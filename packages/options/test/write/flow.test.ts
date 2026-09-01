@@ -1,5 +1,5 @@
 import { LiveStreakConfigError } from "@livestreak/core";
-import { flowTokenAbi } from "@flowstream/contracts";
+import { lvstTokenAbi } from "@livestreak/contracts";
 import { describe, expect, it } from "vitest";
 
 import { asVaultId } from "../../src/model/ids.js";
@@ -17,7 +17,7 @@ const ADDRESSES: LivestreakContractAddresses = {
   vaultFactory: "0x0000000000000000000000000000000000000013",
   vault: "0x0000000000000000000000000000000000000014",
   vaultFunding: "0x0000000000000000000000000000000000000015",
-  flowToken: "0x0000000000000000000000000000000000000016",
+  lvstToken: "0x0000000000000000000000000000000000000016",
   stewardRegistry: "0x0000000000000000000000000000000000000017"
 };
 
@@ -35,8 +35,8 @@ describe("write flow", () => {
     });
 
     expect(writer.requests[0]).toEqual({
-      address: ADDRESSES.flowToken,
-      abi: flowTokenAbi,
+      address: ADDRESSES.lvstToken,
+      abi: lvstTokenAbi,
       functionName: "claimLossFlow",
       args: [VAULT_ID, 0]
     });
@@ -68,8 +68,8 @@ describe("write flow", () => {
     await transport.stakeFlow({ amount });
 
     expect(writer.requests[0]).toEqual({
-      address: ADDRESSES.flowToken,
-      abi: flowTokenAbi,
+      address: ADDRESSES.lvstToken,
+      abi: lvstTokenAbi,
       functionName: "skeletonStake",
       args: [amount]
     });
@@ -86,8 +86,8 @@ describe("write flow", () => {
     await transport.unstakeFlow({ amount });
 
     expect(writer.requests[0]).toEqual({
-      address: ADDRESSES.flowToken,
-      abi: flowTokenAbi,
+      address: ADDRESSES.lvstToken,
+      abi: lvstTokenAbi,
       functionName: "skeletonUnstake",
       args: [amount]
     });

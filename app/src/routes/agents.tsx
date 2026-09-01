@@ -38,7 +38,7 @@ function useAgents(): Agent[] {
         if (addrs.length === 0) return // no agents registered yet, keep mocks
 
         const onChainAgents = await Promise.all(
-          addrs.map(async (addr, i) => {
+          addrs.map(async (addr) => {
             const r = await publicClient.readContract({
               address: contracts.agentRegistry,
               abi: AGENT_REGISTRY_ABI,
@@ -48,7 +48,6 @@ function useAgents(): Agent[] {
 
             const role = AGENT_TYPE_MAP[Number(r[2])] ?? 'bookmaker'
             const wins = Number(r[4])
-            const losses = Number(r[5])
             const accuracy = Number(r[6]) / 100 // basis points to %
 
             return {

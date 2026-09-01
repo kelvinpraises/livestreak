@@ -11,7 +11,7 @@ interface Props {
   onSelectVault: (id: string) => void
 }
 
-export function MyPositions({ positions, vaults, onSelectVault }: Props) {
+export function MyPositions({ positions, onSelectVault }: Props) {
   const active = positions.filter(p => !p.resolved)
   const resolved = positions.filter(p => p.resolved)
   const totalStreamed = positions.reduce((s, p) => s + p.streamed, 0)

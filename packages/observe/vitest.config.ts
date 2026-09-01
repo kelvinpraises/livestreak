@@ -18,6 +18,7 @@ export default defineConfig({
       { find: /^#run\//, replacement: `${sourceDirectory}/run/` },
       { find: /^#bridge\//, replacement: `${sourceDirectory}/bridge/` },
       { find: /^#scope\//, replacement: `${sourceDirectory}/scope/` },
+      { find: /^#market\//, replacement: `${sourceDirectory}/market/` },
       { find: /^#builtins\.js$/, replacement: `${sourceDirectory}/builtins.js` }
     ]
   }

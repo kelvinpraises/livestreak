@@ -34,7 +34,6 @@ export interface StealthWalletState {
 
 function warn(message: string, err?: unknown) {
   const detail = err instanceof Error ? err.message : err != null ? String(err) : ''
-  // eslint-disable-next-line no-console
   console.warn(`[wallet] ${message}${detail ? `: ${detail}` : ''} (interim wallet edge)`)
 }
 
@@ -68,7 +67,7 @@ export function useStealthWallet(): StealthWalletState {
       // Lazy import: @livestreak/wallet is a heavy Node/bare-runtime SDK. Loading
       // it on demand keeps it out of the SSR graph and turns any bundling/runtime
       // load failure into a soft warning rather than a module-load crash.
-      const { default: WalletManagerEvmErc4337 } = await import('@livestreak/wallet')
+      const { WalletManagerEvmErc4337 } = await import('@livestreak/wallet')
       const manager = new WalletManagerEvmErc4337(secret, walletConfig())
       const account = await manager.getAccountByPath("0'/0/0")
       const addr = (await account.getAddress()) as Address

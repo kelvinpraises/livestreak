@@ -27,7 +27,7 @@ export type UnstakeFlowInput = {
 type FlowWriteDeps = {
   readonly writer: ContractWriter;
   readonly addresses: LivestreakContractAddresses;
-  readonly abis: Pick<LivestreakContractAbis, "FlowToken">;
+  readonly abis: Pick<LivestreakContractAbis, "LvstToken">;
 };
 
 export const claimLossFlow = async (
@@ -38,8 +38,8 @@ export const claimLossFlow = async (
   const side = sideToSolidityValue(validateOptionsVaultSide(input.side));
 
   return deps.writer.write({
-    address: deps.addresses.flowToken,
-    abi: deps.abis.FlowToken,
+    address: deps.addresses.lvstToken,
+    abi: deps.abis.LvstToken,
     functionName: "claimLossFlow",
     args: [vaultBytes, side]
   });
@@ -49,8 +49,8 @@ export const stakeFlow = async (deps: FlowWriteDeps, input: StakeFlowInput): Pro
   const amount = requirePositiveBigInt(input.amount, "amount");
 
   return deps.writer.write({
-    address: deps.addresses.flowToken,
-    abi: deps.abis.FlowToken,
+    address: deps.addresses.lvstToken,
+    abi: deps.abis.LvstToken,
     functionName: "skeletonStake",
     args: [amount]
   });
@@ -60,8 +60,8 @@ export const unstakeFlow = async (deps: FlowWriteDeps, input: UnstakeFlowInput):
   const amount = requirePositiveBigInt(input.amount, "amount");
 
   return deps.writer.write({
-    address: deps.addresses.flowToken,
-    abi: deps.abis.FlowToken,
+    address: deps.addresses.lvstToken,
+    abi: deps.abis.LvstToken,
     functionName: "skeletonUnstake",
     args: [amount]
   });

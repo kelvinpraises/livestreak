@@ -67,6 +67,15 @@ export const createInitialBoard = (input: CreateInitialBoardInput): Board => {
         status: ["idle", null, nowMs],
         readonly: {},
         functions: []
+      },
+      market: {
+        label: "Market",
+        catalog: "market",
+        status: ["none", null, nowMs],
+    readonly: {
+      registrationState: "none"
+    },
+        functions: []
       }
     }
   };

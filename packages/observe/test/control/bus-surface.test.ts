@@ -344,7 +344,7 @@ describe("control bus surfaces", () => {
 });
 
 describe("stage-owned board cells", () => {
-  it("makeObserveRun creates only system Board cells", () => {
+  it("makeObserveRun creates system and market Board cells before prepare", () => {
     const run = makeObserveRunSync(
       browserCaptureRunConfig(
         "run_system_only",
@@ -354,7 +354,7 @@ describe("stage-owned board cells", () => {
     );
 
     expect(new Set(Object.keys(run.board.cells))).toEqual(
-      new Set(["system:memory", "system:pause", "system:run", "system:tick"])
+      new Set(["market", "system:memory", "system:pause", "system:run", "system:tick"])
     );
   });
 

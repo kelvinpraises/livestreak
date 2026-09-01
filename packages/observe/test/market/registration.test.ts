@@ -1,0 +1,157 @@
+import { describe, expect, it, beforeEach } from "vitest";
+import { Effect, Exit } from "effect";
+import { LiveStreakConfigError } from "@livestreak/core";
+import { buildControlCatalog } from "#run/control/index.js";
+import { createControlBus } from "#run/control/bus/index.js";
+import { createInitialBoard } from "#run/control/board/index.js";
+import {
+  forkMarketRegistrationIfNeeded,
+  resetMarketRegistrationRunsForTests,
+  runMarketRegistrationLifecycle
+} from "#market/registration.js";
+import { validateObserveRunMarketOptions } from "#market/validate.js";
+import {
+  createFakeMarketRegistrar,
+  defaultFakeRegisterResult,
+  paymasterFailure
+} from "#test/helpers/fake-market-registrar.js";
+import { minimalEvmMarketRegistrationConfig } from "#test/helpers/market-config.js";
+
+describe("market registration lifecycle", () => {
+  beforeEach(() => {
+    resetMarketRegistrationRunsForTests();
+  });
+
+  it("fires exactly one registration per runId (idempotent double-start)", async () => {
+    let registerCalls = 0;
+    const registrar = createFakeMarketRegistrar({
+      onRegister: () => {
+        registerCalls += 1;
+      },
+      delayMs: 20
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const bus = yield* createControlBus({
+            runId: "run_idempotent",
+            board: createInitialBoard({ runId: "run_idempotent", nowMs: 1 }),
+            catalog: buildControlCatalog(),
+            surfaces: []
+          });
+
+          const registration = minimalEvmMarketRegistrationConfig("run_idempotent");
+          const input = {
+            runId: "run_idempotent",
+            bus,
+            registration,
+            registrar
+          };
+
+          yield* forkMarketRegistrationIfNeeded(input);
+          yield* forkMarketRegistrationIfNeeded(input);
+          yield* Effect.sleep("100 millis");
+        })
+      )
+    );
+
+    expect(registerCalls).toBe(1);
+  });
+
+  it("records paymaster-side failure without affecting board run cell", async () => {
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const bus = yield* createControlBus({
+          runId: "run_paymaster",
+          board: createInitialBoard({ runId: "run_paymaster", nowMs: 1 }),
+          catalog: buildControlCatalog(),
+          surfaces: []
+        });
+
+        const registration = minimalEvmMarketRegistrationConfig("run_paymaster");
+        yield* runMarketRegistrationLifecycle({
+          runId: "run_paymaster",
+          bus,
+          registration,
+          registrar: createFakeMarketRegistrar({ failWith: paymasterFailure() })
+        });
+
+        return yield* bus.readBoard();
+      })
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.cells["market"]?.status[0]).toBe("failed");
+      expect(exit.value.cells["market"]?.readonly).toMatchObject({ phase: "paymaster" });
+      expect(exit.value.cells["system:run"]?.status[0]).toBe("created");
+    }
+  });
+
+  it("reaches registered when the fake registrar succeeds", async () => {
+    const exit = await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const bus = yield* createControlBus({
+          runId: "run_registered",
+          board: createInitialBoard({ runId: "run_registered", nowMs: 1 }),
+          catalog: buildControlCatalog(),
+          surfaces: []
+        });
+
+        const registration = minimalEvmMarketRegistrationConfig("run_registered");
+        yield* runMarketRegistrationLifecycle({
+          runId: "run_registered",
+          bus,
+          registration,
+          registrar: createFakeMarketRegistrar({
+            result: defaultFakeRegisterResult({
+              runId: "run_registered",
+              title: registration.title,
+              streamId: registration.deriveStreamId("run_registered")
+            })
+          })
+        });
+
+        return yield* bus.readBoard();
+      })
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.cells["market"]?.status[0]).toBe("registered");
+    }
+  });
+
+  it("rejects invalid market config at the kernel edge", async () => {
+    const exit = await Effect.runPromiseExit(
+      validateObserveRunMarketOptions({
+        registration: {
+          walletInit: {
+            chain: "evm",
+            seedSource: "raw",
+            config: {
+              chainId: 1,
+              provider: "not-a-url",
+              bundlerUrl: "not-a-url",
+              isSponsored: true,
+              useNativeCoins: false,
+              entryPointAddress: "0x0000000000000000000000000000000000000001",
+              safe4337ModuleAddress: "0x0000000000000000000000000000000000000002",
+              safeModulesSetupAddress: "0x0000000000000000000000000000000000000003",
+              safeModulesVersion: "0.3.0",
+              contractNetworks: {}
+            }
+          },
+          seed: "",
+          marketRegistryAddress: "0x0000000000000000000000000000000000000001",
+          title: "",
+          deriveStreamId: () =>
+            "0x0000000000000000000000000000000000000000000000000000000000000000"
+        }
+      })
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+});

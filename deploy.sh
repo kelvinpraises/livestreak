@@ -23,11 +23,6 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"   # repo root (this script lives at the ro
 echo "→ building $IMAGE (linux/amd64) …"
 docker buildx build --platform linux/amd64 \
   -f "$ROOT/Dockerfile" \
-  --build-arg VITE_CHAIN_ID="${VITE_CHAIN_ID:-5042002}" \
-  --build-arg VITE_ARC_RPC_URL="${VITE_ARC_RPC_URL:-https://testnet-rpc.arc.network}" \
-  --build-arg VITE_BUNDLER_URL="${VITE_BUNDLER_URL:-http://108.130.99.99:4848/bundler/arc}" \
-  --build-arg VITE_PAYMASTER_URL="${VITE_PAYMASTER_URL:-http://108.130.99.99:4848/paymaster/arc}" \
-  --build-arg VITE_USDC_ADDRESS="${VITE_USDC_ADDRESS:-0x3600000000000000000000000000000000000000}" \
   -t "$IMAGE" --push "$ROOT"
 
 echo "→ deploying on $SSH_USER@$HOST …"

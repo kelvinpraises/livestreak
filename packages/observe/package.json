@@ -16,6 +16,7 @@
     "#run/*": "./dist/run/*",
     "#bridge/*": "./dist/bridge/*",
     "#scope/*": "./dist/scope/*",
+    "#market/*": "./dist/market/*",
     "#builtins.js": "./dist/builtins.js"
   },
   "files": [
@@ -26,16 +27,19 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "lint:implemented": "eslint src/run/control src/run/worker test",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
+    "@livestreak/contracts": "file:../contracts",
     "@livestreak/core": "file:../core",
     "@livestreak/schema": "file:../schema",
-    "effect": "3.21.3"
+    "@livestreak/wallet": "file:../wallet",
+    "effect": "3.21.3",
+    "viem": "^2.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "^4.1.8"
   }
 }

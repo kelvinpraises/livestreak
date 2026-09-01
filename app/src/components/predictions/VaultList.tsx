@@ -38,13 +38,13 @@ export function VaultList({ vaults, events, positions, selectedVaultId, onDismis
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         <AnimatePresence mode="wait">
           {tab === 'feed' && (
-            <motion.div key="feed" initial={{ opacity: 0, transform: 'translateX(8px)' }} animate={{ opacity: 1, transform: 'translateX(0px)' }} exit={{ opacity: 0, transform: 'translateX(-8px)' }} transition={{ duration: 0.15, exit: { duration: 0.1 } }} style={{ height: '100%', overflow: 'hidden' }}>
+            <motion.div key="feed" initial={{ opacity: 0, transform: 'translateX(8px)' }} animate={{ opacity: 1, transform: 'translateX(0px)' }} exit={{ opacity: 0, transform: 'translateX(-8px)', transition: { duration: 0.1 } }} transition={{ duration: 0.15 }} style={{ height: '100%', overflow: 'hidden' }}>
               <ActivityFeed events={events} />
             </motion.div>
           )}
           {tab === 'mine' && (
-            <motion.div key="mine" initial={{ opacity: 0, transform: 'translateX(8px)' }} animate={{ opacity: 1, transform: 'translateX(0px)' }} exit={{ opacity: 0, transform: 'translateX(-8px)' }} transition={{ duration: 0.15, exit: { duration: 0.1 } }} style={{ height: '100%', overflow: 'hidden' }}>
-              <MyPositions positions={positions} vaults={vaults} onSelectVault={(id: string) => { /* scroll up to focused vault handled by parent */ }} />
+            <motion.div key="mine" initial={{ opacity: 0, transform: 'translateX(8px)' }} animate={{ opacity: 1, transform: 'translateX(0px)' }} exit={{ opacity: 0, transform: 'translateX(-8px)', transition: { duration: 0.1 } }} transition={{ duration: 0.15 }} style={{ height: '100%', overflow: 'hidden' }}>
+              <MyPositions positions={positions} vaults={vaults} onSelectVault={() => { /* scroll up to focused vault handled by parent */ }} />
             </motion.div>
           )}
         </AnimatePresence>

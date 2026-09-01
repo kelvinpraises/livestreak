@@ -2,7 +2,7 @@
 
 import { sideFromSolidityValue } from "./sides.js";
 
-import { asMarketId, asUserAddress, asVaultId } from "../../model/ids.js";
+import { asMarketId, asVaultId } from "../../model/ids.js";
 import { emptySidePosition } from "../../model/position.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { OptionsFundingStream } from "../../model/funding.js";

@@ -1,6 +1,6 @@
 // --- exports ---
 
-import { flowTokenAbi, vaultFundingAbi } from "@flowstream/contracts";
+import { lvstTokenAbi, vaultFundingAbi } from "@livestreak/contracts";
 
 import type { LivestreakContractAddresses } from "../read/contracts/addresses.js";
 import type { LivestreakContractAbis } from "../read/contracts/transport.js";
@@ -32,7 +32,7 @@ export type OptionsWriteTransport = {
 export type ContractsOptionsWriteTransportInput = {
   readonly writer: ContractWriter;
   readonly addresses: LivestreakContractAddresses;
-  readonly abis?: Pick<LivestreakContractAbis, "VaultFunding" | "FlowToken">;
+  readonly abis?: Pick<LivestreakContractAbis, "VaultFunding" | "LvstToken">;
 };
 
 export const createContractsOptionsWriteTransport = (
@@ -42,7 +42,7 @@ export const createContractsOptionsWriteTransport = (
 type WriteDeps = {
   readonly writer: ContractWriter;
   readonly addresses: LivestreakContractAddresses;
-  readonly abis: Pick<LivestreakContractAbis, "VaultFunding" | "FlowToken">;
+  readonly abis: Pick<LivestreakContractAbis, "VaultFunding" | "LvstToken">;
 };
 
 class ContractsOptionsWriteTransport implements OptionsWriteTransport {
@@ -54,7 +54,7 @@ class ContractsOptionsWriteTransport implements OptionsWriteTransport {
       addresses: validateLivestreakContractAddresses(input.addresses),
       abis: input.abis ?? {
         VaultFunding: vaultFundingAbi,
-        FlowToken: flowTokenAbi
+        LvstToken: lvstTokenAbi
       }
     };
   }

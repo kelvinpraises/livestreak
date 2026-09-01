@@ -184,3 +184,18 @@ export * from "./pipeline/process/index.js";
 export * from "./pipeline/publish/index.js";
 export * from "./pipeline/registry.js";
 export * from "./pipeline/shared.js";
+
+export type {
+  MarketFailurePhase,
+  MarketLifecycleState,
+  MarketLifecycleStatus,
+  MarketRegistrar,
+  MarketRegisterInput,
+  MarketRegisterResult,
+  ObserveRunMarketConfig,
+  ObserveRunMarketOptions,
+  StreamId,
+  VerifiedMarketRegistration
+} from "./market/index.js";
+
+export { testPlaceholderDeriveStreamId } from "./market/index.js";

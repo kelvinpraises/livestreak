@@ -23,7 +23,7 @@ const ADDRESSES: LivestreakContractAddresses = {
   vaultFactory: "0x0000000000000000000000000000000000000013",
   vault: "0x0000000000000000000000000000000000000014",
   vaultFunding: "0x0000000000000000000000000000000000000015",
-  flowToken: "0x0000000000000000000000000000000000000016",
+  lvstToken: "0x0000000000000000000000000000000000000016",
   stewardRegistry: "0x0000000000000000000000000000000000000017"
 };
 
@@ -305,7 +305,7 @@ const respond = (request: ContractReadRequest, options: FakeReaderOptions): unkn
     }
   }
 
-  if (address === ADDRESSES.flowToken) {
+  if (address === ADDRESSES.lvstToken) {
     if (functionName === "balanceOf") {
       return 50n * 10n ** 18n;
     }

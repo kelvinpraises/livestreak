@@ -12,13 +12,11 @@
     "src/"
   ],
   "scripts": {
-    "build:sol": "forge build && FOUNDRY_PROFILE=aa forge build",
-    "test:sol": "forge test",
-    "fmt:sol": "forge fmt",
-    "gen": "wagmi generate",
-    "build": "npm run build:sol && npm run gen",
-    "deploy": "tsx deploy/main.ts",
-    "e2e": "tsx deploy/e2e.ts"
+    "clean": "rm -rf out cache generated/contracts.ts",
+    "build": "forge build && FOUNDRY_PROFILE=aa forge build && wagmi generate",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "lint": "forge fmt --check src test",
+    "test": "forge test"
   },
   "dependencies": {
     "viem": "^2.23.0"

@@ -11,6 +11,7 @@
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "effect": "3.21.3"
   },
   "devDependencies": {
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "^4.1.8"
   }
 }

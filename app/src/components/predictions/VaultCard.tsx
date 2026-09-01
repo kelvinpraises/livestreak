@@ -155,8 +155,8 @@ export function VaultCard({ vault, index = 0 }: { vault: Vault; index?: number }
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 350, damping: 32, exit: { type: 'spring', stiffness: 400, damping: 35, opacity: { duration: 0.1 } } }}
+            exit={{ height: 0, opacity: 0, transition: { type: 'spring', stiffness: 400, damping: 35, opacity: { duration: 0.1 } } }}
+            transition={{ type: 'spring', stiffness: 350, damping: 32 }}
             style={{ overflow: 'hidden' }}
           >
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '12px 14px' }}>
@@ -223,7 +223,7 @@ function StatusBadge({ vault, hotMs, expiryMs }: { vault: Vault; hotMs: number; 
 
 function WinState({ payout }: { payout: number }) {
   return (
-    <motion.div initial={{ scale: 0.95, opacity: 0, filter: 'blur(4px)' }} animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }} transition={{ type: 'spring', stiffness: 350, damping: 30, exit: { duration: 0.12 } }} style={{
+    <motion.div initial={{ scale: 0.95, opacity: 0, filter: 'blur(4px)' }} animate={{ scale: 1, opacity: 1, filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)', transition: { duration: 0.12 } }} transition={{ type: 'spring', stiffness: 350, damping: 30 }} style={{
       background: 'linear-gradient(135deg, rgba(255,213,83,0.08) 0%, rgba(255,150,0,0.04) 100%)',
       border: '1px solid rgba(255,213,83,0.25)', borderRadius: 7, padding: '8px 12px', marginBottom: 4,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -239,7 +239,7 @@ function WinState({ payout }: { payout: number }) {
 
 function LossState({ flowReceived }: { flowReceived: number }) {
   return (
-    <motion.div initial={{ opacity: 0, transform: 'translateY(6px)', filter: 'blur(4px)' }} animate={{ opacity: 1, transform: 'translateY(0px)', filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)' }} transition={{ type: 'spring', stiffness: 350, damping: 30, exit: { duration: 0.12 } }} style={{
+    <motion.div initial={{ opacity: 0, transform: 'translateY(6px)', filter: 'blur(4px)' }} animate={{ opacity: 1, transform: 'translateY(0px)', filter: 'blur(0px)' }} exit={{ opacity: 0, filter: 'blur(4px)', transition: { duration: 0.12 } }} transition={{ type: 'spring', stiffness: 350, damping: 30 }} style={{
       background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.1)',
       borderRadius: 7, padding: '7px 12px', marginBottom: 4,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',

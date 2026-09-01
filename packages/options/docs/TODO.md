@@ -1,6 +1,6 @@
 # @livestreak/options — TODO
 
-See [architecture.md](./architecture.md). Depends on `@flowstream/contracts` generated ABIs for contract reads. See [repo TODO](../../../README.md).
+See [architecture.md](./architecture.md). Depends on `@livestreak/contracts` generated ABIs for contract reads. See [repo TODO](../../../README.md).
 
 **Role:** browser-safe consumer workflow. No market/vault creation. No `Effect.run*` in library `src/`.
 
@@ -27,7 +27,7 @@ See [architecture.md](./architecture.md). Depends on `@flowstream/contracts` gen
 
 ## Slice 2 — real chain reads
 
-**Unblocked:** `@flowstream/contracts` ships wagmi-generated ABIs. Options owns transport, address maps, and side decoding.
+**Unblocked:** `@livestreak/contracts` ships wagmi-generated ABIs. Options owns transport, address maps, and side decoding.
 
 - [x] `createContractsOptionsReadTransport` under `src/read/contracts/`
 - [x] Contract read result → Options model mapping (`mapping.ts`)
@@ -63,7 +63,7 @@ See [architecture.md](./architecture.md). Depends on `@flowstream/contracts` gen
 - [x] `write/transport.ts` — `ContractWriter`, `OptionsWriteTransport`, `createContractsOptionsWriteTransport`
 - [x] `write/funding.ts` — `setFundingRate`, `stopFundingStream`
 - [x] `write/flow.ts` — `claimLossFlow`, `stakeFlow` (`skeletonStake`), `unstakeFlow` (`skeletonUnstake`)
-- [x] Contract writes via `{ address, abi, functionName, args }` from `@flowstream/contracts` ABIs + injected `ContractWriter`
+- [x] Contract writes via `{ address, abi, functionName, args }` from `@livestreak/contracts` ABIs + injected `ContractWriter`
 - [x] Tests under `test/write/` with fake writer + negative paths
 - [ ] Wire viem/wallet `ContractWriter` at app edge
 
@@ -130,7 +130,7 @@ view of the contracts funding accumulator. Depends on the contracts funding modu
 
 Run after touching this package. Full checklist: [repo TODO § Hardening loop](../../../README.md#hardening-loop).
 
-- [x] check / build / test for `packages/options` (`check` ~40s due to `@flowstream/contracts` ABI typecheck; use `pool: threads` for vitest)
+- [x] check / build / test for `packages/options` (`check` blocked on missing `vaultFundingAbi` — migrate to `addressDriverAbi`; use `pool: threads` for vitest)
 - [x] Browser-safe import scan; no `Effect.run*` in `src/`
 - [x] Negative-path test for every new public API
 - [x] Update this `docs/TODO.md`
@@ -142,3 +142,11 @@ Run after touching this package. Full checklist: [repo TODO § Hardening loop](.
 Canonical package path is `packages/options`. Root `package.json` workspaces include `packages/*` alongside legacy `packages-re/*`.
 
 - [x] Use root workspace dependencies; do not add local Node-only runtime APIs to `src/`.
+
+---
+
+## Noted — out of scope (do not start here)
+
+`createContractsOptionsWriteTransport` + injected `ContractWriter` (`src/write/transport.ts`) is over-engineered now that `@livestreak/wallet` is deterministic (same config+seed → same account). A future slice should import the wallet directly and drop the writer port. **Not started in this hygiene pass.**
+
+**Funding driver drift:** generated contracts export `addressDriverAbi` (with `fund` / `stop` / `activeStream`), not `vaultFundingAbi` (`setFundingRate` / `fundingActive`). Options read/write funding transport still targets the old surface — needs a dedicated options slice, not a rename-only hygiene fix.

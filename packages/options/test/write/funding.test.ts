@@ -1,5 +1,5 @@
 import { LiveStreakConfigError } from "@livestreak/core";
-import { flowTokenAbi, vaultFundingAbi } from "@flowstream/contracts";
+import { vaultFundingAbi } from "@livestreak/contracts";
 import { describe, expect, it } from "vitest";
 
 import { asVaultId } from "../../src/model/ids.js";
@@ -17,7 +17,7 @@ const ADDRESSES: LivestreakContractAddresses = {
   vaultFactory: "0x0000000000000000000000000000000000000013",
   vault: "0x0000000000000000000000000000000000000014",
   vaultFunding: "0x0000000000000000000000000000000000000015",
-  flowToken: "0x0000000000000000000000000000000000000016",
+  lvstToken: "0x0000000000000000000000000000000000000016",
   stewardRegistry: "0x0000000000000000000000000000000000000017"
 };
 

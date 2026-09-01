@@ -88,10 +88,10 @@ export const validateBookmakerRuntimeConfig = (
 const validateNested = <T>(
   input: unknown,
   validator: (value: unknown) => ValidationResult<T>,
-  _fieldPath: string
+  fieldPath: string
 ): ValidationResult<T> => {
   if (input === undefined) {
-    return validationFailure("is required");
+    return validationFailure(`${fieldPath} is required`);
   }
 
   return validator(input);

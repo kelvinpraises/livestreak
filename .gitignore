@@ -15,9 +15,10 @@ dist/
 .env*.local
 !.env.example
 
-# IDE
+# IDE / agent tooling
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 
@@ -44,3 +45,4 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.pyc
+

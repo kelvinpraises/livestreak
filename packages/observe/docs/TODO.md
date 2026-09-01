@@ -38,16 +38,11 @@ design decision, not silently shipped. Blocking inbox requests filed:
 
 ---
 
-## Proposed implementation — end-to-end market edge (AWAITING USER GO)
+## Proposed implementation — end-to-end market edge
 
-Full map: [flow.md](./flow.md). Per HARDENING-AGENT loop, proposed not shipped. AA stays at the
-edge; observe stays a pure Effect lib (no chain/wallet/secret imports, no worker-blocking).
+Full map: [flow.md](./flow.md). Slice 1 is **implemented** (see Integration edges). Remaining slices:
 
-- [ ] **Slice 1 (recommended first): injected market-registration seam.** This is "how observe talks to the contracts edge." In-package, no other package's code needed.
-  - `MarketRegistrationIntent` read-model (`runId`, `suggestedTitle?`, stream/endpoint/evidence refs — id-only, no blobs).
-  - Injected `MarketRegistrationCoordinator` port via `ObserveRunKernelOptions` (mirrors `captureDriver` injection); observe CALLS it, the edge IMPLEMENTS the AA `registerMarket` UserOp.
-  - New Board readonly channel `system:market` (`none→pending→registered(marketId)→failed(reason)`), **idempotent per runId**, non-blocking the worker; **verify** returned `marketId` vs streamId+observer (open-caller `registerMarket`).
-  - Negative-path tests: no coordinator → stays `none`; coordinator failure/sponsorship-expiry → `failed`; double-start → no re-register; marketId mismatch → `failed`.
+- [x] **Slice 1: market registration edge (implemented).** Observe imports `@livestreak/wallet` under `src/market/chains/**` only; constructs AA account from injected `WalletInit` + seed; forks `registerMarket` at run start; verifies `MarketRegistered` (streamId + sender); projects `market` board cell (`none→pending→registered→failed`); idempotent per runId; non-blocking worker. Sui = typed not-supported stub. streamId derivation remains injected (`context/temp-convo/contracts/inbox/from-observe__streamid-derivation.md` still open). UserOp receipt path: **(a)** wallet `getUserOperationReceipt`.
 - [ ] **Slice 2: live output endpoint (host sink).** No live watch/webrtc endpoint exists today (file export only) → nothing to register. Blocked-on host output-mode CONFLICT + session seam.
 - [ ] **Slice 3: host-session handoff fields.** Supply `contentId`/`observer`/`outputMode`; ingest signed `EndpointManifest` refs (id-only) into a `system:session` channel; handle manifest expiry/rotation. Blocked-on host seam inbox. Note: `ObserveRun.manifest` (`PublishManifest`) name-collides host `EndpointManifest` — pick distinct naming.
 - [ ] **Slice 4: stream-end → market-close signal.** Surface a trustworthy stream-end fact keyed to `marketId` for a resolver (steward/contracts) to settle. Cross-package; observe provides only the signal. (Contracts has no `closeMarket`/`settleMarket` today — likely a contracts ask.)

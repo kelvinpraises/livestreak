@@ -9,7 +9,7 @@ export function SessionKey({ visible, onSign, onDismiss }: Props) {
       {visible && (
         <>
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onDismiss} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)', zIndex: 200 }} />
-          <motion.div initial={{ opacity: 0, transform: 'translate(-50%, -50%) scale(0.95)', filter: 'blur(4px)' }} animate={{ opacity: 1, transform: 'translate(-50%, -50%) scale(1)', filter: 'blur(0px)' }} exit={{ opacity: 0, transform: 'translate(-50%, -50%) scale(0.97)', filter: 'blur(2px)' }} transition={{ type: 'spring', stiffness: 350, damping: 28, exit: { duration: 0.15 } }}
+          <motion.div initial={{ opacity: 0, transform: 'translate(-50%, -50%) scale(0.95)', filter: 'blur(4px)' }} animate={{ opacity: 1, transform: 'translate(-50%, -50%) scale(1)', filter: 'blur(0px)' }} exit={{ opacity: 0, transform: 'translate(-50%, -50%) scale(0.97)', filter: 'blur(2px)', transition: { duration: 0.15 } }} transition={{ type: 'spring', stiffness: 350, damping: 28 }}
             className="broadcast-corners"
             style={{ position: 'fixed', top: '50%', left: '50%', zIndex: 201, background: '#0d0d1c', border: '1px solid rgba(0,255,135,0.2)', borderRadius: 16, padding: 28, width: 360, boxShadow: '0 0 60px rgba(0,255,135,0.08), 0 24px 80px rgba(0,0,0,0.8)', overflow: 'visible' }}>
             <button onClick={onDismiss} style={{ position: 'absolute', top: 16, right: 16, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.3)', padding: 4 }}><X size={16} /></button>

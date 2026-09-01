@@ -21,7 +21,7 @@ function HomePage() {
           <motion.div initial={{ opacity: 0, transform: 'translateY(12px)' }} animate={{ opacity: 1, transform: 'translateY(0px)' }} transition={{ delay: 0.1, duration: 0.4 }} style={{ marginBottom: 32 }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(0,255,135,0.06)', border: '1px solid rgba(0,255,135,0.18)', borderRadius: 20, padding: '5px 16px' }}>
               <div className="live-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: '#00ff87' }} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#00ff87', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em' }}>LIVE ON ARC</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#00ff87', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em' }}>LIVE ON MANTLE</span>
             </div>
           </motion.div>
 

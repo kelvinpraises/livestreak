@@ -9,11 +9,14 @@ import type {
 
 export const planBookmakerWrite = (
   decision: BookmakerDecision,
-  _contracts: BookmakerContractsSurface
-): BookmakerWritePlan => ({
-  decision,
-  intents: writeIntentsFromDecision(decision)
-});
+  contracts: BookmakerContractsSurface
+): BookmakerWritePlan => {
+  void contracts;
+  return {
+    decision,
+    intents: writeIntentsFromDecision(decision)
+  };
+};
 
 // --- helpers ---
 

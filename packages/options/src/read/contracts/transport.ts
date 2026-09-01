@@ -2,12 +2,12 @@
 
 import { LiveStreakConfigError } from "@livestreak/core";
 import {
-  flowTokenAbi,
+  lvstTokenAbi,
   marketRegistryAbi,
   stewardRegistryAbi,
   vaultAbi,
   vaultFundingAbi
-} from "@flowstream/contracts";
+} from "@livestreak/contracts";
 
 import { asMarketId, asVaultId } from "../../model/ids.js";
 import type { LvstAccount } from "../../model/lvst.js";
@@ -58,7 +58,7 @@ export type LivestreakContractAbis = {
   readonly MarketRegistry: typeof marketRegistryAbi;
   readonly Vault: typeof vaultAbi;
   readonly VaultFunding: typeof vaultFundingAbi;
-  readonly FlowToken: typeof flowTokenAbi;
+  readonly LvstToken: typeof lvstTokenAbi;
   readonly StewardRegistry: typeof stewardRegistryAbi;
 };
 
@@ -66,7 +66,7 @@ const DEFAULT_ABIS: LivestreakContractAbis = {
   MarketRegistry: marketRegistryAbi,
   Vault: vaultAbi,
   VaultFunding: vaultFundingAbi,
-  FlowToken: flowTokenAbi,
+  LvstToken: lvstTokenAbi,
   StewardRegistry: stewardRegistryAbi
 };
 
@@ -244,15 +244,15 @@ class ContractsOptionsReadTransport implements OptionsReadTransport {
 
     try {
       const balance = await this.call<bigint>(
-        this.addresses.flowToken,
-        this.abis.FlowToken,
+        this.addresses.lvstToken,
+        this.abis.LvstToken,
         "balanceOf",
         [account as `0x${string}`]
       );
 
       const staked = await this.call<bigint>(
-        this.addresses.flowToken,
-        this.abis.FlowToken,
+        this.addresses.lvstToken,
+        this.abis.LvstToken,
         "skeletonStaked",
         [account as `0x${string}`]
       );

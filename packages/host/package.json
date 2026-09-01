@@ -21,6 +21,7 @@
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {

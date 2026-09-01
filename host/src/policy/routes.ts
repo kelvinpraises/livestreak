@@ -9,7 +9,7 @@ import { evaluateHostPolicy, type PolicyEvaluatorDeps } from "./evaluate.js";
 
 // --- exports ---
 
-export interface PolicyRouteDeps extends PolicyEvaluatorDeps {}
+export type PolicyRouteDeps = PolicyEvaluatorDeps;
 
 export type PolicyRouteSuccess = {
   readonly ok: true;

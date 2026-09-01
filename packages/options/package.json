@@ -15,14 +15,16 @@
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run"
   },
   "dependencies": {
     "@livestreak/core": "file:../core",
-    "@flowstream/contracts": "file:../contracts"
+    "@livestreak/contracts": "file:../contracts"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "vitest": "^4.1.8"
   }
 }

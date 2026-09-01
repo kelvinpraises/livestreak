@@ -25,7 +25,8 @@ export interface AaServerConfig {
   readonly chains: readonly AaChainConfig[];
 }
 
-export const readAaServerConfig = (_config: HostServerConfig): AaServerConfig => {
+export const readAaServerConfig = (config: HostServerConfig): AaServerConfig => {
+  void config;
   const executorPrivateKey = readExecutorPrivateKey();
   const paymasterAddress = readPaymasterAddress();
 

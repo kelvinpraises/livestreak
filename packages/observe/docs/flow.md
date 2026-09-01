@@ -35,7 +35,7 @@ market-registration edge documented end-to-end" — i.e. on this file.
 | capture injection seam | `run/kernel.ts` `ObserveRunKernelOptions.captureDriver/sinkDriver` | drivers are **injected**; kernel resolves built-ins or injected |
 | sinks today | `pipeline/publish/sinks/file` | **file export only**. `local/` + `simulcast/` READMEs say "Planned … not implemented" |
 | output vocab | `@livestreak/schema` session.ts:3 | `OutputMode = "file"|"local"|"simulcast"` |
-| AA wallet config (injected) | `@livestreak/schema` wallet.ts | `WalletInit{ seedSource, config: WalletInitConfig{ chainId, provider(rpc), bundlerUrl, paymasterUrl?, isSponsored, entryPointAddress, safe4337ModuleAddress, contractNetworks, … } }` — "every field CALLER-INJECTED; never hardcode" |
+| AA wallet config (injected) | `@livestreak/schema` wallet.ts | `WalletInit{ seedSource, config: EvmWalletInitConfig{ chainId, provider(rpc), bundlerUrl, paymasterUrl?, isSponsored, entryPointAddress, safe4337ModuleAddress, contractNetworks, … } }` — "every field CALLER-INJECTED; never hardcode" |
 | host session | `@livestreak/host` session.ts | `HostCreateSessionRequest{ contentId, observer, sessionId, outputMode, … }` → `HostSessionResult{ summary, draft{ sessionId, endpoints[], manifestDraft: EndpointManifest, policy } }` |
 | signed manifest | `@livestreak/host` manifest.ts | `EndpointManifest{ manifestId, sessionId, observer, contentId, hostId, endpoints[]{kind: watch\|webrtc\|state\|telemetry\|archive\|control, url, expiresAtMs}, hostPolicyStatus, cacheReceiptRefs[], expiresAtMs, signature }` |
 | host AA infra | `@livestreak/host` aa.ts | bundler proxy `{host}/aa/bundler/{chain}`, paymaster proxy, `AaSponsorshipMode = none\|dev_open\|tenant_quota\|paymaster_signed` |
@@ -57,7 +57,7 @@ at the edge and **never baked** into observe:
 - WalletInit            (@livestreak/schema) — AA: seed source + chainId/bundler/paymaster/entryPoint/contractNetworks
 - streamId derivation    runId → bytes32 (owned by contracts; see inbox request)
 - market title + observer identity (smart-account address)
-- a MarketRegistrationCoordinator port  — observe CALLS it; the edge IMPLEMENTS the AA UserOp
+- ObserveRunKernelOptions.market registration group (WalletInit + seed + registry + deriveStreamId + title)
 ```
 
 ## 3. Stage-by-stage flow + edge cases
@@ -124,22 +124,24 @@ The cross-check **confirmed** (with file:line) every gap already in §3/§5: no 
 ## 4. What AA means for observe (the crisp boundary)
 
 ```text
-Observe NEVER: holds the seed, builds/signs/submits a UserOperation, imports viem/wallet/bundler/
-  paymaster, or bakes chain/rpc/entryPoint/paymaster. The Safe-4337 account + WalletInit live ONLY
-  at the composition-root edge (cli/gateway/app).
+Observe imports @livestreak/wallet and @livestreak/contracts ONLY under src/market/chains/**.
+Given injected WalletInit + runtime seed + MarketRegistry address + deriveStreamId + title,
+observe constructs the AA account (createWalletManager), sends registerMarket as a UserOp,
+verifies the MarketRegistered event (streamId + sender == own AA account), and projects a
+`market` board cell lifecycle: none → pending → registered(marketId) → failed(reason).
 
-Observe ONLY:
-  1. exposes a browser-safe REGISTRATION INTENT read-model (runId, suggested title, host session
-     refs, endpoint/evidence refs — id-only strings, no blobs, consistent with the Board/Artifact rule);
-  2. accepts a REGISTRATION RESULT (marketId + status + reason) back through an INJECTED coordinator
-     port (mirroring the capture-driver injection seam in ObserveRunKernelOptions); and
-  3. projects a market lifecycle channel (none→pending→registered→failed) onto the run read model,
-     idempotent per runId, WITHOUT blocking the media worker.
+Observe NEVER: bakes seed/bundler/paymaster/rpc/entryPoint/chain/addresses, blocks a worker
+turn on the chain write, or imports wallet/viem/contracts outside market/chains/**.
+
+ObserveRunKernelOptions.market (optional):
+  - registration: WalletInit (schema-validated), seed, marketRegistryAddress, title, deriveStreamId
+  - registrar?: injected override for tests (mirrors captureDriver override)
+When absent, the `market` cell stays `none` and no chain code runs.
+
+Registration runs as a forked fiber in the run scope at start — idempotent per runId, non-blocking
+the media worker. marketId decode uses wallet getUserOperationReceipt(userOpHash) (path a).
+streamId derivation is injected — contracts owns the canonical formula (inbox still open).
 ```
-
-Because AA writes are **async, sponsored, and failure-prone**, registration is its own lifecycle
-channel — not a synchronous kernel step, not a worker turn. The edge owns the UserOp; observe owns
-the intent in / result out + the visible state.
 
 ## 5. Gap summary (what current impl does NOT satisfy)
 

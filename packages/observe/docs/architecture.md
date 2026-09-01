@@ -147,6 +147,18 @@ src/
       types.ts
       index.ts
 
+  market/
+    index.ts
+    types.ts
+    registration.ts
+    verify.ts
+    board.ts
+    validate.ts
+    chains/
+      index.ts
+      evm.ts
+      sui.ts
+
   scope/
     scopes.ts
 ```
@@ -161,6 +173,7 @@ A folder gets exactly one `index.ts` (re-exports only, zero logic) when code **o
 | --- | --- | --- |
 | `adapters/ffmpeg` | yes | kept |
 | `bridge`, `bridge/panel` | yes | kept |
+| `market` | yes | domain peer to `bridge/`/`scope/`; chain imports quarantined to `market/chains/**` |
 | `pipeline/capture` | yes | stage root: `registry`, `types`, `pause` |
 | `pipeline/capture/browser` | yes | kept |
 | `pipeline/capture/file`, `synthetic`, `iptv` | no | registry-leaf drivers |
@@ -834,6 +847,7 @@ Board ownership rules:
 | `system:run` | Kernel | lifecycle reducers and worker snapshot projection |
 | `system:pause` | Kernel / system surface | pause/resume/setPresentation functions |
 | `system:memory` | Kernel | memory policy settings functions |
+| `market` | Market domain | `market/registration.ts` lifecycle commits via `market/board.ts` reducer |
 | `capture:*`.settings | Capture surface | surface-owned mutating functions |
 | `capture:*`.readonly | Kernel / surface reducers | worker snapshot projection and surface facts |
 | `sink:*`.settings | Sink surface | surface-owned functions |

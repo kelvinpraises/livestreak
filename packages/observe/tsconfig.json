@@ -9,6 +9,7 @@
       "#adapters/*": ["./src/adapters/*"],
       "#run/*": ["./src/run/*"],
       "#scope/*": ["./src/scope/*"],
+      "#market/*": ["./src/market/*"],
       "#builtins.js": ["./src/builtins.js"],
       "#index.js": ["./src/index.js"],
       "#test/*": ["./test/*"]

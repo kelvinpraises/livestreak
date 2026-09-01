@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "#chains/*": ["./src/chains/*"],
+      "#vendor/*": ["./src/vendor/*"],
+      "#types.js": ["./src/types.ts"],
+      "#create-wallet-manager.js": ["./src/create-wallet-manager.ts"],
+      "#index.js": ["./src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "test/types/**/*.ts"]
+}

@@ -1,7 +1,4 @@
-/**
- * Compile-only guard: public extension-contract types import from the package root.
- * No runtime assertions — `npm run check` validates these imports.
- */
+import { describe, expect, it } from "vitest";
 import type {
   Board,
   CapabilityGrant,
@@ -12,6 +9,8 @@ import type {
   ControlsView,
   ControlSurface,
   FrameSource,
+  MarketLifecycleState,
+  ObserveRunMarketConfig,
   ObserveRunResult,
   ProcessPack,
   SinkDriver
@@ -28,15 +27,14 @@ export const publicTypeContracts = {
   sinkDriver: {} as SinkDriver,
   controlsView: {} as ControlsView,
   controlCellView: {} as ControlCellView,
-  controlFunctionView: {} as ControlFunctionView
+  controlFunctionView: {} as ControlFunctionView,
+  marketLifecycle: {} as MarketLifecycleState,
+  marketConfig: {} as ObserveRunMarketConfig
 };
 
-const assertSnapshotWhenNotInterrupted = (result: ObserveRunResult): void => {
-  if (result.outcome !== "interrupted") {
-    void result.snapshot?.lifecycle;
-  }
-};
-
-export const observeRunOutcomeContracts = {
-  assertSnapshotWhenNotInterrupted
-};
+describe("public type contracts", () => {
+  it("imports extension-contract types from the package root", () => {
+    expect(publicTypeContracts.board).toBeDefined();
+    expect(publicTypeContracts.marketLifecycle).toBeDefined();
+  });
+});

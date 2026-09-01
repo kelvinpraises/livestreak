@@ -13,14 +13,16 @@
     "packages/wallet",
     "packages/host",
     "host",
-    "cli"
+    "cli",
+    "app"
   ],
   "scripts": {
     "postinstall": "patch-package --patch-dir packages/wallet/patches",
-    "check:re2": "npm run check --workspace=@livestreak/options --workspace=@livestreak/observe --workspace=@livestreak/core --workspace=@livestreak/host --if-present",
-    "test:re2": "npm run test --workspace=@livestreak/options --workspace=@livestreak/observe --workspace=@livestreak/core --workspace=@livestreak/host --if-present",
-    "check:host": "npm run check --workspace=@livestreak/host --workspace=@livestreak/host-server --if-present",
-    "test:host": "npm run test --workspace=@livestreak/host --workspace=@livestreak/host-server --if-present"
+    "clean": "npm run clean --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
@@ -31,5 +33,14 @@
     "typescript": "6.0.3",
     "typescript-eslint": "^8.61.0",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "axios": "1.13.5",
+    "cookie": "1.0.2",
+    "sodium-javascript": "npm:sodium-universal@5.0.1",
+    "tar": "7.5.7",
+    "tmp": "0.2.5",
+    "undici": "7.21.0",
+    "ws": "8.18.3"
   }
 }

@@ -52,6 +52,6 @@ export const validateLivestreakContractAddresses = (
   vaultFactory: validateContractAddress(addresses.vaultFactory, "vaultFactory"),
   vault: validateContractAddress(addresses.vault, "vault"),
   vaultFunding: validateContractAddress(addresses.vaultFunding, "vaultFunding"),
-  flowToken: validateContractAddress(addresses.flowToken, "flowToken"),
+  lvstToken: validateContractAddress(addresses.lvstToken, "lvstToken"),
   stewardRegistry: validateContractAddress(addresses.stewardRegistry, "stewardRegistry")
 });

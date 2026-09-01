@@ -17,7 +17,7 @@ import the wallet SDK at all.
 1. **Seed interface** — derive the seed from the user's password
    (`secret = sha256("livestreak-stealth-v1" + password)`; testnet-only, replace
    with real auth later).
-2. **Config assembly** — build the `WalletInit` / `WalletInitConfig` object using
+2. **Config assembly** — build the `WalletInit` / `EvmWalletInitConfig` object using
    the Effect Schema in **`@livestreak/schema`** (`src/wallet.ts`). `config/contracts.ts`
    `walletConfig()` already returns this shape; it should be validated against the
    schema and typed from it.

@@ -1,28 +1,39 @@
 /**
- * Contract addresses + chain config, read from env.
- * All hooks import from here. After deployment, just update .env.
+ * Contract addresses + chain/AA config — the committed source of truth.
+ *
+ * These are all PUBLIC values (chain id, RPC/bundler/paymaster URLs, contract
+ * addresses) baked into the client bundle at build time, so they live here in
+ * code rather than in env vars or CI secrets. To point at a new deployment or a
+ * production host server, edit the literals below. All hooks import from here.
  */
 
 import { createPublicClient, http, defineChain, type Address } from 'viem'
 
-export const arcTestnet = defineChain({
-  id: Number(import.meta.env.VITE_CHAIN_ID || 5042002),
-  name: 'Arc Testnet',
-  nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
-  rpcUrls: { default: { http: [import.meta.env.VITE_ARC_RPC_URL || 'https://testnet-rpc.arc.network'] } },
-  blockExplorers: { default: { name: 'ArcScan', url: 'https://testnet-scan.arc.network' } },
+/** Network + endpoints. Edit here for prod (e.g. real bundler/paymaster host). */
+export const CHAIN_ID = 5003
+export const RPC_URL = 'https://rpc.sepolia.mantle.xyz'
+export const BUNDLER_URL = 'http://localhost:4848/bundler/mantle'
+export const PAYMASTER_URL = 'http://localhost:4848/paymaster/mantle'
+
+export const mantleSepolia = defineChain({
+  id: CHAIN_ID,
+  name: 'Mantle Sepolia',
+  nativeCurrency: { name: 'Mantle', symbol: 'MNT', decimals: 18 },
+  rpcUrls: { default: { http: [RPC_URL] } },
+  blockExplorers: { default: { name: 'Mantle Sepolia Explorer', url: 'https://sepolia.mantlescan.xyz' } },
 })
 
 const ZERO = '0x0000000000000000000000000000000000000000' as Address
 
+/** Contract addresses — update these after deploying the protocol contracts. */
 export const contracts = {
-  vault: (import.meta.env.VITE_VAULT_ADDRESS || ZERO) as Address,
-  flowToken: (import.meta.env.VITE_FLOW_TOKEN_ADDRESS || ZERO) as Address,
-  agentRegistry: (import.meta.env.VITE_AGENT_REGISTRY_ADDRESS || ZERO) as Address,
-  observerRegistry: (import.meta.env.VITE_OBSERVER_REGISTRY_ADDRESS || ZERO) as Address,
-  steward: (import.meta.env.VITE_STEWARD_ADDRESS || ZERO) as Address,
-  protocolLP: (import.meta.env.VITE_PROTOCOL_LP_ADDRESS || ZERO) as Address,
-  usdc: (import.meta.env.VITE_USDC_ADDRESS || '0x3600000000000000000000000000000000000000') as Address,
+  vault: ZERO,
+  flowToken: ZERO,
+  agentRegistry: ZERO,
+  observerRegistry: ZERO,
+  steward: ZERO,
+  protocolLP: ZERO,
+  usdc: ZERO,
 } as const
 
 /** True when contracts are deployed (not zero addresses) */
@@ -32,7 +43,7 @@ export function isDeployed(): boolean {
 
 /** Shared public client for read operations */
 export const publicClient = createPublicClient({
-  chain: arcTestnet,
+  chain: mantleSepolia,
   transport: http(),
 })
 
@@ -136,8 +147,8 @@ export const PROTOCOL_LP_ABI = [
 // ─── ERC-4337 / Safe account-abstraction config (for @livestreak/wallet) ───
 //
 // These are the CREATE2 deterministic Safe + EntryPoint addresses (identical on
-// every EVM chain). Bundler/paymaster default to the local host server; override
-// via env in production. This shape mirrors @livestreak/schema's WalletInitConfig.
+// every EVM chain). Bundler/paymaster come from the URLs configured at the top of
+// this file. This shape mirrors @livestreak/schema's EvmWalletInitConfig.
 
 const AA_ADDRESSES = {
   entryPoint: '0x0000000071727De22E5E9d8BAf0edAc6f37da032',
@@ -153,16 +164,12 @@ const AA_ADDRESSES = {
   simulateTxAccessor: '0x2979b39572fd8e47168e2aa7caed7df46b609327',
 } as const
 
-const BUNDLER_URL = (import.meta.env.VITE_BUNDLER_URL as string) || 'http://localhost:4848/bundler/arc'
-const PAYMASTER_URL = (import.meta.env.VITE_PAYMASTER_URL as string) || 'http://localhost:4848/paymaster/arc'
-
 /** Build the wdkConfig passed to `new WalletManagerEvmErc4337(secret, config)`. */
 export function walletConfig() {
-  const chainId = Number(import.meta.env.VITE_CHAIN_ID || 5042002)
-  const rpcUrl = (import.meta.env.VITE_ARC_RPC_URL as string) || 'https://testnet-rpc.arc.network'
+  const chainId = CHAIN_ID
   return {
     chainId,
-    provider: rpcUrl,
+    provider: RPC_URL,
     bundlerUrl: BUNDLER_URL,
     paymasterUrl: PAYMASTER_URL,
     entryPointAddress: AA_ADDRESSES.entryPoint,

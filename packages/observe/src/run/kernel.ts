@@ -14,8 +14,13 @@ import { createSystemRunSurface, systemRunStopScope } from "./control/index.js";
 import type { DescribeControlContext } from "./control/bus/index.js";
 import type { ObserveRun } from "./run.js";
 import { callStoredRunFunction, type ObserveRunHandle, type RunStore } from "./store.js";
-import type { WorkerRunOutcome } from "./worker/worker.js";
+import type { ObserveRunMarketOptions } from "#market/index.js";
+import {
+  forkMarketRegistrationIfNeeded,
+  resolveMarketRegistrarFromOptions
+} from "#market/index.js";
 import { runScopedWorkerUntilStoppedWithBoard } from "./worker/worker.js";
+import type { WorkerRunOutcome } from "./worker/worker.js";
 import { createWorkerBoardWake } from "./worker/wake.js";
 import type { WorkerSnapshot } from "./worker/snapshot.js";
 import type { SinkStageState } from "./worker/state.js";
@@ -36,6 +41,7 @@ export interface ObserveRunKernelOptions {
   readonly captureDriver?: CaptureDriver<any>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- injected sink drivers carry heterogeneous config shapes
   readonly sinkDriver?: SinkDriver<any>;
+  readonly market?: ObserveRunMarketOptions;
 }
 
 export const defaultObserveRunMaxTurns = 4096;
@@ -139,6 +145,16 @@ export const startObserveRun = (
 
       const boardWake = yield* createWorkerBoardWake();
       yield* bus.registerWakeWorker(() => boardWake.notify());
+
+      const marketSetup = yield* resolveMarketRegistrarFromOptions(options.market);
+      if (marketSetup !== undefined) {
+        yield* forkMarketRegistrationIfNeeded({
+          runId: run.config.runId,
+          bus,
+          registration: marketSetup.registration,
+          registrar: marketSetup.registrar
+        });
+      }
 
       const result = yield* runScopedWorkerUntilStoppedWithBoard({
         runId: run.config.runId,

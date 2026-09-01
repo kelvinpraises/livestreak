@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Clock, Fire, X } from '@phosphor-icons/react'
 import { StreamSlider } from '#/components/predictions/StreamSlider'
-import { formatUSDC, formatCountdown, formatMultiplier, calcPoolPct } from '#/utils/format'
+import { formatCountdown, formatMultiplier, calcPoolPct } from '#/utils/format'
 import type { Vault } from '#/data/mock'
 
 interface Props {
@@ -36,8 +36,8 @@ export function FocusedVault({ vault, onDismiss }: Props) {
     <motion.div
       initial={{ opacity: 0, transform: 'translateY(-12px)', filter: 'blur(4px)' }}
       animate={{ opacity: 1, transform: 'translateY(0px)', filter: 'blur(0px)' }}
-      exit={{ opacity: 0, transform: 'translateY(-8px)', filter: 'blur(4px)' }}
-      transition={{ type: 'spring', stiffness: 350, damping: 28, exit: { duration: 0.15 } }}
+      exit={{ opacity: 0, transform: 'translateY(-8px)', filter: 'blur(4px)', transition: { duration: 0.15 } }}
+      transition={{ type: 'spring', stiffness: 350, damping: 28 }}
       style={{
         flexShrink: 0,
         borderBottom: '1px solid rgba(255,255,255,0.07)',

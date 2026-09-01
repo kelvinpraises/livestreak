@@ -9,20 +9,31 @@ export default tseslint.config(
       '**/dist/**',
       '**/node_modules/**',
       '**/.output/**',
-      'app/**',
-      'packages/**',
-      // 'packages-re2/**',
-      // 'cli-re2/**',
-      'packages/contracts/**',
+      '**/.tanstack/**',
+      '**/out/**',
+      'packages/contracts/lib/**',
+      'packages/contracts/cache/**',
+      'packages/wallet/src/vendor/**',
+      '**/routeTree.gen.ts',
     ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
-  eslintPluginUnicorn.configs['flat/all'],
   {
+    plugins: {
+      unicorn: eslintPluginUnicorn,
+    },
     languageOptions: {
       globals: {
         ...globals.node,
+      },
+    },
+  },
+  {
+    files: ['app/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.browser,
       },
     },
   },

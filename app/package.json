@@ -6,11 +6,14 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "vite dev --port 3000",
+    "clean": "rm -rf .output .tanstack",
     "build": "vite build",
+    "check": "tsc --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run --passWithNoTests",
+    "dev": "vite dev --port 3000",
     "preview": "vite preview",
-    "start": "node .output/server/index.mjs",
-    "test": "vitest run"
+    "start": "node .output/server/index.mjs"
   },
   "dependencies": {
     "@livestreak/wallet": "file:../packages/wallet",

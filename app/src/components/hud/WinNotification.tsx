@@ -22,8 +22,8 @@ function Toast({ toast, onDismiss }: { toast: WinToast; onDismiss: () => void })
     <motion.div
       initial={{ transform: 'translateY(-60px) scale(0.95)', opacity: 0, filter: 'blur(6px)' }}
       animate={{ transform: 'translateY(0px) scale(1)', opacity: 1, filter: 'blur(0px)' }}
-      exit={{ transform: 'translateY(-40px) scale(0.97)', opacity: 0, filter: 'blur(4px)' }}
-      transition={{ type: 'spring', stiffness: 350, damping: 24, exit: { duration: 0.15 } }}
+      exit={{ transform: 'translateY(-40px) scale(0.97)', opacity: 0, filter: 'blur(4px)', transition: { duration: 0.15 } }}
+      transition={{ type: 'spring', stiffness: 350, damping: 24 }}
       onClick={onDismiss}
       className=""
       style={{

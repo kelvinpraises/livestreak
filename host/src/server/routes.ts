@@ -15,7 +15,7 @@ import { handleCreateSession, handleGetManifest } from "../sessions/routes.js";
 import { createSessionStore } from "../sessions/store.js";
 import { createSimilarityStore } from "../similarity/store.js";
 import { handleFindSimilar, handleIndexVault } from "../similarity/routes.js";
-import { jsonFailure, jsonSuccess, routeNotFound, type JsonResponse } from "./http.js";
+import { jsonFailure, jsonSuccess, type JsonResponse } from "./http.js";
 
 // --- exports ---
 

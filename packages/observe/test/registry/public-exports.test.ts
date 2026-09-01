@@ -138,4 +138,15 @@ describe("observe public exports", () => {
     expect(publicExport("TimelineMarker")).toBeUndefined();
     expect(publicExport("TimelineMarkerKind")).toBeUndefined();
   });
+
+  it("exposes public market registration types without chain internals", () => {
+    expect(publicExport("ObserveRunMarketConfig")).toBeUndefined();
+    expect(publicExport("ObserveRunMarketOptions")).toBeUndefined();
+    expect(publicExport("MarketLifecycleState")).toBeUndefined();
+    expect(publicExport("MarketRegistrar")).toBeUndefined();
+    expect(publicExport("testPlaceholderDeriveStreamId")).toBeTypeOf("function");
+    expect(publicExport("createMarketRegistrar")).toBeUndefined();
+    expect(publicExport("forkMarketRegistrationIfNeeded")).toBeUndefined();
+    expect(publicExport("applyMarketLifecycleToBoard")).toBeUndefined();
+  });
 });

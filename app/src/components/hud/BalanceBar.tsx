@@ -14,7 +14,7 @@ export function BalanceBar({ flow, wallet, onClaim, claiming }: Props) {
     <div className="balance-bar-bg" style={{ flexShrink: 0 }}>
       <AnimatePresence>
         {expanded && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ type: 'spring', stiffness: 300, damping: 30, exit: { type: 'spring', stiffness: 380, damping: 35, opacity: { duration: 0.1 } } }} style={{ overflow: 'hidden' }}>
+          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0, transition: { type: 'spring', stiffness: 380, damping: 35, opacity: { duration: 0.1 } } }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} style={{ overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
               <Stat label="Available" value={formatFlow(unstaked)} accent="#00ff87" />
               <Stat label="Staked" value={formatFlow(flow.staked)} accent="#00c8ff" />

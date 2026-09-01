@@ -1,0 +1,30 @@
+# Docker build context for ./Dockerfile (context = repo root).
+# Only app/ and packages/wallet/ are COPYed; everything else just bloats/leaks.
+
+**/node_modules
+**/.output
+**/dist
+**/build
+**/.git
+**/.DS_Store
+**/*.log
+
+# secrets / local env never go into the image (frontend config is public build-args)
+**/.env
+**/.env.*
+!**/.env.example
+
+# reference + non-app workspaces (not needed to build the frontend)
+context
+host
+cli
+packages/contracts
+packages/core
+packages/schema
+packages/observe
+packages/options
+packages/bookmaker
+packages/steward
+packages/host
+
+# keep: app/** and packages/wallet/**

@@ -1,0 +1,21 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "#server/*": ["./src/server/*"],
+      "#descriptor/*": ["./src/descriptor/*"],
+      "#policy/*": ["./src/policy/*"],
+      "#sessions/*": ["./src/sessions/*"],
+      "#manifests/*": ["./src/manifests/*"],
+      "#cache/*": ["./src/cache/*"],
+      "#similarity/*": ["./src/similarity/*"],
+      "#forum/*": ["./src/forum/*"],
+      "#aa/*": ["./src/aa/*"],
+      "#webrtc/*": ["./src/webrtc/*"],
+      "#test/*": ["./test/*"]
+    }
+  },
+  "include": ["src", "test"]
+}

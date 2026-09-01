@@ -1,0 +1,37 @@
+import { useState, useEffect, useRef } from 'react'
+import { mockFrame, mockEvents, type WSFrame, type WSEvent } from '#/data/mock'
+
+export function useWebSocket(url = 'ws://localhost:8765') {
+  const [frame, setFrame] = useState<WSFrame>(mockFrame)
+  const [events, setEvents] = useState<WSEvent[]>(mockEvents)
+  const [connected, setConnected] = useState(false)
+  const wsRef = useRef<WebSocket | null>(null)
+
+  useEffect(() => {
+    if (connected) return
+    const interval = setInterval(() => {
+      setFrame(prev => ({ ...prev, frame: prev.frame + 1, ts: Date.now() }))
+    }, 800)
+    return () => clearInterval(interval)
+  }, [connected])
+
+  useEffect(() => {
+    try {
+      const ws = new WebSocket(url)
+      ws.onopen = () => setConnected(true)
+      ws.onmessage = (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data as string) as WSFrame
+          setFrame(data)
+          if (data.events?.length) setEvents(prev => [...data.events, ...prev].slice(0, 50))
+        } catch { /* ignore */ }
+      }
+      ws.onclose = () => setConnected(false)
+      ws.onerror = () => ws.close()
+      wsRef.current = ws
+    } catch { /* ws unavailable */ }
+    return () => wsRef.current?.close()
+  }, [url])
+
+  return { frame, events, connected }
+}

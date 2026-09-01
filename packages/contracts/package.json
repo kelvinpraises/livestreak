@@ -1,0 +1,31 @@
+{
+  "name": "@livestreak/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./generated/contracts.ts"
+  },
+  "files": [
+    "generated/",
+    "foundry.toml",
+    "src/"
+  ],
+  "scripts": {
+    "build:sol": "forge build && FOUNDRY_PROFILE=aa forge build",
+    "test:sol": "forge test",
+    "fmt:sol": "forge fmt",
+    "gen": "wagmi generate",
+    "build": "npm run build:sol && npm run gen",
+    "deploy": "tsx deploy/main.ts",
+    "e2e": "tsx deploy/e2e.ts"
+  },
+  "dependencies": {
+    "viem": "^2.23.0"
+  },
+  "devDependencies": {
+    "@wagmi/cli": "^2.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "6.0.3"
+  }
+}

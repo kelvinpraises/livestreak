@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "#bridge/*": ["./src/bridge/*"],
+      "#pipeline/*": ["./src/pipeline/*"],
+      "#adapters/*": ["./src/adapters/*"],
+      "#run/*": ["./src/run/*"],
+      "#scope/*": ["./src/scope/*"],
+      "#builtins.js": ["./src/builtins.js"],
+      "#index.js": ["./src/index.js"],
+      "#test/*": ["./test/*"]
+    }
+  },
+  "include": ["src", "test"]
+}

@@ -1,0 +1,29 @@
+{
+  "name": "@livestreak/steward",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@livestreak/core": "file:../core",
+    "@livestreak/schema": "file:../schema"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

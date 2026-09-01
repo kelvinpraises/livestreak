@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "#index.js": ["./src/index.js"]
+    }
+  },
+  "include": ["src"]
+}

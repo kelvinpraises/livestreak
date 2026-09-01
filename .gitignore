@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+venv/
+.venv/
+
+# Build outputs
+dist/
+.next/
+.tanstack/
+.output/
+
+# Environment
+.env
+.env.local
+.env*.local
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.sqlite
+*.db
+*.db-*
+
+# Misc
+output.txt
+tmp/
+.mastra/
+context/
+
+# ML weights (keep under context/quary on disk only)
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc

@@ -1,0 +1,25 @@
+{
+  "name": "@livestreak/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "livestreak": "dist/main.js"
+  },
+  "main": "dist/main.js",
+  "files": ["dist"],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@effect/cli": "0.69.2",
+    "@effect/platform-node": "0.96.1",
+    "@livestreak/observe": "file:../packages/observe",
+    "effect": "3.21.3"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}

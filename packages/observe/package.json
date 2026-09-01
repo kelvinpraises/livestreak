@@ -1,0 +1,41 @@
+{
+  "name": "@livestreak/observe",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "imports": {
+    "#pipeline/*": "./dist/pipeline/*",
+    "#adapters/*": "./dist/adapters/*",
+    "#run/*": "./dist/run/*",
+    "#bridge/*": "./dist/bridge/*",
+    "#scope/*": "./dist/scope/*",
+    "#builtins.js": "./dist/builtins.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "lint:implemented": "eslint src/run/control src/run/worker test",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@livestreak/core": "file:../core",
+    "@livestreak/schema": "file:../schema",
+    "effect": "3.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "@livestreak/wallet",
+  "version": "1.0.0-beta.5",
+  "description": "Vendored BIP-32 EVM ERC-4337 wallet manager (Safe account abstraction)",
+  "keywords": [
+    "wdk",
+    "wallet",
+    "bip-32",
+    "ethereum",
+    "erc-4337"
+  ],
+  "author": "LiveStreak",
+  "license": "Apache-2.0",
+  "main": "index.js",
+  "type": "module",
+  "types": "./types",
+  "dependencies": {
+    "@safe-global/protocol-kit": "^6.1.2",
+    "@safe-global/relay-kit": "^4.1.1",
+    "@tetherto/wdk-wallet": "1.0.0-beta.7",
+    "@tetherto/wdk-wallet-evm": "1.0.0-beta.8",
+    "bare-node-runtime": "^1.1.4",
+    "ethers": "6.14.4",
+    "sodium-javascript": "^0.8.0"
+  },
+  "overrides": {
+    "axios": "1.13.5",
+    "cookie": "1.0.2",
+    "tar": "7.5.7",
+    "tmp": "0.2.5",
+    "undici": "7.21.0",
+    "ws": "8.18.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "bare": "./bare.js",
+      "default": "./index.js"
+    },
+    "./package": {
+      "default": "./package.json"
+    }
+  }
+}

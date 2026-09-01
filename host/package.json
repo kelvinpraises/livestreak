@@ -1,0 +1,22 @@
+{
+  "name": "@livestreak/host-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@livestreak/core": "file:../packages/core",
+    "@livestreak/host": "file:../packages/host",
+    "viem": "^2.50.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

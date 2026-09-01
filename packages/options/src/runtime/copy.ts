@@ -1,0 +1,81 @@
+// --- exports ---
+
+import type {
+  OptionsMarketSnapshot,
+  OptionsUserOptionsSnapshot,
+  OptionsVaultSnapshot
+} from "../model/snapshot.js";
+import type { OptionsRuntimeLastError, OptionsRuntimeState } from "./store.js";
+
+export const copyMarketSnapshot = (
+  snapshot: OptionsMarketSnapshot
+): OptionsMarketSnapshot => ({
+  market: {
+    ...snapshot.market,
+    vaultIds: [...snapshot.market.vaultIds],
+    ...(snapshot.market.timing === undefined ? {} : { timing: { ...snapshot.market.timing } })
+  },
+  vaults: snapshot.vaults.map((vault) => ({ ...vault, pools: { ...vault.pools }, steward: { ...vault.steward }, timing: { ...vault.timing } }))
+});
+
+export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultSnapshot => ({
+  vault: {
+    ...snapshot.vault,
+    pools: { ...snapshot.vault.pools },
+    steward: { ...snapshot.vault.steward },
+    timing: { ...snapshot.vault.timing }
+  },
+  ...(snapshot.userPosition === undefined
+    ? {}
+    : {
+        userPosition: {
+          ...snapshot.userPosition,
+          positions: {
+            yes: { ...snapshot.userPosition.positions.yes },
+            no: { ...snapshot.userPosition.positions.no }
+          }
+        }
+      }),
+  ...(snapshot.funding === undefined
+    ? {}
+    : {
+        funding: {
+          yes: { ...snapshot.funding.yes },
+          no: { ...snapshot.funding.no }
+        }
+      })
+});
+
+export const copyUserOptionsSnapshot = (
+  snapshot: OptionsUserOptionsSnapshot
+): OptionsUserOptionsSnapshot => ({
+  account: snapshot.account,
+  ...(snapshot.marketId === undefined ? {} : { marketId: snapshot.marketId }),
+  markets: snapshot.markets.map(copyMarketSnapshot),
+  vaults: snapshot.vaults.map(copyVaultSnapshot),
+  lvstAccount: {
+    ...snapshot.lvstAccount,
+    lossClaims: { ...snapshot.lvstAccount.lossClaims }
+  },
+  ...(snapshot.protocol === undefined ? {} : { protocol: { ...snapshot.protocol } })
+});
+
+export const copyRuntimeState = (state: OptionsRuntimeState): OptionsRuntimeState => ({
+  runtimeId: state.runtimeId,
+  revision: state.revision,
+  ...(state.userSnapshot === undefined
+    ? {}
+    : { userSnapshot: copyUserOptionsSnapshot(state.userSnapshot) }),
+  markets: state.markets.map(copyMarketSnapshot),
+  vaults: state.vaults.map(copyVaultSnapshot),
+  ...(state.lastError === undefined
+    ? {}
+    : { lastError: copyRuntimeLastError(state.lastError) })
+});
+
+// --- helpers ---
+
+const copyRuntimeLastError = (error: OptionsRuntimeLastError): OptionsRuntimeLastError => ({
+  message: error.message,
+  ...(error.details === undefined ? {} : { details: error.details })
+});

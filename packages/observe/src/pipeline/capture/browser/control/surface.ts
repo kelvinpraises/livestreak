@@ -40,7 +40,7 @@ export const browserCaptureFunctionNames = [
   "setCaptureFps"
 ] as const;
 
-/* eslint-disable unicorn/no-null -- BoardCell.status tuple uses null for absent message */
+ 
 export const createBrowserCaptureControlSurface = (
   controls: BrowserCaptureControls
 ): ControlSurface => ({

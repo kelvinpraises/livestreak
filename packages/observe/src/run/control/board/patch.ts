@@ -227,7 +227,7 @@ const patchChangesSettings = (patch: BoardPatch): boolean => {
 
 export const boardSettingsChanged = (before: Board, after: Board): boolean => {
   for (const [cellId, cell] of Object.entries(after.cells)) {
-    const beforeSettings = before.cells[cellId as keyof typeof before.cells]?.settings;
+    const beforeSettings = before.cells[cellId]?.settings;
     if (!isJsonEqual(beforeSettings ?? {}, cell.settings ?? {})) {
       return true;
     }

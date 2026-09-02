@@ -1,11 +1,12 @@
 import { Effect } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
 import { createWalletManager } from "@livestreak/wallet";
-import { marketRegistryAbi } from "@livestreak/contracts";
+import { evm } from "@livestreak/contracts";
 import { decodeEventLog, encodeFunctionData, type Log } from "viem";
-import type { ObserveRunMarketConfig } from "../types.js";
-import type { MarketRegisterInput, MarketRegisterResult, MarketRegistrar } from "../types.js";
-import { decodeMarketRegisteredPayload, verifyMarketRegistration } from "../verify.js";
+import type { MarketRegisterResult, MarketRegistrar, ObserveRunMarketConfig } from "#market/types.js";
+import { decodeMarketRegisteredPayload, verifyMarketRegistration } from "#market/verify.js";
+
+const { marketRegistryAbi } = evm;
 
 /** UserOp receipt path (a): wallet read-only account exposes getUserOperationReceipt(userOpHash). */
 export const createEvmMarketRegistrar = (

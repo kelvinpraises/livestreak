@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmit": false,
+    "declaration": true,
+    "declarationMap": true
+  },
+  "include": [
+    "kit/**/*.ts",
+    "chains/evm/index.ts",
+    "chains/evm/abis.ts",
+    "chains/evm/addresses.ts",
+    "chains/evm/contract.ts",
+    "chains/evm/types.ts",
+    "chains/evm/generated/abis.ts",
+    "chains/sui/index.ts",
+    "chains/solana/index.ts"
+  ],
+  "exclude": ["chains/evm/lib/**", "chains/evm/out/**", "chains/evm/cache/**"]
+}

@@ -18,9 +18,9 @@ const withRunSettings = (settings: Record<string, unknown>) => ({
   cells: {
     ...baseBoard.cells,
     "system:run": {
-      ...baseBoard.cells["system:run"]!,
+      ...baseBoard.cells["system:run"],
       settings: {
-        ...baseBoard.cells["system:run"]!.settings,
+        ...baseBoard.cells["system:run"].settings,
         ...settings
       }
     }
@@ -32,9 +32,9 @@ const withPauseSettings = (settings: Record<string, unknown>) => ({
   cells: {
     ...baseBoard.cells,
     "system:pause": {
-      ...baseBoard.cells["system:pause"]!,
+      ...baseBoard.cells["system:pause"],
       settings: {
-        ...baseBoard.cells["system:pause"]!.settings,
+        ...baseBoard.cells["system:pause"].settings,
         ...settings
       }
     }
@@ -46,7 +46,7 @@ const withPauseSettingsOnly = (settings: Record<string, unknown>) => ({
   cells: {
     ...baseBoard.cells,
     "system:pause": {
-      ...baseBoard.cells["system:pause"]!,
+      ...baseBoard.cells["system:pause"],
       settings
     }
   }
@@ -60,7 +60,7 @@ const withCellSettingsValue = (board: Board, cellId: string, settings: unknown):
     cells: {
       ...board.cells,
       [cellId]: {
-        ...board.cells[cellId as keyof typeof board.cells]!,
+        ...board.cells[cellId],
         settings
       }
     }
@@ -71,9 +71,9 @@ const withBrowserSettings = (settings: Record<string, unknown>) => ({
   cells: {
     ...baseBoard.cells,
     "capture:browser": {
-      ...baseBoard.cells["capture:browser"]!,
+      ...baseBoard.cells["capture:browser"],
       settings: {
-        ...baseBoard.cells["capture:browser"]!.settings,
+        ...baseBoard.cells["capture:browser"].settings,
         ...settings
       }
     }
@@ -235,7 +235,7 @@ describe("validateBoardSettings", () => {
       cells: {
         ...baseBoard.cells,
         "system:pause": {
-          ...baseBoard.cells["system:pause"]!,
+          ...baseBoard.cells["system:pause"],
           settings: "bad"
         }
       }
@@ -254,7 +254,7 @@ describe("validateBoardSettings", () => {
       cells: {
         ...baseBoard.cells,
         "system:pause": {
-          ...baseBoard.cells["system:pause"]!,
+          ...baseBoard.cells["system:pause"],
           settings: new Date()
         }
       }
@@ -375,7 +375,7 @@ describe("validateBoardSettings", () => {
     }
   });
 
-  /* eslint-disable unicorn/no-null -- validating null crop is required */
+   
   it("accepts capture:browser.settings.crop when null", async () => {
     const board = withBrowserSettings({ crop: null });
     const exit = await Effect.runPromiseExit(validateBoardSettings(board));
@@ -449,7 +449,7 @@ describe("validateBoardSettings", () => {
 
   it("rejects sink subscribe when not an array", async () => {
     const board = withCellSettingsValue(baseBoard, "sink:file-export", {
-      ...baseBoard.cells["sink:file-export"]!.settings,
+      ...baseBoard.cells["sink:file-export"].settings,
       subscribe: "publish.video.rendered"
     });
     const exit = await Effect.runPromiseExit(validateBoardSettings(board));
@@ -464,7 +464,7 @@ describe("validateBoardSettings", () => {
 
   it("rejects sink subscribe with non-string member", async () => {
     const board = withCellSettingsValue(baseBoard, "sink:file-export", {
-      ...baseBoard.cells["sink:file-export"]!.settings,
+      ...baseBoard.cells["sink:file-export"].settings,
       subscribe: ["publish.video.rendered", 42]
     });
     const exit = await Effect.runPromiseExit(validateBoardSettings(board));
@@ -479,7 +479,7 @@ describe("validateBoardSettings", () => {
 
   it("rejects sink required when non-boolean", async () => {
     const board = withCellSettingsValue(baseBoard, "sink:file-export", {
-      ...baseBoard.cells["sink:file-export"]!.settings,
+      ...baseBoard.cells["sink:file-export"].settings,
       required: "yes"
     });
     const exit = await Effect.runPromiseExit(validateBoardSettings(board));
@@ -494,7 +494,7 @@ describe("validateBoardSettings", () => {
 
   it("rejects sink path when non-string", async () => {
     const board = withCellSettingsValue(baseBoard, "sink:file-export", {
-      ...baseBoard.cells["sink:file-export"]!.settings,
+      ...baseBoard.cells["sink:file-export"].settings,
       path: 42
     });
     const exit = await Effect.runPromiseExit(validateBoardSettings(board));
@@ -547,7 +547,7 @@ describe("validateBoardSettings", () => {
 
   it("rejects capture:file.settings.maxPumpMs when Infinity", async () => {
     const board = withCellSettingsValue(fileBoard, "capture:file", {
-      ...fileBoard.cells["capture:file"]!.settings,
+      ...fileBoard.cells["capture:file"].settings,
       maxPumpMs: Infinity
     });
     const exit = await Effect.runPromiseExit(validateBoardSettings(board));

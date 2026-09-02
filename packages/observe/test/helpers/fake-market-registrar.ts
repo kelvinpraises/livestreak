@@ -3,8 +3,7 @@ import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core"
 import type {
   MarketRegisterInput,
   MarketRegisterResult,
-  MarketRegistrar,
-  StreamId
+  MarketRegistrar
 } from "#market/types.js";
 
 export interface FakeMarketRegistrarOptions {
@@ -48,7 +47,7 @@ export const defaultFakeRegisterResult = (
   userOpHash: "0xuserop",
   sender: "0x00000000000000000000000000000000000000aa",
   decoded: {
-    marketId: "0x0000000000000000000000000000000000000000000000000000000000000001" as StreamId,
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000001",
     streamId: input.streamId,
     title: input.title
   }
@@ -65,7 +64,7 @@ export const foreignSenderRegisterResult = (
   userOpHash: "0xuserop-foreign",
   sender: "0x00000000000000000000000000000000000000aa",
   decoded: {
-    marketId: "0x0000000000000000000000000000000000000000000000000000000000000002" as StreamId,
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000002",
     streamId: input.streamId,
     title: input.title
   }
@@ -77,7 +76,7 @@ export const mismatchedSenderRegisterResult = (
   userOpHash: "0xuserop-mismatch",
   sender: "0x0000000000000000000000000000000000000bad",
   decoded: {
-    marketId: "0x0000000000000000000000000000000000000000000000000000000000000003" as StreamId,
+    marketId: "0x0000000000000000000000000000000000000000000000000000000000000003",
     streamId: input.streamId,
     title: input.title
   }

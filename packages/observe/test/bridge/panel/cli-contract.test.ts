@@ -126,9 +126,9 @@ describe("bridge panel CLI contract", () => {
       cells: {
         ...catalog.cells,
         "system:pause": {
-          ...catalog.cells["system:pause"]!,
+          ...catalog.cells["system:pause"],
           functions: {
-            ...catalog.cells["system:pause"]!.functions,
+            ...catalog.cells["system:pause"].functions,
             hiddenAction: {
               scope: "system:pause:hiddenAction",
               label: "Hidden",
@@ -147,7 +147,7 @@ describe("bridge panel CLI contract", () => {
         "system:run": {
           label: "Run",
           catalog: "system:run",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["prepared", null, Date.now()] as const,
           readonly: { runId: "run_catalog_enrichment" },
           functions: []
@@ -155,7 +155,7 @@ describe("bridge panel CLI contract", () => {
         "system:pause": {
           label: "Pause",
           catalog: "system:pause",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, Date.now()] as const,
           functions: ["pause", "resume", "setPresentation", "orphanAction"]
         }

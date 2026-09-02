@@ -14,7 +14,7 @@ export const createBrowserLivePauseRuntime = (): Effect.Effect<BrowserLivePauseR
     const pausedReference = yield* Ref.make(false);
     const revisionReference = yield* Ref.make(0);
     const resumeGateReference = yield* Ref.make<Deferred.Deferred<void, never> | undefined>(
-      // eslint-disable-next-line unicorn/no-useless-undefined -- Ref.make requires an initial value
+       
       undefined
     );
 

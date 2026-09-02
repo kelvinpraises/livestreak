@@ -91,5 +91,5 @@ export interface MarketRegistrar {
 /** Test-only streamId placeholder — NOT a canonical contracts formula. */
 export const testPlaceholderDeriveStreamId = (runId: string): StreamId => {
   const hex = Buffer.from(runId, "utf8").toString("hex").padEnd(64, "0").slice(0, 64);
-  return `0x${hex}` as StreamId;
+  return `0x${hex}`;
 };

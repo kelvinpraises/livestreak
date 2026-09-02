@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-null -- BoardCell.status tuple uses null for absent message */
+ 
 import { Effect, Exit } from "effect";
 import { describe, expect, it } from "vitest";
 import { createFileSinkDriver } from "#pipeline/publish/sinks/file/driver.js";

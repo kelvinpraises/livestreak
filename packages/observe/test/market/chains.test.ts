@@ -1,14 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
-import { decodeEventLog, encodeAbiParameters, keccak256, toHex, type Hex } from "viem";
-import { marketRegistryAbi } from "@livestreak/contracts";
+import { decodeEventLog, encodeAbiParameters, keccak256, padHex, toHex, type Hex } from "viem";
+import { evm } from "@livestreak/contracts";
 import { extractUserOperationReceiptPayload } from "#market/chains/evm.js";
 import { createMarketRegistrar } from "#market/chains/index.js";
 import { decodeMarketRegisteredPayload } from "#market/verify.js";
 import { testPlaceholderDeriveStreamId } from "#market/types.js";
 import type { ObserveRunMarketConfig } from "#market/types.js";
 
-const marketRegisteredTopic = keccak256(toHex("MarketRegistered(bytes32,string,bytes32)"));
+const { marketRegistryAbi } = evm;
+
+const marketRegisteredTopic = keccak256(
+  toHex("MarketRegistered(bytes32,address,bytes32,string)")
+);
 
 describe("market chain seam", () => {
   it("decodes MarketRegistered from a fixture UserOperation receipt (path a)", async () => {
@@ -18,12 +22,18 @@ describe("market chain seam", () => {
       "0x00000000000000000000000000000000000000000000000000000000000000aa" as Hex;
     const title = "Fixture Derby";
 
+    const creator = "0x00000000000000000000000000000000000000aa" as Hex;
     const data = encodeAbiParameters([{ type: "string" }], [title]);
-    const topics = [marketRegisteredTopic, marketId, streamId] as const;
+    const topics = [
+      marketRegisteredTopic,
+      marketId,
+      padHex(creator, { size: 32 }),
+      streamId
+    ] as const;
 
     const payload = await Effect.runPromise(
       extractUserOperationReceiptPayload({
-        sender: "0x00000000000000000000000000000000000000aa",
+        sender: creator,
         receipt: {
           logs: [
             {
@@ -44,14 +54,14 @@ describe("market chain seam", () => {
       })
     );
 
-    expect(payload.sender).toBe("0x00000000000000000000000000000000000000aa");
+    expect(payload.sender).toBe(creator);
     expect(payload.logs.length).toBe(1);
 
     const decodedLog = decodeEventLog({
       abi: marketRegistryAbi,
       eventName: "MarketRegistered",
-      data: payload.logs[0]!.data,
-      topics: payload.logs[0]!.topics
+      data: payload.logs[0].data,
+      topics: payload.logs[0].topics
     });
 
     const decoded = decodeMarketRegisteredPayload({

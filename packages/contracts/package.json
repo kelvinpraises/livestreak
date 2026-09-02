@@ -2,27 +2,45 @@
   "name": "@livestreak/contracts",
   "version": "0.1.0",
   "private": true,
+  "description": "LiveStreak protocol ABIs, types, and per-chain deploy addresses",
   "type": "module",
+  "main": "./dist/kit/index.js",
+  "types": "./dist/kit/index.d.ts",
   "exports": {
-    ".": "./generated/contracts.ts"
+    ".": {
+      "types": "./dist/kit/index.d.ts",
+      "default": "./dist/kit/index.js"
+    },
+    "./evm": {
+      "types": "./dist/chains/evm/index.d.ts",
+      "default": "./dist/chains/evm/index.js"
+    },
+    "./package": {
+      "default": "./package.json"
+    }
   },
   "files": [
-    "generated/",
-    "foundry.toml",
-    "src/"
+    "dist",
+    "kit",
+    "chains",
+    "chains/evm/generated",
+    "chains/evm/deployments",
+    "chains/evm/foundry.toml",
+    "chains/evm/solidity"
   ],
   "scripts": {
-    "clean": "rm -rf out cache generated/contracts.ts",
-    "build": "forge build && FOUNDRY_PROFILE=aa forge build && wagmi generate",
+    "clean": "rm -rf dist chains/evm/out chains/evm/cache chains/evm/generated/abis.ts",
+    "build": "cd chains/evm && forge build && FOUNDRY_PROFILE=aa forge build && wagmi generate && cd ../.. && tsc -p tsconfig.build.json && mkdir -p dist/chains/evm/deployments && for f in chains/evm/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/evm/deployments/; done",
     "check": "tsc -p tsconfig.json --noEmit",
-    "lint": "forge fmt --check src test",
-    "test": "forge test"
+    "lint": "eslint kit chains && cd chains/evm && forge fmt --check solidity test",
+    "test": "cd chains/evm && forge test"
   },
   "dependencies": {
     "viem": "^2.23.0"
   },
   "devDependencies": {
     "@wagmi/cli": "^2.10.0",
+    "@types/node": "^22.15.30",
     "tsx": "^4.19.0",
     "typescript": "6.0.3"
   }

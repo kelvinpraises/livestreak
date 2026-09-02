@@ -44,7 +44,7 @@ const makeBrowserObserveRunConfig = (runId: string, outputPath: string): Observe
     driverId: "memory",
     config: { path: outputPath }
   },
-  // eslint-disable-next-line unicorn/no-null -- passthrough signal
+   
   process: null
 });
 

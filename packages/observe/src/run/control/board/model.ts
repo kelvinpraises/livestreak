@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-null -- BoardCell.status tuple uses null for absent message */
+ 
 import type { BoardCell, BoardCellId } from "#run/control/bus/index.js";
 import { defaultControlPause, defaultControlRun } from "./settings.js";
 

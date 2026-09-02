@@ -18,7 +18,7 @@ describe("writeStdinWithBackpressure", () => {
       },
       on: (event, listener) => {
         if (event === "drain") {
-          drainListener = listener as () => void;
+          drainListener = listener;
         }
       },
       removeListener: (event) => {

@@ -139,7 +139,7 @@ const describeSyntheticCaptureCell = (
     cell: {
       label: "Synthetic Capture",
       catalog: "capture:synthetic",
-      // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+       
       status: ["idle", null, nowMs],
       settings: {},
       readonly: {

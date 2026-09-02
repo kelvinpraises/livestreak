@@ -27,7 +27,7 @@ export const makeFakeLiveObserveRun = (runId: string, outputPath: string) => ({
     driverId: "memory",
     config: { path: outputPath }
   },
-  // eslint-disable-next-line unicorn/no-null -- passthrough signal
+   
   process: null
 });
 

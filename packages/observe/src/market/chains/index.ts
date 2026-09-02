@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { LiveStreakConfigError } from "@livestreak/core";
 import type { WalletInit } from "@livestreak/schema";
-import type { MarketRegistrar, ObserveRunMarketConfig } from "../types.js";
+import type { MarketRegistrar, ObserveRunMarketConfig } from "#market/types.js";
 import { createEvmMarketRegistrar } from "./evm.js";
 import { createSuiMarketRegistrar } from "./sui.js";
 

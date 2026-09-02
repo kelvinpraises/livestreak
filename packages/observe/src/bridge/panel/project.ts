@@ -45,7 +45,7 @@ const projectControls = (board: Board, catalog?: ControlCatalog): ControlsView =
     runId: readBoardRunId(board),
     revision: board.revision,
     cells: sortedCellIds.map((id, order) =>
-      projectCellView(id, board.cells[id]!, order, catalog, runState)
+      projectCellView(id, board.cells[id], order, catalog, runState)
     )
   };
 };
@@ -191,7 +191,7 @@ const cellGroupOrder = (cellId: string): number => {
 };
 
 const sortCellIds = (cellIds: readonly string[]): readonly string[] =>
-  // eslint-disable-next-line unicorn/no-array-sort -- stable sort helper; toSorted unavailable in current TS lib target
+   
   [...cellIds].sort((left: string, right: string) => {
     const groupDiff = cellGroupOrder(left) - cellGroupOrder(right);
     if (groupDiff !== 0) {

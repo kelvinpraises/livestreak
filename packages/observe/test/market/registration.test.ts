@@ -1,6 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { Effect, Exit } from "effect";
-import { LiveStreakConfigError } from "@livestreak/core";
 import { buildControlCatalog } from "#run/control/index.js";
 import { createControlBus } from "#run/control/bus/index.js";
 import { createInitialBoard } from "#run/control/board/index.js";

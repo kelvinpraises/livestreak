@@ -13,7 +13,7 @@ export const describeBrowserCaptureCell = (
     cell: {
       label: "Browser Capture",
       catalog: browserCaptureSurfaceCellId,
-      // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+       
       status: ["idle", null, nowMs],
       settings: {
         url: config.url,

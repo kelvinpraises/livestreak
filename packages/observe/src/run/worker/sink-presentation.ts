@@ -79,7 +79,7 @@ export const resumeSinkPresentation = (
         })
       );
 
-      if ((state.lifecycle as WorkerLifecycle) === "failed") {
+      if ((state.lifecycle) === "failed") {
         return;
       }
     }

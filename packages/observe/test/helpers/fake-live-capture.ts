@@ -55,7 +55,7 @@ export const createFakeLiveCaptureDriver = (
         cell: {
           label: "Fake Live Capture",
           catalog: "capture:fake-live",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, context.nowMs ?? Date.now()],
           settings: {},
           readonly: {

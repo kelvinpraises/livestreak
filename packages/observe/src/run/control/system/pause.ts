@@ -29,7 +29,7 @@ export const createSystemPauseSurface = (): ControlSurface => ({
     cell: {
       label: "Pause",
       catalog: "system:pause",
-      // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+       
       status: ["idle", null, Date.now()],
       functions: ["pause", "resume", "setPresentation"]
     }

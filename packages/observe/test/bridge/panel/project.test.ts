@@ -28,22 +28,22 @@ describe("projectBoardControls", () => {
     const shuffledBoard = {
       ...board,
       cells: {
-        "sink:file-export": board.cells["sink:file-export"]!,
+        "sink:file-export": board.cells["sink:file-export"],
         "process:football": {
           label: "Football",
           catalog: "process:football",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, Date.now()] as const,
           functions: ["analyze"]
         },
-        "system:tick": board.cells["system:tick"]!,
-        "capture:browser": board.cells["capture:browser"]!,
-        "system:memory": board.cells["system:memory"]!,
-        "system:pause": board.cells["system:pause"]!,
-        "system:run": board.cells["system:run"]!,
+        "system:tick": board.cells["system:tick"],
+        "capture:browser": board.cells["capture:browser"],
+        "system:memory": board.cells["system:memory"],
+        "system:pause": board.cells["system:pause"],
+        "system:run": board.cells["system:run"],
         "future:widget": {
           label: "Widget",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, Date.now()] as const,
           functions: []
         }
@@ -74,7 +74,7 @@ describe("projectBoardControls", () => {
       cells: {
         ...board.cells,
         "system:run": {
-          ...board.cells["system:run"]!,
+          ...board.cells["system:run"],
           catalog: "system:run",
           status: ["running", "All good", updatedAtMs] as const
         }
@@ -109,7 +109,7 @@ describe("projectBoardControls", () => {
         ...board.cells,
         "system:memory": {
           label: "Memory",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, Date.now()] as const,
           functions: []
         }
@@ -134,7 +134,7 @@ describe("projectBoardControls", () => {
         "process:football": {
           label: "Football",
           catalog: "process:football",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, Date.now()] as const,
           settings: { mode: "live" },
           functions: ["analyze"]
@@ -161,7 +161,7 @@ describe("projectBoardControls", () => {
       cells: {
         ...board.cells,
         "capture:browser": {
-          ...board.cells["capture:browser"]!,
+          ...board.cells["capture:browser"],
           refs: {
             latestPreviewArtifactId: "art_123",
             previewBlob: { data: "data:image/jpeg;base64,abc" },
@@ -185,7 +185,7 @@ describe("projectBoardControls", () => {
       cells: {
         ...board.cells,
         "capture:browser": {
-          ...board.cells["capture:browser"]!,
+          ...board.cells["capture:browser"],
           refs: {
             latestPreviewArtifactId: "art_123",
             previewBlob: { data: "blob" },
@@ -209,7 +209,7 @@ describe("projectBoardControls", () => {
 
   it("does not mutate the source board or nested records", () => {
     const mutableBoard = createBrowserBoardFixture("run_mutation", browserBoardSettings);
-    const browserSourceCell = mutableBoard.cells["capture:browser"]!;
+    const browserSourceCell = mutableBoard.cells["capture:browser"];
     const settings = browserSourceCell.settings ?? {};
     const readonlySection = browserSourceCell.readonly ?? {};
     const references = { latestPreviewArtifactId: "art_before" };
@@ -280,9 +280,9 @@ describe("projectControlPanelControls", () => {
       cells: {
         ...catalog.cells,
         "system:pause": {
-          ...catalog.cells["system:pause"]!,
+          ...catalog.cells["system:pause"],
           functions: {
-            ...catalog.cells["system:pause"]!.functions,
+            ...catalog.cells["system:pause"].functions,
             hiddenAction: {
               scope: "system:pause:hiddenAction",
               label: "Hidden",
@@ -327,7 +327,7 @@ describe("projectControlPanelControls", () => {
       cells: {
         ...board.cells,
         "sink:file-export": {
-          ...board.cells["sink:file-export"]!,
+          ...board.cells["sink:file-export"],
           catalog: "sink:file",
           functions: ["flush"]
         }
@@ -357,7 +357,7 @@ describe("projectControlPanelControls", () => {
         "process:football": {
           label: "Football",
           catalog: "process:football",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, Date.now()] as const,
           functions: ["analyze"]
         }
@@ -384,7 +384,7 @@ describe("projectControlPanelControls", () => {
         "process:football": {
           label: "Football",
           catalog: "process:football",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, Date.now()] as const,
           functions: ["analyze"]
         }
@@ -409,8 +409,8 @@ describe("panel disabled reasons", () => {
     cells: {
       ...board.cells,
       "system:run": {
-        ...board.cells["system:run"]!,
-        // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+        ...board.cells["system:run"],
+         
         status: [runStatus, null, Date.now()] as const
       }
     }
@@ -422,7 +422,7 @@ describe("panel disabled reasons", () => {
       cells: {
         ...board.cells,
         "capture:browser": {
-          ...board.cells["capture:browser"]!,
+          ...board.cells["capture:browser"],
           status: ["failed", "Capture crashed", Date.now()] as const
         }
       }
@@ -487,7 +487,7 @@ describe("panel disabled reasons", () => {
         "process:football": {
           label: "Football",
           catalog: "process:football",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, Date.now()] as const,
           functions: ["analyze"]
         }

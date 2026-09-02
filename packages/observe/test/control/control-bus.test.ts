@@ -180,7 +180,7 @@ describe("control bus", () => {
             runId: testRunId,
             board: testBoard,
             catalog: buildControlCatalog(),
-            surfaces: [source.control!]
+            surfaces: [source.control]
           });
 
           return yield* bus.callFunction({
@@ -225,7 +225,7 @@ describe("control bus", () => {
             runId: testRunId,
             board: testBoard,
             catalog: buildControlCatalog(),
-            surfaces: [source.control!]
+            surfaces: [source.control]
           });
 
           const result = yield* bus.callFunction({
@@ -275,7 +275,7 @@ describe("control bus", () => {
             runId: testRunId,
             board: testBoard,
             catalog: buildControlCatalog(),
-            surfaces: [source.control!]
+            surfaces: [source.control]
           });
 
           const seen: string[] = [];
@@ -325,7 +325,7 @@ describe("control bus", () => {
             runId: testRunId,
             board: testBoard,
             catalog: buildControlCatalog(),
-            surfaces: [source.control!]
+            surfaces: [source.control]
           });
 
           return yield* bus.callFunction({
@@ -483,9 +483,9 @@ describe("control bus", () => {
       cells: {
         ...testBoard.cells,
         "system:pause": {
-          ...testBoard.cells["system:pause"]!,
+          ...testBoard.cells["system:pause"],
           settings: {
-            ...testBoard.cells["system:pause"]!.settings,
+            ...testBoard.cells["system:pause"].settings,
             whilePaused: "slate",
             slateAssetId: "asset1"
           }
@@ -543,9 +543,9 @@ describe("control bus", () => {
       cells: {
         ...testBoard.cells,
         "system:pause": {
-          ...testBoard.cells["system:pause"]!,
+          ...testBoard.cells["system:pause"],
           settings: {
-            ...testBoard.cells["system:pause"]!.settings,
+            ...testBoard.cells["system:pause"].settings,
             whilePaused: "hold",
             slateAssetId: "asset1"
           }
@@ -583,9 +583,9 @@ describe("control bus", () => {
       cells: {
         ...testBoard.cells,
         "system:pause": {
-          ...testBoard.cells["system:pause"]!,
+          ...testBoard.cells["system:pause"],
           settings: {
-            ...testBoard.cells["system:pause"]!.settings,
+            ...testBoard.cells["system:pause"].settings,
             requested: true
           }
         }
@@ -729,7 +729,7 @@ describe("control bus", () => {
             runId: testRunId,
             board: testBoard,
             catalog: buildControlCatalog(),
-            surfaces: [source.control!, createSystemPauseSurface()],
+            surfaces: [source.control, createSystemPauseSurface()],
             wakeWorker
           });
 
@@ -965,13 +965,13 @@ describe("control bus", () => {
             runId: testRunId,
             board: testBoard,
             catalog: buildControlCatalog(),
-            surfaces: [source.control!]
+            surfaces: [source.control]
           });
           const busB = yield* createControlBus({
             runId: "run_artifacts_b",
             board: boardB,
             catalog: buildControlCatalog(),
-            surfaces: [source.control!]
+            surfaces: [source.control]
           });
 
           const resultA = yield* busA.callFunction({
@@ -1023,7 +1023,7 @@ describe("control bus", () => {
             runId: testRunId,
             board: testBoard,
             catalog: buildControlCatalog(),
-            surfaces: [source.control!]
+            surfaces: [source.control]
           });
 
           const first = yield* bus.callFunction({
@@ -1064,7 +1064,7 @@ describe("control bus", () => {
 
   it("system:run:stop returns patch result and updates cells on first call", async () => {
     const wakeCalls: string[] = [];
-    const baseRunCell = testBoard.cells["system:run"]!;
+    const baseRunCell = testBoard.cells["system:run"];
     const runningBoard = {
       ...testBoard,
       cells: {
@@ -1109,7 +1109,7 @@ describe("control bus", () => {
 
   it("system:run:stop repeat is a structural no-op", async () => {
     const wakeCalls: string[] = [];
-    const baseRunCell = testBoard.cells["system:run"]!;
+    const baseRunCell = testBoard.cells["system:run"];
     const runningBoard = {
       ...testBoard,
       cells: {

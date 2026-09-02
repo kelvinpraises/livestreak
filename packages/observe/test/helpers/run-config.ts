@@ -24,7 +24,7 @@ export const syntheticCaptureRunConfig = (
     driverId: "memory",
     config: { path: sinkPath }
   },
-  // eslint-disable-next-line unicorn/no-null -- passthrough signal
+   
   process: null
 });
 

@@ -357,7 +357,7 @@ const assertPlainOptionalObject = (
   fieldPath: string
 ): Effect.Effect<Readonly<Record<string, unknown>> | undefined, LiveStreakConfigError> => {
   if (value === undefined) {
-    return Effect.succeed(void 0 as Readonly<Record<string, unknown>> | undefined);
+    return Effect.succeed(void 0);
   }
 
   return assertPlainSettingsObject(value, fieldPath);

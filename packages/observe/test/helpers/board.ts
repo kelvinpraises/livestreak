@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-null -- BoardCell.status tuple uses null for absent message */
+ 
 import type { BrowserCaptureConfig } from "#pipeline/capture/browser/index.js";
 import { browserCaptureFunctionNames } from "#pipeline/capture/browser/control/surface.js";
 import { createInitialBoard, type Board } from "#run/control/board/index.js";

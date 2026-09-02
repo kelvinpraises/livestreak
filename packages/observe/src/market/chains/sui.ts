@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { LiveStreakConfigError } from "@livestreak/core";
-import type { MarketRegistrar } from "../types.js";
+import type { MarketRegistrar } from "#market/types.js";
 
 export const createSuiMarketRegistrar = (): MarketRegistrar => ({
   registerMarket: () =>

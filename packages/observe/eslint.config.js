@@ -24,6 +24,9 @@ const runBrowserControlImportBlocks = ["#pipeline/capture/browser/control/**"];
 export default [
   ...root,
   {
+    ignores: ["dist/**"]
+  },
+  {
     files: ["src/pipeline/**/*.{ts,tsx}"],
     rules: {
       "no-restricted-imports": [

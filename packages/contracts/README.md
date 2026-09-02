@@ -1,29 +1,40 @@
-# FlowStream contracts
+# @livestreak/contracts
 
-Solidity/Foundry source of truth. CREATE2 deploy via `deploy/` (xylkstream pattern).
+Multichain protocol ABIs and deploy addresses. Chain-first layout: Foundry lives under `chains/evm/`; the npm facade is `kit/`.
 
 ## Layout
 
 ```text
-src/
-  market/       MarketRegistry
-  bookmaker/    BookmakerRegistry
-  vault/        Side, Vault, VaultFactory, VaultFunding
-  token/        FlowToken
-  steward/      StewardRegistry
-  aa/           AAImports.sol (enable after forge install of AA deps)
-generated/      wagmi ABIs (npm run gen)
-test/
+chains/
+  evm/          Solidity, tests, deploy, generated/abis.ts, deployments/, index.ts
+  sui/          stub
+  solana/       stub
+kit/            export { evm, sui, solana }
 ```
 
-Solidity source of truth: `src/`. Generated ABI/types: `generated/contracts.ts`. No handwritten TypeScript read/write layer in this package.
+## Consumer import
+
+```ts
+import { evm } from "@livestreak/contracts";
+import { getContract, readContract } from "viem";
+
+evm.vaultAbi; // flat ABIs (tree-shakeable)
+evm.abis.vault; // typed map, narrow ABI preserved
+evm.addresses.localhost.vault; // typed addresses (undefined if not deployed)
+
+const vault = evm.contract("vault", "localhost");
+getContract({ ...vault, client });
+readContract({ ...evm.contract("treasury"), client, functionName: "skimBps" });
+```
+
+`evm.contract(name)` throws if the address is missing on that deployment. `evm.contract("vlt")` is a compile error.
+
+Committed addresses live in `chains/evm/deployments/<network>.json`. Local `deploy/output/` is gitignored dev output.
 
 ## Commands
 
 ```shell
 cd packages/contracts
-forge build && forge test
-npm run gen
+npm run build    # forge + wagmi + tsc → dist/{kit,chains}
+npm run test     # forge test in chains/evm
 ```
-
-AA contracts (`src/aa/`) are not compiled until account-abstraction + safe-contracts deps are installed.

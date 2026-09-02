@@ -16,7 +16,7 @@ export const createSystemRunSurface = (): ControlSurface => ({
     cell: {
       label: "Run",
       catalog: "system:run",
-      // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+       
       status: ["created", null, Date.now()],
       functions: ["stop"]
     }

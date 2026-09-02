@@ -24,7 +24,7 @@ export const browserCaptureRunConfig = (
     instanceId: sink.instanceId,
     config: { path: sink.path }
   },
-  // eslint-disable-next-line unicorn/no-null -- passthrough signal
+   
   process: null
 });
 
@@ -44,6 +44,6 @@ export const fileCaptureRunConfig = (
     instanceId,
     config: { path: sinkPath }
   },
-  // eslint-disable-next-line unicorn/no-null -- passthrough signal
+   
   process: null
 });

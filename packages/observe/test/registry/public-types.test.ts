@@ -29,7 +29,8 @@ export const publicTypeContracts = {
   controlCellView: {} as ControlCellView,
   controlFunctionView: {} as ControlFunctionView,
   marketLifecycle: {} as MarketLifecycleState,
-  marketConfig: {} as ObserveRunMarketConfig
+  marketConfig: {} as ObserveRunMarketConfig,
+  observeRunResult: {} as ObserveRunResult
 };
 
 describe("public type contracts", () => {

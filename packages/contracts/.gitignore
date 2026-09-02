@@ -1,14 +1,29 @@
-# Compiler files
+# Foundry compiler artifacts
+chains/evm/cache/
+chains/evm/out/
+
+# Legacy paths (pre-chains/ relocate)
+evm/cache/
+evm/out/
 cache/
 out/
 
 # Ignores development broadcast logs
-!/broadcast
-/broadcast/*/31337/
-/broadcast/**/dry-run/
+!/chains/evm/broadcast
+/chains/evm/broadcast/*/31337/
+/chains/evm/broadcast/**/dry-run/
 
 node_modules/
 
+# TS facade build output (regenerate via `npm run build`)
+dist/
+
+# Local deploy manifests (dev-only; not shipped)
+chains/evm/deploy/output/*.json
+!chains/evm/deploy/output/.gitkeep
+
+# Legacy deploy output paths
+evm/deploy/output/*.json
 deploy/output/*.json
 !deploy/output/.gitkeep
 

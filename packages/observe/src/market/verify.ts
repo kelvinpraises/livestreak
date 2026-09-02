@@ -60,5 +60,5 @@ const normalizeAddress = (value: string): string => value.toLowerCase();
 const normalizeBytes32 = (value: string): StreamId => {
   const trimmed = value.trim();
   const hex = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
-  return `0x${hex.padStart(64, "0").slice(-64)}` as StreamId;
+  return `0x${hex.padStart(64, "0").slice(-64)}`;
 };

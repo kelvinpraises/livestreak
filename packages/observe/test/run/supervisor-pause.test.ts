@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-null -- BoardCell.status tuple uses null for absent message */
+ 
 import { Effect, Either, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { LiveStreakRuntimeError } from "@livestreak/core";

@@ -167,7 +167,7 @@ const validateProcess = (value: unknown): ValidationResult<null | ObserveRunProc
   }
 
   if (value === null) {
-    // eslint-disable-next-line unicorn/no-null -- passthrough signal
+     
     return { ok: true, value: null };
   }
 

@@ -63,7 +63,7 @@ export const projectWorkerControlView = (board: Board): WorkerControlView => {
         ? { slateAssetId: pauseSettings.slateAssetId }
         : {})
     },
-    // eslint-disable-next-line unicorn/no-null -- passthrough signal
+     
     process: null,
     sinks: projectSinkPolicies(board)
   };

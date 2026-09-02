@@ -57,7 +57,7 @@ export const createBlockedCaptureDriver = (): {
         cell: {
           label: "Blocked Capture",
           catalog: "capture:blocked",
-          // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+           
           status: ["idle", null, context.nowMs ?? Date.now()],
           settings: {},
           readonly: {
@@ -142,6 +142,6 @@ export const makeBlockedObserveRun = (runId: string, outputPath: string): Observ
     driverId: "memory",
     config: { path: outputPath }
   },
-  // eslint-disable-next-line unicorn/no-null -- passthrough signal
+   
   process: null
 });

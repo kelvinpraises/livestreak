@@ -52,7 +52,7 @@ const memorySinkDriver = (
       cell: {
         label: "Memory Sink",
         catalog: "sink:memory",
-        // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+         
         status: ["idle", null, nowMs],
         settings: {
           path: config.path,

@@ -55,7 +55,7 @@ describe("control bus surfaces", () => {
     );
 
     const originalBoard = await Effect.runPromise(bus.readBoard());
-    const original = originalBoard.cells["capture:browser"]!;
+    const original = originalBoard.cells["capture:browser"];
     const replacement = {
       id: "capture:browser" as const,
       cell: {
@@ -71,7 +71,7 @@ describe("control bus surfaces", () => {
     await Effect.runPromise(bus.mountSurface(stageCellSurface(replacement)));
 
     const remountedBoard = await Effect.runPromise(bus.readBoard());
-    const remounted = remountedBoard.cells["capture:browser"]!;
+    const remounted = remountedBoard.cells["capture:browser"];
     expect(remounted.label).toBe("Browser Capture Remounted");
     expect(remounted.settings).toEqual(original.settings);
     expect(remounted.readonly).toEqual(original.readonly);
@@ -82,7 +82,7 @@ describe("control bus surfaces", () => {
 
   it("does not bump Board revision when remounting identical cell metadata", async () => {
     const board = createBrowserBoardFixture("run_mount_noop");
-    const originalCell = board.cells["capture:browser"]!;
+    const originalCell = board.cells["capture:browser"];
     const bus = await Effect.runPromise(
       createControlBus({
         runId: "run_mount_noop",
@@ -147,8 +147,8 @@ describe("control bus surfaces", () => {
           cell: {
             label: "Browser Capture Updated",
             catalog: "capture:browser",
-            status: board.cells["capture:browser"]!.status,
-            functions: [...board.cells["capture:browser"]!.functions, "futureFn"]
+            status: board.cells["capture:browser"].status,
+            functions: [...board.cells["capture:browser"].functions, "futureFn"]
           }
         })
       )
@@ -162,7 +162,7 @@ describe("control bus surfaces", () => {
 
   it("replaces live handlers without Board revision churn on identical metadata", async () => {
     const board = createBrowserBoardFixture("run_handler_replace");
-    const browserCell = board.cells["capture:browser"]!;
+    const browserCell = board.cells["capture:browser"];
     const cellDefinition = {
       id: "capture:browser" as const,
       cell: {
@@ -376,7 +376,7 @@ describe("stage-owned board cells", () => {
         instanceId: "memory-sink",
         config: { path: "/tmp/out-prepare.mp4" }
       },
-      // eslint-disable-next-line unicorn/no-null -- passthrough signal
+       
       process: null
     });
 
@@ -399,7 +399,7 @@ describe("generic runtime control surfaces", () => {
         driverId: "memory",
         config: { path: "/tmp/out-fake.mp4" }
       },
-      // eslint-disable-next-line unicorn/no-null -- passthrough signal
+       
       process: null
     });
 

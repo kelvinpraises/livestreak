@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-null -- BoardCell.status tuple uses null for absent message */
+ 
 import { Effect, Stream } from "effect";
 import type { CaptureDriver, CaptureDriverDescriptor, FrameSource } from "#pipeline/capture/index.js";
 import type { ControlCellDefinition, ControlSurface } from "#run/control/bus/index.js";

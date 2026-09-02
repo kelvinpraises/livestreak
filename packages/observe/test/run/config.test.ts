@@ -19,7 +19,7 @@ const canonicalFileConfig = {
     driverId: "file",
     config: { path: "/input.mp4" }
   },
-  // eslint-disable-next-line unicorn/no-null -- passthrough signal
+   
   process: null,
   sink: {
     driverId: "file",
@@ -79,7 +79,7 @@ describe("observe run config contract", () => {
   });
 
   it("rejects missing top-level object", async () => {
-    // eslint-disable-next-line unicorn/no-null -- invalid input fixture
+     
     await expectConfigError(null, "observe run config must be a plain object");
     await expectConfigError("run_01", "observe run config must be a plain object");
     await expectConfigError([], "observe run config must be a plain object");
@@ -101,7 +101,7 @@ describe("observe run config contract", () => {
   });
 
   it("rejects capture as null, array, or string", async () => {
-    // eslint-disable-next-line unicorn/no-null -- invalid input fixture
+     
     await expectConfigError({ ...canonicalFileConfig, capture: null }, "capture must be a plain object");
     await expectConfigError({ ...canonicalFileConfig, capture: [] }, "capture must be a plain object");
     await expectConfigError({ ...canonicalFileConfig, capture: "file" }, "capture must be a plain object");
@@ -198,7 +198,7 @@ describe("observe run config contract", () => {
   });
 
   it("rejects sink as null, array, or string", async () => {
-    // eslint-disable-next-line unicorn/no-null -- invalid input fixture
+     
     await expectConfigError({ ...canonicalFileConfig, sink: null }, "sink must be a plain object");
     await expectConfigError({ ...canonicalFileConfig, sink: [] }, "sink must be a plain object");
     await expectConfigError({ ...canonicalFileConfig, sink: "file" }, "sink must be a plain object");
@@ -292,7 +292,7 @@ describe("observe run config contract", () => {
 // --- helpers ---
 
 const expectPassthroughProcess = (process: ObserveRunConfig["process"]): void => {
-  // eslint-disable-next-line unicorn/no-null -- passthrough signal
+   
   expect(process).toBe(null);
 };
 
@@ -309,7 +309,7 @@ const malformedConfig = (patch: Record<string, unknown>): ObserveRunConfig =>
   ({
     ...canonicalFileConfig,
     ...patch
-  }) as ObserveRunConfig;
+  });
 
 const expectConfigError = async (input: unknown, message: string): Promise<void> => {
   const exit = await Effect.runPromiseExit(validateObserveRunConfig(input));

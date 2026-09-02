@@ -1,4 +1,4 @@
-/* eslint-disable unicorn/no-null -- BoardCell.status tuple uses null for absent message */
+ 
 import { describe, expect, it } from "vitest";
 import { applyWorkerSnapshotToBoard } from "#run/control/board/index.js";
 import { createInitialBoard } from "#run/control/board/index.js";
@@ -35,7 +35,7 @@ describe("applyWorkerSnapshotToBoard", () => {
       cells: {
         ...runningBoard.cells,
         "system:run": {
-          ...runningBoard.cells["system:run"]!,
+          ...runningBoard.cells["system:run"],
           settings: {
             stopRequested: true,
             stopReason: "operator request"
@@ -56,7 +56,7 @@ describe("applyWorkerSnapshotToBoard", () => {
       cells: {
         ...runningBoard.cells,
         "system:run": {
-          ...runningBoard.cells["system:run"]!,
+          ...runningBoard.cells["system:run"],
           settings: {
             stopRequested: true
           }

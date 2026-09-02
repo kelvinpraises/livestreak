@@ -103,7 +103,7 @@ export const normalizeDetectedBrowserTargets = (
   }
 
   // toSorted is unavailable under the package TS lib target; copy before sort.
-  // eslint-disable-next-line unicorn/no-array-sort -- ES2023 toSorted not in compile lib
+   
   const sorted = [...clipped].sort((left, right) => right.score - left.score);
   const limited = sorted.slice(0, browserTargetDetectionMaxTargets);
 

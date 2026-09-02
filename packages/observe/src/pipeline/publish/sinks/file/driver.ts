@@ -217,7 +217,7 @@ const describeFileSinkCell = (
     cell: {
       label: "File Export",
       catalog: "sink:file",
-      // eslint-disable-next-line unicorn/no-null -- BoardCell.status tuple uses null for absent message
+       
       status: ["idle", null, nowMs],
       settings: {
         path: config.path,

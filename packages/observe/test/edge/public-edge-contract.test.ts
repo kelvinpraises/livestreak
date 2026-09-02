@@ -377,7 +377,7 @@ const runPublicFileEdgeScenario = (
         const config = fileCaptureRunConfig(runId, inputPath, outputPath);
 
         expect(config.capture.driverId).toBe("file");
-        // eslint-disable-next-line unicorn/no-null -- passthrough signal
+         
         expect(config.process).toBe(null);
         expect(config.sink.driverId).toBe("file");
         expect(config.sink.instanceId).toBeUndefined();

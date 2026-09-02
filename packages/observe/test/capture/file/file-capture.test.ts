@@ -29,7 +29,7 @@ describe("file capture driver", () => {
     ]);
   });
 
-  it("parses ffprobe frame-rate metadata", async () => {
+  it("parses ffprobe frame-rate metadata", () => {
     expect(parseFraction("30000/1001")).toBeCloseTo(29.97, 2);
     expect(parseFraction("0/0")).toBeUndefined();
   });

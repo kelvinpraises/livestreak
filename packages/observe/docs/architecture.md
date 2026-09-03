@@ -151,7 +151,6 @@ src/
     index.ts
     types.ts
     registration.ts
-    verify.ts
     board.ts
     validate.ts
     chains/

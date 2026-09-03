@@ -77,7 +77,7 @@ export async function deployAA(
         to: DETERMINISTIC_DEPLOYER,
         data: (ENTRYPOINT_SALT + initcode.slice(2)) as Hex,
         gas: 6_000_000n
-      });
+      } as never);
       await client.waitForTransactionReceipt({ hash });
 
       if (!(await isDeployed(client, canonical))) {

@@ -1,28 +1,56 @@
+import { OutputMode } from "@livestreak/schema";
 import { Schema } from "effect";
+import { MemoryDescriptorAdvert } from "./memory.js";
+import {
+  ContentDescriptorAdvert,
+  WalrusDescriptorAdvert
+} from "./walrus.js";
 
 // --- exports ---
 
-export const HostCapability = Schema.Literal(
-  "webrtc_forwarding",
-  "host_cache",
-  "endpoint_manifests",
-  "thumbnails",
-  "audit_logs",
-  "key_rotation"
+export { OutputMode, type OutputMode as HostOutputMode } from "@livestreak/schema";
+
+export const HostModuleToken = Schema.Literal(
+  "aa",
+  "media",
+  "walrus_memory",
+  "walrus_content",
+  "discovery",
+  "runtime",
+  "tenancy"
 );
 
-export type HostCapability = Schema.Schema.Type<typeof HostCapability>;
+export type HostModuleToken = Schema.Schema.Type<typeof HostModuleToken>;
 
-export const HostOutputMode = Schema.Literal("forwarder", "local", "file");
+export { MemoryTrustModel, MemoryDescriptorAdvert } from "./memory.js";
 
-export type HostOutputMode = Schema.Schema.Type<typeof HostOutputMode>;
+export {
+  WalrusNetwork,
+  ContentDescriptorAdvert,
+  WalrusDescriptorAdvert,
+  PointerScheme,
+  StorePointer,
+  ContentBlobStoreRequest,
+  ContentPersistence,
+  pointerSchemeForNetwork
+} from "./walrus.js";
+
+export const MediaDescriptorAdvert = Schema.Struct({
+  simulcastAvailable: Schema.Boolean
+});
+
+export type MediaDescriptorAdvert = Schema.Schema.Type<typeof MediaDescriptorAdvert>;
 
 export const HostProviderDescriptor = Schema.Struct({
   version: Schema.Literal("0.1.0"),
   hostId: Schema.NonEmptyString,
   baseUrl: Schema.NonEmptyString,
-  capabilities: Schema.Array(HostCapability),
-  supportedOutputs: Schema.Array(HostOutputMode),
+  modules: Schema.Array(HostModuleToken),
+  supportedOutputs: Schema.Array(OutputMode),
+  media: MediaDescriptorAdvert,
+  walrus: WalrusDescriptorAdvert,
+  memory: MemoryDescriptorAdvert,
+  content: ContentDescriptorAdvert,
   termsVersion: Schema.optional(Schema.NonEmptyString)
 });
 

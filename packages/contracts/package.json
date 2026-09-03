@@ -15,6 +15,10 @@
       "types": "./dist/chains/evm/index.d.ts",
       "default": "./dist/chains/evm/index.js"
     },
+    "./evm/abis": {
+      "types": "./dist/chains/evm/abis-entry.d.ts",
+      "default": "./dist/chains/evm/abis-entry.js"
+    },
     "./package": {
       "default": "./package.json"
     }
@@ -32,7 +36,9 @@
     "clean": "rm -rf dist chains/evm/out chains/evm/cache chains/evm/generated/abis.ts",
     "build": "cd chains/evm && forge build && FOUNDRY_PROFILE=aa forge build && wagmi generate && cd ../.. && tsc -p tsconfig.build.json && mkdir -p dist/chains/evm/deployments && for f in chains/evm/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/evm/deployments/; done",
     "check": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint kit chains && cd chains/evm && forge fmt --check solidity test",
+    "lint": "eslint . && cd chains/evm && forge fmt --check solidity test",
+    "deploy": "tsx chains/evm/deploy/main.ts",
+    "e2e": "tsx chains/evm/deploy/e2e.ts",
     "test": "cd chains/evm && forge test"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
 import { createPublicClient, createWalletClient, http, encodeAbiParameters, keccak256, toHex, parseEther, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from "fs";
 import { join, resolve } from "path";
 
 export const DETERMINISTIC_DEPLOYER = "0x4e59b44847b379578588920cA78FbF26c0B4956C" as Address;
@@ -23,7 +23,7 @@ export async function ensureNickFactory(
   const fundHash = await walletClient.sendTransaction({
     to: NICK_FACTORY_DEPLOYER,
     value: parseEther("0.01")
-  });
+  } as never);
   await publicClient.waitForTransactionReceipt({ hash: fundHash });
 
   const deployHash = await publicClient.request({
@@ -113,8 +113,8 @@ function buildInitcode(
     return bytecode;
   }
 
-  const ctorInputs = artifact.abi.filter((entry) => entry.type === "constructor")[0]?.inputs ?? [];
-  const encoded = encodeAbiParameters(ctorInputs, constructorArgs);
+  const ctorInputs = artifact.abi.filter((entry: { type: string }) => entry.type === "constructor")[0]?.inputs ?? [];
+  const encoded = encodeAbiParameters(ctorInputs as never, constructorArgs as never);
   return (bytecode + encoded.slice(2)) as Hex;
 }
 
@@ -141,7 +141,7 @@ export async function deployFromArtifact(
   const hash = await walletClient.sendTransaction({
     to: DETERMINISTIC_DEPLOYER,
     data: (salt + initcode.slice(2)) as Hex
-  });
+  } as never);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   if (!receipt.status || receipt.status === "reverted") {
     throw new Error(`CREATE2 deploy failed for ${label ?? artifactPath}`);
@@ -172,4 +172,21 @@ export function writeState(name: string, state: DeployState): void {
   const filePath = join(OUTPUT_DIR, `${name}.json`);
   writeFileSync(filePath, `${JSON.stringify(state, null, 2)}\n`);
   console.log(`  State saved -> ${filePath}`);
+}
+
+/** Copy a fresh deploy output into the committed `deployments/` snapshot for the typed kit. */
+export function promoteDeployment(name: string): void {
+  const source = join(OUTPUT_DIR, `${name}.json`);
+  if (!existsSync(source)) {
+    throw new Error(`Cannot promote: missing deploy output at ${source}`);
+  }
+
+  const destDir = join(CONTRACTS_ROOT, "deployments");
+  if (!existsSync(destDir)) {
+    mkdirSync(destDir, { recursive: true });
+  }
+
+  const dest = join(destDir, `${name}.json`);
+  copyFileSync(source, dest);
+  console.log(`  Promoted deployment -> ${dest}`);
 }

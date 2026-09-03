@@ -1,10 +1,10 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it, vi } from "vitest";
 
-import { asMarketId, asUserAddress, asVaultId } from "../../src/model/ids.js";
+import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../src/model/ids.js";
 import {
   createContractsOptionsReadTransport,
-  type LivestreakContractAddresses
+  type OptionsContractAddresses
 } from "../../src/read/contracts/index.js";
 import {
   createOptionsRuntime,
@@ -22,14 +22,14 @@ const HEX_MARKET_ID = asMarketId(
   "0x0000000000000000000000000000000000000000000000000000000000000001"
 );
 
-const CONTRACT_ADDRESSES: LivestreakContractAddresses = {
+const CONTRACT_ADDRESSES: OptionsContractAddresses = {
   marketRegistry: "0x0000000000000000000000000000000000000011",
-  bookmakerRegistry: "0x0000000000000000000000000000000000000012",
-  vaultFactory: "0x0000000000000000000000000000000000000013",
   vault: "0x0000000000000000000000000000000000000014",
-  vaultFunding: "0x0000000000000000000000000000000000000015",
+  marketDriver: "0x0000000000000000000000000000000000000015",
+  stewardRegistry: "0x0000000000000000000000000000000000000017",
+  treasury: "0x0000000000000000000000000000000000000018",
   lvstToken: "0x0000000000000000000000000000000000000016",
-  stewardRegistry: "0x0000000000000000000000000000000000000017"
+  dripsStreaming: "0x0000000000000000000000000000000000000019"
 };
 
 const baseInput = (transport: OptionsReadTransport): OptionsRuntimeInput => ({
@@ -136,18 +136,17 @@ describe("options runtime store and refresh", () => {
     expect(state.vaults.length).toBeGreaterThan(0);
   });
 
-  it("refreshVault stores vault snapshot with user position when user supplied", async () => {
-    const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+  it("refreshVault stores vault snapshot with share totals", async () => {
+    const transport = createFakeOptionsReadTransport(fixtureSeed());
     const runtime = createOptionsRuntime(baseInput(transport));
 
-    const state = await runtime.refreshVault(asVaultId("vault_01"), user);
+    const state = await runtime.refreshVault(asVaultId("vault_01"));
 
     expect(state.vaults).toHaveLength(1);
-    expect(state.vaults[0]?.userPosition?.positions.yes.streamed).toBe(25_000_000n);
+    expect(state.vaults[0]?.shareTotals.yes).toBe(34_000_000n);
   });
 
-  it("refreshUser stores user/options/FLOW snapshot", async () => {
+  it("refreshUser stores user snapshot with NFTs and LVST account", async () => {
     const user = fixtureUser();
     const transport = createFakeOptionsReadTransport(fixtureSeed(user));
     const runtime = createOptionsRuntime(baseInput(transport));
@@ -157,9 +156,11 @@ describe("options runtime store and refresh", () => {
     expect(state.userSnapshot?.lvstAccount.balance).toBeGreaterThan(0n);
     expect(state.userSnapshot?.markets).toHaveLength(1);
     expect(state.userSnapshot?.vaults).toHaveLength(1);
+    expect(state.userSnapshot?.nfts).toHaveLength(1);
+    expect(state.userSnapshot?.nfts[0]?.nft.tokenId).toBe(asTokenId(1n));
   });
 
-  it("readPanel projects from stored data without calling transport again", async () => {
+  it("readPanel projects NFT lanes from stored data without calling transport again", async () => {
     const user = fixtureUser();
     let transportCalls = 0;
     const transport = wrapTransport(createFakeOptionsReadTransport(fixtureSeed(user)), () => {
@@ -173,6 +174,7 @@ describe("options runtime store and refresh", () => {
     const panel = runtime.readPanel();
 
     expect(panel.lvst.balanceLVST).toBeTruthy();
+    expect(panel.nfts[0]?.lanes).toHaveLength(2);
     expect(panel.markets[0]?.title).toBe("Regulation hearing");
     expect(transportCalls).toBe(callsAfterRefresh);
   });
@@ -195,7 +197,7 @@ describe("options runtime store and refresh", () => {
     );
   });
 
-  it("fails with LiveStreakConfigError when FLOW account is missing", async () => {
+  it("fails with LiveStreakConfigError when LVST account is missing", async () => {
     const transport = createFakeOptionsReadTransport(fixtureSeed());
     const runtime = createOptionsRuntime(baseInput(transport));
 
@@ -243,7 +245,7 @@ describe("options runtime store and refresh", () => {
 
     await runtime.refreshUser(user, asMarketId("market_01"));
     unsubscribe();
-    await runtime.refreshVault(asVaultId("vault_01"), user);
+    await runtime.refreshVault(asVaultId("vault_01"));
 
     expect(seen).toEqual([1]);
   });
@@ -252,8 +254,8 @@ describe("options runtime store and refresh", () => {
     const runtimeModule = await import("../../src/runtime/index.js");
 
     expect("createOptionsBridge" in runtimeModule).toBe(false);
-    expect("setFundingRate" in runtimeModule).toBe(false);
-    expect("claimVault" in runtimeModule).toBe(false);
+    expect("fundStream" in runtimeModule).toBe(false);
+    expect("claimLossLvst" in runtimeModule).toBe(false);
   });
 
   it("notifies subscribers when refreshMarket fails and clears lastError on success", async () => {
@@ -289,6 +291,7 @@ describe("options runtime store and refresh", () => {
       market: {
         marketId: asMarketId("mutated"),
         title: "mutated",
+        creator: asUserAddress("0xcreator"),
         status: "open",
         vaultIds: []
       },
@@ -367,6 +370,10 @@ const wrapTransport = (
     onCall();
     return transport.readMarket(marketId);
   },
+  readStreamState: async (marketId) => {
+    onCall();
+    return transport.readStreamState(marketId);
+  },
   listMarketVaults: async (marketId) => {
     onCall();
     return transport.listMarketVaults(marketId);
@@ -375,17 +382,77 @@ const wrapTransport = (
     onCall();
     return transport.readVault(vaultId);
   },
-  readUserVaultPosition: async (user, vaultId) => {
+  readVaultShareTotals: async (vaultId) => {
     onCall();
-    return transport.readUserVaultPosition(user, vaultId);
+    return transport.readVaultShareTotals(vaultId);
   },
-  readFundingStream: async (user, vaultId, side) => {
+  listOwnerTokens: async (owner) => {
     onCall();
-    return transport.readFundingStream(user, vaultId, side);
+    return transport.listOwnerTokens(owner);
+  },
+  readNft: async (tokenId, owner) => {
+    onCall();
+    return transport.readNft(tokenId, owner);
   },
   readLvstAccount: async (user) => {
     onCall();
     return transport.readLvstAccount(user);
+  },
+  readClaimable: async (tokenId, vaultId, side) => {
+    onCall();
+    return transport.readClaimable(tokenId, vaultId, side);
+  },
+  readLossClaimable: async (tokenId, vaultId, side) => {
+    onCall();
+    return transport.readLossClaimable(tokenId, vaultId, side);
+  },
+  readPot: async (vaultId) => {
+    onCall();
+    return transport.readPot(vaultId);
+  },
+  readCollected: async (vaultId) => {
+    onCall();
+    return transport.readCollected(vaultId);
+  },
+  readAccountVaultIds: async (tokenId) => {
+    onCall();
+    return transport.readAccountVaultIds(tokenId);
+  },
+  readWinningSide: async (vaultId) => {
+    onCall();
+    return transport.readWinningSide(vaultId);
+  },
+  readBoard: async (vaultId, side) => {
+    onCall();
+    return transport.readBoard(vaultId, side);
+  },
+  readSharePrice: async (vaultId, side) => {
+    onCall();
+    return transport.readSharePrice(vaultId, side);
+  },
+  readPendingShares: async (vaultId, side, tokenId) => {
+    onCall();
+    return transport.readPendingShares(vaultId, side, tokenId);
+  },
+  readUsdcAddress: async () => {
+    onCall();
+    return transport.readUsdcAddress();
+  },
+  readNftBalance: async (tokenId) => {
+    onCall();
+    return transport.readNftBalance(tokenId);
+  },
+  readOwnerOf: async (tokenId) => {
+    onCall();
+    return transport.readOwnerOf(tokenId);
+  },
+  readApproved: async (tokenId) => {
+    onCall();
+    return transport.readApproved(tokenId);
+  },
+  readIsApprovedForAll: async (owner, operator) => {
+    onCall();
+    return transport.readIsApprovedForAll(owner, operator);
   },
   ...(transport.readProtocolSummary === undefined
     ? {}

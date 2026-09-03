@@ -5,9 +5,10 @@ import { projectOptionsPanel } from "../src/panel/project.js";
 import { readUserOptionsSnapshot } from "../src/read/snapshot.js";
 import {
   createFakeOptionsReadTransport,
-  fixtureResolvedPosition,
+  fixtureNft,
   fixtureResolvedVault,
   fixtureSeed,
+  fixtureShareTotals,
   fixtureUser
 } from "./helpers/fake-transport.js";
 
@@ -23,33 +24,35 @@ describe("projectOptionsPanel", () => {
     expect(panel.markets[0]?.totals.pooledUSDC).toBe("279000000");
   });
 
-  it("includes user deposited/streamed amounts on both sides", async () => {
+  it("projects NFT lane rates and accrued shares", async () => {
     const user = fixtureUser();
     const transport = createFakeOptionsReadTransport(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
-    const userPanel = panel.markets[0]?.vaults[0]?.user;
-    expect(userPanel?.positions.yes.streamedUSDC).toBe("25000000");
-    expect(userPanel?.positions.no.streamedUSDC).toBe("5000000");
-    expect(userPanel?.totals.streamedUSDC).toBe("30000000");
+    const nft = panel.nfts[0];
+    expect(nft?.tokenId).toBe("1");
+    expect(nft?.laneCount).toBe(2);
+    expect(nft?.lanes[0]?.side).toBe("yes");
+    expect(nft?.lanes[0]?.rate).toBe("800000");
+    expect(nft?.lanes[0]?.sharesAccrued).toBe("34000000");
+    expect(nft?.lanes[1]?.side).toBe("no");
+    expect(nft?.lanes[1]?.rate).toBe("0");
+    expect(nft?.lanes[1]?.sharesAccrued).toBe("6000000");
   });
 
-  it("includes funding rates and marks zero rate as paused", async () => {
+  it("includes vault share totals from snapshot enrichment", async () => {
     const user = fixtureUser();
     const transport = createFakeOptionsReadTransport(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
-    const userPanel = panel.markets[0]?.vaults[0]?.user;
-    expect(userPanel?.positions.yes.fundingRatePerMinuteUSDC).toBe("800000");
-    expect(userPanel?.positions.yes.streamPaused).toBe(false);
-    expect(userPanel?.positions.no.fundingRatePerMinuteUSDC).toBe("0");
-    expect(userPanel?.positions.no.streamPaused).toBe(true);
-    expect(userPanel?.activeFunding.allPaused).toBe(false);
+    const vault = panel.markets[0]?.vaults[0];
+    expect(vault?.shareTotals.yes).toBe("34000000");
+    expect(vault?.shareTotals.no).toBe("6000000");
   });
 
-  it("includes FLOW balance, staked amount, pending dividends, and loss claims", async () => {
+  it("includes LVST balance, staked amount, and pending dividends", async () => {
     const user = fixtureUser();
     const transport = createFakeOptionsReadTransport(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
@@ -58,15 +61,27 @@ describe("projectOptionsPanel", () => {
     expect(panel.lvst.balanceLVST).toBe("1000000000000000000");
     expect(panel.lvst.stakedLVST).toBe("250000000000000000");
     expect(panel.lvst.pendingDividendsUSDC).toBe("12500000");
-    expect(panel.lvst.lossClaims.claimableLVST).toBe("500000000000000000");
+    expect(panel.lvst.actions.canStake).toBe(true);
+    expect(panel.lvst.actions.canClaimDividends).toBe(true);
   });
 
-  it("projects resolved vault claimable winnings and per-side loss claims", async () => {
+  it("includes market creator on market panel", async () => {
+    const user = fixtureUser();
+    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
+    const panel = projectOptionsPanel(snapshot);
+
+    expect(panel.markets[0]?.creator).toBe("0xcreator");
+  });
+
+  it("projects resolved vault status and outcome", async () => {
     const user = fixtureUser();
     const transport = createFakeOptionsReadTransport({
       ...fixtureSeed(user),
       vaults: [fixtureResolvedVault()],
-      positions: [fixtureResolvedPosition(user)]
+      shareTotals: {
+        vault_01: fixtureShareTotals()
+      }
     });
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
@@ -74,10 +89,7 @@ describe("projectOptionsPanel", () => {
     const vault = panel.markets[0]?.vaults[0];
     expect(vault?.status).toBe("resolved");
     expect(vault?.outcome).toBe("yes");
-    expect(vault?.user?.positions.yes.claimableUSDC).toBe("58000000");
-    expect(vault?.user?.positions.no.lossClaimableLVST).toBe("2500000");
-    expect(vault?.user?.positions.yes.isWinningSide).toBe(true);
-    expect(vault?.user?.positions.no.isWinningSide).toBe(false);
+    expect(vault?.pools.totalUSDC).toBe("597000000");
   });
 
   it("does not leak transport objects or unrelated domain fields", async () => {
@@ -93,5 +105,31 @@ describe("projectOptionsPanel", () => {
     expect(serialized).not.toContain("forumThread");
     expect(serialized).not.toMatch(/"abi"\s*:/);
     expect(panel).not.toHaveProperty("transport");
+  });
+
+  it("projects depleted lane flag from NFT lanes", async () => {
+    const user = fixtureUser();
+    const nft = fixtureNft(user, {
+      lanes: [
+        {
+          tokenId: fixtureNft(user).tokenId,
+          vaultId: fixtureNft(user).lanes[0]!.vaultId,
+          side: "yes",
+          rate: 0n,
+          gPaid: 0n,
+          sharesAccrued: 0n,
+          depleted: true
+        }
+      ],
+      laneCount: 1
+    });
+    const transport = createFakeOptionsReadTransport({
+      ...fixtureSeed(user),
+      nfts: [nft]
+    });
+    const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
+    const panel = projectOptionsPanel(snapshot);
+
+    expect(panel.nfts[0]?.lanes[0]?.depleted).toBe(true);
   });
 });

@@ -2,9 +2,9 @@ import { EventEmitter } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { createHostRouteDeps, createHostRoutes } from "#server/routes.js";
-import { dispatchHttpRequest } from "#server/http.js";
-import { defaultHostServerConfig } from "../src/descriptor/config.js";
+import { createHostRouteDeps, createHostRoutes } from "#api/server.js";
+import { dispatchHttpRequest } from "#api/server.js";
+import { defaultHostServerConfig } from "#config/host.js";
 
 // --- helpers ---
 
@@ -75,7 +75,7 @@ describe("dispatchHttpRequest", () => {
     await dispatchHttpRequest(
       createMockRequest({
         method: "POST",
-        url: "/sessions",
+        url: "/media/sessions",
         body: "{not-json"
       }),
       response,
@@ -89,14 +89,14 @@ describe("dispatchHttpRequest", () => {
     expect(payload.error.message).toBe("Malformed JSON request body");
   });
 
-  it("returns typed 400 for empty POST bodies on POST /sessions", async () => {
+  it("returns typed 400 for empty POST bodies on POST /media/sessions", async () => {
     const { deps, routes } = createTestHost();
     const response = createMockResponse();
 
     await dispatchHttpRequest(
       createMockRequest({
         method: "POST",
-        url: "/sessions"
+        url: "/media/sessions"
       }),
       response,
       routes,
@@ -108,15 +108,15 @@ describe("dispatchHttpRequest", () => {
     expect(payload.error.shortName).toBe("config");
   });
 
-  it("returns typed 400 for invalid object bodies on POST /sessions", async () => {
+  it("returns typed 400 for invalid object bodies on POST /media/sessions", async () => {
     const { deps, routes } = createTestHost();
     const response = createMockResponse();
 
     await dispatchHttpRequest(
       createMockRequest({
         method: "POST",
-        url: "/sessions",
-        body: JSON.stringify({ outputMode: "forwarder" })
+        url: "/media/sessions",
+        body: JSON.stringify({ outputMode: "local" })
       }),
       response,
       routes,

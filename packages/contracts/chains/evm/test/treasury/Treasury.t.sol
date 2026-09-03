@@ -87,6 +87,27 @@ contract TreasuryTest is Test {
         return VaultDriverHarness.bondVault(vaultDriver, usdc, marketId, "Q2?", Side.Yes);
     }
 
+    /// A vault resolved to a side with zero winner shares sweeps the whole pot to the Treasury house pot
+    /// (no pro-rata payees) instead of stranding it; losers still keep their LVST loss basis.
+    function test_collect_zeroWinnerShares_sweepsPotToTreasury() public {
+        // Seeded + funded only on NO, resolved YES → winning side (YES) has 0 shares.
+        bytes32 vz = VaultDriverHarness.bondVault(vaultDriver, usdc, marketId, "ZeroWin?", Side.No);
+        _fund(bob, bobNft, vz, Side.No, RATE, 50 * RATE);
+        vm.warp(200);
+        _resolve(vz, Vault.Outcome.Yes);
+
+        uint256 treasuryBefore = usdc.balanceOf(address(treasury));
+        vault.collect(vz);
+        vm.warp(200 + CYCLE * 3); // let cycles complete so harvest banks the NO pool
+        vault.collect(vz); // harvest + flush the sweep
+
+        (,, uint256 yesShareTotal,) = vault.getVaultPools(vz);
+        assertEq(yesShareTotal, 0, "winning YES side has 0 shares");
+        assertEq(vault.pot(vz), 0, "pot zeroed - no winner can withdraw");
+        assertGt(usdc.balanceOf(address(treasury)) - treasuryBefore, 0, "pot swept to the treasury house pot");
+        assertGt(vault.lossClaimable(bobNft, vz, Side.No), 0, "loser keeps the LVST loss basis");
+    }
+
     function test_lossMintsFlowOnCurve() public {
         _fund(alice, aliceNft, v1, Side.Yes, RATE, 50 * RATE);
         _fund(bob, bobNft, v1, Side.No, RATE, 50 * RATE);

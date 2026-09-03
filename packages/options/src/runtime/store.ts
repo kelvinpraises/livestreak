@@ -24,6 +24,7 @@ export interface OptionsRuntimeState {
   readonly userSnapshot?: OptionsUserOptionsSnapshot;
   readonly markets: readonly OptionsMarketSnapshot[];
   readonly vaults: readonly OptionsVaultSnapshot[];
+  readonly memory: Readonly<Record<string, unknown>>;
   readonly lastError?: OptionsRuntimeLastError;
 }
 
@@ -33,6 +34,8 @@ export interface OptionsRuntimeStore {
   setMarketSnapshot: (snapshot: OptionsMarketSnapshot) => void;
   setVaultSnapshot: (snapshot: OptionsVaultSnapshot) => void;
   setLastError: (error: OptionsRuntimeLastError | undefined) => void;
+  setMemory: (key: string, value: unknown) => void;
+  getMemory: <T>(key: string) => T | undefined;
 }
 
 export const createOptionsRuntimeStore = (runtimeId: string): OptionsRuntimeStore =>
@@ -43,6 +46,7 @@ class OptionsRuntimeStoreInMemory implements OptionsRuntimeStore {
   private userSnapshot?: OptionsUserOptionsSnapshot;
   private readonly markets = new Map<MarketId, OptionsMarketSnapshot>();
   private readonly vaults = new Map<VaultId, OptionsVaultSnapshot>();
+  private readonly memory = new Map<string, unknown>();
   private lastError?: OptionsRuntimeLastError;
 
   constructor(private readonly runtimeId: string) {}
@@ -54,6 +58,7 @@ class OptionsRuntimeStoreInMemory implements OptionsRuntimeStore {
       ...(this.userSnapshot === undefined ? {} : { userSnapshot: this.userSnapshot }),
       markets: [...this.markets.values()],
       vaults: [...this.vaults.values()],
+      memory: Object.fromEntries(this.memory.entries()),
       ...(this.lastError === undefined ? {} : { lastError: this.lastError })
     });
   }
@@ -78,7 +83,16 @@ class OptionsRuntimeStoreInMemory implements OptionsRuntimeStore {
     this.markets.set(copy.market.marketId, copy);
 
     for (const vault of copy.vaults) {
-      this.vaults.set(vault.vaultId, { vault });
+      this.vaults.set(vault.vaultId, {
+        vault,
+        pools: vault.pools,
+        shareTotals: { yes: 0n, no: 0n },
+        hot: vault.steward,
+        dispute: {
+          active: vault.steward.disputeId !== undefined,
+          disputeId: vault.steward.disputeId
+        }
+      });
     }
 
     this.lastError = undefined;
@@ -100,5 +114,14 @@ class OptionsRuntimeStoreInMemory implements OptionsRuntimeStore {
             ...(error.details === undefined ? {} : { details: error.details })
           };
     this.revision += 1;
+  }
+
+  setMemory(key: string, value: unknown): void {
+    this.memory.set(key, value);
+    this.revision += 1;
+  }
+
+  getMemory<T>(key: string): T | undefined {
+    return this.memory.get(key) as T | undefined;
   }
 }

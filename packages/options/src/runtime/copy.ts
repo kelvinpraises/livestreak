@@ -2,6 +2,7 @@
 
 import type {
   OptionsMarketSnapshot,
+  OptionsNftSnapshot,
   OptionsUserOptionsSnapshot,
   OptionsVaultSnapshot
 } from "../model/snapshot.js";
@@ -15,7 +16,12 @@ export const copyMarketSnapshot = (
     vaultIds: [...snapshot.market.vaultIds],
     ...(snapshot.market.timing === undefined ? {} : { timing: { ...snapshot.market.timing } })
   },
-  vaults: snapshot.vaults.map((vault) => ({ ...vault, pools: { ...vault.pools }, steward: { ...vault.steward }, timing: { ...vault.timing } }))
+  vaults: snapshot.vaults.map((vault) => ({
+    ...vault,
+    pools: { ...vault.pools },
+    steward: { ...vault.steward },
+    timing: { ...vault.timing }
+  }))
 });
 
 export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultSnapshot => ({
@@ -25,25 +31,17 @@ export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultS
     steward: { ...snapshot.vault.steward },
     timing: { ...snapshot.vault.timing }
   },
-  ...(snapshot.userPosition === undefined
-    ? {}
-    : {
-        userPosition: {
-          ...snapshot.userPosition,
-          positions: {
-            yes: { ...snapshot.userPosition.positions.yes },
-            no: { ...snapshot.userPosition.positions.no }
-          }
-        }
-      }),
-  ...(snapshot.funding === undefined
-    ? {}
-    : {
-        funding: {
-          yes: { ...snapshot.funding.yes },
-          no: { ...snapshot.funding.no }
-        }
-      })
+  pools: { ...snapshot.pools },
+  shareTotals: { ...snapshot.shareTotals },
+  hot: { ...snapshot.hot },
+  dispute: { ...snapshot.dispute }
+});
+
+export const copyNftSnapshot = (snapshot: OptionsNftSnapshot): OptionsNftSnapshot => ({
+  nft: {
+    ...snapshot.nft,
+    lanes: snapshot.nft.lanes.map((lane) => ({ ...lane }))
+  }
 });
 
 export const copyUserOptionsSnapshot = (
@@ -53,10 +51,8 @@ export const copyUserOptionsSnapshot = (
   ...(snapshot.marketId === undefined ? {} : { marketId: snapshot.marketId }),
   markets: snapshot.markets.map(copyMarketSnapshot),
   vaults: snapshot.vaults.map(copyVaultSnapshot),
-  lvstAccount: {
-    ...snapshot.lvstAccount,
-    lossClaims: { ...snapshot.lvstAccount.lossClaims }
-  },
+  nfts: snapshot.nfts.map(copyNftSnapshot),
+  lvstAccount: { ...snapshot.lvstAccount },
   ...(snapshot.protocol === undefined ? {} : { protocol: { ...snapshot.protocol } })
 });
 
@@ -68,6 +64,7 @@ export const copyRuntimeState = (state: OptionsRuntimeState): OptionsRuntimeStat
     : { userSnapshot: copyUserOptionsSnapshot(state.userSnapshot) }),
   markets: state.markets.map(copyMarketSnapshot),
   vaults: state.vaults.map(copyVaultSnapshot),
+  memory: { ...state.memory },
   ...(state.lastError === undefined
     ? {}
     : { lastError: copyRuntimeLastError(state.lastError) })

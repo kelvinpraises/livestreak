@@ -598,12 +598,20 @@ contract Vault {
             Side winning = data.outcome == Outcome.Yes ? Side.Yes : Side.No;
             uint256 winPool = _boards[vaultId][winning].pool;
             uint256 losePool = _boards[vaultId][winning == Side.Yes ? Side.No : Side.Yes].pool;
-            uint256 skim;
-            if (address(treasury) != address(0) && losePool > 0) {
-                skim = (losePool * treasury.skimBps()) / 10_000;
+            if (_boards[vaultId][winning].sideShares == 0 && address(treasury) != address(0)) {
+                // No winning-side shareholders: the pot has no pro-rata payees and would otherwise
+                // strand. Sweep the whole pot to the Treasury house pot (losers still mint LVST against
+                // their loss basis). pot stays 0 so no winner withdrawal is possible.
+                skimOwed[vaultId] = winPool + losePool;
+                pot[vaultId] = 0;
+            } else {
+                uint256 skim;
+                if (address(treasury) != address(0) && losePool > 0) {
+                    skim = (losePool * treasury.skimBps()) / 10_000;
+                }
+                skimOwed[vaultId] = skim;
+                pot[vaultId] = winPool + losePool - skim;
             }
-            skimOwed[vaultId] = skim;
-            pot[vaultId] = winPool + losePool - skim;
         }
 
         // Idempotent liquidity gather: bank whatever Drips has delivered so far into the Vault.

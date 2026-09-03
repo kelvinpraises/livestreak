@@ -2,13 +2,39 @@ import { Effect } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
 import { createWalletManager } from "@livestreak/wallet";
 import { evm } from "@livestreak/contracts";
-import { decodeEventLog, encodeFunctionData, type Log } from "viem";
-import type { MarketRegisterResult, MarketRegistrar, ObserveRunMarketConfig } from "#market/types.js";
-import { decodeMarketRegisteredPayload, verifyMarketRegistration } from "#market/verify.js";
+import { encodeAbiParameters, encodeFunctionData, keccak256 } from "viem";
+import type {
+  EvmAddress,
+  MarketRegisterResult,
+  MarketRegistrar,
+  ObserveRunMarketConfig,
+  StreamId
+} from "#market/types.js";
+import { validateMarketRunId } from "#market/validate.js";
 
 const { marketRegistryAbi } = evm;
 
-/** UserOp receipt path (a): wallet read-only account exposes getUserOperationReceipt(userOpHash). */
+/** Byte-identical to observe's canonical streamId: keccak256(abi.encode(observer, runId)). */
+export const observeRunStreamId = (observer: EvmAddress, runId: string): StreamId =>
+  keccak256(
+    encodeAbiParameters(
+      [{ type: "address" }, { type: "string" }],
+      [observer, runId]
+    )
+  );
+
+/** Byte-identical to MarketRegistry.computeMarketId(observer, streamId). */
+export const computeMarketId = (
+  observer: EvmAddress,
+  streamId: StreamId
+): StreamId =>
+  keccak256(
+    encodeAbiParameters(
+      [{ type: "address" }, { type: "bytes32" }],
+      [observer, streamId]
+    )
+  );
+
 export const createEvmMarketRegistrar = (
   config: ObserveRunMarketConfig
 ): MarketRegistrar => ({
@@ -21,6 +47,8 @@ export const createEvmMarketRegistrar = (
           })
         );
       }
+
+      const runId = yield* validateMarketRunId(input.runId);
 
       const manager = createWalletManager(
         "evm",
@@ -37,15 +65,18 @@ export const createEvmMarketRegistrar = (
         catch: (error) => toRuntimeError("Failed to open read-only wallet account", error)
       });
 
-      const sender = yield* Effect.tryPromise({
+      const observer = yield* Effect.tryPromise({
         try: () => readOnly.getAddress(),
         catch: (error) => toRuntimeError("Failed to read wallet address", error)
       });
 
+      const streamId = observeRunStreamId(observer as EvmAddress, runId);
+      const marketId = computeMarketId(observer as EvmAddress, streamId);
+
       const data = encodeFunctionData({
         abi: marketRegistryAbi,
         functionName: "registerMarket",
-        args: [input.title, input.streamId]
+        args: [input.title, streamId]
       });
 
       const sendResult = yield* Effect.tryPromise({
@@ -58,74 +89,46 @@ export const createEvmMarketRegistrar = (
         catch: (error) => classifySendFailure(error)
       });
 
-      const userOpReceipt = yield* pollUserOperationReceipt(readOnly, sendResult.hash);
-      const decoded = yield* decodeMarketRegisteredFromLogs(userOpReceipt.logs);
-      const verified = yield* verifyMarketRegistration({
-        decoded,
-        expectedStreamId: input.streamId,
-        sender: sender as `0x${string}`,
-        expectedSender: sender as `0x${string}`,
-        userOpHash: sendResult.hash
-      });
+      yield* pollUntilUserOperationIncluded(readOnly, sendResult.hash);
 
       return {
-        userOpHash: verified.userOpHash,
-        sender: verified.sender,
-        decoded: {
-          marketId: verified.marketId,
-          streamId: verified.streamId,
-          title: verified.title
-        }
+        userOpHash: sendResult.hash,
+        marketId,
+        streamId,
+        title: input.title
       } satisfies MarketRegisterResult;
     })
 });
 
-export interface UserOperationReceiptPayload {
-  readonly sender: `0x${string}`;
-  readonly logs: readonly Log[];
-}
-
-export const extractUserOperationReceiptPayload = (
+export const assertUserOperationSucceeded = (
   receipt: unknown
-): Effect.Effect<UserOperationReceiptPayload, LiveStreakConfigError> => {
+): Effect.Effect<void, LiveStreakRuntimeError> => {
   if (!isRecord(receipt)) {
     return Effect.fail(
-      new LiveStreakConfigError({
-        message: "UserOperation receipt payload is not an object"
-      })
+      receiptFailure("UserOperation receipt payload is not an object")
     );
   }
 
-  const sender = readSender(receipt);
-  const logs = readLogs(receipt);
-
-  if (sender === undefined) {
-    return Effect.fail(
-      new LiveStreakConfigError({
-        message: "UserOperation receipt is missing sender"
-      })
-    );
+  const success = readUserOperationSuccess(receipt);
+  if (success === undefined) {
+    return Effect.fail(receiptFailure("UserOperation receipt is missing success"));
   }
 
-  if (logs.length === 0) {
-    return Effect.fail(
-      new LiveStreakConfigError({
-        message: "UserOperation receipt is missing logs"
-      })
-    );
+  if (success === false) {
+    return Effect.fail(receiptFailure("UserOperation included but reverted"));
   }
 
-  return Effect.succeed({ sender, logs });
+  return Effect.void;
 };
 
 // --- helpers ---
 
-const pollUserOperationReceipt = (
+const pollUntilUserOperationIncluded = (
   readOnly: { getUserOperationReceipt: (hash: string) => Promise<unknown> },
   userOpHash: string,
   maxAttempts = 40,
   delayMs = 50
-): Effect.Effect<UserOperationReceiptPayload, LiveStreakRuntimeError> =>
+): Effect.Effect<void, LiveStreakRuntimeError> =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const receipt = yield* Effect.tryPromise({
@@ -134,56 +137,30 @@ const pollUserOperationReceipt = (
       });
 
       if (receipt !== null && receipt !== undefined) {
-        return yield* extractUserOperationReceiptPayload(receipt).pipe(
-          Effect.mapError(
-            (error) =>
-              new LiveStreakRuntimeError({
-                message: error.message
-              })
-          )
-        );
+        return yield* assertUserOperationSucceeded(receipt);
       }
 
       yield* Effect.sleep(`${delayMs} millis`);
     }
 
     return yield* Effect.fail(
-      new LiveStreakRuntimeError({
-        message: `Timed out waiting for UserOperation receipt for ${userOpHash}`
-      })
+      receiptFailure(`Timed out waiting for UserOperation receipt for ${userOpHash}`)
     );
   });
 
-const decodeMarketRegisteredFromLogs = (
-  logs: readonly Log[]
-): Effect.Effect<ReturnType<typeof decodeMarketRegisteredPayload>, LiveStreakConfigError> => {
-  for (const log of logs) {
-    try {
-      const decoded = decodeEventLog({
-        abi: marketRegistryAbi,
-        eventName: "MarketRegistered",
-        data: log.data,
-        topics: log.topics
-      });
-
-      return Effect.succeed(
-        decodeMarketRegisteredPayload({
-          marketId: String(decoded.args.marketId),
-          streamId: String(decoded.args.streamId),
-          title: decoded.args.title
-        })
-      );
-    } catch {
-      continue;
-    }
+const readUserOperationSuccess = (receipt: Record<string, unknown>): boolean | undefined => {
+  const direct = receipt["success"];
+  if (typeof direct === "boolean") {
+    return direct;
   }
 
-  return Effect.fail(
-    new LiveStreakConfigError({
-      message: "MarketRegistered event not found in UserOperation receipt logs"
-    })
-  );
+  return undefined;
 };
+
+const receiptFailure = (message: string): LiveStreakRuntimeError =>
+  new LiveStreakRuntimeError({
+    message
+  });
 
 const classifySendFailure = (error: unknown): LiveStreakRuntimeError => {
   const message = error instanceof Error ? error.message : String(error);
@@ -210,34 +187,3 @@ const toRuntimeError = (prefix: string, error: unknown): LiveStreakRuntimeError 
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
-
-const readSender = (receipt: Record<string, unknown>): `0x${string}` | undefined => {
-  const direct = receipt["sender"];
-  if (typeof direct === "string" && direct.startsWith("0x")) {
-    return direct as `0x${string}`;
-  }
-
-  const nestedReceipt = receipt["receipt"];
-  if (isRecord(nestedReceipt)) {
-    const from = nestedReceipt["from"];
-    if (typeof from === "string" && from.startsWith("0x")) {
-      return from as `0x${string}`;
-    }
-  }
-
-  return undefined;
-};
-
-const readLogs = (receipt: Record<string, unknown>): readonly Log[] => {
-  const direct = receipt["logs"];
-  if (Array.isArray(direct)) {
-    return direct as Log[];
-  }
-
-  const nestedReceipt = receipt["receipt"];
-  if (isRecord(nestedReceipt) && Array.isArray(nestedReceipt["logs"])) {
-    return nestedReceipt["logs"] as Log[];
-  }
-
-  return [];
-};

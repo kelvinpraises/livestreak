@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import {Context} from "openzeppelin-contracts/utils/Context.sol";
 import {ERC2771Context} from "openzeppelin-contracts/metatx/ERC2771Context.sol";
 import {ERC721, ERC721URIStorage, IERC721} from "openzeppelin-contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import {ERC721Enumerable} from "openzeppelin-contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import {StreamReceiver, StreamConfigImpl} from "../Streams.sol";
 import {Managed} from "../Managed.sol";
 import {SharedDriverUtils} from "./SharedDriverUtils.sol";
@@ -27,7 +28,7 @@ interface ITreasuryLoss {
 /// `setLanes`, the single declarative lane-set op).
 /// The lane ceiling is naturally the market's vault count (you cannot fund a vault that does not
 /// exist), hard-capped at MAX_LANES so the shared-balance maxEnd refresh stays bounded.
-contract MarketDriver is SharedDriverUtils, ERC721URIStorage, Managed {
+contract MarketDriver is SharedDriverUtils, ERC721Enumerable, ERC721URIStorage, Managed {
     uint32 public immutable DRIVER_ID;
     Protocol public immutable PROTOCOL;
     Vault public immutable VAULT;
@@ -98,6 +99,15 @@ contract MarketDriver is SharedDriverUtils, ERC721URIStorage, Managed {
         bytes32 key = _laneKeys[tokenId][index];
         Lane storage lane = _lanes[tokenId][key];
         return (lane.vaultId, lane.side, lane.rate);
+    }
+
+    /// @notice Every tokenId currently owned by `owner` (includes NFTs transferred in).
+    function tokensOfOwner(address owner) external view returns (uint256[] memory tokenIds) {
+        uint256 n = balanceOf(owner);
+        tokenIds = new uint256[](n);
+        for (uint256 i; i < n; ++i) {
+            tokenIds[i] = tokenOfOwnerByIndex(owner, i);
+        }
     }
 
     function mint(bytes32 marketId_, address to) external whenNotPaused returns (uint256 tokenId) {
@@ -419,6 +429,30 @@ contract MarketDriver is SharedDriverUtils, ERC721URIStorage, Managed {
             sides[i] = lane.side;
         }
         VAULT.refreshMaxEnds(tokenId, vaultIds, sides, maxEnd);
+    }
+
+    function _beforeTokenTransfer(address from, address to, uint256 firstTokenId, uint256 batchSize)
+        internal
+        override(ERC721, ERC721Enumerable)
+    {
+        super._beforeTokenTransfer(from, to, firstTokenId, batchSize);
+    }
+
+    function _burn(uint256 tokenId) internal override(ERC721, ERC721URIStorage) {
+        super._burn(tokenId);
+    }
+
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721Enumerable, ERC721URIStorage)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
+
+    function tokenURI(uint256 tokenId) public view override(ERC721, ERC721URIStorage) returns (string memory) {
+        return super.tokenURI(tokenId);
     }
 
     function _msgSender() internal view override(Context, ERC2771Context) returns (address) {

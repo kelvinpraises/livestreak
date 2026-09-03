@@ -12,12 +12,25 @@ describe("host descriptor shape", () => {
       version: "0.1.0",
       hostId: "host_dev",
       baseUrl: "http://127.0.0.1:8787",
-      capabilities: ["endpoint_manifests", "host_cache", "webrtc_forwarding"],
-      supportedOutputs: ["forwarder", "local", "file"]
+      modules: ["aa", "media", "walrus_memory", "walrus_content", "discovery"],
+      supportedOutputs: ["local", "file"],
+      media: { simulcastAvailable: false },
+      walrus: { network: null },
+      memory: {
+        relayerUrl: null,
+        namespaceTemplate: "market:{marketId}",
+        trustModel: "plaintext-relayer"
+      },
+      content: {
+        publisherUrl: null,
+        aggregatorUrl: null
+      }
     };
 
     expect(descriptor.version).toBe("0.1.0");
-    expect(descriptor.capabilities).toContain("host_cache");
+    expect(descriptor.modules).toContain("media");
+    expect(descriptor.memory.namespaceTemplate).toBe("market:{marketId}");
+    expect(descriptor.walrus.network).toBeNull();
   });
 });
 
@@ -27,7 +40,7 @@ describe("host policy shape", () => {
       descriptor: {
         hostId: "host_dev",
         accountTier: "dev",
-        supportedOutputs: ["forwarder", "local", "file"],
+        supportedOutputs: ["local", "file"],
         debug: false,
         cache: {
           available: true,
@@ -45,7 +58,7 @@ describe("host policy shape", () => {
           warnings: []
         }
       },
-      outputMode: "forwarder",
+      outputMode: "local",
       cache: {
         intent: "required",
         required: true,
@@ -103,7 +116,7 @@ describe("aa descriptor shape", () => {
   });
 });
 
-describe("host similarity shape", () => {
+describe("host discovery shape", () => {
   it("accepts request and result records", () => {
     const result: HostSimilarityResult = {
       marketId: "mkt_01",

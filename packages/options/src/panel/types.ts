@@ -8,40 +8,28 @@ import type {
   OptionsVaultType
 } from "../model/index.js";
 
-export interface OptionsSidePanel {
+export interface OptionsLanePanel {
+  readonly vaultId: string;
   readonly side: OptionsVaultSide;
-  readonly streamedUSDC: string;
-  readonly shares: string;
-  readonly currentValueUSDC: string;
-  readonly claimableUSDC: string;
-  readonly lossClaimableLVST: string;
-  readonly fundingRatePerMinuteUSDC: string;
-  readonly fundingActive: boolean;
-  readonly streamPaused: boolean;
-  readonly isWinningSide: boolean | null;
-  readonly released: boolean;
+  readonly rate: string;
+  readonly sharesAccrued: string;
+  readonly depleted: boolean;
+  readonly maxEndMs?: number;
+  readonly claimableUSDC?: string;
+  readonly lossClaimableLVST?: string;
+  readonly won?: boolean;
+  readonly canClaimWin?: boolean;
+  readonly canClaimLoss?: boolean;
 }
 
-export interface OptionsVaultUserPanel {
-  readonly account: string;
-  readonly positions: {
-    readonly yes: OptionsSidePanel;
-    readonly no: OptionsSidePanel;
-  };
-  readonly totals: {
-    readonly streamedUSDC: string;
-    readonly shares: string;
-    readonly currentValueUSDC: string;
-    readonly claimableUSDC: string;
-    readonly lossClaimableLVST: string;
-  };
-  readonly activeFunding: {
-    readonly yesRatePerMinuteUSDC: string;
-    readonly noRatePerMinuteUSDC: string;
-    readonly totalRatePerMinuteUSDC: string;
-    readonly anyActive: boolean;
-    readonly allPaused: boolean;
-  };
+export interface OptionsNftPanel {
+  readonly tokenId: string;
+  readonly marketId: string;
+  readonly laneCount: number;
+  readonly lanes: readonly OptionsLanePanel[];
+  readonly owner: string;
+  readonly approved?: string;
+  readonly isOperator?: boolean;
 }
 
 export interface OptionsVaultPanel {
@@ -56,6 +44,10 @@ export interface OptionsVaultPanel {
     readonly yesUSDC: string;
     readonly noUSDC: string;
     readonly totalUSDC: string;
+  };
+  readonly shareTotals: {
+    readonly yes: string;
+    readonly no: string;
   };
   readonly odds: {
     readonly yesMultiplier: number;
@@ -75,18 +67,19 @@ export interface OptionsVaultPanel {
     readonly hotReason?: string;
     readonly disputeId?: string;
   };
-  readonly user?: OptionsVaultUserPanel;
 }
 
 export interface OptionsMarketPanel {
   readonly marketId: string;
   readonly title: string;
+  readonly creator: string;
   readonly streamId?: string;
   readonly category?: string;
   readonly status: OptionsMarketStatus;
   readonly vaultIds: readonly string[];
   readonly totals: {
     readonly pooledUSDC: string;
+    readonly totalPooledUSDC: string;
     readonly activeVaults: number;
     readonly resolvedVaults: number;
   };
@@ -105,10 +98,10 @@ export interface OptionsLvstPanel {
   readonly unstakedLVST: string;
   readonly pendingDividendsUSDC: string;
   readonly totalEarnedLVST?: string;
-  readonly lossClaims: {
-    readonly claimableLVST: string;
-    readonly claimedLVST: string;
-    readonly stakedFromClaimsLVST: string;
+  readonly actions: {
+    readonly canStake: boolean;
+    readonly canUnstake: boolean;
+    readonly canClaimDividends: boolean;
   };
 }
 
@@ -125,6 +118,7 @@ export interface OptionsUserPanel {
 export interface OptionsPanel {
   readonly account: string;
   readonly markets: readonly OptionsMarketPanel[];
+  readonly nfts: readonly OptionsNftPanel[];
   readonly lvst: OptionsLvstPanel;
   readonly protocol?: OptionsProtocolPanel;
   readonly user: OptionsUserPanel;

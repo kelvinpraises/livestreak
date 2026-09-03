@@ -8,7 +8,7 @@ export interface LvstAccount {
   readonly staked: bigint;
   readonly pendingDividends: bigint;
   readonly totalEarned?: bigint;
-  readonly lossClaims: {
+  readonly lossClaims?: {
     readonly claimable: bigint;
     readonly claimed: bigint;
     readonly stakedFromClaims: bigint;

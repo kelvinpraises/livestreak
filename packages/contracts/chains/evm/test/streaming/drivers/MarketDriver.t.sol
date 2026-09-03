@@ -10,6 +10,8 @@ import {Vault} from "../../../solidity/vault/Vault.sol";
 import {Side} from "../../../solidity/vault/Side.sol";
 import {MarketRegistry} from "../../../solidity/registries/MarketRegistry.sol";
 import {IERC20} from "openzeppelin-contracts/token/ERC20/IERC20.sol";
+import {IERC165} from "openzeppelin-contracts/utils/introspection/IERC165.sol";
+import {IERC721Enumerable} from "openzeppelin-contracts/token/ERC721/extensions/IERC721Enumerable.sol";
 import {MockUSDC} from "../../mocks/MockUSDC.sol";
 import {ProtocolWire} from "../../helpers/ProtocolWire.sol";
 import {MarketDriverHarness} from "../../helpers/MarketDriverHarness.sol";
@@ -383,5 +385,49 @@ contract MarketDriverTest is Test {
 
         vm.expectRevert("VaultDriver: not funding driver");
         vaultDriver.receiverAccount(v1, Side.Yes);
+    }
+
+    function test_tokensOfOwner_mintWithSalt() public {
+        address carol = makeAddr("carol");
+        uint64 salt0 = 7;
+        uint64 salt1 = 42;
+        uint256 nft0 = MarketDriverHarness.mintWithSalt(marketDriver, carol, marketId, salt0);
+        uint256 nft1 = MarketDriverHarness.mintWithSalt(marketDriver, carol, marketId, salt1);
+
+        uint256[] memory owned = marketDriver.tokensOfOwner(carol);
+        assertEq(owned.length, 2, "two NFTs");
+        assertEq(owned[0], nft0, "first token");
+        assertEq(owned[1], nft1, "second token");
+        assertEq(marketDriver.balanceOf(carol), 2, "balance matches");
+    }
+
+    function test_tokensOfOwner_transferIn() public {
+        address carol = makeAddr("carol");
+        uint256 carolNft = MarketDriverHarness.mintWithSalt(marketDriver, carol, marketId, 99);
+
+        vm.prank(carol);
+        marketDriver.transferFrom(carol, alice, carolNft);
+
+        uint256[] memory aliceOwned = marketDriver.tokensOfOwner(alice);
+        assertEq(aliceOwned.length, 2, "alice gained one");
+        assertEq(aliceOwned[0], aliceNft, "original alice nft");
+        assertEq(aliceOwned[1], carolNft, "transferred nft");
+
+        uint256[] memory carolOwned = marketDriver.tokensOfOwner(carol);
+        assertEq(carolOwned.length, 0, "carol empty");
+    }
+
+    function test_tokensOfOwner_mint_nonSalt() public {
+        address carol = makeAddr("carol");
+        uint256 nft = MarketDriverHarness.mint(marketDriver, carol, marketId);
+
+        uint256[] memory owned = marketDriver.tokensOfOwner(carol);
+        assertEq(owned.length, 1, "one NFT");
+        assertEq(owned[0], nft, "mint() token");
+    }
+
+    function test_supportsInterface_enumerable() public view {
+        assertTrue(marketDriver.supportsInterface(type(IERC165).interfaceId), "IERC165");
+        assertTrue(marketDriver.supportsInterface(type(IERC721Enumerable).interfaceId), "IERC721Enumerable");
     }
 }

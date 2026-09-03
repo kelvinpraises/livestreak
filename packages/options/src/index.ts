@@ -1,41 +1,69 @@
 export type {
   LvstAccount,
   MarketId,
-  OptionsFundingStream,
+  OptionsBoardState,
+  OptionsClaimEntry,
+  OptionsClaimsView,
+  OptionsLane,
   OptionsMarket,
   OptionsMarketSnapshot,
   OptionsMarketStatus,
   OptionsMarketTiming,
+  OptionsNft,
+  OptionsNftSnapshot,
   OptionsProtocolSummary,
-  OptionsSidePosition,
+  OptionsSessionPnlView,
+  OptionsStreamAccrualView,
+  OptionsStreamMedia,
+  OptionsStreamState,
+  OptionsStreamStatus,
+  OptionsMediaResolver,
+  OptionsMediaResolvers,
   OptionsUserOptionsSnapshot,
-  OptionsUserVaultPosition,
   OptionsVault,
-  OptionsVaultFundingSnapshot,
   OptionsVaultOutcome,
   OptionsVaultPools,
+  OptionsVaultShareTotals,
   OptionsVaultSide,
   OptionsVaultSnapshot,
   OptionsVaultStatus,
   OptionsVaultStewardState,
   OptionsVaultTiming,
   OptionsVaultType,
+  ProjectSessionPnlInput,
+  ProjectStreamAccrualInput,
   TokenAddress,
+  TokenId,
   UserAddress,
   VaultId
 } from "./model/index.js";
 export {
   asMarketId,
   asTokenAddress,
+  asTokenId,
   asUserAddress,
   asVaultId,
-  emptySidePosition,
-  hasVaultExposure,
-  isFundingStreamPaused,
+  BASE_PRICE,
+  CURVE_K,
+  isAccrualFrozen,
   isOptionsVaultSide,
   OPTIONS_VAULT_SIDES,
+  priceOf,
+  projectClaimsView,
+  projectSessionPnl,
+  projectShares,
+  projectStreamAccrual,
+  DEFAULT_MEDIA_RESOLVERS,
+  resolveStreamMedia,
+  walrusAggregatorResolver,
+  WALRUS_MAINNET_AGGREGATOR,
+  WALRUS_TESTNET_AGGREGATOR,
+  segMath,
+  SHARE_SCALE,
+  sharesPerUsdc,
   totalVaultPool,
-  validateOptionsVaultSide
+  validateOptionsVaultSide,
+  WAD
 } from "./model/index.js";
 export type { OptionsReadTransport } from "./read/index.js";
 export {
@@ -46,19 +74,24 @@ export {
   contractsReadFailed,
   contractsReadNotFound,
   createContractsOptionsReadTransport,
+  gatherUserVaultClaims,
+  getStreamMedia,
+  readClaimsView,
   readMarketSnapshot,
+  readSessionPnl,
   readUserOptionsSnapshot,
-  readVaultSnapshot
+  readVaultSnapshot,
+  type OptionsContractAddresses
 } from "./read/index.js";
 export type {
+  OptionsLanePanel,
   OptionsLvstPanel,
   OptionsMarketPanel,
+  OptionsNftPanel,
   OptionsPanel,
   OptionsProtocolPanel,
-  OptionsSidePanel,
   OptionsUserPanel,
-  OptionsVaultPanel,
-  OptionsVaultUserPanel
+  OptionsVaultPanel
 } from "./panel/index.js";
 export { projectOptionsPanel } from "./panel/index.js";
 export type {
@@ -70,21 +103,37 @@ export type {
 } from "./runtime/index.js";
 export { createOptionsRuntime, validateOptionsRuntimeConfig } from "./runtime/index.js";
 export type {
-  ClaimLossFlowInput,
+  ApproveNftInput,
+  ClaimLossLvstInput,
   ContractWriteRequest,
   ContractWriter,
   ContractsOptionsWriteTransportInput,
+  FundStreamInput,
+  LaneWriteInput,
   OptionsWriteTransport,
-  SetFundingRateInput,
-  StakeFlowInput,
-  StopFundingStreamInput,
-  UnstakeFlowInput
+  SetApprovalForAllInput,
+  SetLanesInput,
+  StakeLvstInput,
+  StopAllFundingInput,
+  StopFundingInput,
+  TransferNftInput,
+  UnstakeLvstInput,
+  WithdrawInput,
+  WithdrawManyInput
 } from "./write/index.js";
 export {
-  claimLossFlow,
+  approveNft,
+  claimDividends,
+  claimLossLvst,
   createContractsOptionsWriteTransport,
-  setFundingRate,
-  stakeFlow,
-  stopFundingStream,
-  unstakeFlow
+  fundStream,
+  setApprovalForAll,
+  setLanes,
+  stakeLvst,
+  stopAllFunding,
+  stopFunding,
+  transferNft,
+  unstakeLvst,
+  withdraw,
+  withdrawMany
 } from "./write/index.js";

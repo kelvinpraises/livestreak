@@ -1,75 +1,154 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Effect, Exit } from "effect";
-import { decodeEventLog, encodeAbiParameters, keccak256, padHex, toHex, type Hex } from "viem";
-import { evm } from "@livestreak/contracts";
-import { extractUserOperationReceiptPayload } from "#market/chains/evm.js";
+import { keccak256, encodeAbiParameters } from "viem";
+import {
+  assertUserOperationSucceeded,
+  computeMarketId,
+  observeRunStreamId
+} from "#market/chains/evm.js";
+import { createEvmMarketRegistrar } from "#market/chains/evm.js";
 import { createMarketRegistrar } from "#market/chains/index.js";
-import { decodeMarketRegisteredPayload } from "#market/verify.js";
-import { testPlaceholderDeriveStreamId } from "#market/types.js";
+import { validateMarketRunId } from "#market/validate.js";
 import type { ObserveRunMarketConfig } from "#market/types.js";
 
-const { marketRegistryAbi } = evm;
-
-const marketRegisteredTopic = keccak256(
-  toHex("MarketRegistered(bytes32,address,bytes32,string)")
+const GOLDEN_OBSERVER = "0x00000000000000000000000000000000000000aa" as const;
+const GOLDEN_RUN_ID = "run_golden";
+const GOLDEN_STREAM_ID = keccak256(
+  encodeAbiParameters(
+    [{ type: "address" }, { type: "string" }],
+    [GOLDEN_OBSERVER, GOLDEN_RUN_ID]
+  )
+);
+const GOLDEN_MARKET_ID = keccak256(
+  encodeAbiParameters(
+    [{ type: "address" }, { type: "bytes32" }],
+    [GOLDEN_OBSERVER, GOLDEN_STREAM_ID]
+  )
 );
 
+const evmWalletMocks = vi.hoisted(() => {
+  const observer = "0x00000000000000000000000000000000000000cc" as const;
+  const readOnly = {
+    getAddress: vi.fn(async () => observer),
+    getUserOperationReceipt: vi.fn(async () => ({
+      success: true,
+      logs: [],
+      userOpHash: "0xuserop",
+      sender: observer
+    }))
+  };
+  const account = {
+    sendTransaction: vi.fn(async () => ({ hash: "0xuserop", fee: 0n })),
+    toReadOnlyAccount: vi.fn(async () => readOnly)
+  };
+
+  return { observer, readOnly, account };
+});
+
+vi.mock("@livestreak/wallet", () => ({
+  createWalletManager: () => ({
+    getAccount: async () => evmWalletMocks.account
+  })
+}));
+
+const minimalEvmConfig = (): ObserveRunMarketConfig => ({
+  walletInit: {
+    chain: "evm",
+    seedSource: "raw",
+    config: {
+      chainId: 1,
+      provider: "https://example.invalid",
+      bundlerUrl: "https://example.invalid",
+      isSponsored: true,
+      useNativeCoins: false,
+      entryPointAddress: "0x0000000000000000000000000000000000000001",
+      safe4337ModuleAddress: "0x0000000000000000000000000000000000000002",
+      safeModulesSetupAddress: "0x0000000000000000000000000000000000000003",
+      safeModulesVersion: "0.3.0",
+      contractNetworks: {}
+    }
+  },
+  seed: "test-seed",
+  marketRegistryAddress: "0x0000000000000000000000000000000000000001",
+  title: "Local market"
+});
+
 describe("market chain seam", () => {
-  it("decodes MarketRegistered from a fixture UserOperation receipt (path a)", async () => {
-    const marketId =
-      "0x0000000000000000000000000000000000000000000000000000000000000001" as Hex;
-    const streamId =
-      "0x00000000000000000000000000000000000000000000000000000000000000aa" as Hex;
-    const title = "Fixture Derby";
+  it("observeRunStreamId matches keccak256(abi.encode(observer, runId)) golden vector", () => {
+    expect(observeRunStreamId(GOLDEN_OBSERVER, GOLDEN_RUN_ID)).toBe(GOLDEN_STREAM_ID);
+  });
 
-    const creator = "0x00000000000000000000000000000000000000aa" as Hex;
-    const data = encodeAbiParameters([{ type: "string" }], [title]);
-    const topics = [
-      marketRegisteredTopic,
-      marketId,
-      padHex(creator, { size: 32 }),
-      streamId
-    ] as const;
+  it("observeRunStreamId is deterministic and runId-sensitive", () => {
+    const first = observeRunStreamId(GOLDEN_OBSERVER, "run_a");
+    const second = observeRunStreamId(GOLDEN_OBSERVER, "run_a");
+    const third = observeRunStreamId(GOLDEN_OBSERVER, "run_b");
 
-    const payload = await Effect.runPromise(
-      extractUserOperationReceiptPayload({
-        sender: creator,
-        receipt: {
-          logs: [
-            {
-              address: "0x0000000000000000000000000000000000000001",
-              blockHash:
-                "0x0000000000000000000000000000000000000000000000000000000000000001",
-              blockNumber: 1n,
-              data,
-              logIndex: 0,
-              removed: false,
-              transactionHash:
-                "0x0000000000000000000000000000000000000000000000000000000000000002",
-              transactionIndex: 0,
-              topics: [...topics]
-            }
-          ]
-        }
+    expect(first).toBe(second);
+    expect(first).not.toBe(third);
+  });
+
+  it("rejects empty runId", async () => {
+    const exit = await Effect.runPromiseExit(validateMarketRunId(""));
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("rejects whitespace-only runId", async () => {
+    const exit = await Effect.runPromiseExit(validateMarketRunId("   "));
+    expect(Exit.isFailure(exit)).toBe(true);
+  });
+
+  it("computeMarketId matches MarketRegistry.computeMarketId golden vector", () => {
+    expect(computeMarketId(GOLDEN_OBSERVER, GOLDEN_STREAM_ID)).toBe(GOLDEN_MARKET_ID);
+  });
+
+  it("assertUserOperationSucceeded reads only success (ignores empty logs)", async () => {
+    const exit = await Effect.runPromiseExit(
+      assertUserOperationSucceeded({
+        success: true,
+        logs: [],
+        userOpHash: "0xdead",
+        sender: GOLDEN_OBSERVER
       })
     );
 
-    expect(payload.sender).toBe(creator);
-    expect(payload.logs.length).toBe(1);
+    expect(Exit.isSuccess(exit)).toBe(true);
+  });
 
-    const decodedLog = decodeEventLog({
-      abi: marketRegistryAbi,
-      eventName: "MarketRegistered",
-      data: payload.logs[0].data,
-      topics: payload.logs[0].topics
-    });
+  it("assertUserOperationSucceeded fails when success is false", async () => {
+    const exit = await Effect.runPromiseExit(
+      assertUserOperationSucceeded({
+        success: false,
+        logs: [{ address: "0x1", topics: [], data: "0x" }],
+        userOpHash: "0xdead",
+        sender: GOLDEN_OBSERVER
+      })
+    );
 
-    const decoded = decodeMarketRegisteredPayload({
-      marketId: String(decodedLog.args.marketId),
-      streamId: String(decodedLog.args.streamId),
-      title: decodedLog.args.title
-    });
-    expect(decoded.streamId).toBe(streamId);
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(String(exit.cause)).toContain("reverted");
+    }
+  });
+
+  it("registers with canonical streamId and marketId when receipt logs are empty", async () => {
+    const runId = "run_local_market_id";
+    const streamId = observeRunStreamId(evmWalletMocks.observer, runId);
+    const expectedMarketId = computeMarketId(evmWalletMocks.observer, streamId);
+
+    const registrar = createEvmMarketRegistrar(minimalEvmConfig());
+    const exit = await Effect.runPromiseExit(
+      registrar.registerMarket({
+        runId,
+        title: "Local market"
+      })
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.streamId).toBe(streamId);
+      expect(exit.value.marketId).toBe(expectedMarketId);
+      expect(evmWalletMocks.readOnly.getUserOperationReceipt).toHaveBeenCalledWith("0xuserop");
+    }
   });
 
   it("returns typed not-supported for sui wallet chain", async () => {
@@ -81,16 +160,14 @@ describe("market chain seam", () => {
       },
       seed: "test-seed",
       marketRegistryAddress: "0x0000000000000000000000000000000000000001",
-      title: "Sui stream",
-      deriveStreamId: testPlaceholderDeriveStreamId
+      title: "Sui stream"
     };
 
     const registrar = await Effect.runPromise(createMarketRegistrar(config));
     const exit = await Effect.runPromiseExit(
       registrar.registerMarket({
         runId: "run_sui",
-        title: config.title,
-        streamId: testPlaceholderDeriveStreamId("run_sui")
+        title: config.title
       })
     );
 

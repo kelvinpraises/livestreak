@@ -45,12 +45,9 @@ export const defaultFakeRegisterResult = (
   input: MarketRegisterInput
 ): MarketRegisterResult => ({
   userOpHash: "0xuserop",
-  sender: "0x00000000000000000000000000000000000000aa",
-  decoded: {
-    marketId: "0x0000000000000000000000000000000000000000000000000000000000000001",
-    streamId: input.streamId,
-    title: input.title
-  }
+  marketId: "0x0000000000000000000000000000000000000000000000000000000000000001",
+  streamId: "0x00000000000000000000000000000000000000000000000000000000000000aa",
+  title: input.title
 });
 
 export const paymasterFailure = (): LiveStreakRuntimeError =>
@@ -58,26 +55,7 @@ export const paymasterFailure = (): LiveStreakRuntimeError =>
     message: "Paymaster-side registration failure: sponsorship expired"
   });
 
-export const foreignSenderRegisterResult = (
-  input: MarketRegisterInput
-): MarketRegisterResult => ({
-  userOpHash: "0xuserop-foreign",
-  sender: "0x00000000000000000000000000000000000000aa",
-  decoded: {
-    marketId: "0x0000000000000000000000000000000000000000000000000000000000000002",
-    streamId: input.streamId,
-    title: input.title
-  }
-});
-
-export const mismatchedSenderRegisterResult = (
-  input: MarketRegisterInput
-): MarketRegisterResult => ({
-  userOpHash: "0xuserop-mismatch",
-  sender: "0x0000000000000000000000000000000000000bad",
-  decoded: {
-    marketId: "0x0000000000000000000000000000000000000000000000000000000000000003",
-    streamId: input.streamId,
-    title: input.title
-  }
-});
+export const receiptFailure = (): LiveStreakRuntimeError =>
+  new LiveStreakRuntimeError({
+    message: "UserOperation included but reverted"
+  });

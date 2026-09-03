@@ -144,7 +144,7 @@ describe("observe public exports", () => {
     expect(publicExport("ObserveRunMarketOptions")).toBeUndefined();
     expect(publicExport("MarketLifecycleState")).toBeUndefined();
     expect(publicExport("MarketRegistrar")).toBeUndefined();
-    expect(publicExport("testPlaceholderDeriveStreamId")).toBeTypeOf("function");
+    expect(publicExport("observeRunStreamId")).toBeTypeOf("function");
     expect(publicExport("createMarketRegistrar")).toBeUndefined();
     expect(publicExport("forkMarketRegistrationIfNeeded")).toBeUndefined();
     expect(publicExport("applyMarketLifecycleToBoard")).toBeUndefined();

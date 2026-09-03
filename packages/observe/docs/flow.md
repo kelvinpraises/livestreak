@@ -111,7 +111,7 @@ Legend: ✅ handled in observe today · ⚠️ partial · ❌ **UNHANDLED**
 Devil's-advocate pass (sonnet + haiku vs. this map; opus = my own pass). Findings folded in below
 are **peer-verified against source**, not taken on the reviewer's word:
 
-- **`registerMarket` is open-caller** — `MarketRegistry.sol:37` has no `onlyOwner`/role/allowlist (contrast `setVaultFactory` onlyOwner, `addVault` factory-gated). So **anyone** can `registerMarket(title, streamId)` for any streamId, and `streamId` has no dup guard. Consequence: a returned `marketId` is **not a trustworthy binding** to observe's stream — a griefer can front-run or spam a second market for the same streamId. Observe must **verify** the marketId it reconciles actually corresponds to its streamId+observer, not assume. (Likely a contracts hardening ask too.)
+- **P3 caller-bound marketId** — `MarketRegistry.computeMarketId(observer, streamId)` is pure; observe computes it locally before send. No receipt event decode. Inclusion confirmed via UserOp receipt `success` only.
 - **Sponsorship is a `VerifyingPaymaster`, not free gas** — `LiveStreakPaymaster.sol:12` (`is VerifyingPaymaster`, `_verifyingSigner`). The UserOp needs a host-signed paymaster approval with `validUntil/validAfter` (`host/aa.ts:63-64`, both optional). New AA edges: signer offline/refuses, approval **expires before the UserOp lands**, sponsorship mode `none`/`tenant_quota` depleted → UserOp fails. Observe's `pending` state must tolerate sponsorship-side failures, not just chain reverts.
 - **The host manifest is already SIGNED, and observe has no slot for it** — `EndpointManifest.signature` is a required `NonEmptyString` (`host/manifest.ts:36`); `HostSessionDraft.manifestDraft` (`host/session.ts:42`) ships signed despite the "draft" name. Meanwhile observe's `ObserveRun.manifest` is a **`PublishManifest`** (internal passthrough, `run/run.ts:29`) — a **name collision** and an entirely different shape. There is **no field on `ObserveRun`/`ObserveRunConfig`** to carry a host session id, manifest id, or endpoint url. Manifest **rotation** (expiry mid-stream) produces a new signed `manifestId` with no carrier back to observe.
 - **`sessionId` is a required INPUT to `createSession`** — `host/session.ts:16` (`sessionId: NonEmptyString`), supplied by the caller *before* the call, not returned. So Stage C's "sessionId ↔ runId" is a **blocking precondition**, not an open afterthought: the edge cannot call `createSession` until it's resolved.
@@ -126,9 +126,14 @@ The cross-check **confirmed** (with file:line) every gap already in §3/§5: no 
 ```text
 Observe imports @livestreak/wallet and @livestreak/contracts ONLY under src/market/chains/**.
 Given injected WalletInit + runtime seed + MarketRegistry address + deriveStreamId + title,
-observe constructs the AA account (createWalletManager), sends registerMarket as a UserOp,
-verifies the MarketRegistered event (streamId + sender == own AA account), and projects a
-`market` board cell lifecycle: none → pending → registered(marketId) → failed(reason).
+observe constructs the AA account (createWalletManager), computes marketId locally as
+keccak256(abi.encode(observer, streamId)) — byte-identical to MarketRegistry.computeMarketId (P3) —
+sends registerMarket as a UserOp, confirms inclusion via getUserOperationReceipt success only
+(no event decode), and projects a `market` board cell lifecycle:
+none → pending → registered(marketId) → failed(reason).
+
+Slice 1's receipt-decode + sender/streamId verify were designed out: P3 makes marketId
+caller-bound and unique, so decoding MarketRegistered and self-comparing streamId/sender is redundant.
 
 Observe NEVER: bakes seed/bundler/paymaster/rpc/entryPoint/chain/addresses, blocks a worker
 turn on the chain write, or imports wallet/viem/contracts outside market/chains/**.
@@ -139,8 +144,7 @@ ObserveRunKernelOptions.market (optional):
 When absent, the `market` cell stays `none` and no chain code runs.
 
 Registration runs as a forked fiber in the run scope at start — idempotent per runId, non-blocking
-the media worker. marketId decode uses wallet getUserOperationReceipt(userOpHash) (path a).
-streamId derivation is injected — contracts owns the canonical formula (inbox still open).
+the media worker. streamId derivation is injected — contracts owns the canonical formula (inbox still open).
 ```
 
 ## 5. Gap summary (what current impl does NOT satisfy)
@@ -154,7 +158,6 @@ streamId derivation is injected — contracts owns the canonical formula (inbox 
 | No injected MarketRegistrationCoordinator port (AA UserOp seam) | D | blocks the chain write |
 | Registration not idempotent per runId → duplicate-market risk | D | correctness |
 | No `marketId` + market-lifecycle channel on the run read model | E | blocks bookmaker/host |
-| Returned `marketId` not verified vs streamId+observer (open-caller `registerMarket`) | D/E | trust/correctness |
 | `pending` must tolerate sponsorship-side failure (VerifyingPaymaster approval expiry/refusal) | D | AA correctness |
 | `ObserveRun.manifest` (PublishManifest) name-collides host `EndpointManifest`; no slot to carry host session/manifest refs | C | blocks manifest ingest |
 | `sessionId↔runId` is a blocking precondition for `createSession`, not an open question | C | blocks session |

@@ -65,8 +65,11 @@ export { createStewardRuntime, validateStewardRuntimeConfig } from "./runtime/in
 export type {
   ContractFactSource,
   HostFactSource,
+  MemoryFactSource,
   ObserveFactSource,
   StewardActionPlanSink,
+  StewardMemoryRememberInput,
+  StewardMemorySink,
   StewardRuntime,
   StewardRuntimeConfig,
   StewardRuntimeInput

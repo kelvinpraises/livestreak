@@ -1,10 +1,20 @@
 export * from "./descriptor.js";
-export * from "./policy.js";
-export * from "./session.js";
-export * from "./manifest.js";
-export * from "./cache.js";
-export * from "./account.js";
+export {
+  WalrusNetwork,
+  PointerScheme,
+  StorePointer,
+  ContentBlobStoreRequest,
+  ContentPersistence,
+  ContentDescriptorAdvert,
+  WalrusDescriptorAdvert,
+  pointerSchemeForNetwork
+} from "./walrus.js";
+export * from "./media/policy.js";
+export * from "./media/session.js";
+export * from "./media/manifest.js";
+export * from "./media/evidence.js";
+export * from "./tenancy.js";
 export * from "./aa.js";
-export * from "./forum.js";
-export * from "./similarity.js";
+export * from "./discovery.js";
+export * from "./memory.js";
 export * from "./validation.js";

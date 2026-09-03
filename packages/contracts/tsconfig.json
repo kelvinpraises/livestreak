@@ -8,13 +8,14 @@
   },
   "include": [
     "kit/**/*.ts",
-    "chains/evm/index.ts",
-    "chains/evm/abis.ts",
-    "chains/evm/addresses.ts",
-    "chains/evm/contract.ts",
-    "chains/evm/types.ts",
-    "chains/sui/index.ts",
-    "chains/solana/index.ts"
+    "chains/evm/**/*.ts",
+    "chains/sui/**/*.ts",
+    "chains/solana/**/*.ts"
   ],
-  "exclude": ["chains/evm/lib/**", "chains/evm/out/**", "chains/evm/cache/**"]
+  "exclude": [
+    "chains/evm/lib/**",
+    "chains/evm/out/**",
+    "chains/evm/cache/**",
+    "chains/evm/wagmi.config.ts"
+  ]
 }

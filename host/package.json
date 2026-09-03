@@ -8,15 +8,25 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "dev": "tsx src/main.ts",
+    "start": "node dist/main.js"
   },
   "dependencies": {
     "@livestreak/core": "file:../packages/core",
     "@livestreak/host": "file:../packages/host",
-    "viem": "^2.50.4"
+    "@livestreak/schema": "file:../packages/schema",
+    "@livestreak/wallet": "file:../packages/wallet",
+    "@mysten-incubation/memwal": "^0.0.7",
+    "@mysten/seal": "^1.2.1",
+    "@mysten/sui": "^2.19.0",
+    "@mysten/walrus": "^1.2.1",
+    "viem": "^2.50.4",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
+    "tsx": "^4.19.0",
     "typescript": "6.0.3",
     "vitest": "^4.1.8"
   }

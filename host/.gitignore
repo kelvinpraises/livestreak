@@ -1,0 +1,3 @@
+aa.chains.json
+aa.chains.*.json
+!aa.chains.example.json

@@ -25,6 +25,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@livestreak/schema": "file:../schema",
     "effect": "3.21.3"
   },
   "devDependencies": {

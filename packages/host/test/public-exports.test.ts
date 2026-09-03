@@ -4,10 +4,10 @@ import * as Public from "#index.js";
 const publicExport = (name: string): unknown => (Public as Record<string, unknown>)[name];
 
 describe("host public exports", () => {
-  it("exposes descriptor, policy, session, manifest, cache, account, aa, and forum shapes", () => {
+  it("exposes descriptor, policy, session, manifest, cache, tenancy, aa, discovery, and memory shapes", () => {
     expect(publicExport("HostProviderDescriptor")).toBeDefined();
-    expect(publicExport("HostCapability")).toBeDefined();
-    expect(publicExport("HostOutputMode")).toBeDefined();
+    expect(publicExport("HostModuleToken")).toBeDefined();
+    expect(publicExport("OutputMode")).toBeDefined();
     expect(publicExport("HostPolicyRequest")).toBeDefined();
     expect(publicExport("HostPolicyResult")).toBeDefined();
     expect(publicExport("HostPolicyBlockReason")).toBeDefined();
@@ -19,14 +19,17 @@ describe("host public exports", () => {
     expect(publicExport("HostCacheReceiptRequest")).toBeDefined();
     expect(publicExport("HostTenantDescriptor")).toBeDefined();
     expect(publicExport("AaCapabilityDescriptor")).toBeDefined();
-    expect(publicExport("ForumThreadRecord")).toBeDefined();
+    expect(publicExport("MemoryAccessRequest")).toBeDefined();
+    expect(publicExport("MemoryAccessResponse")).toBeDefined();
+    expect(publicExport("MarketMemoryBinding")).toBeDefined();
     expect(publicExport("HostSimilarityRequest")).toBeDefined();
     expect(publicExport("HostSimilarityResult")).toBeDefined();
     expect(publicExport("HostSimilarVaultCandidate")).toBeDefined();
     expect(publicExport("HostSimilarityIndexRequest")).toBeDefined();
     expect(publicExport("decodeHostPolicyRequest")).toBeTypeOf("function");
-    expect(publicExport("decodeHostSimilarityRequest")).toBeTypeOf("function");
-    expect(publicExport("decodeHostSimilarityIndexRequest")).toBeTypeOf("function");
+    expect(publicExport("decodeHostDiscoveryRequest")).toBeTypeOf("function");
+    expect(publicExport("decodeHostDiscoveryIndexRequest")).toBeTypeOf("function");
+    expect(publicExport("decodeMemoryAccessRequest")).toBeTypeOf("function");
     expect(publicExport("validationErrorMessage")).toBeTypeOf("function");
   });
 
@@ -34,5 +37,8 @@ describe("host public exports", () => {
     expect(publicExport("createHttpHostProviderClient")).toBeUndefined();
     expect(publicExport("dispatchRequest")).toBeUndefined();
     expect(publicExport("makeInMemoryHostProviderClient")).toBeUndefined();
+    expect(publicExport("HostCapability")).toBeUndefined();
+    expect(publicExport("ForumThreadRecord")).toBeUndefined();
+    expect(publicExport("decodeHostSimilarityRequest")).toBeUndefined();
   });
 });

@@ -25,6 +25,11 @@ export interface OptionsVaultPools {
   readonly no: bigint;
 }
 
+export interface OptionsVaultShareTotals {
+  readonly yes: bigint;
+  readonly no: bigint;
+}
+
 export interface OptionsVaultTiming {
   readonly createdAtMs: number;
   readonly expiresAtMs: number;

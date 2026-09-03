@@ -17,7 +17,14 @@ import type { StewardRuntimeLastError } from "./store.js";
 
 // --- exports ---
 
+export interface StewardSubjectRefreshResult {
+  readonly subject: StewardSubject;
+  readonly findings: readonly StewardFinding[];
+  readonly decisions: readonly StewardDecision[];
+}
+
 export interface StewardRefreshResult {
+  readonly perSubject: readonly StewardSubjectRefreshResult[];
   readonly latestFindings: readonly StewardFinding[];
   readonly latestDecisions: readonly StewardDecision[];
   readonly pendingActionPlans: readonly StewardActionPlan[];
@@ -30,6 +37,7 @@ export const refreshWatchedSubjects = async (input: {
   readonly actionContext?: StewardActionContext;
   readonly sources: StewardFactSources;
 }): Promise<StewardRefreshResult> => {
+  const perSubject: StewardSubjectRefreshResult[] = [];
   const latestFindings: StewardFinding[] = [];
   const latestDecisions: StewardDecision[] = [];
   const pendingActionPlans: StewardActionPlan[] = [];
@@ -40,12 +48,14 @@ export const refreshWatchedSubjects = async (input: {
     const decisions = chooseStewardDecisions(findings, input.decisionPolicy);
     const plans = planStewardActions(decisions, input.actionContext);
 
+    perSubject.push({ subject, findings, decisions });
     latestFindings.push(...findings);
     latestDecisions.push(...decisions);
     pendingActionPlans.push(...plans);
   }
 
   return {
+    perSubject,
     latestFindings,
     latestDecisions,
     pendingActionPlans
@@ -76,11 +86,12 @@ const collectFactsForSubject = async (
   subject: StewardSubject,
   sources: StewardFactSources
 ): Promise<readonly StewardFact[]> => {
-  const [contractRaw, hostRaw, observeRaw] = await Promise.all([
+  const [contractRaw, hostRaw, observeRaw, memoryRaw] = await Promise.all([
     sources.contract.readFacts(subject),
     sources.host.readFacts(subject),
-    sources.observe.readFacts(subject)
+    sources.observe.readFacts(subject),
+    sources.memory.readFacts(subject)
   ]);
 
-  return [...contractRaw, ...hostRaw, ...observeRaw].map(validateStewardFact);
+  return [...contractRaw, ...hostRaw, ...observeRaw, ...memoryRaw].map(validateStewardFact);
 };

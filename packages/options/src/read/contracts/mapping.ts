@@ -1,19 +1,23 @@
 // --- exports ---
 
-import { sideFromSolidityValue } from "./sides.js";
+import { LiveStreakConfigError } from "@livestreak/core";
+import type { PointerScheme } from "@livestreak/host";
 
-import { asMarketId, asVaultId } from "../../model/ids.js";
-import { emptySidePosition } from "../../model/position.js";
+import { sideFromSolidityValue } from "./sides.js";
+import type { OptionsStreamState } from "../../model/media.js";
+
+import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../model/ids.js";
 import type { LvstAccount } from "../../model/lvst.js";
-import type { OptionsFundingStream } from "../../model/funding.js";
-import type { MarketId, UserAddress, VaultId } from "../../model/ids.js";
+import type { OptionsLane } from "../../model/lane.js";
+import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
 import type { OptionsMarket } from "../../model/market.js";
+import type { OptionsNft } from "../../model/nft.js";
 import type { OptionsProtocolSummary } from "../../model/snapshot.js";
-import type { OptionsSidePosition, OptionsUserVaultPosition } from "../../model/position.js";
 import type {
   OptionsVault,
   OptionsVaultOutcome,
   OptionsVaultPools,
+  OptionsVaultShareTotals,
   OptionsVaultSide,
   OptionsVaultStatus,
   OptionsVaultStewardState,
@@ -24,6 +28,7 @@ export type RawMarketData = {
   readonly id: `0x${string}`;
   readonly title: string;
   readonly streamId: `0x${string}`;
+  readonly creator: `0x${string}`;
   readonly createdAt: bigint;
   readonly exists: boolean;
 };
@@ -35,14 +40,37 @@ export type RawVaultData = {
   readonly creator: `0x${string}`;
   readonly status: number;
   readonly outcome: number;
-  readonly yesPool: bigint;
-  readonly noPool: bigint;
+  readonly resolvedAt: number;
   readonly exists: boolean;
 };
 
-export type RawSidePosition = {
-  readonly shares: bigint;
-  readonly deposited: bigint;
+export type RawVaultPools = {
+  readonly yesTotal: bigint;
+  readonly noTotal: bigint;
+  readonly yesShareTotal: bigint;
+  readonly noShareTotal: bigint;
+};
+
+export type RawStreamState = {
+  readonly status: number;
+  readonly scheme: number;
+  readonly id: string;
+  readonly updatedAt: bigint;
+  readonly endedAt: bigint;
+};
+
+export type RawLane = {
+  readonly vaultId: `0x${string}`;
+  readonly side: number;
+  readonly rate: bigint;
+};
+
+export type RawPosition = {
+  readonly rate: bigint;
+  readonly gPaid: bigint;
+  readonly sharesAccrued: bigint;
+  readonly maxEnd: number;
+  readonly depleted: boolean;
 };
 
 export type RawHotState = {
@@ -60,6 +88,13 @@ export type RawDisputeState = {
 
 const VAULT_STATUSES = ["open", "hot", "locked", "resolved", "disputed"] as const satisfies readonly OptionsVaultStatus[];
 const VAULT_OUTCOMES = ["pending", "yes", "no"] as const satisfies readonly OptionsVaultOutcome[];
+const STREAM_STATUSES = ["none", "live", "ended"] as const;
+const STORAGE_SCHEMES = [
+  "walrus-testnet",
+  "walrus-mainnet",
+  "ipfs",
+  "arweave"
+] as const satisfies readonly PointerScheme[];
 
 export const bytes32ToHex = (value: `0x${string}` | string): string => {
   const normalized = value.toLowerCase();
@@ -73,6 +108,7 @@ export const mapMarket = (
 ): OptionsMarket => ({
   marketId,
   title: data.title,
+  creator: asUserAddress(data.creator),
   streamId: bytes32ToHex(data.streamId),
   status: "open",
   vaultIds,
@@ -84,25 +120,52 @@ export const mapMarket = (
 export const mapVaultIds = (ids: readonly `0x${string}`[]): readonly VaultId[] =>
   ids.map((id) => asVaultId(bytes32ToHex(id)));
 
+export const mapVaultPools = (data: RawVaultPools): OptionsVaultPools => ({
+  yes: data.yesTotal,
+  no: data.noTotal
+});
+
+export const mapVaultShareTotals = (data: RawVaultPools): OptionsVaultShareTotals => ({
+  yes: data.yesShareTotal,
+  no: data.noShareTotal
+});
+
+export const mapStreamState = (data: RawStreamState): OptionsStreamState => {
+  const status = STREAM_STATUSES[data.status];
+  const scheme = STORAGE_SCHEMES[data.scheme];
+
+  if (status === undefined || scheme === undefined) {
+    throw new LiveStreakConfigError({
+      message: "Invalid stream state from contracts",
+      metadata: { details: `status=${data.status} scheme=${data.scheme}` }
+    });
+  }
+
+  return {
+    status,
+    scheme,
+    id: data.id,
+    updatedAtMs: Number(data.updatedAt) * 1000,
+    endedAtMs: Number(data.endedAt) * 1000
+  };
+};
+
 export const mapVault = (
   data: RawVaultData,
+  pools: RawVaultPools,
   hot?: RawHotState,
   dispute?: RawDisputeState
 ): OptionsVault => {
   const timing: OptionsVaultTiming = {
     createdAtMs: 0,
-    expiresAtMs: 0
+    expiresAtMs: 0,
+    ...(data.resolvedAt > 0 ? { resolvedAtMs: data.resolvedAt * 1000 } : {})
   };
 
   const steward: OptionsVaultStewardState = {
     hot: hot?.active ?? false,
     hotUntilMs: hot?.active ? Number(hot.until) * 1000 : undefined,
     disputeId: dispute?.active ? bytes32ToHex(dispute.proofRef) : undefined
-  };
-
-  const pools: OptionsVaultPools = {
-    yes: data.yesPool,
-    no: data.noPool
   };
 
   return {
@@ -113,71 +176,100 @@ export const mapVault = (
     creator: data.creator,
     status: VAULT_STATUSES[data.status] ?? "open",
     outcome: VAULT_OUTCOMES[data.outcome] ?? "pending",
-    pools,
+    pools: mapVaultPools(pools),
     timing,
     steward
   };
 };
 
-export const mapSidePosition = (side: OptionsVaultSide, data: RawSidePosition): OptionsSidePosition => {
-  if (data.shares === 0n && data.deposited === 0n) {
-    return emptySidePosition(side);
-  }
+export const mapLane = (
+  tokenId: TokenId,
+  lane: RawLane,
+  position: RawPosition
+): OptionsLane => ({
+  tokenId,
+  vaultId: asVaultId(bytes32ToHex(lane.vaultId)),
+  side: sideFromSolidityValue(lane.side),
+  rate: lane.rate,
+  gPaid: position.gPaid,
+  sharesAccrued: position.sharesAccrued,
+  maxEndMs: position.maxEnd > 0 ? position.maxEnd * 1000 : undefined,
+  depleted: position.depleted
+});
 
-  return {
-    side,
-    streamed: data.deposited,
-    shares: data.shares,
-    currentValue: data.deposited,
-    claimable: 0n,
-    released: false,
-    lossClaimable: 0n
-  };
+export const enrichLane = (
+  lane: OptionsLane,
+  claimable: bigint,
+  lossClaimable: bigint,
+  winningSide?: OptionsVaultSide
+): OptionsLane => ({
+  ...lane,
+  claimable,
+  lossClaimable,
+  ...(winningSide === undefined ? {} : { won: lane.side === winningSide })
+});
+
+export type RawBoard = {
+  readonly pool: bigint;
+  readonly sideRate: bigint;
+  readonly g: bigint;
+  readonly lastAdvance: number;
 };
 
-export const mapUserVaultPosition = (
-  user: UserAddress,
-  vaultId: VaultId,
-  yes: RawSidePosition,
-  no: RawSidePosition
-): OptionsUserVaultPosition => ({
-  account: user,
-  vaultId,
-  positions: {
-    yes: mapSidePosition("yes", yes),
-    no: mapSidePosition("no", no)
-  }
+export const mapBoard = (data: RawBoard) => ({
+  pool: data.pool,
+  sideRate: data.sideRate,
+  g: data.g,
+  lastAdvanceMs: data.lastAdvance * 1000
 });
 
-export const mapFundingStream = (
-  user: UserAddress,
-  vaultId: VaultId,
-  side: OptionsVaultSide,
-  ratePerSecond: bigint,
-  active: boolean
-): OptionsFundingStream => ({
-  account: user,
-  vaultId,
-  side,
-  ratePerSecond,
-  ratePerMinute: ratePerSecond * 60n,
-  active
+export const mapNft = (
+  tokenId: TokenId,
+  owner: UserAddress,
+  marketId: MarketId,
+  laneCount: number,
+  lanes: readonly OptionsLane[],
+  transfer?: { readonly approved?: UserAddress; readonly isOperator?: boolean }
+): OptionsNft => ({
+  tokenId,
+  owner,
+  marketId,
+  laneCount,
+  lanes,
+  ...(transfer?.approved === undefined ? {} : { approved: transfer.approved }),
+  ...(transfer?.isOperator === undefined ? {} : { isOperator: transfer.isOperator })
 });
+
+export type RawStreamsState = {
+  readonly streamsHash: `0x${string}`;
+  readonly streamsHistoryHash: `0x${string}`;
+  readonly updateTime: number;
+  readonly balance: bigint;
+  readonly maxEnd: number;
+};
+
+export const mapStreamsStateBalance = (state: RawStreamsState): bigint => state.balance;
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+export const mapApprovedAddress = (value: `0x${string}`): UserAddress | undefined => {
+  if (value.toLowerCase() === ZERO_ADDRESS) {
+    return undefined;
+  }
+
+  return asUserAddress(value);
+};
 
 export const mapLvstAccount = (
   user: UserAddress,
   balance: bigint,
-  staked: bigint
+  staked: bigint,
+  pendingDividends: bigint
 ): LvstAccount => ({
   account: user,
   balance,
   staked,
-  pendingDividends: 0n,
-  lossClaims: {
-    claimable: 0n,
-    claimed: 0n,
-    stakedFromClaims: 0n
-  }
+  pendingDividends
 });
 
 export const mapProtocolSummary = (

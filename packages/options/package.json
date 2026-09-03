@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@livestreak/core": "file:../core",
-    "@livestreak/contracts": "file:../contracts"
+    "@livestreak/contracts": "file:../contracts",
+    "@livestreak/host": "file:../host"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

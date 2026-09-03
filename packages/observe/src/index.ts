@@ -194,8 +194,7 @@ export type {
   MarketRegisterResult,
   ObserveRunMarketConfig,
   ObserveRunMarketOptions,
-  StreamId,
-  VerifiedMarketRegistration
+  StreamId
 } from "./market/index.js";
 
-export { testPlaceholderDeriveStreamId } from "./market/index.js";
+export { observeRunStreamId } from "./market/index.js";

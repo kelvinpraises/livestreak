@@ -15,6 +15,7 @@ export default tseslint.config(
       'packages/contracts/chains/evm/out/**',
       'packages/contracts/chains/evm/cache/**',
       'packages/contracts/chains/evm/generated/**',
+      'packages/contracts/chains/evm/wagmi.config.ts',
       'packages/wallet/src/vendor/**',
       '**/routeTree.gen.ts',
     ],

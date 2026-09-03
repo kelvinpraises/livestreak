@@ -1,0 +1,13 @@
+[
+  {
+    "routeKey": "local",
+    "chainId": 31337,
+    "name": "local",
+    "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+    "rpcUrl": "http://127.0.0.1:8545",
+    "executorKeyEnv": "LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY",
+    "paymasterAddress": "0x547f60b6c453178c851d529bf36e9bccc57ba844",
+    "safeModule": "0x7240e794b12f848dea622a0da206d1b7d56bd",
+    "bundlerUrl": "http://127.0.0.1:4337"
+  }
+]

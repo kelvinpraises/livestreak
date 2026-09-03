@@ -5,7 +5,9 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import type {
   MarketId,
   OptionsMarketSnapshot,
+  OptionsNftSnapshot,
   OptionsUserOptionsSnapshot,
+  OptionsVault,
   OptionsVaultSnapshot,
   UserAddress,
   VaultId
@@ -34,28 +36,47 @@ export const readMarketSnapshot = async (
 
 export const readVaultSnapshot = async (
   transport: OptionsReadTransport,
-  vaultId: VaultId,
-  user?: UserAddress
+  vaultId: VaultId
 ): Promise<OptionsVaultSnapshot> => {
   const vault = await readOrThrow(() => transport.readVault(vaultId), "vault", vaultId);
-
-  if (user === undefined) {
-    return { vault };
-  }
-
-  const [userPosition, yesFunding, noFunding] = await Promise.all([
-    readOrThrow(() => transport.readUserVaultPosition(user, vaultId), "user position", user),
-    readOrThrow(() => transport.readFundingStream(user, vaultId, "yes"), "funding stream", user),
-    readOrThrow(() => transport.readFundingStream(user, vaultId, "no"), "funding stream", user)
-  ]);
+  const shareTotals = await readOrThrow(
+    () => transport.readVaultShareTotals(vaultId),
+    "vault share totals",
+    vaultId
+  );
 
   return {
     vault,
-    userPosition,
-    funding: {
-      yes: yesFunding,
-      no: noFunding
-    }
+    pools: vault.pools,
+    shareTotals,
+    hot: vault.steward,
+    dispute: {
+      active: vault.steward.disputeId !== undefined,
+      disputeId: vault.steward.disputeId
+    },
+    ...(await enrichResolvedVaultFields(transport, vaultId, vault))
+  };
+};
+
+const enrichResolvedVaultFields = async (
+  transport: OptionsReadTransport,
+  vaultId: VaultId,
+  vault: OptionsVault
+): Promise<Pick<OptionsVaultSnapshot, "winningSide" | "pot" | "collected">> => {
+  if (vault.status !== "resolved") {
+    return {};
+  }
+
+  const [winningSide, pot, collected] = await Promise.all([
+    transport.readWinningSide(vaultId),
+    transport.readPot(vaultId),
+    transport.readCollected(vaultId)
+  ]);
+
+  return {
+    ...(winningSide === undefined ? {} : { winningSide }),
+    pot,
+    collected
   };
 };
 
@@ -80,14 +101,36 @@ export const readUserOptionsSnapshot = async (
       account: user,
       markets: [],
       vaults: [],
+      nfts: [],
       lvstAccount,
       protocol
     };
   }
 
   const marketSnapshot = await readMarketSnapshot(transport, marketId);
+  const tokenIds = await readOrThrow(
+    () => transport.listOwnerTokens(user),
+    "owner tokens",
+    user
+  );
+
+  const nfts: OptionsNftSnapshot[] = [];
+  for (const tokenId of tokenIds) {
+    const nft = await readOrThrow(() => transport.readNft(tokenId, user), "nft", String(tokenId));
+    if (nft.marketId === marketId) {
+      nfts.push({ nft });
+    }
+  }
+
+  const vaultIdSet = new Set<VaultId>(marketSnapshot.market.vaultIds);
+  for (const entry of nfts) {
+    for (const lane of entry.nft.lanes) {
+      vaultIdSet.add(lane.vaultId);
+    }
+  }
+
   const vaults = await Promise.all(
-    marketSnapshot.vaults.map((vault) => readVaultSnapshot(transport, vault.vaultId, user))
+    [...vaultIdSet].map((vaultId) => readVaultSnapshot(transport, vaultId))
   );
 
   return {
@@ -95,6 +138,7 @@ export const readUserOptionsSnapshot = async (
     marketId,
     markets: [marketSnapshot],
     vaults,
+    nfts,
     lvstAccount,
     protocol
   };

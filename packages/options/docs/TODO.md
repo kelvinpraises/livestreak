@@ -1,152 +1,56 @@
 # @livestreak/options — TODO
 
-See [architecture.md](./architecture.md). Depends on `@livestreak/contracts` generated ABIs for contract reads. See [repo TODO](../../../README.md).
+See [architecture.md](./architecture.md). Browser-safe consumer workflow — no market/vault creation,
+no `Effect.run*`. **Wallet-direct** (R6): options imports `@livestreak/wallet` and connects via
+`createWalletManager(walletInit.chain, seed, config)`, chain-dispatched (`chains/{evm,sui}`, mirror
+observe/market/chains); view reads via a viem public client. ABIs from `@livestreak/contracts/evm/abis`.
+`walletInit` + seed injected at runtime (seed never baked).
 
-**Role:** browser-safe consumer workflow. No market/vault creation. No `Effect.run*` in library `src/`.
+## ✅ Shipped — R1–R3 core (decode / mapping / projection logic; 120 tests). R6 restructures the connection layer; R4/R5 media is superseded.
 
----
+- **R1 — NFT-lane core** (committed `8d120aa`). Model keyed `tokenId → lanes` (one side per vault;
+  multi-NFT via `tokensOfOwner`). Reads: `getVault` + `getVaultPools`, `getPosition`, steward
+  hot/dispute, market index `+creator`. Writes → MarketDriver
+  (`fund`/`setLanes`/`stop`/`stopAll`/`withdraw`/`claimLossLvst`/`transferFrom`/`approve`) + Treasury
+  (`stakeLvst`/`unstakeLvst`/`claimDividends`).
+- **R2 — read-views.** Claim previews (`claimable`/`lossClaimable`/`winningSide` [guarded]/`pot`); live
+  ln() ticker (`OptionsStreamAccrualView`); panel win/loss amounts + flags; `architecture.md` rewritten.
+- **R3 — aggregation.** Cross-NFT session PnL (`projectSessionPnl`; `invested` caller-supplied, never
+  fabricated; Drips `streamsState[3]` = remaining balance); exhaustive `OptionsClaimsView`; runtime
+  `set`/`get`/`onChange` in-memory API; stake grey-out flags + market total-pool + NFT transfer reads.
 
-## Slice 1 — model + read + panel (current)
+- ~~**R4 / R5 — media read + resolvers**~~ — **SUPERSEDED**: gateway/URL resolution is not options'
+  layer (options does only contract I/O). R6 strips it; only the raw `readStreamState` read survives.
 
-- [x] `model/*` — market, vault, position, funding, flow account, snapshot aggregates
-- [x] `read/*` — `OptionsReadTransport`, `readMarketSnapshot`, `readVaultSnapshot`, `readUserOptionsSnapshot`
-- [x] `panel/*` — `OptionsPanel`, `projectOptionsPanel`
-- [x] Fake transport test helper under `test/helpers/fake-transport.ts`
-- [x] Pure tests: pool totals, sides, resolved claim/loss, panel projection
-- [x] Bigint in model snapshots; string amounts in panel
-- [x] Architecture + public export guards
+> R2–R4 are in the working tree, **uncommitted** (R1 = `8d120aa`).
 
-**Follow-ups discovered in slice 1:**
+## ▢ Open
 
-- [ ] `model/resolved.ts` + `OptionsResolvedVaultView` split (architecture doc) — live `OptionsVaultPanel` currently carries resolved fields when status is resolved
-- [ ] `model/odds.ts` bonding-curve odds — panel uses simple parimutuel pool ratios for v0
-- [ ] `readProtocolSummary` only when transport implements it; empty-market `readUserOptionsSnapshot` without `marketId` returns LVST-only shell
-- [x] Fake transport exposes `readProtocolSummary` only when protocol seed is present
+- [ ] **R6 — multi-chain + wallet-direct realignment** (prompt written, awaiting run). Three corrections
+  (2026-06-20): **(a) strip VOD** — gateway/URL resolution (R4/R5) is media plumbing, not contract I/O;
+  keep only the raw `readStreamState`. **(b) wallet-direct** — drop the injected `ContractWriter` /
+  `ContractReader`; connect via `createWalletManager(walletInit.chain, seed, config)` + AA userOps,
+  **mirroring `observe/src/market/chains`**. **(c) multi-chain** — restructure into `chains/{evm,sui}` +
+  `chains/index.ts` dispatched on `walletInit.chain` (Sui stubbed; reads via a viem public client).
+  **(d) restructure to the observe aesthetic** — `chains/` region, sub-grouped `model/` (+ `model/math/`),
+  thin roots, consistent `index`/`types` per region, kill the cross-layer `media` split. R1–R5 logic
+  **moves**, not rewritten. Prompt is hardened (grounding preamble + structure audits).
 
----
+After R6: app integration (below, not options) + phase-2 `Live` playback.
 
-## Slice 2 — real chain reads
+## Next (not options)
 
-**Unblocked:** `@livestreak/contracts` ships wagmi-generated ABIs. Options owns transport, address maps, and side decoding.
+App integration — wire `app/` `/stream` mock hooks (`useVaults`/`useFlow`) to `createOptionsRuntime`
++ a viem `ContractReader`/`ContractWriter` at the app edge. Separate app-package prompt.
 
-- [x] `createContractsOptionsReadTransport` under `src/read/contracts/`
-- [x] Contract read result → Options model mapping (`mapping.ts`)
-- [x] Fake reader tests — no live chain
-- [ ] Wire viem/public `ContractReader` at app edge (runtime slice)
-- [ ] `listMarkets` helper when options needs multi-market discovery without protocol summary
-- [ ] Per-vault `lossFlowClaimable` aggregation into `LvstAccount` when `getUserVaultIds` exists on-chain
+## Invariants (keep)
 
-**Contract reads consumed:**
+Side enum `yes=0`/`no=1`; `account` in Vault reads is the **`tokenId`**; pools from `getVaultPools`
+(not `getVault`); `winningSide` only behind a `status === "resolved"` guard; **wallet-direct** via `createWalletManager(walletInit.chain, seed, config)` + `chains/{evm,sui}`
+dispatch (mirror observe/market/chains); view reads via a viem public client; **no injected ports**.
 
-- `getMarket`, `getVaultIds`, `getVault`, `position(user, vault, side)`, `fundingRate`, `fundingActive`
-- FLOW skeleton: `balanceOf`, `skeletonStaked`
-- steward: `vaultHotState`, `disputeState`
-- optional: `marketCount` + `marketIdAt` for `readProtocolSummary`
+## Verify
 
----
-
-## Slice 3 — runtime + polling
-
-- [x] `runtime/config.ts`, `store.ts`, `refresh.ts`, `runtime.ts`
-- [x] `createOptionsRuntime` — manual refresh, in-memory store, `readPanel`, subscriptions
-- [x] Opt-in `startPolling()` when `refreshIntervalMs` is set
-- [x] Tests under `test/runtime/`
-- [x] Runtime hardening: subscriber error notify, polling catch, `unknown` config validation, snapshot copies, contracts input validation
-- [x] Vitest `pool: "threads"` to avoid fork-worker hangs in this environment
-- [ ] Wire viem/public `ContractReader` at app edge
-- [x] No wallet secrets stored in runtime (write transport injected at app edge)
-
----
-
-## Slice 4a — writes (unblocked on-chain functions)
-
-- [x] `write/transport.ts` — `ContractWriter`, `OptionsWriteTransport`, `createContractsOptionsWriteTransport`
-- [x] `write/funding.ts` — `setFundingRate`, `stopFundingStream`
-- [x] `write/flow.ts` — `claimLossFlow`, `stakeFlow` (`skeletonStake`), `unstakeFlow` (`skeletonUnstake`)
-- [x] Contract writes via `{ address, abi, functionName, args }` from `@livestreak/contracts` ABIs + injected `ContractWriter`
-- [x] Tests under `test/write/` with fake writer + negative paths
-- [ ] Wire viem/wallet `ContractWriter` at app edge
-
----
-
-## Slice 4b — writes (blocked on contracts)
-
-Contract functions do not exist yet — do not implement until contracts add user claim/release + dividends:
-
-- [ ] `write/claim.ts` — `claimVault`, `releaseVault` (Vault has factory-only `resolve`; no user claim/release)
-- [ ] `claimFlowDividends` (no LvstToken function)
-- [ ] `claimAndStakeLossFlow` (no combined function; use `claimLossFlow` + `skeletonStake` separately today)
-
----
-
-## Slice 5 — bridge (later)
-
-- [ ] `bridge/` callable edge when CLI/UI gateway needs it
-- [ ] Action hints on panel (`canStreamYes`, `canClaim`, etc.) — read-only flags deferred until write slice
-
----
-
-## Slice 6 — live stream-earnings ticker (consumer UX)
-
-Show each funder, in real time, what their active stream is earning per second — the consumer
-view of the contracts funding accumulator. Depends on the contracts funding module exposing
-`pendingShares(user, vault, side)` (the zero-mutation projection of `rate_u · (G − gPaid_u)`).
-
-- [ ] Read `pendingShares` + the inputs needed to extrapolate locally (`rate_u`, `gPaid_u`,
-      side `G`/`sideRate`/`lastAdvance`, current price) into an `OptionsStreamAccrualView`.
-- [ ] Client-side per-second tick: between RPC reads, project pending shares forward with the
-      same formula the contract uses (shares = `rate_u · (G_now − gPaid_u)`, de-scaled), so the
-      ticker animates each second without spamming the chain.
-- [ ] Panel fields: pending shares now, $ value now, and current accrual rate (shares/sec) —
-      note shares/sec falls as the side's pool (and price) grows, exactly per the bonding curve.
-- [ ] Read-only, reconstructable, no durable state (same purity law as the rest of options).
-- [ ] Blocked until the contracts funding-pricing slice ships `pendingShares`.
-
----
-
-## Reads must cover
-
-- [x] Markets, vaults, vault pools
-- [x] User YES and NO positions (separate)
-- [x] Funding rates per side
-- [x] LVST balance, staked, pending dividends, loss claims
-- [ ] Resolved vault list helper (`listResolvedVaults`) — deferred; single-vault resolved projection works via transport data
-
----
-
-## Tests & guards
-
-- [x] Fake transport tests for public read APIs
-- [x] Contracts transport mapping tests (`test/read/contracts-transport.test.ts`)
-- [x] Negative-path tests for missing market/vault/LVST account
-- [x] Public export contract test
-- [x] Architecture guards (Effect purity, forbidden imports, empty files)
-- [x] Runtime tests (`test/runtime/runtime.test.ts`)
-- [x] Write transport tests (`test/write/funding.test.ts`, `test/write/flow.test.ts`)
-
----
-
-## Hardening (every slice)
-
-Run after touching this package. Full checklist: [repo TODO § Hardening loop](../../../README.md#hardening-loop).
-
-- [x] check / build / test for `packages/options` (`check` blocked on missing `vaultFundingAbi` — migrate to `addressDriverAbi`; use `pool: threads` for vitest)
-- [x] Browser-safe import scan; no `Effect.run*` in `src/`
-- [x] Negative-path test for every new public API
-- [x] Update this `docs/TODO.md`
-
----
-
-## Workspace hygiene
-
-Canonical package path is `packages/options`. Root `package.json` workspaces include `packages/*` alongside legacy `packages-re/*`.
-
-- [x] Use root workspace dependencies; do not add local Node-only runtime APIs to `src/`.
-
----
-
-## Noted — out of scope (do not start here)
-
-`createContractsOptionsWriteTransport` + injected `ContractWriter` (`src/write/transport.ts`) is over-engineered now that `@livestreak/wallet` is deterministic (same config+seed → same account). A future slice should import the wallet directly and drop the writer port. **Not started in this hygiene pass.**
-
-**Funding driver drift:** generated contracts export `addressDriverAbi` (with `fund` / `stop` / `activeStream`), not `vaultFundingAbi` (`setFundingRate` / `fundingActive`). Options read/write funding transport still targets the old surface — needs a dedicated options slice, not a rename-only hygiene fix.
+```
+cd packages/options && npm run check && npm run build && npm test
+```

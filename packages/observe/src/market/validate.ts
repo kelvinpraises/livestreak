@@ -16,6 +16,20 @@ export const decodeWalletInit = (
     )
   );
 
+export const validateMarketRunId = (
+  runId: string
+): Effect.Effect<string, LiveStreakConfigError> => {
+  if (typeof runId !== "string" || runId.trim().length === 0) {
+    return Effect.fail(
+      new LiveStreakConfigError({
+        message: "market.runId must be a non-empty string"
+      })
+    );
+  }
+
+  return Effect.succeed(runId);
+};
+
 export const validateObserveRunMarketConfig = (
   input: ObserveRunMarketConfig
 ): Effect.Effect<ObserveRunMarketConfig, LiveStreakConfigError> =>
@@ -42,23 +56,6 @@ export const validateObserveRunMarketConfig = (
       return yield* Effect.fail(
         new LiveStreakConfigError({
           message: "market.seed must be a non-empty string or Uint8Array"
-        })
-      );
-    }
-
-    if (typeof input.deriveStreamId !== "function") {
-      return yield* Effect.fail(
-        new LiveStreakConfigError({
-          message: "market.deriveStreamId must be a function"
-        })
-      );
-    }
-
-    const streamId = input.deriveStreamId("validation-probe");
-    if (!isBytes32(streamId)) {
-      return yield* Effect.fail(
-        new LiveStreakConfigError({
-          message: "market.deriveStreamId must return a bytes32 hex string"
         })
       );
     }
@@ -91,9 +88,6 @@ export const validateObserveRunMarketOptions = (
 
 const isEvmAddress = (value: string): value is `0x${string}` =>
   /^0x[0-9a-fA-F]{40}$/.test(value);
-
-const isBytes32 = (value: string): value is `0x${string}` =>
-  /^0x[0-9a-fA-F]{64}$/.test(value);
 
 const normalizeAddress = (value: `0x${string}`): `0x${string}` =>
   value.toLowerCase() as `0x${string}`;

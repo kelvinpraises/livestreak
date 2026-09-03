@@ -50,8 +50,7 @@ export async function deployStreaming(
       `${LABEL}.caller`
     );
 
-    // Drivers are wired in the `wire` scope: the vault-aware AddressDriver needs the Vault address
-    // (deployed in `protocol`), and the Vault must register as the receiver driver first.
+    // MarketDriver is wired in the `wire` scope (receiver driver registered first).
     console.log("  Streaming core deployed.");
 
     return {

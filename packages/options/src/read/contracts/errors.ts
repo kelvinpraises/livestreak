@@ -5,10 +5,26 @@ import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core"
 export type ContractsReadEntity =
   | "market"
   | "vault"
-  | "user position"
-  | "funding stream"
+  | "vault share totals"
+  | "owner tokens"
+  | "nft"
   | "LVST account"
-  | "protocol summary";
+  | "protocol summary"
+  | "claimable"
+  | "loss claimable"
+  | "pot"
+  | "collected"
+  | "account vault ids"
+  | "winning side"
+  | "board"
+  | "share price"
+  | "pending shares"
+  | "USDC address"
+  | "NFT balance"
+  | "ownerOf"
+  | "getApproved"
+  | "isApprovedForAll"
+  | "stream state";
 
 export const contractsReadNotFound = (
   entity: ContractsReadEntity,

@@ -1,9 +1,10 @@
 import type { Hex } from "viem";
 import { describe, expect, it } from "vitest";
-import { createPaymasterSigner } from "#aa/paymaster-signer.js";
-import { handleBundlerRpc, handlePaymasterRpc } from "#aa/routes.js";
-import { createAaRouteDeps } from "#aa/routes.js";
-import { defaultHostServerConfig } from "../src/descriptor/config.js";
+import { createPaymasterSigner } from "#services/aa/paymaster.js";
+import { handleBundlerRpc, handlePaymasterRpc } from "#services/aa/routes.js";
+import { createAaRouteDeps } from "#services/aa/routes.js";
+import { defaultHostServerConfig } from "#config/host.js";
+import { readAaServerConfig } from "#services/aa/chains.js";
 
 const TEST_EXECUTOR_KEY =
   "0x0000000000000000000000000000000000000000000000000000000000000001" as Hex;
@@ -29,13 +30,14 @@ const createTestAaDeps = () => {
 };
 
 describe("aa bundler proxy", () => {
-  it("returns 503 JSON-RPC error when Alto is not running for the chain", async () => {
+  it("returns 503 JSON-RPC error when bundler URL is not configured for the chain", async () => {
+    const aa = readAaServerConfig(defaultHostServerConfig());
     const response = await handleBundlerRpc("local", {
       jsonrpc: "2.0",
       method: "eth_chainId",
       params: [],
       id: 42
-    });
+    }, aa);
 
     expect(response.ok).toBe(true);
     if (response.ok) {

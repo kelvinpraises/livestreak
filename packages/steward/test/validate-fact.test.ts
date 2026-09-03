@@ -23,6 +23,19 @@ describe("steward fact validation", () => {
     expect(validateStewardFact(fact)).toEqual(fact);
   });
 
+  it("accepts memory-sourced recalled facts", () => {
+    const fact = {
+      id: "fact-memory",
+      subject,
+      source: "memory" as const,
+      key: "prior_bookmaker_flag",
+      value: true
+    };
+
+    expect(isStewardFact(fact)).toBe(true);
+    expect(validateStewardFact(fact)).toEqual(fact);
+  });
+
   it("accepts optional TEE attestation metadata on facts", () => {
     const fact = {
       id: "fact-tee",

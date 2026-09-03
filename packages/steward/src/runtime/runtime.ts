@@ -9,8 +9,13 @@ import {
   type StewardRuntimeInput
 } from "./config.js";
 import { refreshWatchedSubjects, toRuntimeLastError } from "./refresh.js";
-import type { ContractFactSource, HostFactSource, ObserveFactSource } from "./sources.js";
-import type { StewardActionPlanSink } from "./sink.js";
+import type {
+  ContractFactSource,
+  HostFactSource,
+  MemoryFactSource,
+  ObserveFactSource
+} from "./sources.js";
+import type { StewardActionPlanSink, StewardMemorySink } from "./sink.js";
 import { createStewardRuntimeStore, type StewardRuntimeStore } from "./store.js";
 
 // --- exports ---
@@ -33,7 +38,9 @@ class StewardRuntimeFacade implements StewardRuntime {
   private readonly contractFactSource: ContractFactSource;
   private readonly hostFactSource: HostFactSource;
   private readonly observeFactSource: ObserveFactSource;
+  private readonly memoryFactSource: MemoryFactSource;
   private readonly actionPlanSink: StewardActionPlanSink;
+  private readonly memorySink: StewardMemorySink;
   private readonly listeners = new Set<(snapshot: StewardStateSnapshot) => void>();
   private pollingTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -43,7 +50,9 @@ class StewardRuntimeFacade implements StewardRuntime {
     this.contractFactSource = input.contractFactSource;
     this.hostFactSource = input.hostFactSource;
     this.observeFactSource = input.observeFactSource;
+    this.memoryFactSource = input.memoryFactSource;
     this.actionPlanSink = input.actionPlanSink;
+    this.memorySink = input.memorySink;
   }
 
   readSnapshot(): StewardStateSnapshot {
@@ -64,9 +73,14 @@ class StewardRuntimeFacade implements StewardRuntime {
         sources: {
           contract: this.contractFactSource,
           host: this.hostFactSource,
-          observe: this.observeFactSource
+          observe: this.observeFactSource,
+          memory: this.memoryFactSource
         }
       });
+
+      for (const group of result.perSubject) {
+        await this.memorySink.remember(group);
+      }
 
       if (result.pendingActionPlans.length > 0) {
         await this.actionPlanSink.submit(result.pendingActionPlans);

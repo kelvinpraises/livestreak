@@ -23,9 +23,8 @@ export const refreshMarketSnapshot = async (
 
 export const refreshVaultSnapshot = async (
   transport: OptionsReadTransport,
-  vaultId: VaultId,
-  user?: UserAddress
-): Promise<OptionsVaultSnapshot> => readVaultSnapshot(transport, vaultId, user);
+  vaultId: VaultId
+): Promise<OptionsVaultSnapshot> => readVaultSnapshot(transport, vaultId);
 
 export const refreshUserSnapshot = async (
   transport: OptionsReadTransport,

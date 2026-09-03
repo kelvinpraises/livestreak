@@ -1,5 +1,4 @@
 import type { ObserveRunMarketConfig } from "#market/types.js";
-import { testPlaceholderDeriveStreamId } from "#market/types.js";
 
 export const minimalEvmWalletInit = () =>
   ({
@@ -23,6 +22,5 @@ export const minimalEvmMarketRegistrationConfig = (runId: string): ObserveRunMar
   walletInit: minimalEvmWalletInit(),
   seed: "test-seed-bytes",
   marketRegistryAddress: "0x00000000000000000000000000000000000000bb",
-  title: `Market for ${runId}`,
-  deriveStreamId: testPlaceholderDeriveStreamId
+  title: `Market for ${runId}`
 });

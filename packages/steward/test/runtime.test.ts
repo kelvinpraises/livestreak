@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { createStewardRuntime } from "../src/runtime/runtime.js";
 import {
+  emptyMemoryPorts,
   makeFakeContractFactSource,
   makeFakeHostFactSource,
+  makeFakeMemoryFactSource,
   makeFakeObserveFactSource,
-  makeRecordingActionPlanSink
+  makeRecordingActionPlanSink,
+  makeRecordingMemorySink
 } from "./fakes/runtime-sources.js";
 
 const subject = {
@@ -50,6 +53,7 @@ const baseConfig = {
 describe("steward runtime", () => {
   it("runs subject through facts, findings, decisions, action plans, and sink", async () => {
     const sink = makeRecordingActionPlanSink();
+    const memory = emptyMemoryPorts();
     const runtime = createStewardRuntime({
       config: baseConfig,
       contractFactSource: makeFakeContractFactSource({}),
@@ -66,6 +70,7 @@ describe("steward runtime", () => {
         ]
       }),
       observeFactSource: makeFakeObserveFactSource({}),
+      ...memory,
       actionPlanSink: sink
     });
 
@@ -75,16 +80,19 @@ describe("steward runtime", () => {
     expect(snapshot.latestDecisions?.[0]?.action).toBe("openThread");
     expect(sink.plans).toHaveLength(1);
     expect(sink.plans[0]?.hostActions[0]?.kind).toBe("openThread");
+    expect(memory.memorySink.remembered).toHaveLength(1);
     expect(runtime.readPanel().summary?.findingCount).toBe(1);
   });
 
   it("produces no findings or plans when all fact sources return empty", async () => {
     const sink = makeRecordingActionPlanSink();
+    const memory = emptyMemoryPorts();
     const runtime = createStewardRuntime({
       config: baseConfig,
       contractFactSource: makeFakeContractFactSource({}),
       hostFactSource: makeFakeHostFactSource({}),
       observeFactSource: makeFakeObserveFactSource({}),
+      ...memory,
       actionPlanSink: sink
     });
 
@@ -93,10 +101,12 @@ describe("steward runtime", () => {
     expect(snapshot.latestFindings).toEqual([]);
     expect(snapshot.latestDecisions).toEqual([]);
     expect(sink.plans).toEqual([]);
+    expect(memory.memorySink.remembered).toHaveLength(1);
   });
 
   it("notifies subscribers when the snapshot changes", async () => {
     const sink = makeRecordingActionPlanSink();
+    const memory = emptyMemoryPorts();
     const runtime = createStewardRuntime({
       config: baseConfig,
       contractFactSource: makeFakeContractFactSource({}),
@@ -112,6 +122,7 @@ describe("steward runtime", () => {
         ]
       }),
       observeFactSource: makeFakeObserveFactSource({}),
+      ...memory,
       actionPlanSink: sink
     });
 
@@ -130,11 +141,13 @@ describe("steward runtime", () => {
 
   it("starts polling only when refreshIntervalMs is configured", async () => {
     const sink = makeRecordingActionPlanSink();
+    const memory = emptyMemoryPorts();
     const runtime = createStewardRuntime({
       config: { ...baseConfig, refreshIntervalMs: 50 },
       contractFactSource: makeFakeContractFactSource({}),
       hostFactSource: makeFakeHostFactSource({}),
       observeFactSource: makeFakeObserveFactSource({}),
+      ...memory,
       actionPlanSink: sink
     });
 

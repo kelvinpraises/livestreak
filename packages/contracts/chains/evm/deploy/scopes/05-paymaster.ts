@@ -27,14 +27,8 @@ export async function deployPaymaster(
   const entryPoint = aa.contracts.entryPoint as Address;
 
   if (!process.env.OPERATOR_ADDRESS) {
-    return {
-      status: "failed",
-      error:
-        `OPERATOR_ADDRESS is required to deploy the paymaster. ` +
-        `It must match the key the server uses to sign UserOps (OPERATOR_KEY), ` +
-        `otherwise the paymaster's verifyingSigner will not match → AA34 at runtime. ` +
-        `Run: OPERATOR_ADDRESS=0x... DEPLOYER_PRIVATE_KEY=0x... npm run deploy -- --name ${config.chain}`
-    };
+    process.env.OPERATOR_ADDRESS = config.deployer;
+    console.log(`  OPERATOR_ADDRESS unset — using deployer ${config.deployer}`);
   }
   const verifyingSigner = process.env.OPERATOR_ADDRESS as Address;
   console.log(`  EntryPoint: ${entryPoint}`);
@@ -60,7 +54,7 @@ export async function deployPaymaster(
     functionName: "depositTo",
     args: [paymaster],
     value: parseEther("0.05")
-  });
+  } as never);
   await client.waitForTransactionReceipt({ hash: depositHash });
   console.log("  Deposited 0.05 ETH");
 
@@ -73,7 +67,7 @@ export async function deployPaymaster(
     functionName: "addStake",
     args: [86400],
     value: parseEther("0.01")
-  });
+  } as never);
   await client.waitForTransactionReceipt({ hash: stakeHash });
   console.log("  Staked 0.01 ETH");
 
@@ -81,7 +75,8 @@ export async function deployPaymaster(
     status: "completed",
     deployedAt: new Date().toISOString(),
     contracts: {
-      verifyingPaymaster: paymaster
+      verifyingPaymaster: paymaster,
+      verifyingSigner
     }
   };
 }

@@ -2,70 +2,53 @@
 
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import type { VaultId } from "../model/ids.js";
-import type { OptionsVaultSide } from "../model/vault.js";
-import { validateOptionsVaultSide } from "../model/vault.js";
-import type { LivestreakContractAddresses } from "../read/contracts/addresses.js";
-import { sideToSolidityValue } from "../read/contracts/sides.js";
-import type { LivestreakContractAbis } from "../read/contracts/transport.js";
-import { validateVaultIdForContracts } from "../read/contracts/validation.js";
+import type { OptionsContractAddresses } from "../read/contracts/addresses.js";
+import type { OptionsContractAbis } from "../read/contracts/transport.js";
 import type { ContractWriter } from "./transport.js";
 
-export type ClaimLossFlowInput = {
-  readonly vaultId: VaultId;
-  readonly side: OptionsVaultSide;
-};
-
-export type StakeFlowInput = {
+export type StakeLvstInput = {
   readonly amount: bigint;
 };
 
-export type UnstakeFlowInput = {
+export type UnstakeLvstInput = {
   readonly amount: bigint;
 };
 
-type FlowWriteDeps = {
+type LvstWriteDeps = {
   readonly writer: ContractWriter;
-  readonly addresses: LivestreakContractAddresses;
-  readonly abis: Pick<LivestreakContractAbis, "LvstToken">;
+  readonly addresses: OptionsContractAddresses;
+  readonly abis: Pick<OptionsContractAbis, "Treasury">;
 };
 
-export const claimLossFlow = async (
-  deps: FlowWriteDeps,
-  input: ClaimLossFlowInput
-): Promise<unknown> => {
-  const vaultBytes = validateVaultIdForContracts(input.vaultId);
-  const side = sideToSolidityValue(validateOptionsVaultSide(input.side));
-
-  return deps.writer.write({
-    address: deps.addresses.lvstToken,
-    abi: deps.abis.LvstToken,
-    functionName: "claimLossFlow",
-    args: [vaultBytes, side]
-  });
-};
-
-export const stakeFlow = async (deps: FlowWriteDeps, input: StakeFlowInput): Promise<unknown> => {
+export const stakeLvst = async (deps: LvstWriteDeps, input: StakeLvstInput): Promise<unknown> => {
   const amount = requirePositiveBigInt(input.amount, "amount");
 
   return deps.writer.write({
-    address: deps.addresses.lvstToken,
-    abi: deps.abis.LvstToken,
-    functionName: "skeletonStake",
+    address: deps.addresses.treasury,
+    abi: deps.abis.Treasury,
+    functionName: "stakeLvst",
     args: [amount]
   });
 };
 
-export const unstakeFlow = async (deps: FlowWriteDeps, input: UnstakeFlowInput): Promise<unknown> => {
+export const unstakeLvst = async (deps: LvstWriteDeps, input: UnstakeLvstInput): Promise<unknown> => {
   const amount = requirePositiveBigInt(input.amount, "amount");
 
   return deps.writer.write({
-    address: deps.addresses.lvstToken,
-    abi: deps.abis.LvstToken,
-    functionName: "skeletonUnstake",
+    address: deps.addresses.treasury,
+    abi: deps.abis.Treasury,
+    functionName: "unstakeLvst",
     args: [amount]
   });
 };
+
+export const claimDividends = async (deps: LvstWriteDeps): Promise<unknown> =>
+  deps.writer.write({
+    address: deps.addresses.treasury,
+    abi: deps.abis.Treasury,
+    functionName: "claimDividends",
+    args: []
+  });
 
 // --- helpers ---
 

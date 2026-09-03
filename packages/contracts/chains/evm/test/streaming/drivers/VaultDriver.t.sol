@@ -137,16 +137,20 @@ contract VaultDriverTest is Test {
         assertEq(usdc.balanceOf(creator) - before, paid);
     }
 
-    function test_stopSeed_closesLane() public {
+    function test_stopSeed_closesLaneAndRefundsUnspent() public {
         bytes32 vaultId =
             VaultDriverHarness.createVault(vaultDriver, usdc, creator, marketId, "Q?", Side.No, RATE, SEED_DEPOSIT);
 
-        vm.warp(START + 5);
+        vm.warp(START + 5); // 5 of 10 USDC streamed at rate 1e6; ~5 USDC unspent
+        uint256 before = usdc.balanceOf(creator);
         vm.prank(creator);
-        vaultDriver.stopSeed(vaultId);
+        uint256 refunded = vaultDriver.stopSeed(vaultId);
 
         uint256 account = vaultDriver.seedAccount(creator, vaultId);
         (uint256 rate,,,,) = vault.getPosition(vaultId, Side.No, account);
         assertEq(rate, 0, "board lane cleared");
+        assertGt(refunded, 0, "unspent seed bond refunded");
+        assertEq(usdc.balanceOf(creator) - before, refunded, "refund paid to the creator");
+        assertApproxEqAbs(refunded, 5 * RATE, RATE, "roughly the unstreamed half of the bond");
     }
 }

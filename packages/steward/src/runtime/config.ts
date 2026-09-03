@@ -5,8 +5,8 @@ import type { StewardDecisionPolicy } from "../decision/types.js";
 import type { StewardSubject } from "../model/subject.js";
 import type { StewardRuleset } from "../rules/types.js";
 import { isStewardSubject, validateStewardSubject } from "../validate/subject.js";
-import type { ContractFactSource, HostFactSource, ObserveFactSource } from "./sources.js";
-import type { StewardActionPlanSink } from "./sink.js";
+import type { ContractFactSource, HostFactSource, MemoryFactSource, ObserveFactSource } from "./sources.js";
+import type { StewardActionPlanSink, StewardMemorySink } from "./sink.js";
 
 // --- exports ---
 
@@ -24,7 +24,9 @@ export interface StewardRuntimeInput {
   readonly contractFactSource: ContractFactSource;
   readonly hostFactSource: HostFactSource;
   readonly observeFactSource: ObserveFactSource;
+  readonly memoryFactSource: MemoryFactSource;
   readonly actionPlanSink: StewardActionPlanSink;
+  readonly memorySink: StewardMemorySink;
 }
 
 export const validateStewardRuntimeConfig = (input: unknown): StewardRuntimeConfig => {

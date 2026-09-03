@@ -3,7 +3,7 @@ import type { TeeAttestationRef } from "./tee.js";
 
 // --- exports ---
 
-export const STEWARD_FACT_SOURCES = ["contract", "host", "observe"] as const;
+export const STEWARD_FACT_SOURCES = ["contract", "host", "observe", "memory"] as const;
 
 export type StewardFactSource = (typeof STEWARD_FACT_SOURCES)[number];
 

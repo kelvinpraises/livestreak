@@ -1,19 +1,39 @@
 // --- exports ---
 
 export {
-  type ClaimLossFlowInput,
-  claimLossFlow,
-  type StakeFlowInput,
-  stakeFlow,
-  type UnstakeFlowInput,
-  unstakeFlow
+  type ClaimLossLvstInput,
+  claimLossLvst,
+  type WithdrawInput,
+  type WithdrawManyInput,
+  withdraw,
+  withdrawMany
+} from "./claim.js";
+export {
+  type FundStreamInput,
+  fundStream,
+  type LaneWriteInput,
+  type SetLanesInput,
+  setLanes,
+  type StopAllFundingInput,
+  stopAllFunding,
+  type StopFundingInput,
+  stopFunding
+} from "./funding.js";
+export {
+  claimDividends,
+  type StakeLvstInput,
+  stakeLvst,
+  type UnstakeLvstInput,
+  unstakeLvst
 } from "./lvst.js";
 export {
-  type SetFundingRateInput,
-  setFundingRate,
-  type StopFundingStreamInput,
-  stopFundingStream
-} from "./funding.js";
+  type ApproveNftInput,
+  approveNft,
+  type SetApprovalForAllInput,
+  setApprovalForAll,
+  type TransferNftInput,
+  transferNft
+} from "./nft.js";
 export {
   type ContractWriteRequest,
   type ContractWriter,

@@ -15,10 +15,15 @@ export interface ObserveFactSource {
   readonly readFacts: (subject: StewardSubject) => Promise<readonly unknown[]>;
 }
 
+export interface MemoryFactSource {
+  readonly readFacts: (subject: StewardSubject) => Promise<readonly unknown[]>;
+}
+
 export interface StewardFactSources {
   readonly contract: ContractFactSource;
   readonly host: HostFactSource;
   readonly observe: ObserveFactSource;
+  readonly memory: MemoryFactSource;
 }
 
 export type StewardFactSourceReader = (subject: StewardSubject) => Promise<readonly StewardFact[]>;

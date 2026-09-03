@@ -2,13 +2,15 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it } from "vitest";
 
 import {
-  emptySidePosition,
-  hasVaultExposure,
+  BASE_PRICE,
+  CURVE_K,
   isOptionsVaultSide,
+  priceOf,
+  sharesPerUsdc,
   totalVaultPool,
   validateOptionsVaultSide
 } from "../src/model/index.js";
-import { fixtureResolvedPosition, fixtureResolvedVault } from "./helpers/fake-transport.js";
+import { fixtureResolvedVault, fixtureVault } from "./helpers/fake-transport.js";
 
 describe("options model", () => {
   it("allows YES and NO sides", () => {
@@ -23,31 +25,30 @@ describe("options model", () => {
     expect(() => validateOptionsVaultSide("YES")).toThrow(LiveStreakConfigError);
   });
 
-  it("supports user positions with both YES and NO exposure", () => {
-    const position = fixtureResolvedPosition();
-
-    expect(hasVaultExposure(position)).toBe(true);
-    expect(position.positions.yes.shares).toBeGreaterThan(0n);
-    expect(position.positions.no.shares).toBeGreaterThan(0n);
-  });
-
-  it("models resolved vault winning side claimable and losing side loss claim", () => {
-    const vault = fixtureResolvedVault();
-    const position = fixtureResolvedPosition();
-
-    expect(vault.outcome).toBe("yes");
-    expect(position.positions.yes.claimable).toBeGreaterThan(0n);
-    expect(position.positions.no.lossClaimable).toBeGreaterThan(0n);
-  });
-
   it("computes total vault pool from YES and NO pools", () => {
     const vault = fixtureResolvedVault();
 
     expect(totalVaultPool(vault.pools)).toBe(597_000_000n);
   });
 
-  it("provides empty side positions for both sides", () => {
-    expect(emptySidePosition("yes").side).toBe("yes");
-    expect(emptySidePosition("no").side).toBe("no");
+  it("computes priceOf from pool size using bonding curve constants", () => {
+    expect(priceOf(0n)).toBe(BASE_PRICE);
+    expect(priceOf(CURVE_K)).toBe(BASE_PRICE * 2n);
+  });
+
+  it("computes sharesPerUsdc from pool price", () => {
+    const pool = 50_000_000n;
+    const expectedPrice = BASE_PRICE + (BASE_PRICE * pool) / CURVE_K;
+
+    expect(sharesPerUsdc(pool)).toBe(1_000_000n / expectedPrice);
+    expect(sharesPerUsdc(0n)).toBe(10n);
+  });
+
+  it("models open vault pool composition", () => {
+    const vault = fixtureVault();
+
+    expect(vault.pools.yes).toBe(94_000_000n);
+    expect(vault.pools.no).toBe(185_000_000n);
+    expect(totalVaultPool(vault.pools)).toBe(279_000_000n);
   });
 });

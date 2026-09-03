@@ -10,6 +10,7 @@
   "include": [
     "kit/**/*.ts",
     "chains/evm/index.ts",
+    "chains/evm/abis-entry.ts",
     "chains/evm/abis.ts",
     "chains/evm/addresses.ts",
     "chains/evm/contract.ts",

@@ -1730,9 +1730,40 @@ export const marketDriverAbi = [
   },
   {
     type: 'function',
+    inputs: [{ name: 'index', internalType: 'uint256', type: 'uint256' }],
+    name: 'tokenByIndex',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'owner', internalType: 'address', type: 'address' },
+      { name: 'index', internalType: 'uint256', type: 'uint256' },
+    ],
+    name: 'tokenOfOwnerByIndex',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [{ name: 'tokenId', internalType: 'uint256', type: 'uint256' }],
     name: 'tokenURI',
     outputs: [{ name: '', internalType: 'string', type: 'string' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'owner', internalType: 'address', type: 'address' }],
+    name: 'tokensOfOwner',
+    outputs: [{ name: 'tokenIds', internalType: 'uint256[]', type: 'uint256[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [],
+    name: 'totalSupply',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'view',
   },
   {
@@ -1960,6 +1991,13 @@ export const marketRegistryAbi = [
   },
   {
     type: 'function',
+    inputs: [],
+    name: 'STREAM_LOCK_GRACE',
+    outputs: [{ name: '', internalType: 'uint64', type: 'uint64' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [
       { name: 'marketId', internalType: 'bytes32', type: 'bytes32' },
       { name: 'vaultId', internalType: 'bytes32', type: 'bytes32' },
@@ -2004,6 +2042,24 @@ export const marketRegistryAbi = [
     inputs: [{ name: 'marketId', internalType: 'bytes32', type: 'bytes32' }],
     name: 'getVaultIds',
     outputs: [{ name: '', internalType: 'bytes32[]', type: 'bytes32[]' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'marketId', internalType: 'bytes32', type: 'bytes32' },
+      { name: 'scheme', internalType: 'enum MarketRegistry.StorageScheme', type: 'uint8' },
+      { name: 'id', internalType: 'string', type: 'string' },
+    ],
+    name: 'goLive',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: 'marketId', internalType: 'bytes32', type: 'bytes32' }],
+    name: 'isLocked',
+    outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
     stateMutability: 'view',
   },
   {
@@ -2074,6 +2130,30 @@ export const marketRegistryAbi = [
   },
   {
     type: 'function',
+    inputs: [
+      { name: 'marketId', internalType: 'bytes32', type: 'bytes32' },
+      { name: 'scheme', internalType: 'enum MarketRegistry.StorageScheme', type: 'uint8' },
+      { name: 'id', internalType: 'string', type: 'string' },
+    ],
+    name: 'setEnded',
+    outputs: [],
+    stateMutability: 'nonpayable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: '', internalType: 'bytes32', type: 'bytes32' }],
+    name: 'streamState',
+    outputs: [
+      { name: 'status', internalType: 'enum MarketRegistry.StreamStatus', type: 'uint8' },
+      { name: 'scheme', internalType: 'enum MarketRegistry.StorageScheme', type: 'uint8' },
+      { name: 'id', internalType: 'string', type: 'string' },
+      { name: 'updatedAt', internalType: 'uint64', type: 'uint64' },
+      { name: 'endedAt', internalType: 'uint64', type: 'uint64' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     inputs: [{ name: 'newOwner', internalType: 'address', type: 'address' }],
     name: 'transferOwnership',
     outputs: [],
@@ -2105,6 +2185,38 @@ export const marketRegistryAbi = [
       { name: 'newOwner', internalType: 'address', type: 'address', indexed: true },
     ],
     name: 'OwnershipTransferred',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'marketId', internalType: 'bytes32', type: 'bytes32', indexed: true },
+      {
+        name: 'scheme',
+        internalType: 'enum MarketRegistry.StorageScheme',
+        type: 'uint8',
+        indexed: false,
+      },
+      { name: 'id', internalType: 'string', type: 'string', indexed: false },
+      { name: 'endedAt', internalType: 'uint64', type: 'uint64', indexed: false },
+    ],
+    name: 'StreamEnded',
+  },
+  {
+    type: 'event',
+    anonymous: false,
+    inputs: [
+      { name: 'marketId', internalType: 'bytes32', type: 'bytes32', indexed: true },
+      {
+        name: 'scheme',
+        internalType: 'enum MarketRegistry.StorageScheme',
+        type: 'uint8',
+        indexed: false,
+      },
+      { name: 'id', internalType: 'string', type: 'string', indexed: false },
+      { name: 'updatedAt', internalType: 'uint64', type: 'uint64', indexed: false },
+    ],
+    name: 'StreamLive',
   },
   {
     type: 'event',
@@ -3637,7 +3749,7 @@ export const vaultDriverAbi = [
     type: 'function',
     inputs: [{ name: 'vaultId', internalType: 'bytes32', type: 'bytes32' }],
     name: 'stopSeed',
-    outputs: [],
+    outputs: [{ name: 'refunded', internalType: 'uint256', type: 'uint256' }],
     stateMutability: 'nonpayable',
   },
   {

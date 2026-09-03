@@ -2,8 +2,8 @@
 
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import type { MarketId, UserAddress, VaultId } from "../../model/ids.js";
-import type { LivestreakContractAddresses } from "./addresses.js";
+import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
+import type { OptionsContractAddresses } from "./addresses.js";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 const BYTES32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -44,14 +44,25 @@ export const validateMarketIdForContracts = (marketId: MarketId): `0x${string}` 
 export const validateVaultIdForContracts = (vaultId: VaultId): `0x${string}` =>
   validateBytes32Id(vaultId, "vaultId");
 
-export const validateLivestreakContractAddresses = (
-  addresses: LivestreakContractAddresses
-): LivestreakContractAddresses => ({
+export const validateTokenIdForContracts = (tokenId: TokenId): bigint => {
+  if (typeof tokenId !== "bigint" || tokenId < 0n) {
+    throw new LiveStreakConfigError({
+      message: "Invalid tokenId",
+      metadata: { details: String(tokenId) }
+    });
+  }
+
+  return tokenId;
+};
+
+export const validateOptionsContractAddresses = (
+  addresses: OptionsContractAddresses
+): OptionsContractAddresses => ({
   marketRegistry: validateContractAddress(addresses.marketRegistry, "marketRegistry"),
-  bookmakerRegistry: validateContractAddress(addresses.bookmakerRegistry, "bookmakerRegistry"),
-  vaultFactory: validateContractAddress(addresses.vaultFactory, "vaultFactory"),
   vault: validateContractAddress(addresses.vault, "vault"),
-  vaultFunding: validateContractAddress(addresses.vaultFunding, "vaultFunding"),
+  marketDriver: validateContractAddress(addresses.marketDriver, "marketDriver"),
+  stewardRegistry: validateContractAddress(addresses.stewardRegistry, "stewardRegistry"),
+  treasury: validateContractAddress(addresses.treasury, "treasury"),
   lvstToken: validateContractAddress(addresses.lvstToken, "lvstToken"),
-  stewardRegistry: validateContractAddress(addresses.stewardRegistry, "stewardRegistry")
+  dripsStreaming: validateContractAddress(addresses.dripsStreaming, "dripsStreaming")
 });

@@ -1,10 +1,11 @@
 import { Schema } from "effect";
-import { HostPolicyRequest } from "./policy.js";
-import { HostCreateSessionRequest } from "./session.js";
-import { HostCacheReceiptRequest } from "./cache.js";
-import { ForumAppendMessageRequest, ForumCreateThreadRequest } from "./forum.js";
+import { HostPolicyRequest } from "./media/policy.js";
+import { HostCreateSessionRequest } from "./media/session.js";
+import { HostCacheReceiptRequest } from "./media/evidence.js";
 import { AaPaymasterRequest } from "./aa.js";
-import { HostSimilarityIndexRequest, HostSimilarityRequest } from "./similarity.js";
+import { HostSimilarityIndexRequest, HostSimilarityRequest } from "./discovery.js";
+import { MemoryAccessRequest } from "./memory.js";
+import { ContentBlobStoreRequest } from "./walrus.js";
 
 // --- exports ---
 
@@ -14,15 +15,15 @@ export const decodeHostCreateSessionRequest = Schema.decodeUnknownEither(HostCre
 
 export const decodeHostCacheReceiptRequest = Schema.decodeUnknownEither(HostCacheReceiptRequest);
 
-export const decodeForumCreateThreadRequest = Schema.decodeUnknownEither(ForumCreateThreadRequest);
-
-export const decodeForumAppendMessageRequest = Schema.decodeUnknownEither(ForumAppendMessageRequest);
-
 export const decodeAaPaymasterRequest = Schema.decodeUnknownEither(AaPaymasterRequest);
 
-export const decodeHostSimilarityRequest = Schema.decodeUnknownEither(HostSimilarityRequest);
+export const decodeHostDiscoveryRequest = Schema.decodeUnknownEither(HostSimilarityRequest);
 
-export const decodeHostSimilarityIndexRequest = Schema.decodeUnknownEither(HostSimilarityIndexRequest);
+export const decodeHostDiscoveryIndexRequest = Schema.decodeUnknownEither(HostSimilarityIndexRequest);
+
+export const decodeMemoryAccessRequest = Schema.decodeUnknownEither(MemoryAccessRequest);
+
+export const decodeContentBlobStoreRequest = Schema.decodeUnknownEither(ContentBlobStoreRequest);
 
 export const validationErrorMessage = (error: unknown): string => {
   if (error instanceof Error && error.message.trim().length > 0) {

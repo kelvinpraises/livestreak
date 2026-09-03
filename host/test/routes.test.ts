@@ -1,28 +1,18 @@
 import type { EndpointDescriptor } from "@livestreak/host";
-import { describe, expect, it } from "vitest";
-import { createHostRouteDeps, createHostRoutes } from "#server/routes.js";
-import { matchRoute } from "#server/http.js";
-import { handlePolicyEvaluate } from "#policy/routes.js";
-import { handleCacheReceipt } from "#cache/routes.js";
-import { handleCreateSession, handleGetManifest } from "#sessions/routes.js";
-import { createCacheStore } from "#cache/store.js";
-import { createManifestStore } from "#manifests/store.js";
-import { createSessionStore } from "#sessions/store.js";
-import { defaultHostServerConfig } from "../src/descriptor/config.js";
-
-const validCreateThreadBody = {
-  title: "Steward discussion",
-  stewardId: "stw_01",
-  initialMessage: {
-    author: { kind: "steward", ref: "stw_01" },
-    body: "Opening the thread"
-  }
-} as const;
-
-const validAppendMessageBody = {
-  author: { kind: "observer", ref: "obs_01" },
-  body: "Follow-up observation"
-} as const;
+import { describe, expect, it, vi } from "vitest";
+import { createHostRouteDeps, createHostRoutes } from "#api/server.js";
+import { matchRoute } from "#api/server.js";
+import { handleMemoryAccess } from "#services/walrus/memory/routes.js";
+import { handlePolicyEvaluate } from "#services/media/policy-routes.js";
+import {
+  handleCacheReceipt,
+  handleCreateSession,
+  handleGetManifest
+} from "#services/media/routes.js";
+import { createEvidenceStore } from "#services/media/evidence.js";
+import { createManifestStore } from "#services/media/manifest.js";
+import { createSessionStore } from "#services/media/session.js";
+import { defaultHostServerConfig } from "#config/host.js";
 
 const validIndexVaultBody = {
   vaultId: "vlt_01",
@@ -42,7 +32,7 @@ const validFindSimilarBody = {
 } as const;
 
 const validSessionBody = {
-  outputMode: "forwarder",
+  outputMode: "local",
   debug: false,
   contentId: "cnt_01",
   observer: "obs_01",
@@ -62,14 +52,19 @@ const validCacheReceiptBody = {
 
 const createTestHost = (config = defaultHostServerConfig()) => ({
   deps: createHostRouteDeps(config),
-  routes: createHostRoutes()
+  routes: createHostRoutes(config)
+});
+
+const mediaDeps = (host: ReturnType<typeof createTestHost>) => ({
+  ...host.deps.media,
+  config: host.deps.config
 });
 
 const createSession = async (
   host: ReturnType<typeof createTestHost>,
   body: Record<string, unknown> = { ...validSessionBody }
 ) => {
-  const matched = matchRoute("POST", "/sessions", host.routes);
+  const matched = matchRoute("POST", "/media/sessions", host.routes);
   return matched!.route.handler({
     params: {},
     body,
@@ -78,26 +73,35 @@ const createSession = async (
 };
 
 describe("host route handlers", () => {
-  it("registers slice-1 through slice-4b AA routes", () => {
+  it("registers modular host routes and removes legacy paths", () => {
     const { routes } = createTestHost();
-    expect(routes).toHaveLength(14);
-    expect(matchRoute("POST", "/sessions", routes)).toBeDefined();
-    expect(matchRoute("GET", "/sessions/session_test_01/manifest", routes)).toBeDefined();
+    expect(routes).toHaveLength(16);
+    expect(matchRoute("GET", "/health", routes)).toBeDefined();
+    expect(matchRoute("GET", "/descriptor", routes)).toBeDefined();
+    expect(matchRoute("POST", "/media/sessions", routes)).toBeDefined();
     expect(
-      matchRoute("POST", "/sessions/session_test_01/cache-receipts", routes)
+      matchRoute("GET", "/media/sessions/session_test_01/manifest", routes)
     ).toBeDefined();
-    expect(matchRoute("POST", "/similarity/vaults", routes)).toBeDefined();
-    expect(matchRoute("POST", "/similarity/find", routes)).toBeDefined();
-    expect(matchRoute("POST", "/forum/threads", routes)).toBeDefined();
-    expect(matchRoute("GET", "/forum/threads/thr_01", routes)).toBeDefined();
-    expect(matchRoute("POST", "/forum/threads/thr_01/messages", routes)).toBeDefined();
+    expect(
+      matchRoute("POST", "/media/sessions/session_test_01/cache-receipts", routes)
+    ).toBeDefined();
+    expect(matchRoute("POST", "/media/policy/evaluate", routes)).toBeDefined();
+    expect(matchRoute("POST", "/discovery/vaults", routes)).toBeDefined();
+    expect(matchRoute("POST", "/discovery/find", routes)).toBeDefined();
+    expect(matchRoute("POST", "/memory/access", routes)).toBeDefined();
+    expect(matchRoute("POST", "/content/blobs", routes)).toBeDefined();
+    expect(matchRoute("GET", "/content/blobs/walrus-testnet/blob_01", routes)).toBeDefined();
     expect(matchRoute("POST", "/aa/bundler/local", routes)).toBeDefined();
     expect(matchRoute("POST", "/aa/paymaster/local", routes)).toBeDefined();
+    expect(matchRoute("POST", "/sessions", routes)).toBeUndefined();
+    expect(matchRoute("POST", "/similarity/vaults", routes)).toBeUndefined();
+    expect(matchRoute("POST", "/forum/threads", routes)).toBeUndefined();
+    expect(matchRoute("POST", "/policy/evaluate", routes)).toBeUndefined();
   });
 });
 
-describe("session routes", () => {
-  it("creates a session via POST /sessions", async () => {
+describe("media session routes", () => {
+  it("creates a session via POST /media/sessions", async () => {
     const host = createTestHost();
     const response = await createSession(host);
 
@@ -117,12 +121,7 @@ describe("session routes", () => {
     const host = createTestHost();
     await createSession(host);
 
-    const duplicate = handleCreateSession(validSessionBody, {
-      config: host.deps.config,
-      sessions: host.deps.sessions,
-      manifests: host.deps.manifests,
-      cache: host.deps.cache
-    });
+    const duplicate = await handleCreateSession(validSessionBody, mediaDeps(host));
 
     expect(duplicate.ok).toBe(false);
     if (!duplicate.ok) {
@@ -134,30 +133,25 @@ describe("session routes", () => {
     const host = createTestHost();
     await createSession(host);
 
-    const originalManifest = host.deps.manifests.getBySessionId("session_test_01");
-    const originalSummary = host.deps.sessions.getSummary("session_test_01");
+    const originalManifest = host.deps.media.manifests.getBySessionId("session_test_01");
+    const originalSummary = host.deps.media.sessions.getSummary("session_test_01");
 
-    handleCreateSession(
+    await handleCreateSession(
       {
         ...validSessionBody,
         contentId: "cnt_overwrite_attempt",
         observer: "obs_overwrite_attempt"
       },
-      {
-        config: host.deps.config,
-        sessions: host.deps.sessions,
-        manifests: host.deps.manifests,
-        cache: host.deps.cache
-      }
+      mediaDeps(host)
     );
 
-    expect(host.deps.manifests.getBySessionId("session_test_01")).toEqual(originalManifest);
-    expect(host.deps.sessions.getSummary("session_test_01")).toEqual(originalSummary);
+    expect(host.deps.media.manifests.getBySessionId("session_test_01")).toEqual(originalManifest);
+    expect(host.deps.media.sessions.getSummary("session_test_01")).toEqual(originalSummary);
   });
 
-  it("rejects invalid POST /sessions bodies", async () => {
+  it("rejects invalid POST /media/sessions bodies", async () => {
     const host = createTestHost();
-    const response = await createSession(host, { outputMode: "forwarder" });
+    const response = await createSession(host, { outputMode: "local" });
     expect(response.ok).toBe(false);
     if (!response.ok) {
       expect(response.status).toBe(400);
@@ -168,10 +162,7 @@ describe("session routes", () => {
     const host = createTestHost();
     await createSession(host);
 
-    const response = handleGetManifest("session_test_01", {
-      sessions: host.deps.sessions,
-      manifests: host.deps.manifests
-    });
+    const response = handleGetManifest("session_test_01", host.deps.media);
 
     expect(response.ok).toBe(true);
     if (response.ok) {
@@ -184,14 +175,33 @@ describe("session routes", () => {
 
   it("returns not-found for missing session manifest", () => {
     const host = createTestHost();
-    const response = handleGetManifest("session_missing", {
-      sessions: host.deps.sessions,
-      manifests: host.deps.manifests
-    });
+    const response = handleGetManifest("session_missing", host.deps.media);
 
     expect(response.ok).toBe(false);
     if (!response.ok) {
       expect(response.status).toBe(404);
+    }
+  });
+
+  it("rejects simulcast when LiveKit is not configured", async () => {
+    const host = createTestHost({
+      ...defaultHostServerConfig(),
+      livekitApiKey: undefined
+    });
+
+    const response = await handleCreateSession(
+      {
+        ...validSessionBody,
+        sessionId: "session_simulcast_01",
+        outputMode: "simulcast"
+      },
+      mediaDeps(host)
+    );
+
+    expect(response.ok).toBe(false);
+    if (!response.ok) {
+      expect(response.status).toBe(400);
+      expect(response.error.message).toContain("simulcast_unavailable");
     }
   });
 });
@@ -201,22 +211,14 @@ describe("cache receipt routes", () => {
     const host = createTestHost();
     await createSession(host);
 
-    const response = handleCacheReceipt("session_test_01", validCacheReceiptBody, {
-      config: host.deps.config,
-      sessions: host.deps.sessions,
-      manifests: host.deps.manifests,
-      cache: host.deps.cache
-    });
+    const response = handleCacheReceipt("session_test_01", validCacheReceiptBody, mediaDeps(host));
 
     expect(response.ok).toBe(true);
     if (response.ok) {
       expect(response.result.status).toBe("accepted");
       expect(response.result.receipt?.receiptId).toMatch(/^receipt_/);
 
-      const manifest = handleGetManifest("session_test_01", {
-        sessions: host.deps.sessions,
-        manifests: host.deps.manifests
-      });
+      const manifest = handleGetManifest("session_test_01", host.deps.media);
 
       expect(manifest.ok).toBe(true);
       if (manifest.ok) {
@@ -230,10 +232,10 @@ describe("cache receipt routes", () => {
     const host = createTestHost();
     await createSession(host);
 
-    const beforeQuota = host.deps.cache.getQuotaRemainingBytes();
-    const beforeManifest = host.deps.manifests.getBySessionId("session_test_01");
-    const beforeReceipts = host.deps.cache.getBySessionId("session_test_01");
-    const beforeSubmissions = host.deps.cache.listSubmissions().length;
+    const beforeQuota = host.deps.media.evidence.getQuotaRemainingBytes();
+    const beforeManifest = host.deps.media.manifests.getBySessionId("session_test_01");
+    const beforeReceipts = host.deps.media.evidence.getBySessionId("session_test_01");
+    const beforeSubmissions = host.deps.media.evidence.listSubmissions().length;
 
     const response = handleCacheReceipt(
       "session_test_01",
@@ -241,29 +243,24 @@ describe("cache receipt routes", () => {
         ...validCacheReceiptBody,
         contentId: "cnt_wrong"
       },
-      {
-        config: host.deps.config,
-        sessions: host.deps.sessions,
-        manifests: host.deps.manifests,
-        cache: host.deps.cache
-      }
+      mediaDeps(host)
     );
 
     expect(response.ok).toBe(false);
     if (!response.ok) {
       expect(response.status).toBe(400);
     }
-    expect(host.deps.cache.getQuotaRemainingBytes()).toBe(beforeQuota);
-    expect(host.deps.manifests.getBySessionId("session_test_01")).toEqual(beforeManifest);
-    expect(host.deps.cache.getBySessionId("session_test_01")).toEqual(beforeReceipts);
-    expect(host.deps.cache.listSubmissions()).toHaveLength(beforeSubmissions);
+    expect(host.deps.media.evidence.getQuotaRemainingBytes()).toBe(beforeQuota);
+    expect(host.deps.media.manifests.getBySessionId("session_test_01")).toEqual(beforeManifest);
+    expect(host.deps.media.evidence.getBySessionId("session_test_01")).toEqual(beforeReceipts);
+    expect(host.deps.media.evidence.listSubmissions()).toHaveLength(beforeSubmissions);
   });
 
-  it("rejects mismatched observer without mutating quota, store, or manifest", async () => {
+  it("rejects mismatched observer without mutating quota", async () => {
     const host = createTestHost();
     await createSession(host);
 
-    const beforeQuota = host.deps.cache.getQuotaRemainingBytes();
+    const beforeQuota = host.deps.media.evidence.getQuotaRemainingBytes();
 
     const response = handleCacheReceipt(
       "session_test_01",
@@ -271,16 +268,11 @@ describe("cache receipt routes", () => {
         ...validCacheReceiptBody,
         observer: "obs_wrong"
       },
-      {
-        config: host.deps.config,
-        sessions: host.deps.sessions,
-        manifests: host.deps.manifests,
-        cache: host.deps.cache
-      }
+      mediaDeps(host)
     );
 
     expect(response.ok).toBe(false);
-    expect(host.deps.cache.getQuotaRemainingBytes()).toBe(beforeQuota);
+    expect(host.deps.media.evidence.getQuotaRemainingBytes()).toBe(beforeQuota);
   });
 
   it("returns not-found for cache receipt on missing session", () => {
@@ -291,12 +283,7 @@ describe("cache receipt routes", () => {
         ...validCacheReceiptBody,
         sessionId: "session_missing"
       },
-      {
-        config: host.deps.config,
-        sessions: host.deps.sessions,
-        manifests: host.deps.manifests,
-        cache: host.deps.cache
-      }
+      mediaDeps(host)
     );
 
     expect(response.ok).toBe(false);
@@ -314,11 +301,11 @@ describe("cache quota source of truth", () => {
     });
     await createSession(host, { ...validSessionBody, sessionId: "session_quota_01" });
 
-    expect(host.deps.cache.getQuotaRemainingBytes()).toBe(1_000);
+    expect(host.deps.media.evidence.getQuotaRemainingBytes()).toBe(1_000);
 
     const beforePolicy = handlePolicyEvaluate(
       {
-        outputMode: "forwarder",
+        outputMode: "local",
         debug: false,
         contentId: "cnt_01",
         observer: "obs_01",
@@ -326,7 +313,7 @@ describe("cache quota source of truth", () => {
       },
       {
         config: host.deps.config,
-        state: { quotaRemainingBytes: host.deps.cache.getQuotaRemainingBytes() }
+        state: { quotaRemainingBytes: host.deps.media.evidence.getQuotaRemainingBytes() }
       }
     );
 
@@ -343,19 +330,14 @@ describe("cache quota source of truth", () => {
         sessionId: "session_quota_01",
         bytesStored: 800
       },
-      {
-        config: host.deps.config,
-        sessions: host.deps.sessions,
-        manifests: host.deps.manifests,
-        cache: host.deps.cache
-      }
+      mediaDeps(host)
     );
 
-    expect(host.deps.cache.getQuotaRemainingBytes()).toBe(200);
+    expect(host.deps.media.evidence.getQuotaRemainingBytes()).toBe(200);
 
     const afterPolicy = handlePolicyEvaluate(
       {
-        outputMode: "forwarder",
+        outputMode: "local",
         debug: false,
         contentId: "cnt_01",
         observer: "obs_01",
@@ -363,7 +345,7 @@ describe("cache quota source of truth", () => {
       },
       {
         config: host.deps.config,
-        state: { quotaRemainingBytes: host.deps.cache.getQuotaRemainingBytes() }
+        state: { quotaRemainingBytes: host.deps.media.evidence.getQuotaRemainingBytes() }
       }
     );
 
@@ -388,26 +370,16 @@ describe("cache quota source of truth", () => {
         sessionId: "session_quota_a",
         bytesStored: 400
       },
-      {
-        config: host.deps.config,
-        sessions: host.deps.sessions,
-        manifests: host.deps.manifests,
-        cache: host.deps.cache
-      }
+      mediaDeps(host)
     );
 
-    const response = handleCreateSession(
+    const response = await handleCreateSession(
       {
         ...validSessionBody,
         sessionId: "session_quota_b",
         expectedCacheBytes: 200
       },
-      {
-        config: host.deps.config,
-        sessions: host.deps.sessions,
-        manifests: host.deps.manifests,
-        cache: host.deps.cache
-      }
+      mediaDeps(host)
     );
 
     expect(response.ok).toBe(false);
@@ -420,8 +392,8 @@ describe("cache quota source of truth", () => {
 
 describe("store mutation safety", () => {
   it("does not let callers mutate internal cache receipt arrays", () => {
-    const cache = createCacheStore(1_000);
-    cache.save({
+    const evidence = createEvidenceStore(1_000);
+    evidence.save({
       receiptId: "receipt_test",
       hostId: "host_dev",
       sessionId: "session_test_01",
@@ -431,7 +403,7 @@ describe("store mutation safety", () => {
       signature: "sig"
     });
 
-    const receipts = [...cache.getBySessionId("session_test_01")];
+    const receipts = [...evidence.getBySessionId("session_test_01")];
     receipts.push({
       receiptId: "receipt_mutated",
       hostId: "host_dev",
@@ -442,7 +414,7 @@ describe("store mutation safety", () => {
       signature: "sig2"
     });
 
-    expect(cache.getBySessionId("session_test_01")).toHaveLength(1);
+    expect(evidence.getBySessionId("session_test_01")).toHaveLength(1);
   });
 
   it("does not let callers mutate internal manifest cacheReceiptRefs", () => {
@@ -492,7 +464,7 @@ describe("store mutation safety", () => {
           descriptor: {
             hostId: "host_dev",
             accountTier: "dev",
-            supportedOutputs: ["forwarder"],
+            supportedOutputs: ["local"],
             debug: false,
             cache: {
               available: true,
@@ -503,7 +475,7 @@ describe("store mutation safety", () => {
             live: { minDurationSeconds: 0, maxDurationSeconds: 3600 },
             evaluation: { ruleSet: "livestreak-host-policy", status: "pass", warnings: [] }
           },
-          outputMode: "forwarder",
+          outputMode: "local",
           cache: {
             intent: "required",
             required: true,
@@ -522,7 +494,7 @@ describe("store mutation safety", () => {
         hostId: "host_dev",
         observer: "obs_01",
         contentId: "cnt_01",
-        outputMode: "forwarder",
+        outputMode: "local",
         status: "active",
         createdAtMs: 1
       }
@@ -539,11 +511,11 @@ describe("store mutation safety", () => {
   });
 });
 
-describe("similarity routes", () => {
+describe("discovery routes", () => {
   it("indexes a vault then finds overlapping candidates in the same market", async () => {
     const host = createTestHost();
 
-    const indexResponse = await matchRoute("POST", "/similarity/vaults", host.routes)!.route.handler({
+    const indexResponse = await matchRoute("POST", "/discovery/vaults", host.routes)!.route.handler({
       params: {},
       body: validIndexVaultBody,
       deps: host.deps
@@ -554,7 +526,7 @@ describe("similarity routes", () => {
       expect(indexResponse.status).toBe(201);
     }
 
-    const findResponse = await matchRoute("POST", "/similarity/find", host.routes)!.route.handler({
+    const findResponse = await matchRoute("POST", "/discovery/find", host.routes)!.route.handler({
       params: {},
       body: validFindSimilarBody,
       deps: host.deps
@@ -575,13 +547,13 @@ describe("similarity routes", () => {
   it("scopes find results to the requested marketId", async () => {
     const host = createTestHost();
 
-    await matchRoute("POST", "/similarity/vaults", host.routes)!.route.handler({
+    await matchRoute("POST", "/discovery/vaults", host.routes)!.route.handler({
       params: {},
       body: validIndexVaultBody,
       deps: host.deps
     });
 
-    const findResponse = await matchRoute("POST", "/similarity/find", host.routes)!.route.handler({
+    const findResponse = await matchRoute("POST", "/discovery/find", host.routes)!.route.handler({
       params: {},
       body: {
         marketId: "mkt_b",
@@ -600,36 +572,10 @@ describe("similarity routes", () => {
     }
   });
 
-  it("returns empty candidates when the index has no overlap", async () => {
-    const host = createTestHost();
-
-    const findResponse = await matchRoute("POST", "/similarity/find", host.routes)!.route.handler({
-      params: {},
-      body: {
-        marketId: "mkt_a",
-        vaultDraft: {
-          title: "Unrelated topic",
-          summary: "Something completely different",
-          tags: ["widgets"]
-        }
-      },
-      deps: host.deps
-    });
-
-    expect(findResponse.ok).toBe(true);
-    if (findResponse.ok) {
-      expect(findResponse.body).toMatchObject({
-        marketId: "mkt_a",
-        candidates: [],
-        duplicateRisk: "low"
-      });
-    }
-  });
-
   it("rejects invalid index and find bodies with 400", async () => {
     const host = createTestHost();
 
-    const indexResponse = await matchRoute("POST", "/similarity/vaults", host.routes)!.route.handler({
+    const indexResponse = await matchRoute("POST", "/discovery/vaults", host.routes)!.route.handler({
       params: {},
       body: { vaultId: "vlt_01" },
       deps: host.deps
@@ -639,7 +585,7 @@ describe("similarity routes", () => {
       expect(indexResponse.status).toBe(400);
     }
 
-    const findResponse = await matchRoute("POST", "/similarity/find", host.routes)!.route.handler({
+    const findResponse = await matchRoute("POST", "/discovery/find", host.routes)!.route.handler({
       params: {},
       body: { marketId: "mkt_a" },
       deps: host.deps
@@ -651,119 +597,141 @@ describe("similarity routes", () => {
   });
 });
 
-describe("forum routes", () => {
-  it("creates a thread, reads it back, and appends a message", async () => {
-    const host = createTestHost();
-
-    const createResponse = await matchRoute("POST", "/forum/threads", host.routes)!.route.handler({
-      params: {},
-      body: validCreateThreadBody,
-      deps: host.deps
-    });
-
-    expect(createResponse.ok).toBe(true);
-    if (!createResponse.ok) {
-      return;
+describe("memory access route", () => {
+  const configuredMemory = () => ({
+    ...defaultHostServerConfig(),
+    walrusNetwork: "mainnet" as const,
+    memorySuiOwnerPrivateKey: "suiprivkey1qqtest",
+    memoryOwnerSeed: null,
+    resolvedWalrus: {
+      network: "mainnet" as const,
+      sui: {
+        rpcUrl: "https://fullnode.mainnet.sui.io:443",
+        packageId: "0xpackage",
+        registryId: "0xregistry"
+      },
+      memory: {
+        relayerUrl: "https://memwal.example"
+      },
+      blob: {
+        publisherUrl: "https://publisher.example",
+        aggregatorUrl: "https://aggregator.example"
+      }
     }
+  });
 
-    expect(createResponse.status).toBe(201);
-    const created = createResponse.body as {
-      thread: { threadId: string; title: string };
-      messages: Array<{ body: string; author: { kind: string; ref: string } }>;
+  const validDelegateKey = "a".repeat(64);
+
+  it("returns scoped credentials including accountId for a granted delegate", async () => {
+    const bindings = {
+      get: vi.fn(),
+      provision: vi.fn(async (marketId: string) => ({
+        marketId,
+        memWalAccountId: "0xaccount_scoped",
+        namespace: `market:${marketId}`
+      })),
+      grantDelegate: vi.fn(async () => undefined),
+      hasDelegate: vi.fn(() => true)
     };
-    expect(created.thread.title).toBe("Steward discussion");
-    expect(created.messages).toHaveLength(1);
-    expect(created.messages[0]?.body).toBe("Opening the thread");
 
-    const threadId = created.thread.threadId;
+    const response = await handleMemoryAccess(
+      { marketId: "mkt_01", suiDelegate: validDelegateKey },
+      {
+        config: configuredMemory(),
+        bindings
+      }
+    );
 
-    const getResponse = await matchRoute("GET", `/forum/threads/${threadId}`, host.routes)!.route.handler({
-      params: { threadId },
-      body: undefined,
-      deps: host.deps
-    });
-
-    expect(getResponse.ok).toBe(true);
-    if (getResponse.ok) {
-      const record = getResponse.body as typeof created;
-      expect(record.thread.threadId).toBe(threadId);
-      expect(record.messages).toHaveLength(1);
-    }
-
-    const appendResponse = await matchRoute(
-      "POST",
-      `/forum/threads/${threadId}/messages`,
-      host.routes
-    )!.route.handler({
-      params: { threadId },
-      body: validAppendMessageBody,
-      deps: host.deps
-    });
-
-    expect(appendResponse.ok).toBe(true);
-    if (appendResponse.ok) {
-      const record = appendResponse.body as {
-        messages: Array<{ body: string; author: { kind: string; ref: string } }>;
-      };
-      expect(record.messages).toHaveLength(2);
-      expect(record.messages[1]?.body).toBe("Follow-up observation");
-      expect(record.messages[1]?.author).toMatchObject({ kind: "observer", ref: "obs_01" });
+    expect(response.ok).toBe(true);
+    if (response.ok) {
+      expect(response.result).toEqual({
+        relayerUrl: "https://memwal.example",
+        namespace: "market:mkt_01",
+        accountId: "0xaccount_scoped"
+      });
+      expect(JSON.stringify(response.result)).not.toContain("memWalAccountId");
     }
   });
 
-  it("returns 404 for missing thread get and append", async () => {
-    const host = createTestHost();
-
-    const getResponse = await matchRoute("GET", "/forum/threads/thr_missing", host.routes)!.route.handler({
-      params: { threadId: "thr_missing" },
-      body: undefined,
-      deps: host.deps
+  it("returns 503 when walrus network selector is absent", async () => {
+    const host = createTestHost({
+      ...defaultHostServerConfig(),
+      walrusNetwork: null,
+      memorySuiOwnerPrivateKey: null,
+      memoryOwnerSeed: null,
+      resolvedWalrus: null
     });
-    expect(getResponse.ok).toBe(false);
-    if (!getResponse.ok) {
-      expect(getResponse.status).toBe(404);
-    }
 
-    const appendResponse = await matchRoute(
-      "POST",
-      "/forum/threads/thr_missing/messages",
-      host.routes
-    )!.route.handler({
-      params: { threadId: "thr_missing" },
-      body: validAppendMessageBody,
-      deps: host.deps
-    });
-    expect(appendResponse.ok).toBe(false);
-    if (!appendResponse.ok) {
-      expect(appendResponse.status).toBe(404);
-    }
-  });
-
-  it("rejects invalid create and append bodies with 400", async () => {
-    const host = createTestHost();
-
-    const createResponse = await matchRoute("POST", "/forum/threads", host.routes)!.route.handler({
+    const response = await matchRoute("POST", "/memory/access", host.routes)!.route.handler({
       params: {},
-      body: {},
+      body: { marketId: "mkt_01", suiDelegate: validDelegateKey },
       deps: host.deps
     });
-    expect(createResponse.ok).toBe(false);
-    if (!createResponse.ok) {
-      expect(createResponse.status).toBe(400);
-    }
 
-    const appendResponse = await matchRoute(
-      "POST",
-      "/forum/threads/thr_01/messages",
-      host.routes
-    )!.route.handler({
-      params: { threadId: "thr_01" },
-      body: {},
+    expect(response.ok).toBe(false);
+    if (!response.ok) {
+      expect(response.status).toBe(503);
+    }
+  });
+
+  it("returns 503 when memory is configured but walrus is not bootstrapped", async () => {
+    const host = createTestHost({
+      ...defaultHostServerConfig(),
+      walrusNetwork: "mainnet",
+      memorySuiOwnerPrivateKey: "suiprivkey1qqtest",
+      memoryOwnerSeed: null,
+      resolvedWalrus: null
+    });
+
+    const response = await matchRoute("POST", "/memory/access", host.routes)!.route.handler({
+      params: {},
+      body: { marketId: "mkt_01", suiDelegate: validDelegateKey },
       deps: host.deps
     });
-    expect(appendResponse.ok).toBe(false);
-    if (!appendResponse.ok) {
-      expect(appendResponse.status).toBe(400);
+
+    expect(response.ok).toBe(false);
+    if (!response.ok) {
+      expect(response.status).toBe(503);
+    }
+  });
+
+  it("returns 400 when suiDelegate is missing", async () => {
+    const response = await handleMemoryAccess(
+      { marketId: "mkt_01" },
+      {
+        config: configuredMemory(),
+        bindings: {
+          get: vi.fn(),
+          provision: vi.fn(),
+          grantDelegate: vi.fn(),
+          hasDelegate: vi.fn()
+        }
+      }
+    );
+
+    expect(response.ok).toBe(false);
+    if (!response.ok) {
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it("returns 400 when suiDelegate is not a valid delegate public key", async () => {
+    const response = await handleMemoryAccess(
+      { marketId: "mkt_01", suiDelegate: "0xabc" },
+      {
+        config: configuredMemory(),
+        bindings: {
+          get: vi.fn(),
+          provision: vi.fn(),
+          grantDelegate: vi.fn(),
+          hasDelegate: vi.fn()
+        }
+      }
+    );
+
+    expect(response.ok).toBe(false);
+    if (!response.ok) {
+      expect(response.status).toBe(400);
     }
   });
 });

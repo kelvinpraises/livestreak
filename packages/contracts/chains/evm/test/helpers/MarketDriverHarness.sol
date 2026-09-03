@@ -15,6 +15,14 @@ library MarketDriverHarness {
         tokenId = driver.mint(marketId, who);
     }
 
+    function mintWithSalt(MarketDriver driver, address who, bytes32 marketId, uint64 salt)
+        internal
+        returns (uint256 tokenId)
+    {
+        vm.prank(who);
+        tokenId = driver.mintWithSalt(marketId, salt, who);
+    }
+
     function fund(
         MarketDriver driver,
         MockUSDC usdc,

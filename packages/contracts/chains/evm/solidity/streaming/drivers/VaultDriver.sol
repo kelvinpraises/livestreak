@@ -92,7 +92,7 @@ contract VaultDriver is SharedDriverUtils {
         emit SeedOpened(vaultId, creator, seedSide, rate, deposit, maxEnd);
     }
 
-    function stopSeed(bytes32 vaultId) external {
+    function stopSeed(bytes32 vaultId) external returns (uint256 refunded) {
         address creator = _msgSender();
         SeedLane memory lane = seeds[vaultId][creator];
         require(lane.active, "VaultDriver: no seed");
@@ -104,10 +104,17 @@ contract VaultDriver is SharedDriverUtils {
             accountId: receiver, config: StreamConfigImpl.create(0, uint160(lane.rate * AMT_MUL), 0, 0)
         });
 
-        DRIPS.setStreams(account, USDC, curr, 0, new StreamReceiver[](0), 0, 0);
+        // Withdraw the entire remaining balance (refund the unstreamed bond) and stop the stream —
+        // without this the unspent seed would be permanently stranded in Drips. The delivered portion
+        // stays as the seed's Board position (onStop banks its shares + loss basis).
+        int128 realDelta = DRIPS.setStreams(account, USDC, curr, type(int128).min, new StreamReceiver[](0), 0, 0);
         Vault(protocol.vault()).onStop(account, vaultId, lane.side);
         seeds[vaultId][creator].active = false;
 
+        if (realDelta < 0) {
+            refunded = uint256(uint128(-realDelta));
+            DRIPS.withdraw(USDC, creator, refunded);
+        }
         emit SeedStopped(vaultId, creator, lane.side);
     }
 

@@ -2,21 +2,19 @@
 
 import type {
   LvstAccount,
-  OptionsFundingStream,
   OptionsMarketSnapshot,
+  OptionsNftSnapshot,
   OptionsUserOptionsSnapshot,
-  OptionsUserVaultPosition,
-  OptionsVault,
   OptionsVaultSnapshot
 } from "../model/index.js";
-import { isFundingStreamPaused, totalVaultPool } from "../model/index.js";
+import { totalVaultPool } from "../model/index.js";
 import type {
+  OptionsLanePanel,
   OptionsLvstPanel,
   OptionsMarketPanel,
+  OptionsNftPanel,
   OptionsPanel,
-  OptionsSidePanel,
-  OptionsVaultPanel,
-  OptionsVaultUserPanel
+  OptionsVaultPanel
 } from "./types.js";
 
 export const projectOptionsPanel = (snapshot: OptionsUserOptionsSnapshot): OptionsPanel => ({
@@ -24,6 +22,7 @@ export const projectOptionsPanel = (snapshot: OptionsUserOptionsSnapshot): Optio
   markets: snapshot.markets.map((marketSnapshot) =>
     projectMarketPanel(marketSnapshot, snapshot.vaults)
   ),
+  nfts: snapshot.nfts.map((entry) => projectNftPanel(entry)),
   lvst: projectLvstPanel(snapshot.lvstAccount),
   ...(snapshot.protocol === undefined ? {} : { protocol: snapshot.protocol }),
   user: {
@@ -58,6 +57,7 @@ const projectMarketPanel = (
   return {
     marketId: marketSnapshot.market.marketId,
     title: marketSnapshot.market.title,
+    creator: marketSnapshot.market.creator,
     ...(marketSnapshot.market.streamId === undefined
       ? {}
       : { streamId: marketSnapshot.market.streamId }),
@@ -68,6 +68,7 @@ const projectMarketPanel = (
     vaultIds: [...marketSnapshot.market.vaultIds],
     totals: {
       pooledUSDC: totalPooled.toString(),
+      totalPooledUSDC: totalPooled.toString(),
       activeVaults,
       resolvedVaults
     },
@@ -79,14 +80,12 @@ const projectMarketPanel = (
 };
 
 const projectVaultPanel = (
-  vault: OptionsVault,
+  vault: OptionsMarketSnapshot["vaults"][number],
   snapshot?: OptionsVaultSnapshot
 ): OptionsVaultPanel => {
-  const pools = vault.pools;
+  const pools = snapshot?.pools ?? vault.pools;
   const total = totalVaultPool(pools);
   const odds = computeOdds(pools.yes, pools.no, total);
-  const winningSide =
-    vault.outcome === "yes" || vault.outcome === "no" ? vault.outcome : null;
 
   return {
     vaultId: vault.vaultId,
@@ -101,6 +100,10 @@ const projectVaultPanel = (
       noUSDC: pools.no.toString(),
       totalUSDC: total.toString()
     },
+    shareTotals: {
+      yes: (snapshot?.shareTotals.yes ?? 0n).toString(),
+      no: (snapshot?.shareTotals.no ?? 0n).toString()
+    },
     odds,
     timing: vault.timing,
     steward: {
@@ -110,94 +113,38 @@ const projectVaultPanel = (
         : { hotUntilMs: vault.steward.hotUntilMs }),
       ...(vault.steward.hotReason === undefined ? {} : { hotReason: vault.steward.hotReason }),
       ...(vault.steward.disputeId === undefined ? {} : { disputeId: vault.steward.disputeId })
-    },
-    ...(snapshot?.userPosition === undefined && snapshot?.funding === undefined
-      ? {}
-      : {
-          user: projectVaultUserPanel(
-            snapshot?.userPosition,
-            snapshot?.funding,
-            winningSide,
-            vault.status
-          )
-        })
-  };
-};
-
-const projectVaultUserPanel = (
-  position: OptionsUserVaultPosition | undefined,
-  funding: { readonly yes: OptionsFundingStream; readonly no: OptionsFundingStream } | undefined,
-  winningSide: "yes" | "no" | null,
-  vaultStatus: OptionsVault["status"]
-): OptionsVaultUserPanel | undefined => {
-  if (position === undefined) {
-    return undefined;
-  }
-
-  const yes = projectSidePanel(
-    position.positions.yes,
-    funding?.yes,
-    winningSide,
-    vaultStatus
-  );
-  const no = projectSidePanel(position.positions.no, funding?.no, winningSide, vaultStatus);
-
-  const streamed = position.positions.yes.streamed + position.positions.no.streamed;
-  const shares = position.positions.yes.shares + position.positions.no.shares;
-  const currentValue =
-    position.positions.yes.currentValue + position.positions.no.currentValue;
-  const claimable = position.positions.yes.claimable + position.positions.no.claimable;
-  const lossClaimable =
-    (position.positions.yes.lossClaimable ?? 0n) + (position.positions.no.lossClaimable ?? 0n);
-
-  const yesRate = funding?.yes.ratePerMinute ?? 0n;
-  const noRate = funding?.no.ratePerMinute ?? 0n;
-  const yesActive = funding?.yes.active === true && !isFundingStreamPaused(funding.yes);
-  const noActive = funding?.no.active === true && !isFundingStreamPaused(funding.no);
-
-  return {
-    account: position.account,
-    positions: { yes, no },
-    totals: {
-      streamedUSDC: streamed.toString(),
-      shares: shares.toString(),
-      currentValueUSDC: currentValue.toString(),
-      claimableUSDC: claimable.toString(),
-      lossClaimableLVST: lossClaimable.toString()
-    },
-    activeFunding: {
-      yesRatePerMinuteUSDC: yesRate.toString(),
-      noRatePerMinuteUSDC: noRate.toString(),
-      totalRatePerMinuteUSDC: (yesRate + noRate).toString(),
-      anyActive: yesActive || noActive,
-      allPaused: !yesActive && !noActive
     }
   };
 };
 
-const projectSidePanel = (
-  position: OptionsUserVaultPosition["positions"]["yes"],
-  funding: OptionsFundingStream | undefined,
-  winningSide: "yes" | "no" | null,
-  vaultStatus: OptionsVault["status"]
-): OptionsSidePanel => {
-  const ratePerMinute = funding?.ratePerMinute ?? 0n;
-  const paused =
-    funding === undefined || isFundingStreamPaused(funding) || funding.active === false;
-  const resolved = vaultStatus === "resolved" || vaultStatus === "disputed";
+const projectNftPanel = (entry: OptionsNftSnapshot): OptionsNftPanel => ({
+  tokenId: entry.nft.tokenId.toString(),
+  marketId: entry.nft.marketId,
+  laneCount: entry.nft.laneCount,
+  lanes: entry.nft.lanes.map(projectLanePanel),
+  owner: entry.nft.owner,
+  ...(entry.nft.approved === undefined ? {} : { approved: entry.nft.approved }),
+  ...(entry.nft.isOperator === undefined ? {} : { isOperator: entry.nft.isOperator })
+});
+
+const projectLanePanel = (lane: OptionsNftSnapshot["nft"]["lanes"][number]): OptionsLanePanel => {
+  const claimable = lane.claimable ?? 0n;
+  const lossClaimable = lane.lossClaimable ?? 0n;
 
   return {
-    side: position.side,
-    streamedUSDC: position.streamed.toString(),
-    shares: position.shares.toString(),
-    currentValueUSDC: position.currentValue.toString(),
-    claimableUSDC: position.claimable.toString(),
-    lossClaimableLVST: (position.lossClaimable ?? 0n).toString(),
-    fundingRatePerMinuteUSDC: ratePerMinute.toString(),
-    fundingActive: funding?.active === true && !isFundingStreamPaused(funding),
-    streamPaused: paused,
-    isWinningSide: resolved && winningSide !== null ? position.side === winningSide : null,
-    released: position.released
+    vaultId: lane.vaultId,
+    side: lane.side,
+    rate: lane.rate.toString(),
+    sharesAccrued: lane.sharesAccrued.toString(),
+    depleted: lane.depleted,
+    ...(lane.maxEndMs === undefined ? {} : { maxEndMs: lane.maxEndMs }),
+    ...(lane.claimable === undefined ? {} : { claimableUSDC: claimable.toString() }),
+    ...(lane.lossClaimable === undefined
+      ? {}
+      : { lossClaimableLVST: lossClaimable.toString() }),
+    ...(lane.won === undefined ? {} : { won: lane.won }),
+    ...(lane.claimable === undefined ? {} : { canClaimWin: claimable > 0n }),
+    ...(lane.lossClaimable === undefined ? {} : { canClaimLoss: lossClaimable > 0n })
   };
 };
 
@@ -214,10 +161,10 @@ const projectLvstPanel = (account: LvstAccount): OptionsLvstPanel => {
     ...(account.totalEarned === undefined
       ? {}
       : { totalEarnedLVST: account.totalEarned.toString() }),
-    lossClaims: {
-      claimableLVST: account.lossClaims.claimable.toString(),
-      claimedLVST: account.lossClaims.claimed.toString(),
-      stakedFromClaimsLVST: account.lossClaims.stakedFromClaims.toString()
+    actions: {
+      canStake: unstaked > 0n,
+      canUnstake: account.staked > 0n,
+      canClaimDividends: account.pendingDividends > 0n
     }
   };
 };

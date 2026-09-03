@@ -1,4 +1,5 @@
 import type { Abi, Address, PublicClient, WalletClient } from "viem";
+import { zeroAddress } from "viem";
 import { readFileSync } from "fs";
 import { join, resolve } from "path";
 import { deployFromArtifact, type ScopeResult } from "../utils.js";
@@ -44,56 +45,109 @@ export async function deployWire(
       await client.waitForTransactionReceipt({ hash });
     };
 
-    await write(protocol, protocolAbi, "setMarketRegistry", [marketRegistry]);
-    await write(protocol, protocolAbi, "setVault", [vault]);
-    await write(protocol, protocolAbi, "setStewardRegistry", [stewardRegistry]);
-    await write(protocol, protocolAbi, "setLvstToken", [lvstToken]);
-    await write(protocol, protocolAbi, "setTreasury", [treasury]);
-    await write(protocol, protocolAbi, "setDripsStreaming", [dripsProxy]);
+    const readProtocol = async (functionName: string) =>
+      (await client.readContract({ address: protocol, abi: protocolAbi, functionName })) as Address;
 
-    const vaultDriver = await deployFromArtifact(
-      walletClient,
-      client,
-      "out/VaultDriver.sol/VaultDriver.json",
-      [protocol, dripsProxy, caller, mockUsdc],
-      undefined,
-      `${LABEL}.vaultDriver`
-    );
-    await write(vaultDriver, vaultDriverAbi, "bootstrapStreaming", []);
-    await write(protocol, protocolAbi, "setVaultDriver", [vaultDriver]);
+    const alreadyWired = (await readProtocol("marketRegistry")) !== zeroAddress;
 
-    const driverId = Number(
-      await client.readContract({ address: dripsProxy, abi: dripsAbi, functionName: "nextDriverId" })
-    );
-    console.log(`  Registering MarketDriver slot (FD_user=${driverId})...`);
-    await write(dripsProxy, dripsAbi, "registerDriver", [deployer]);
+    if (alreadyWired) {
+      console.log("  Protocol already wired — reusing on-chain addresses");
+    } else {
+      await write(protocol, protocolAbi, "setDripsStreaming", [dripsProxy]);
+    }
 
-    const marketDriverLogic = await deployFromArtifact(
-      walletClient,
-      client,
-      "out/MarketDriver.sol/MarketDriver.json",
-      [dripsProxy, caller, driverId, protocol, vault, vaultDriver, mockUsdc],
-      undefined,
-      `${LABEL}.marketDriverLogic`
-    );
-    const marketDriverProxy = await deployFromArtifact(
-      walletClient,
-      client,
-      "out/Managed.sol/ManagedProxy.json",
-      [marketDriverLogic, deployer, "0x"],
-      undefined,
-      `${LABEL}.marketDriverProxy`
-    );
-    await write(dripsProxy, dripsAbi, "updateDriverAddress", [driverId, marketDriverProxy]);
-    await write(protocol, protocolAbi, "setMarketDriver", [marketDriverProxy]);
-    console.log(`    marketDriverProxy → ${marketDriverProxy}`);
+    const vaultDriver = alreadyWired
+      ? await readProtocol("vaultDriver")
+      : await deployFromArtifact(
+          walletClient,
+          client,
+          "out/VaultDriver.sol/VaultDriver.json",
+          [protocol, dripsProxy, caller, mockUsdc],
+          undefined,
+          `${LABEL}.vaultDriver`
+        );
 
-    await write(vault, vaultAbi, "syncFromProtocol", []);
-    console.log(`    vault synced from Protocol`);
+    const vaultDriverId = (await client.readContract({
+      address: vaultDriver,
+      abi: vaultDriverAbi,
+      functionName: "driverId"
+    })) as number;
 
-        await write(stewardRegistry, stewardAbi, "registerSteward", [deployer]);
-        await write(stewardRegistry, stewardAbi, "setDefaultSteward", [deployer]);
-        console.log(`    resolver → stewardRegistry ${stewardRegistry}`);
+    if (vaultDriverId === 0) {
+      await write(vaultDriver, vaultDriverAbi, "bootstrapStreaming", []);
+    }
+
+    if (!alreadyWired) {
+      await write(protocol, protocolAbi, "setVaultDriver", [vaultDriver]);
+    }
+
+    let marketDriverProxy: Address;
+    let marketDriverLogic: Address;
+    if (alreadyWired) {
+      marketDriverProxy = await readProtocol("marketDriver");
+      const priorLogic = previousScopes.wire?.contracts?.marketDriverLogic as Address | undefined;
+      marketDriverLogic =
+        priorLogic ??
+        ((await deployFromArtifact(
+          walletClient,
+          client,
+          "out/MarketDriver.sol/MarketDriver.json",
+          [dripsProxy, caller, 1, protocol, vault, vaultDriver, mockUsdc],
+          undefined,
+          `${LABEL}.marketDriverLogic`
+        )) as Address);
+      console.log(`    marketDriverProxy → ${marketDriverProxy}`);
+    } else {
+      const driverId = Number(
+        await client.readContract({ address: dripsProxy, abi: dripsAbi, functionName: "nextDriverId" })
+      );
+      console.log(`  Registering MarketDriver slot (FD_user=${driverId})...`);
+      await write(dripsProxy, dripsAbi, "registerDriver", [deployer]);
+
+      const marketDriverLogicDeployed = await deployFromArtifact(
+        walletClient,
+        client,
+        "out/MarketDriver.sol/MarketDriver.json",
+        [dripsProxy, caller, driverId, protocol, vault, vaultDriver, mockUsdc],
+        undefined,
+        `${LABEL}.marketDriverLogic`
+      );
+      marketDriverLogic = marketDriverLogicDeployed;
+      marketDriverProxy = await deployFromArtifact(
+        walletClient,
+        client,
+        "out/Managed.sol/ManagedProxy.json",
+        [marketDriverLogic, deployer, "0x"],
+        undefined,
+        `${LABEL}.marketDriverProxy`
+      );
+      await write(dripsProxy, dripsAbi, "updateDriverAddress", [driverId, marketDriverProxy]);
+      await write(protocol, protocolAbi, "setMarketDriver", [marketDriverProxy]);
+      console.log(`    marketDriverProxy → ${marketDriverProxy}`);
+
+      await write(protocol, protocolAbi, "setMarketRegistry", [marketRegistry]);
+      await write(protocol, protocolAbi, "setVault", [vault]);
+      await write(protocol, protocolAbi, "setStewardRegistry", [stewardRegistry]);
+      await write(protocol, protocolAbi, "setLvstToken", [lvstToken]);
+      await write(protocol, protocolAbi, "setTreasury", [treasury]);
+    }
+
+    const vaultSynced = ((await client.readContract({
+      address: vault,
+      abi: vaultAbi,
+      functionName: "marketDriver"
+    })) as Address) !== zeroAddress;
+
+    if (!vaultSynced) {
+      await write(vault, vaultAbi, "syncFromProtocol", []);
+      console.log(`    vault synced from Protocol`);
+    } else {
+      console.log(`    vault already synced`);
+    }
+
+    await write(stewardRegistry, stewardAbi, "registerSteward", [deployer]);
+    await write(stewardRegistry, stewardAbi, "setDefaultSteward", [deployer]);
+    console.log(`    resolver → stewardRegistry ${stewardRegistry}`);
 
     console.log("  Protocol + streaming wired.");
 
@@ -103,6 +157,11 @@ export async function deployWire(
       contracts: { vaultDriver, marketDriverLogic, marketDriverProxy }
     };
   } catch (error) {
+    const prior = previousScopes.wire;
+    if (prior?.status === "completed" && prior.contracts) {
+      console.warn(`  Wire step failed on already-wired chain — keeping prior wire addresses: ${error instanceof Error ? error.message : String(error)}`);
+      return { ...prior, deployedAt: new Date().toISOString() };
+    }
     return {
       status: "failed",
       error: error instanceof Error ? error.message : String(error)

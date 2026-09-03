@@ -1,5 +1,4 @@
 export type {
-  DecodedMarketRegistered,
   EvmAddress,
   MarketFailurePhase,
   MarketLifecycleFailed,
@@ -13,14 +12,11 @@ export type {
   MarketRegistrar,
   ObserveRunMarketConfig,
   ObserveRunMarketOptions,
-  StreamId,
-  VerifiedMarketRegistration
+  StreamId
 } from "./types.js";
 
-export { testPlaceholderDeriveStreamId } from "./types.js";
+export { observeRunStreamId } from "./chains/evm.js";
 export { applyMarketLifecycleToBoard } from "./board.js";
-export { verifyMarketRegistration, decodeMarketRegisteredPayload } from "./verify.js";
-export type { VerifyMarketRegistrationInput } from "./verify.js";
 export {
   forkMarketRegistrationIfNeeded,
   resolveMarketRegistrarFromOptions,
@@ -28,5 +24,9 @@ export {
   runMarketRegistrationLifecycle
 } from "./registration.js";
 export type { MarketRegistrationForkInput } from "./registration.js";
-export { validateObserveRunMarketConfig, validateObserveRunMarketOptions } from "./validate.js";
+export {
+  validateMarketRunId,
+  validateObserveRunMarketConfig,
+  validateObserveRunMarketOptions
+} from "./validate.js";
 export { createMarketRegistrar } from "./chains/index.js";

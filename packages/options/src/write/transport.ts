@@ -1,14 +1,23 @@
 // --- exports ---
 
-import { lvstTokenAbi, vaultFundingAbi } from "@livestreak/contracts";
+import { marketDriverAbi, treasuryAbi } from "@livestreak/contracts/evm/abis";
 
-import type { LivestreakContractAddresses } from "../read/contracts/addresses.js";
-import type { LivestreakContractAbis } from "../read/contracts/transport.js";
-import { validateLivestreakContractAddresses } from "../read/contracts/validation.js";
-import type { ClaimLossFlowInput, StakeFlowInput, UnstakeFlowInput } from "./lvst.js";
-import { claimLossFlow, stakeFlow, unstakeFlow } from "./lvst.js";
-import type { SetFundingRateInput, StopFundingStreamInput } from "./funding.js";
-import { setFundingRate, stopFundingStream } from "./funding.js";
+import type { OptionsContractAddresses } from "../read/contracts/addresses.js";
+import type { OptionsContractAbis } from "../read/contracts/transport.js";
+import { validateOptionsContractAddresses } from "../read/contracts/validation.js";
+import type { ApproveNftInput, SetApprovalForAllInput, TransferNftInput } from "./nft.js";
+import { approveNft, setApprovalForAll, transferNft } from "./nft.js";
+import type { ClaimLossLvstInput, WithdrawInput, WithdrawManyInput } from "./claim.js";
+import { claimLossLvst, withdraw, withdrawMany } from "./claim.js";
+import type {
+  FundStreamInput,
+  SetLanesInput,
+  StopAllFundingInput,
+  StopFundingInput
+} from "./funding.js";
+import { fundStream, setLanes, stopAllFunding, stopFunding } from "./funding.js";
+import type { StakeLvstInput, UnstakeLvstInput } from "./lvst.js";
+import { claimDividends, stakeLvst, unstakeLvst } from "./lvst.js";
 
 export type ContractWriteRequest = {
   readonly address: `0x${string}`;
@@ -22,17 +31,25 @@ export type ContractWriter = {
 };
 
 export type OptionsWriteTransport = {
-  readonly setFundingRate: (input: SetFundingRateInput) => Promise<unknown>;
-  readonly stopFundingStream: (input: StopFundingStreamInput) => Promise<unknown>;
-  readonly claimLossFlow: (input: ClaimLossFlowInput) => Promise<unknown>;
-  readonly stakeFlow: (input: StakeFlowInput) => Promise<unknown>;
-  readonly unstakeFlow: (input: UnstakeFlowInput) => Promise<unknown>;
+  readonly fundStream: (input: FundStreamInput) => Promise<unknown>;
+  readonly setLanes: (input: SetLanesInput) => Promise<unknown>;
+  readonly stopFunding: (input: StopFundingInput) => Promise<unknown>;
+  readonly stopAllFunding: (input: StopAllFundingInput) => Promise<unknown>;
+  readonly withdraw: (input: WithdrawInput) => Promise<unknown>;
+  readonly withdrawMany: (input: WithdrawManyInput) => Promise<unknown>;
+  readonly claimLossLvst: (input: ClaimLossLvstInput) => Promise<unknown>;
+  readonly stakeLvst: (input: StakeLvstInput) => Promise<unknown>;
+  readonly unstakeLvst: (input: UnstakeLvstInput) => Promise<unknown>;
+  readonly claimDividends: () => Promise<unknown>;
+  readonly transferNft: (input: TransferNftInput) => Promise<unknown>;
+  readonly approveNft: (input: ApproveNftInput) => Promise<unknown>;
+  readonly setApprovalForAll: (input: SetApprovalForAllInput) => Promise<unknown>;
 };
 
 export type ContractsOptionsWriteTransportInput = {
   readonly writer: ContractWriter;
-  readonly addresses: LivestreakContractAddresses;
-  readonly abis?: Pick<LivestreakContractAbis, "VaultFunding" | "LvstToken">;
+  readonly addresses: OptionsContractAddresses;
+  readonly abis?: Pick<OptionsContractAbis, "MarketDriver" | "Treasury">;
 };
 
 export const createContractsOptionsWriteTransport = (
@@ -41,8 +58,8 @@ export const createContractsOptionsWriteTransport = (
 
 type WriteDeps = {
   readonly writer: ContractWriter;
-  readonly addresses: LivestreakContractAddresses;
-  readonly abis: Pick<LivestreakContractAbis, "VaultFunding" | "LvstToken">;
+  readonly addresses: OptionsContractAddresses;
+  readonly abis: Pick<OptionsContractAbis, "MarketDriver" | "Treasury">;
 };
 
 class ContractsOptionsWriteTransport implements OptionsWriteTransport {
@@ -51,31 +68,63 @@ class ContractsOptionsWriteTransport implements OptionsWriteTransport {
   constructor(input: ContractsOptionsWriteTransportInput) {
     this.deps = {
       writer: input.writer,
-      addresses: validateLivestreakContractAddresses(input.addresses),
+      addresses: validateOptionsContractAddresses(input.addresses),
       abis: input.abis ?? {
-        VaultFunding: vaultFundingAbi,
-        LvstToken: lvstTokenAbi
+        MarketDriver: marketDriverAbi,
+        Treasury: treasuryAbi
       }
     };
   }
 
-  setFundingRate(input: SetFundingRateInput): Promise<unknown> {
-    return setFundingRate(this.deps, input);
+  fundStream(input: FundStreamInput): Promise<unknown> {
+    return fundStream(this.deps, input);
   }
 
-  stopFundingStream(input: StopFundingStreamInput): Promise<unknown> {
-    return stopFundingStream(this.deps, input);
+  setLanes(input: SetLanesInput): Promise<unknown> {
+    return setLanes(this.deps, input);
   }
 
-  claimLossFlow(input: ClaimLossFlowInput): Promise<unknown> {
-    return claimLossFlow(this.deps, input);
+  stopFunding(input: StopFundingInput): Promise<unknown> {
+    return stopFunding(this.deps, input);
   }
 
-  stakeFlow(input: StakeFlowInput): Promise<unknown> {
-    return stakeFlow(this.deps, input);
+  stopAllFunding(input: StopAllFundingInput): Promise<unknown> {
+    return stopAllFunding(this.deps, input);
   }
 
-  unstakeFlow(input: UnstakeFlowInput): Promise<unknown> {
-    return unstakeFlow(this.deps, input);
+  withdraw(input: WithdrawInput): Promise<unknown> {
+    return withdraw(this.deps, input);
+  }
+
+  withdrawMany(input: WithdrawManyInput): Promise<unknown> {
+    return withdrawMany(this.deps, input);
+  }
+
+  claimLossLvst(input: ClaimLossLvstInput): Promise<unknown> {
+    return claimLossLvst(this.deps, input);
+  }
+
+  stakeLvst(input: StakeLvstInput): Promise<unknown> {
+    return stakeLvst(this.deps, input);
+  }
+
+  unstakeLvst(input: UnstakeLvstInput): Promise<unknown> {
+    return unstakeLvst(this.deps, input);
+  }
+
+  claimDividends(): Promise<unknown> {
+    return claimDividends(this.deps);
+  }
+
+  transferNft(input: TransferNftInput): Promise<unknown> {
+    return transferNft(this.deps, input);
+  }
+
+  approveNft(input: ApproveNftInput): Promise<unknown> {
+    return approveNft(this.deps, input);
+  }
+
+  setApprovalForAll(input: SetApprovalForAllInput): Promise<unknown> {
+    return setApprovalForAll(this.deps, input);
   }
 }

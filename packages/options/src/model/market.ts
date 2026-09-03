@@ -1,7 +1,6 @@
 // --- exports ---
 
-import type { MarketId } from "./ids.js";
-import type { VaultId } from "./ids.js";
+import type { MarketId, UserAddress, VaultId } from "./ids.js";
 
 export type OptionsMarketStatus = "open" | "locked" | "resolved" | "disputed";
 
@@ -14,6 +13,7 @@ export interface OptionsMarketTiming {
 export interface OptionsMarket {
   readonly marketId: MarketId;
   readonly title: string;
+  readonly creator: UserAddress;
   readonly streamId?: string;
   readonly category?: string;
   readonly status: OptionsMarketStatus;

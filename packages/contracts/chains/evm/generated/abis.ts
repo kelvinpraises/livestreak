@@ -3327,6 +3327,16 @@ export const vaultAbi = [
     inputs: [
       { name: 'vaultId', internalType: 'bytes32', type: 'bytes32' },
       { name: 'side', internalType: 'enum Side', type: 'uint8' },
+    ],
+    name: 'pendingBoundaries',
+    outputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'vaultId', internalType: 'bytes32', type: 'bytes32' },
+      { name: 'side', internalType: 'enum Side', type: 'uint8' },
       { name: 'account', internalType: 'uint256', type: 'uint256' },
     ],
     name: 'pendingShares',
@@ -3562,20 +3572,20 @@ export const vaultAbi = [
     type: 'event',
     anonymous: false,
     inputs: [
-      { name: 'vaultId', internalType: 'bytes32', type: 'bytes32', indexed: true },
-      { name: 'marketId', internalType: 'bytes32', type: 'bytes32', indexed: true },
-      { name: 'creator', internalType: 'address', type: 'address', indexed: true },
-      { name: 'question', internalType: 'string', type: 'string', indexed: false },
+      { name: 'vaultDriver', internalType: 'address', type: 'address', indexed: true },
     ],
-    name: 'VaultCreated',
+    name: 'VaultDriverSet',
   },
   {
     type: 'event',
     anonymous: false,
     inputs: [
-      { name: 'vaultDriver', internalType: 'address', type: 'address', indexed: true },
+      { name: 'vaultId', internalType: 'bytes32', type: 'bytes32', indexed: true },
+      { name: 'marketId', internalType: 'bytes32', type: 'bytes32', indexed: true },
+      { name: 'creator', internalType: 'address', type: 'address', indexed: true },
+      { name: 'question', internalType: 'string', type: 'string', indexed: false },
     ],
-    name: 'VaultDriverSet',
+    name: 'VaultOpened',
   },
   {
     type: 'event',

@@ -2,21 +2,22 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it, vi } from "vitest";
 
 import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../src/model/ids.js";
-import {
-  createContractsOptionsReadTransport,
-  type OptionsContractAddresses
-} from "../../src/read/contracts/index.js";
+import type { OptionsContractAddresses } from "../../src/chains/evm/addresses.js";
 import {
   createOptionsRuntime,
   validateOptionsRuntimeConfig,
   type OptionsRuntimeInput
 } from "../../src/runtime/index.js";
 import {
-  createFakeOptionsReadTransport,
+  createFakeChainConfig,
+  createFakeChainWriter,
+  createFakeOptionsChain,
+  createFakeOptionsReader,
+  FakeReaderInMemory,
   fixtureSeed,
   fixtureUser
-} from "../helpers/fake-transport.js";
-import type { OptionsReadTransport } from "../../src/read/transport.js";
+} from "../helpers/fake-chain.js";
+import type { OptionsChain } from "../../src/chains/types.js";
 
 const HEX_MARKET_ID = asMarketId(
   "0x0000000000000000000000000000000000000000000000000000000000000001"
@@ -32,14 +33,15 @@ const CONTRACT_ADDRESSES: OptionsContractAddresses = {
   dripsStreaming: "0x0000000000000000000000000000000000000019"
 };
 
-const baseInput = (transport: OptionsReadTransport): OptionsRuntimeInput => ({
+const baseInput = (chain: OptionsChain): OptionsRuntimeInput => ({
   config: {
     runtimeId: "runtime_01",
     user: fixtureUser(),
     marketIds: [asMarketId("market_01")],
     defaultMarketId: asMarketId("market_01")
   },
-  transport
+  chainConfig: createFakeChainConfig(fixtureSeed()),
+  chain
 });
 
 describe("options runtime config", () => {
@@ -126,8 +128,8 @@ describe("options runtime config", () => {
 
 describe("options runtime store and refresh", () => {
   it("refreshMarket stores market snapshot", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed());
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     const state = await runtime.refreshMarket(asMarketId("market_01"));
 
@@ -137,8 +139,8 @@ describe("options runtime store and refresh", () => {
   });
 
   it("refreshVault stores vault snapshot with share totals", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed());
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     const state = await runtime.refreshVault(asVaultId("vault_01"));
 
@@ -148,8 +150,8 @@ describe("options runtime store and refresh", () => {
 
   it("refreshUser stores user snapshot with NFTs and LVST account", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed(user));
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     const state = await runtime.refreshUser(user, asMarketId("market_01"));
 
@@ -160,28 +162,28 @@ describe("options runtime store and refresh", () => {
     expect(state.userSnapshot?.nfts[0]?.nft.tokenId).toBe(asTokenId(1n));
   });
 
-  it("readPanel projects NFT lanes from stored data without calling transport again", async () => {
+  it("readPanel projects NFT lanes from stored data without calling reader again", async () => {
     const user = fixtureUser();
-    let transportCalls = 0;
-    const transport = wrapTransport(createFakeOptionsReadTransport(fixtureSeed(user)), () => {
-      transportCalls += 1;
+    let readerCalls = 0;
+    const reader = wrapReader(createFakeOptionsReader(fixtureSeed(user)), () => {
+      readerCalls += 1;
     });
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     await runtime.refreshUser(user, asMarketId("market_01"));
-    const callsAfterRefresh = transportCalls;
+    const callsAfterRefresh = readerCalls;
 
     const panel = runtime.readPanel();
 
     expect(panel.lvst.balanceLVST).toBeTruthy();
     expect(panel.nfts[0]?.lanes).toHaveLength(2);
     expect(panel.markets[0]?.title).toBe("Regulation hearing");
-    expect(transportCalls).toBe(callsAfterRefresh);
+    expect(readerCalls).toBe(callsAfterRefresh);
   });
 
   it("fails with LiveStreakConfigError when market is missing", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed());
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     await expect(runtime.refreshMarket(asMarketId("missing"))).rejects.toBeInstanceOf(
       LiveStreakConfigError
@@ -189,8 +191,8 @@ describe("options runtime store and refresh", () => {
   });
 
   it("fails with LiveStreakConfigError when vault is missing", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed());
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     await expect(runtime.refreshVault(asVaultId("missing"))).rejects.toBeInstanceOf(
       LiveStreakConfigError
@@ -198,29 +200,31 @@ describe("options runtime store and refresh", () => {
   });
 
   it("fails with LiveStreakConfigError when LVST account is missing", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed());
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     await expect(
       runtime.refreshUser(asUserAddress("0xmissing"), asMarketId("market_01"))
     ).rejects.toBeInstanceOf(LiveStreakConfigError);
   });
 
-  it("isolates two runtimes with two fake transports", async () => {
-    const transportA = createFakeOptionsReadTransport(fixtureSeed());
-    const transportB = createFakeOptionsReadTransport(fixtureSeed());
+  it("isolates two runtimes with two fake chains", async () => {
+    const readerA = createFakeOptionsReader(fixtureSeed());
+    const readerB = createFakeOptionsReader(fixtureSeed()) as FakeReaderInMemory;
 
     const runtimeA = createOptionsRuntime({
       config: { runtimeId: "runtime_a", user: fixtureUser() },
-      transport: transportA
+      chainConfig: createFakeChainConfig(fixtureSeed()),
+      chain: { reader: readerA, writer: createFakeChainWriter() }
     });
     const runtimeB = createOptionsRuntime({
       config: { runtimeId: "runtime_b", user: fixtureUser() },
-      transport: transportB
+      chainConfig: createFakeChainConfig(fixtureSeed()),
+      chain: { reader: readerB, writer: createFakeChainWriter() }
     });
 
-    transportB.setMarket({
-      ...(await transportB.readMarket(asMarketId("market_01"))),
+    readerB.setMarket({
+      ...(await readerB.readMarket(asMarketId("market_01"))),
       title: "Other market"
     });
 
@@ -235,8 +239,8 @@ describe("options runtime store and refresh", () => {
 
   it("subscription receives snapshot update and unsubscribe works", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed(user));
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     const seen: number[] = [];
     const unsubscribe = runtime.subscribeSnapshots((state) => {
@@ -259,8 +263,8 @@ describe("options runtime store and refresh", () => {
   });
 
   it("notifies subscribers when refreshMarket fails and clears lastError on success", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed());
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     const revisions: number[] = [];
     const errors: Array<string | undefined> = [];
@@ -281,8 +285,8 @@ describe("options runtime store and refresh", () => {
   });
 
   it("does not let returned snapshot mutation affect the store", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
-    const runtime = createOptionsRuntime(baseInput(transport));
+    const reader = createFakeOptionsReader(fixtureSeed());
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
 
     await runtime.refreshMarket(asMarketId("market_01"));
     const first = runtime.readSnapshot();
@@ -312,18 +316,15 @@ describe("options runtime store and refresh", () => {
 
     try {
       let readerCalls = 0;
-      const transport = createContractsOptionsReadTransport({
-        reader: {
-          read: async () => {
-            readerCalls += 1;
-            throw new LiveStreakConfigError({
-              message: "polling read failed",
-              metadata: { details: "test" }
-            });
-          }
-        },
-        addresses: CONTRACT_ADDRESSES
-      });
+      const reader = {
+        readMarket: async () => {
+          readerCalls += 1;
+          throw new LiveStreakConfigError({
+            message: "polling read failed",
+            metadata: { details: "test" }
+          });
+        }
+      } as unknown as import("../../src/chains/types.js").OptionsReader;
 
       const runtime = createOptionsRuntime({
         config: {
@@ -331,7 +332,8 @@ describe("options runtime store and refresh", () => {
           marketIds: [HEX_MARKET_ID],
           refreshIntervalMs: 1_000
         },
-        transport
+        chainConfig: createFakeChainConfig(),
+        chain: { reader, writer: createFakeChainWriter() }
       });
 
       const revisions: number[] = [];
@@ -362,104 +364,108 @@ describe("options runtime store and refresh", () => {
   });
 });
 
-const wrapTransport = (
-  transport: OptionsReadTransport,
+const wrapReader = (
+  reader: import("../../src/chains/types.js").OptionsReader,
   onCall: () => void
-): OptionsReadTransport => ({
+): import("../../src/chains/types.js").OptionsReader => ({
   readMarket: async (marketId) => {
     onCall();
-    return transport.readMarket(marketId);
+    return reader.readMarket(marketId);
   },
   readStreamState: async (marketId) => {
     onCall();
-    return transport.readStreamState(marketId);
+    return reader.readStreamState(marketId);
   },
   listMarketVaults: async (marketId) => {
     onCall();
-    return transport.listMarketVaults(marketId);
+    return reader.listMarketVaults(marketId);
   },
   readVault: async (vaultId) => {
     onCall();
-    return transport.readVault(vaultId);
+    return reader.readVault(vaultId);
   },
   readVaultShareTotals: async (vaultId) => {
     onCall();
-    return transport.readVaultShareTotals(vaultId);
+    return reader.readVaultShareTotals(vaultId);
   },
   listOwnerTokens: async (owner) => {
     onCall();
-    return transport.listOwnerTokens(owner);
+    return reader.listOwnerTokens(owner);
   },
   readNft: async (tokenId, owner) => {
     onCall();
-    return transport.readNft(tokenId, owner);
+    return reader.readNft(tokenId, owner);
   },
   readLvstAccount: async (user) => {
     onCall();
-    return transport.readLvstAccount(user);
+    return reader.readLvstAccount(user);
   },
   readClaimable: async (tokenId, vaultId, side) => {
     onCall();
-    return transport.readClaimable(tokenId, vaultId, side);
+    return reader.readClaimable(tokenId, vaultId, side);
   },
   readLossClaimable: async (tokenId, vaultId, side) => {
     onCall();
-    return transport.readLossClaimable(tokenId, vaultId, side);
+    return reader.readLossClaimable(tokenId, vaultId, side);
   },
   readPot: async (vaultId) => {
     onCall();
-    return transport.readPot(vaultId);
+    return reader.readPot(vaultId);
   },
   readCollected: async (vaultId) => {
     onCall();
-    return transport.readCollected(vaultId);
+    return reader.readCollected(vaultId);
   },
   readAccountVaultIds: async (tokenId) => {
     onCall();
-    return transport.readAccountVaultIds(tokenId);
+    return reader.readAccountVaultIds(tokenId);
   },
   readWinningSide: async (vaultId) => {
     onCall();
-    return transport.readWinningSide(vaultId);
+    return reader.readWinningSide(vaultId);
   },
   readBoard: async (vaultId, side) => {
     onCall();
-    return transport.readBoard(vaultId, side);
+    return reader.readBoard(vaultId, side);
   },
   readSharePrice: async (vaultId, side) => {
     onCall();
-    return transport.readSharePrice(vaultId, side);
+    return reader.readSharePrice(vaultId, side);
   },
   readPendingShares: async (vaultId, side, tokenId) => {
     onCall();
-    return transport.readPendingShares(vaultId, side, tokenId);
+    return reader.readPendingShares(vaultId, side, tokenId);
   },
   readUsdcAddress: async () => {
     onCall();
-    return transport.readUsdcAddress();
+    return reader.readUsdcAddress();
+  },
+  readUsdcBalance: async (owner) => {
+    onCall();
+    return reader.readUsdcBalance(owner);
   },
   readNftBalance: async (tokenId) => {
     onCall();
-    return transport.readNftBalance(tokenId);
+    return reader.readNftBalance(tokenId);
   },
   readOwnerOf: async (tokenId) => {
     onCall();
-    return transport.readOwnerOf(tokenId);
+    return reader.readOwnerOf(tokenId);
   },
   readApproved: async (tokenId) => {
     onCall();
-    return transport.readApproved(tokenId);
+    return reader.readApproved(tokenId);
   },
   readIsApprovedForAll: async (owner, operator) => {
     onCall();
-    return transport.readIsApprovedForAll(owner, operator);
+    return reader.readIsApprovedForAll(owner, operator);
   },
-  ...(transport.readProtocolSummary === undefined
+  ...(reader.readProtocolSummary === undefined
     ? {}
     : {
         readProtocolSummary: async () => {
           onCall();
-          return transport.readProtocolSummary!();
+          return reader.readProtocolSummary!();
         }
       })
 });

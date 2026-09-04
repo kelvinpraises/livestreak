@@ -2,7 +2,7 @@
 
 This document is for the developer who arrives with no conversation history and needs to move. It explains the architecture we want, why the folders exist, what should not be built, and how a bookmaker agent turns live observation context into explicit vault creation decisions.
 
-The short version: **`packages/bookmaker` is the market-making workflow package**. It does **not** trade, stream user funds, or own user positions. It does **not** create markets. **Observe registers the market** when a video stream starts; bookmaker watches that stream and **creates or joins vaults under an existing `marketId`**. Host suggests similar vaults inside the market; contracts record explicit writes; stewards police accountability; options handles user participation.
+The short version: **`packages/bookmaker` is the market-making workflow package with an in-package multichain executor**. It does **not** trade or own user positions. It does **not** create markets. **Observe registers the market** when a video stream starts; bookmaker watches that stream and **creates or joins vaults under an existing `marketId`**. Host suggests similar vaults inside the market via `POST /discovery/find`; bookmaker executes `VaultDriver.createVault` via `chains/`; options handles user participation.
 
 ## The law (five packages)
 
@@ -29,9 +29,9 @@ Bookmaker is **not** the truth engine. It is a **vault origination workflow** ov
 | `VaultDraft` | Proposed vault question, timing, resolution source, optional creator stake/side. |
 | `SimilarityResult` | Host-returned candidate vaults **scoped to `marketId`**. |
 | `BookmakerDecision` | Explicit action: create vault, join vault, or refuse/skip. |
-| `WritePlan` | Contract write payload(s) before execution — `createVault`, optional `joinVaultAsCreator`. |
-| `BookmakerRuntime` | In-memory agent loop: watch → detect → draft → similarity → decide → plan → execute. |
-| `BookmakerPanel` | Projected status for CLI/UI: detections, drafts, decisions, pending writes. |
+| `CreateVaultIntent` | Chain-agnostic bonded seed write: marketId, question, side, stake, seedRate. |
+| `BookmakerRuntime` | In-memory state: watch → detect → draft → similarity → decide → execute. |
+| `BookmakerPanel` | Projected status under `bridge/panel/`. |
 
 Do not use these as bookmaker architecture terms:
 
@@ -60,9 +60,8 @@ detect vault opportunities (strategy/detectors)
 build VaultDraft from detections
 query host for similar vaults under marketId
 choose join existing vault | create new vault | skip
-build contract WritePlan (createVault, join paths)
-execute write via injected wallet/AA transport
-bookmaker runtime state, events, creation panel projection
+execute createVault via chains/ (vaultDriverAbi + wallet inside package)
+bookmaker runtime state, events, bridge panel projection
 resolution *inputs* attached to vault draft (source refs, window) — not final truth
 ```
 

@@ -44,5 +44,6 @@ export interface OptionsUserOptionsSnapshot {
   readonly vaults: readonly OptionsVaultSnapshot[];
   readonly nfts: readonly OptionsNftSnapshot[];
   readonly lvstAccount: LvstAccount;
+  readonly usdcBalance?: bigint;
   readonly protocol?: OptionsProtocolSummary;
 }

@@ -22,6 +22,12 @@ export const buildVaultDraft = (
     marketContext.endpointManifestUri ??
     `observe:${marketContext.observeRunId}`;
 
+  const expiresAtMs = nowMs + detection.durationSeconds * 1_000;
+  const windowSeconds = Math.floor((expiresAtMs - nowMs) / 1_000);
+  const creatorStake = detection.suggestedStake;
+  const seedRate =
+    creatorStake !== undefined && windowSeconds > 0 ? creatorStake / BigInt(windowSeconds) : undefined;
+
   return {
     marketId: marketContext.marketId,
     question: detection.question,
@@ -31,11 +37,12 @@ export const buildVaultDraft = (
     resolutionSource,
     resolutionWindow: {
       opensAtMs: nowMs,
-      expiresAtMs: nowMs + detection.durationSeconds * 1_000
+      expiresAtMs
     },
     fundingToken: options.fundingToken,
     ...(detection.suggestedSide === undefined ? {} : { creatorSide: detection.suggestedSide }),
-    ...(detection.suggestedStake === undefined ? {} : { creatorStake: detection.suggestedStake }),
+    ...(creatorStake === undefined ? {} : { creatorStake }),
+    ...(seedRate === undefined ? {} : { seedRate }),
     ...(marketContext.evidenceRefs === undefined ? {} : { evidenceRefs: marketContext.evidenceRefs }),
     ...(detection.observationRef === undefined ? {} : { observationRef: detection.observationRef })
   };

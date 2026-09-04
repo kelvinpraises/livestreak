@@ -19,7 +19,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@livestreak/host": "file:../host"
+    "@livestreak/contracts": "file:../contracts",
+    "@livestreak/core": "file:../core",
+    "@livestreak/host": "file:../host",
+    "@livestreak/schema": "file:../schema",
+    "@livestreak/wallet": "file:../wallet",
+    "viem": "^2.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

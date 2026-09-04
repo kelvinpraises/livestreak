@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CheckCircle, TrendUp } from '@phosphor-icons/react'
 
-interface WinToast { id: string; type: 'win' | 'loss'; amount?: number; flowReceived?: number; option: string }
+interface WinToast { id: string; type: 'win' | 'loss' | 'stream'; amount?: number; flowReceived?: number; rate?: number; side?: 'yes' | 'no'; option: string }
 interface Props { notifications: WinToast[]; onDismiss: (id: string) => void }
 
 export function WinNotification({ notifications, onDismiss }: Props) {
@@ -18,6 +18,8 @@ export function WinNotification({ notifications, onDismiss }: Props) {
 function Toast({ toast, onDismiss }: { toast: WinToast; onDismiss: () => void }) {
   useEffect(() => { const t = setTimeout(onDismiss, 5000); return () => clearTimeout(t) }, [onDismiss])
   const isWin = toast.type === 'win'
+  const isStream = toast.type === 'stream'
+  const accent = isWin ? '#ffd553' : '#00c8ff'
   return (
     <motion.div
       initial={{ transform: 'translateY(-60px) scale(0.95)', opacity: 0, filter: 'blur(6px)' }}
@@ -47,7 +49,7 @@ function Toast({ toast, onDismiss }: { toast: WinToast; onDismiss: () => void })
         display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
         boxShadow: isWin ? '0 0 20px rgba(255,213,83,0.15)' : 'none',
       }}>
-        {isWin ? <CheckCircle size={18} color="#ffd553" weight="fill" /> : <TrendUp size={18} color="#00c8ff" />}
+        {isWin ? <CheckCircle size={18} color={accent} weight="fill" /> : <TrendUp size={18} color={accent} />}
       </div>
       <div style={{ flex: 1 }}>
         {isWin ? (
@@ -55,9 +57,16 @@ function Toast({ toast, onDismiss }: { toast: WinToast; onDismiss: () => void })
             <div className="text-shimmer display" style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.2, letterSpacing: '0.02em' }}>You won ${toast.amount?.toFixed(2)}</div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 3 }}>{toast.option}</div>
           </>
+        ) : isStream ? (
+          <>
+            <div className="display" style={{ fontSize: 15, fontWeight: 600, color: '#00c8ff', letterSpacing: '0.02em' }}>
+              Streaming ${toast.rate?.toFixed(2)}/min → {toast.side?.toUpperCase()} on {toast.option}
+            </div>
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 3 }}>Mock commit — funds will flow when connected</div>
+          </>
         ) : (
           <>
-            <div className="display" style={{ fontSize: 15, fontWeight: 600, color: '#00c8ff', letterSpacing: '0.02em' }}>You received {toast.flowReceived?.toLocaleString()} $FLOW</div>
+            <div className="display" style={{ fontSize: 15, fontWeight: 600, color: '#00c8ff', letterSpacing: '0.02em' }}>You received {toast.flowReceived?.toLocaleString()} $LVST</div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 3 }}>Losers become owners — stake to earn</div>
           </>
         )}

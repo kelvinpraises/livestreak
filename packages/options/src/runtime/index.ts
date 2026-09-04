@@ -18,3 +18,8 @@ export {
   type OptionsRuntimeStore
 } from "./store.js";
 export { createOptionsRuntime, type OptionsRuntime } from "./runtime.js";
+export { assembleBoard, type OptionsBoard } from "./board.js";
+export {
+  createBoardSubscriptionRegistry,
+  type BoardSubscriptionRegistry
+} from "./subscriptions.js";

@@ -1,0 +1,12 @@
+[package]
+name = "livestreak"
+version = "0.1.0"
+edition = "2024.beta"
+
+[dependencies]
+MoveStdlib = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "framework/mainnet", override = true }
+Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "framework/mainnet", override = true }
+openzeppelin_fp_math = { git = "https://github.com/OpenZeppelin/contracts-sui.git", subdir = "math/fixed_point", rev = "v1.3.0" }
+
+[addresses]
+livestreak = "0x0"

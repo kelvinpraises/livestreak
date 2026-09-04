@@ -14,11 +14,8 @@ export type {
   OptionsProtocolSummary,
   OptionsSessionPnlView,
   OptionsStreamAccrualView,
-  OptionsStreamMedia,
   OptionsStreamState,
   OptionsStreamStatus,
-  OptionsMediaResolver,
-  OptionsMediaResolvers,
   OptionsUserOptionsSnapshot,
   OptionsVault,
   OptionsVaultOutcome,
@@ -53,11 +50,6 @@ export {
   projectSessionPnl,
   projectShares,
   projectStreamAccrual,
-  DEFAULT_MEDIA_RESOLVERS,
-  resolveStreamMedia,
-  walrusAggregatorResolver,
-  WALRUS_MAINNET_AGGREGATOR,
-  WALRUS_TESTNET_AGGREGATOR,
   segMath,
   SHARE_SCALE,
   sharesPerUsdc,
@@ -65,24 +57,18 @@ export {
   validateOptionsVaultSide,
   WAD
 } from "./model/index.js";
-export type { OptionsReadTransport } from "./read/index.js";
 export {
-  type ContractReadRequest,
-  type ContractReader,
-  type ContractsOptionsReadTransportInput,
-  type ContractsReadEntity,
+  readMarketSnapshot,
+  readVaultSnapshot,
+  readUserOptionsSnapshot,
+  readClaimsView,
+  readSessionPnl,
+  readStreamState,
+  gatherUserVaultClaims,
   contractsReadFailed,
   contractsReadNotFound,
-  createContractsOptionsReadTransport,
-  gatherUserVaultClaims,
-  getStreamMedia,
-  readClaimsView,
-  readMarketSnapshot,
-  readSessionPnl,
-  readUserOptionsSnapshot,
-  readVaultSnapshot,
-  type OptionsContractAddresses
-} from "./read/index.js";
+  type ContractsReadEntity
+} from "./flows/index.js";
 export type {
   OptionsLanePanel,
   OptionsLvstPanel,
@@ -91,49 +77,60 @@ export type {
   OptionsPanel,
   OptionsProtocolPanel,
   OptionsUserPanel,
-  OptionsVaultPanel
-} from "./panel/index.js";
-export { projectOptionsPanel } from "./panel/index.js";
+  OptionsVaultPanel,
+  OptionsControlsView
+} from "./bridge/panel/index.js";
+export { projectOptionsPanel, projectOptionsControls } from "./bridge/panel/index.js";
+export type {
+  BridgeCaller,
+  CallActionEnvelope,
+  CapabilityGrant,
+  CapabilityScope,
+  CreateOptionsBridgeInput,
+  OptionsBridge
+} from "./bridge/index.js";
+export {
+  createOptionsBridge,
+  bridgeActionScope,
+  bridgeBoardReadScope,
+  bridgeBoardSubscribeScope,
+  bridgeControlsReadScope,
+  authorizeBridgeCaller,
+  requireAnyScope
+} from "./bridge/index.js";
 export type {
   OptionsRuntime,
   OptionsRuntimeConfig,
   OptionsRuntimeInput,
   OptionsRuntimeLastError,
-  OptionsRuntimeState
+  OptionsRuntimeState,
+  OptionsBoard
 } from "./runtime/index.js";
 export { createOptionsRuntime, validateOptionsRuntimeConfig } from "./runtime/index.js";
 export type {
-  ApproveNftInput,
-  ClaimLossLvstInput,
-  ContractWriteRequest,
-  ContractWriter,
-  ContractsOptionsWriteTransportInput,
+  OptionsChain,
+  OptionsChainConfig,
+  OptionsReader,
+  OptionsWriter,
+  OptionsContractAddresses,
+  TxId,
   FundStreamInput,
-  LaneWriteInput,
-  OptionsWriteTransport,
-  SetApprovalForAllInput,
   SetLanesInput,
-  StakeLvstInput,
-  StopAllFundingInput,
   StopFundingInput,
-  TransferNftInput,
-  UnstakeLvstInput,
+  StopAllFundingInput,
   WithdrawInput,
-  WithdrawManyInput
-} from "./write/index.js";
+  WithdrawManyInput,
+  ClaimLossLvstInput,
+  StakeLvstInput,
+  UnstakeLvstInput,
+  TransferNftInput,
+  ApproveNftInput,
+  SetApprovalForAllInput,
+  LaneWriteInput
+} from "./chains/index.js";
 export {
-  approveNft,
-  claimDividends,
-  claimLossLvst,
-  createContractsOptionsWriteTransport,
-  fundStream,
-  setApprovalForAll,
-  setLanes,
-  stakeLvst,
-  stopAllFunding,
-  stopFunding,
-  transferNft,
-  unstakeLvst,
-  withdraw,
-  withdrawMany
-} from "./write/index.js";
+  createOptionsChain,
+  resolveOptionsAccountAddress,
+  validateOptionsChainConfig,
+  asTxId
+} from "./chains/index.js";

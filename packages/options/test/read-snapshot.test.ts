@@ -11,9 +11,9 @@ import {
   readMarketSnapshot,
   readUserOptionsSnapshot,
   readVaultSnapshot
-} from "../src/read/snapshot.js";
+} from "../src/flows/snapshot.js";
 import {
-  createFakeOptionsReadTransport,
+  createFakeOptionsReader,
   fixtureMarket,
   fixtureNft,
   fixtureOtherMarketNft,
@@ -22,11 +22,11 @@ import {
   fixtureShareTotals,
   fixtureUser,
   fixtureVault
-} from "./helpers/fake-transport.js";
+} from "./helpers/fake-chain.js";
 
 describe("options read snapshots", () => {
   it("readMarketSnapshot returns market plus vaults", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
+    const transport = createFakeOptionsReader(fixtureSeed());
     const snapshot = await readMarketSnapshot(transport, asMarketId("market_01"));
 
     expect(snapshot.market.title).toBe("Regulation hearing");
@@ -36,7 +36,7 @@ describe("options read snapshots", () => {
   });
 
   it("readVaultSnapshot returns pools and share totals", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
+    const transport = createFakeOptionsReader(fixtureSeed());
     const snapshot = await readVaultSnapshot(transport, asVaultId("vault_01"));
 
     expect(snapshot.vault.pools.yes).toBe(94_000_000n);
@@ -47,7 +47,7 @@ describe("options read snapshots", () => {
 
   it("readUserOptionsSnapshot includes NFTs scoped to marketId", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       ...fixtureSeed(user),
       markets: [
         fixtureMarket(),
@@ -80,7 +80,7 @@ describe("options read snapshots", () => {
 
   it("readUserOptionsSnapshot includes vaults from market and NFT lanes", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const transport = createFakeOptionsReader(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
 
     expect(snapshot.lvstAccount.balance).toBeGreaterThan(0n);
@@ -92,7 +92,7 @@ describe("options read snapshots", () => {
 
   it("readUserOptionsSnapshot without marketId returns empty collections", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const transport = createFakeOptionsReader(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user);
 
     expect(snapshot.marketId).toBeUndefined();
@@ -104,7 +104,7 @@ describe("options read snapshots", () => {
 
   it("readUserOptionsSnapshot omits protocol when transport has no readProtocolSummary", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeedWithoutProtocol(user));
+    const transport = createFakeOptionsReader(fixtureSeedWithoutProtocol(user));
 
     expect(transport.readProtocolSummary).toBeUndefined();
 
@@ -115,7 +115,7 @@ describe("options read snapshots", () => {
   });
 
   it("fails with LiveStreakConfigError when market is missing", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
+    const transport = createFakeOptionsReader(fixtureSeed());
 
     await expect(readMarketSnapshot(transport, asMarketId("missing"))).rejects.toBeInstanceOf(
       LiveStreakConfigError
@@ -123,7 +123,7 @@ describe("options read snapshots", () => {
   });
 
   it("fails with LiveStreakConfigError when vault is missing", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
+    const transport = createFakeOptionsReader(fixtureSeed());
 
     await expect(readVaultSnapshot(transport, asVaultId("missing"))).rejects.toBeInstanceOf(
       LiveStreakConfigError
@@ -131,7 +131,7 @@ describe("options read snapshots", () => {
   });
 
   it("fails with LiveStreakConfigError when share totals are missing", async () => {
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       markets: [fixtureMarket()],
       vaults: [fixtureVault()],
       nfts: [fixtureNft()],
@@ -145,7 +145,7 @@ describe("options read snapshots", () => {
 
   it("fails with LiveStreakConfigError when NFT is missing", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       ...fixtureSeed(user),
       nfts: []
     });
@@ -156,7 +156,7 @@ describe("options read snapshots", () => {
   });
 
   it("fails with LiveStreakConfigError when LVST account is missing", async () => {
-    const transport = createFakeOptionsReadTransport(fixtureSeed());
+    const transport = createFakeOptionsReader(fixtureSeed());
 
     await expect(
       readUserOptionsSnapshot(transport, asUserAddress("0xmissing"), asMarketId("market_01"))
@@ -164,8 +164,8 @@ describe("options read snapshots", () => {
   });
 
   it("keeps fake transport data isolated between instances", async () => {
-    const left = createFakeOptionsReadTransport(fixtureSeed());
-    const right = createFakeOptionsReadTransport();
+    const left = createFakeOptionsReader(fixtureSeed());
+    const right = createFakeOptionsReader();
 
     await expect(readMarketSnapshot(left, asMarketId("market_01"))).resolves.toBeDefined();
     await expect(readMarketSnapshot(right, asMarketId("market_01"))).rejects.toBeInstanceOf(

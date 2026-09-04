@@ -29,7 +29,8 @@ export const validateVaultDraft = (input: unknown): ValidationResult<VaultDraft>
 
   requireOptionalNonEmptyString(value.vaultType, "vaultType", issues);
   requireOptionalSide(value.creatorSide, "creatorSide", issues);
-  requireOptionalNonNegativeBigInt(value.creatorStake, "creatorStake", issues);
+  requireOptionalPositiveBigInt(value.creatorStake, "creatorStake", issues);
+  requireOptionalPositiveBigInt(value.seedRate, "seedRate", issues);
   requireOptionalStringArray(value.evidenceRefs, "evidenceRefs", issues);
   requireOptionalNonEmptyString(value.observationRef, "observationRef", issues);
 
@@ -47,9 +48,12 @@ export const validateVaultDraft = (input: unknown): ValidationResult<VaultDraft>
     fundingToken: fundingToken!,
     ...(optionalString(value.vaultType) === undefined ? {} : { vaultType: optionalString(value.vaultType) }),
     ...(optionalSide(value.creatorSide) === undefined ? {} : { creatorSide: optionalSide(value.creatorSide) }),
-    ...(optionalNonNegativeBigInt(value.creatorStake) === undefined
+    ...(optionalPositiveBigInt(value.creatorStake) === undefined
       ? {}
-      : { creatorStake: optionalNonNegativeBigInt(value.creatorStake) }),
+      : { creatorStake: optionalPositiveBigInt(value.creatorStake) }),
+    ...(optionalPositiveBigInt(value.seedRate) === undefined
+      ? {}
+      : { seedRate: optionalPositiveBigInt(value.seedRate) }),
     ...(optionalStringArray(value.evidenceRefs) === undefined
       ? {}
       : { evidenceRefs: optionalStringArray(value.evidenceRefs) }),
@@ -57,6 +61,38 @@ export const validateVaultDraft = (input: unknown): ValidationResult<VaultDraft>
       ? {}
       : { observationRef: optionalString(value.observationRef) })
   });
+};
+
+export const validateVaultDraftForCreate = (
+  draft: VaultDraft,
+  nowMs: number
+): ValidationResult<VaultDraft> => {
+  const base = validateVaultDraft(draft);
+  if (base.ok === false) {
+    return base;
+  }
+
+  const issues: string[] = [];
+
+  if (typeof nowMs !== "number" || Number.isFinite(nowMs) === false) {
+    issues.push("nowMs must be a finite number");
+  } else if (base.value.resolutionWindow.expiresAtMs <= nowMs) {
+    issues.push("resolutionWindow.expiresAtMs must be after nowMs");
+  }
+
+  if (base.value.creatorStake === undefined || base.value.creatorStake <= 0n) {
+    issues.push("creatorStake must be a positive bigint for createVault");
+  }
+
+  if (base.value.seedRate === undefined || base.value.seedRate <= 0n) {
+    issues.push("seedRate must be a positive bigint for createVault");
+  }
+
+  if (issues.length > 0) {
+    return validationFailure(...issues);
+  }
+
+  return base;
 };
 
 // --- helpers ---
@@ -95,6 +131,20 @@ const requireOptionalSide = (value: unknown, fieldPath: string, issues: string[]
 
   if (value !== "yes" && value !== "no") {
     issues.push(`${fieldPath} must be "yes" or "no" when provided`);
+  }
+};
+
+const requireOptionalPositiveBigInt = (
+  value: unknown,
+  fieldPath: string,
+  issues: string[]
+): void => {
+  if (value === undefined) {
+    return;
+  }
+
+  if (typeof value !== "bigint" || value <= 0n) {
+    issues.push(`${fieldPath} must be a positive bigint when provided`);
   }
 };
 
@@ -183,6 +233,9 @@ const optionalString = (value: unknown): string | undefined =>
 
 const optionalSide = (value: unknown): "yes" | "no" | undefined =>
   value === "yes" || value === "no" ? value : undefined;
+
+const optionalPositiveBigInt = (value: unknown): bigint | undefined =>
+  typeof value === "bigint" && value > 0n ? value : undefined;
 
 const optionalNonNegativeBigInt = (value: unknown): bigint | undefined =>
   typeof value === "bigint" && value >= 0n ? value : undefined;

@@ -16,6 +16,7 @@ export interface VaultDraft {
   readonly fundingToken: string;
   readonly creatorSide?: "yes" | "no";
   readonly creatorStake?: bigint;
+  readonly seedRate?: bigint;
   readonly evidenceRefs?: readonly string[];
   readonly observationRef?: string;
 }

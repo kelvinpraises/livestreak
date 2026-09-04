@@ -1,7 +1,8 @@
 import type { EndpointDescriptor } from "@livestreak/host";
+import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { createHostRouteDeps, createHostRoutes } from "#api/server.js";
-import { matchRoute } from "#api/server.js";
+import { createApp, createHostRouteDeps } from "#api/server.js";
+import { handleFindSimilar, handleIndexVault } from "#services/discovery-routes.js";
 import { handleMemoryAccess } from "#services/walrus/memory/routes.js";
 import { handlePolicyEvaluate } from "#services/media/policy-routes.js";
 import {
@@ -52,7 +53,7 @@ const validCacheReceiptBody = {
 
 const createTestHost = (config = defaultHostServerConfig()) => ({
   deps: createHostRouteDeps(config),
-  routes: createHostRoutes(config)
+  app: createApp(createHostRouteDeps(config))
 });
 
 const mediaDeps = (host: ReturnType<typeof createTestHost>) => ({
@@ -63,40 +64,43 @@ const mediaDeps = (host: ReturnType<typeof createTestHost>) => ({
 const createSession = async (
   host: ReturnType<typeof createTestHost>,
   body: Record<string, unknown> = { ...validSessionBody }
-) => {
-  const matched = matchRoute("POST", "/media/sessions", host.routes);
-  return matched!.route.handler({
-    params: {},
-    body,
-    deps: host.deps
-  });
-};
+) => handleCreateSession(body, mediaDeps(host));
 
 describe("host route handlers", () => {
-  it("registers modular host routes and removes legacy paths", () => {
-    const { routes } = createTestHost();
-    expect(routes).toHaveLength(16);
-    expect(matchRoute("GET", "/health", routes)).toBeDefined();
-    expect(matchRoute("GET", "/descriptor", routes)).toBeDefined();
-    expect(matchRoute("POST", "/media/sessions", routes)).toBeDefined();
-    expect(
-      matchRoute("GET", "/media/sessions/session_test_01/manifest", routes)
-    ).toBeDefined();
-    expect(
-      matchRoute("POST", "/media/sessions/session_test_01/cache-receipts", routes)
-    ).toBeDefined();
-    expect(matchRoute("POST", "/media/policy/evaluate", routes)).toBeDefined();
-    expect(matchRoute("POST", "/discovery/vaults", routes)).toBeDefined();
-    expect(matchRoute("POST", "/discovery/find", routes)).toBeDefined();
-    expect(matchRoute("POST", "/memory/access", routes)).toBeDefined();
-    expect(matchRoute("POST", "/content/blobs", routes)).toBeDefined();
-    expect(matchRoute("GET", "/content/blobs/walrus-testnet/blob_01", routes)).toBeDefined();
-    expect(matchRoute("POST", "/aa/bundler/local", routes)).toBeDefined();
-    expect(matchRoute("POST", "/aa/paymaster/local", routes)).toBeDefined();
-    expect(matchRoute("POST", "/sessions", routes)).toBeUndefined();
-    expect(matchRoute("POST", "/similarity/vaults", routes)).toBeUndefined();
-    expect(matchRoute("POST", "/forum/threads", routes)).toBeUndefined();
-    expect(matchRoute("POST", "/policy/evaluate", routes)).toBeUndefined();
+  it("registers modular host routes and removes legacy paths", async () => {
+    const { app } = createTestHost();
+    await request(app).get("/health").expect(200);
+    await request(app).get("/descriptor").expect(200);
+    await request(app).post("/media/sessions").send(validSessionBody).expect(201);
+    await request(app).get("/media/sessions/session_test_01/manifest").expect(200);
+    await request(app)
+      .post("/media/sessions/session_test_01/cache-receipts")
+      .send(validCacheReceiptBody)
+      .expect(200);
+    await request(app).post("/media/policy/evaluate").send({}).expect(400);
+    await request(app).post("/discovery/vaults").send(validIndexVaultBody).expect(201);
+    await request(app).post("/discovery/find").send(validFindSimilarBody).expect(200);
+    await request(app)
+      .post("/memory/access")
+      .send({ marketId: "mkt_01", suiDelegate: "a".repeat(64) })
+      .expect(503);
+    await request(app)
+      .post("/content/blobs")
+      .send({ bytesBase64: "", persistence: "ephemeral" })
+      .expect(503);
+    await request(app).get("/content/blobs/walrus-testnet/blob_01").expect(503);
+    await request(app)
+      .post("/aa/bundler/local")
+      .send({ jsonrpc: "2.0", method: "eth_chainId", params: [], id: 1 })
+      .expect(503);
+    await request(app)
+      .post("/aa/paymaster/local")
+      .send({ jsonrpc: "2.0", method: "pm_getPaymasterStubData", params: [], id: 1 })
+      .expect(503);
+    await request(app).post("/sessions").expect(404);
+    await request(app).post("/similarity/vaults").expect(404);
+    await request(app).post("/forum/threads").expect(404);
+    await request(app).post("/policy/evaluate").expect(404);
   });
 });
 
@@ -107,8 +111,7 @@ describe("media session routes", () => {
 
     expect(response.ok).toBe(true);
     if (response.ok) {
-      expect(response.status).toBe(201);
-      expect(response.body).toMatchObject({
+      expect(response.result).toMatchObject({
         summary: {
           sessionId: "session_test_01",
           status: "active"
@@ -515,30 +518,19 @@ describe("discovery routes", () => {
   it("indexes a vault then finds overlapping candidates in the same market", async () => {
     const host = createTestHost();
 
-    const indexResponse = await matchRoute("POST", "/discovery/vaults", host.routes)!.route.handler({
-      params: {},
-      body: validIndexVaultBody,
-      deps: host.deps
-    });
+    const indexResponse = handleIndexVault(validIndexVaultBody, host.deps.discovery);
 
     expect(indexResponse.ok).toBe(true);
-    if (indexResponse.ok) {
-      expect(indexResponse.status).toBe(201);
-    }
 
-    const findResponse = await matchRoute("POST", "/discovery/find", host.routes)!.route.handler({
-      params: {},
-      body: validFindSimilarBody,
-      deps: host.deps
-    });
+    const findResponse = handleFindSimilar(validFindSimilarBody, host.deps.discovery);
 
     expect(findResponse.ok).toBe(true);
     if (findResponse.ok) {
-      expect(findResponse.body).toMatchObject({
+      expect(findResponse.result).toMatchObject({
         marketId: "mkt_a",
         duplicateRisk: expect.any(String)
       });
-      const body = findResponse.body as { candidates: Array<{ marketId: string }> };
+      const body = findResponse.result as unknown as { candidates: Array<{ marketId: string }> };
       expect(body.candidates.length).toBeGreaterThan(0);
       expect(body.candidates[0]?.marketId).toBe("mkt_a");
     }
@@ -547,24 +539,19 @@ describe("discovery routes", () => {
   it("scopes find results to the requested marketId", async () => {
     const host = createTestHost();
 
-    await matchRoute("POST", "/discovery/vaults", host.routes)!.route.handler({
-      params: {},
-      body: validIndexVaultBody,
-      deps: host.deps
-    });
+    handleIndexVault(validIndexVaultBody, host.deps.discovery);
 
-    const findResponse = await matchRoute("POST", "/discovery/find", host.routes)!.route.handler({
-      params: {},
-      body: {
+    const findResponse = handleFindSimilar(
+      {
         marketId: "mkt_b",
         vaultDraft: validFindSimilarBody.vaultDraft
       },
-      deps: host.deps
-    });
+      host.deps.discovery
+    );
 
     expect(findResponse.ok).toBe(true);
     if (findResponse.ok) {
-      expect(findResponse.body).toMatchObject({
+      expect(findResponse.result).toMatchObject({
         marketId: "mkt_b",
         candidates: [],
         duplicateRisk: "low"
@@ -575,21 +562,13 @@ describe("discovery routes", () => {
   it("rejects invalid index and find bodies with 400", async () => {
     const host = createTestHost();
 
-    const indexResponse = await matchRoute("POST", "/discovery/vaults", host.routes)!.route.handler({
-      params: {},
-      body: { vaultId: "vlt_01" },
-      deps: host.deps
-    });
+    const indexResponse = handleIndexVault({ vaultId: "vlt_01" }, host.deps.discovery);
     expect(indexResponse.ok).toBe(false);
     if (!indexResponse.ok) {
       expect(indexResponse.status).toBe(400);
     }
 
-    const findResponse = await matchRoute("POST", "/discovery/find", host.routes)!.route.handler({
-      params: {},
-      body: { marketId: "mkt_a" },
-      deps: host.deps
-    });
+    const findResponse = handleFindSimilar({ marketId: "mkt_a" }, host.deps.discovery);
     expect(findResponse.ok).toBe(false);
     if (!findResponse.ok) {
       expect(findResponse.status).toBe(400);
@@ -603,6 +582,7 @@ describe("memory access route", () => {
     walrusNetwork: "mainnet" as const,
     memorySuiOwnerPrivateKey: "suiprivkey1qqtest",
     memoryOwnerSeed: null,
+    walletSeed: null,
     resolvedWalrus: {
       network: "mainnet" as const,
       sui: {
@@ -662,11 +642,13 @@ describe("memory access route", () => {
       resolvedWalrus: null
     });
 
-    const response = await matchRoute("POST", "/memory/access", host.routes)!.route.handler({
-      params: {},
-      body: { marketId: "mkt_01", suiDelegate: validDelegateKey },
-      deps: host.deps
-    });
+    const response = await handleMemoryAccess(
+      { marketId: "mkt_01", suiDelegate: validDelegateKey },
+      {
+        config: host.deps.config,
+        bindings: host.deps.walrus.memory.bindings
+      }
+    );
 
     expect(response.ok).toBe(false);
     if (!response.ok) {
@@ -683,11 +665,13 @@ describe("memory access route", () => {
       resolvedWalrus: null
     });
 
-    const response = await matchRoute("POST", "/memory/access", host.routes)!.route.handler({
-      params: {},
-      body: { marketId: "mkt_01", suiDelegate: validDelegateKey },
-      deps: host.deps
-    });
+    const response = await handleMemoryAccess(
+      { marketId: "mkt_01", suiDelegate: validDelegateKey },
+      {
+        config: host.deps.config,
+        bindings: host.deps.walrus.memory.bindings
+      }
+    );
 
     expect(response.ok).toBe(false);
     if (!response.ok) {

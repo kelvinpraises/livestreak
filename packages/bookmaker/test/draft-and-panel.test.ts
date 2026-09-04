@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildVaultDraft } from "../src/draft/build.js";
-import { projectBookmakerPanel } from "../src/panel/project.js";
+import { projectBookmakerPanel } from "../src/bridge/panel/project.js";
 import { detection, marketContext, similarityResult, vaultDraft, watchSource } from "./helpers/fixtures.js";
 
 describe("buildVaultDraft", () => {
@@ -17,6 +17,7 @@ describe("buildVaultDraft", () => {
       opensAtMs: 1_000,
       expiresAtMs: 601_000
     });
+    expect(draft.seedRate).toBe(8_333n);
     expect(draft.fundingToken).toBe("0xusdc");
   });
 });
@@ -65,10 +66,18 @@ describe("projectBookmakerPanel", () => {
         reason: "duplicate_vault",
         detection: detected
       },
-      pendingWritePlan: {
-        decision: { action: "createVault", draft, detection: detected },
-        intents: [{ action: "createVault", marketId: "market-1", draft }]
-      },
+      pendingWriteIntents: [
+        {
+          action: "createVault",
+          marketId: "market-1",
+          question: draft.question,
+          creatorSide: "yes",
+          creatorStake: 5_000_000n,
+          seedRate: 8_333n,
+          resolutionSource: draft.resolutionSource,
+          resolutionWindowExpiresAtMs: draft.resolutionWindow.expiresAtMs
+        }
+      ],
       updatedAtMs: 99
     });
 

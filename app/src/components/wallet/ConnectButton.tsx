@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Wallet, CaretDown, SignOut, Copy, Check, UserPlus, Key, X, SpinnerGap, Warning } from '@phosphor-icons/react'
+import { Wallet, CaretDown, SignOut, Copy, Check, X, SpinnerGap, Warning } from '@phosphor-icons/react'
 import { useWalletContext } from '#/contexts/WalletContext.tsx'
 import { formatUSDCFull } from '#/utils/format.ts'
 
@@ -25,7 +25,6 @@ export function ConnectButton() {
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
-  const [modalMode, setModalMode] = useState<'choose' | 'register'>('choose')
   const [password, setPassword] = useState('')
   const [copied, setCopied] = useState(false)
 
@@ -38,7 +37,6 @@ export function ConnectButton() {
   }
 
   function openModal() {
-    setModalMode('choose')
     setPassword('')
     setModalOpen(true)
   }
@@ -104,11 +102,6 @@ export function ConnectButton() {
           />
           <Dialog.Content
             className="wallet-dialog-content"
-            onOpenAutoFocus={(e) => {
-              // Don't autofocus the close button — let our input handle it
-              if (modalMode === 'register') return
-              e.preventDefault()
-            }}
             style={{
               position: 'fixed', top: '50%', left: '50%',
               transform: 'translate(-50%, -50%)',
@@ -130,7 +123,6 @@ export function ConnectButton() {
               </button>
             </Dialog.Close>
 
-            {/* Icon */}
             <div style={{
               width: 48, height: 48, borderRadius: 12,
               background: 'rgba(0,255,135,0.1)',
@@ -141,153 +133,82 @@ export function ConnectButton() {
               <Wallet size={22} color="#00ff87" />
             </div>
 
-            {modalMode === 'choose' ? (
-              <>
-                <Dialog.Title className="display" style={{
-                  fontSize: 20, fontWeight: 700, marginBottom: 10,
-                  color: '#fff', letterSpacing: '0.02em',
-                }}>
-                  Connect Wallet
-                </Dialog.Title>
-                <Dialog.Description style={{
-                  fontSize: 14, color: 'rgba(255,255,255,0.5)',
-                  lineHeight: 1.6, marginBottom: 24,
-                }}>
-                  Enter a password to derive your smart wallet. Testnet only — this is not secure key management.
-                </Dialog.Description>
+            <Dialog.Title className="display" style={{
+              fontSize: 20, fontWeight: 700, marginBottom: 10,
+              color: '#fff', letterSpacing: '0.02em',
+            }}>
+              Connect Wallet
+            </Dialog.Title>
+            <Dialog.Description style={{
+              fontSize: 14, color: 'rgba(255,255,255,0.5)',
+              lineHeight: 1.6, marginBottom: 20,
+            }}>
+              Your wallet is derived deterministically from a password — same password, same wallet. Testnet only — this is not secure key management.
+            </Dialog.Description>
 
-                {/* Error display */}
-                {error && (
-                  <div style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 8,
-                    background: 'rgba(255,45,120,0.08)',
-                    border: '1px solid rgba(255,45,120,0.2)',
-                    borderRadius: 8, padding: '10px 12px',
-                    marginBottom: 16,
-                  }}>
-                    <Warning size={14} color="#ff2d78" style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, color: '#ff2d78', lineHeight: 1.4 }}>{error}</span>
-                  </div>
-                )}
-
-                {/* Create Wallet */}
-                <ModalOption
-                  onClick={() => setModalMode('register')}
-                  disabled={isLoading}
-                  icon={<UserPlus size={16} color="#00ff87" />}
-                  iconBg="rgba(0,255,135,0.1)"
-                  hoverBg="rgba(0,255,135,0.06)"
-                  hoverBorder="rgba(0,255,135,0.2)"
-                  title="Create Wallet"
-                  subtitle="Derive a new smart account from a password"
-                />
-
-                {/* I have a wallet */}
-                <ModalOption
-                  onClick={() => setModalMode('register')}
-                  disabled={isLoading}
-                  icon={<Key size={16} color="#00c8ff" />}
-                  iconBg="rgba(0,200,255,0.1)"
-                  hoverBg="rgba(0,200,255,0.06)"
-                  hoverBorder="rgba(0,200,255,0.2)"
-                  title="I have a wallet"
-                  subtitle="Re-enter your password to restore it"
-                />
-              </>
-            ) : (
-              /* ─── Register mode: username input ─── */
-              <>
-                <Dialog.Title className="display" style={{
-                  fontSize: 20, fontWeight: 700, marginBottom: 10,
-                  color: '#fff', letterSpacing: '0.02em',
-                }}>
-                  Enter Password
-                </Dialog.Title>
-                <Dialog.Description style={{
-                  fontSize: 14, color: 'rgba(255,255,255,0.5)',
-                  lineHeight: 1.6, marginBottom: 20,
-                }}>
-                  Your wallet is derived deterministically from this password — same password, same wallet. Testnet only.
-                </Dialog.Description>
-
-                {error && (
-                  <div style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 8,
-                    background: 'rgba(255,45,120,0.08)',
-                    border: '1px solid rgba(255,45,120,0.2)',
-                    borderRadius: 8, padding: '10px 12px',
-                    marginBottom: 16,
-                  }}>
-                    <Warning size={14} color="#ff2d78" style={{ marginTop: 1, flexShrink: 0 }} />
-                    <span style={{ fontSize: 12, color: '#ff2d78', lineHeight: 1.4 }}>{error}</span>
-                  </div>
-                )}
-
-                <input
-                  type="password"
-                  placeholder="Password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleConnect() }}
-                  autoFocus
-                  style={{
-                    width: '100%', padding: '12px 14px',
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 8, fontSize: 14,
-                    color: '#fff', fontFamily: 'var(--font-sans)',
-                    outline: 'none', marginBottom: 16,
-                    transition: 'border-color 0.15s',
-                    boxSizing: 'border-box',
-                  }}
-                  onFocus={e => { e.currentTarget.style.borderColor = 'rgba(0,255,135,0.4)' }}
-                  onBlur={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' }}
-                />
-
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <button
-                    onClick={() => setModalMode('choose')}
-                    style={{
-                      flex: 1, padding: '12px 0', fontSize: 13,
-                      borderRadius: 8, border: '1px solid rgba(255,255,255,0.1)',
-                      background: 'none', color: 'rgba(255,255,255,0.5)',
-                      cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 500,
-                    }}
-                  >
-                    Back
-                  </button>
-                  <button
-                    onClick={handleConnect}
-                    disabled={isLoading || !password.trim()}
-                    className="btn-primary"
-                    style={{
-                      flex: 2, padding: '12px 0', fontSize: 13,
-                      borderRadius: 8, fontWeight: 600,
-                      opacity: isLoading || !password.trim() ? 0.5 : 1,
-                      cursor: isLoading || !password.trim() ? 'not-allowed' : 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    }}
-                  >
-                    {isLoading ? (
-                      <>
-                        <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}>
-                          <SpinnerGap size={14} />
-                        </motion.div>
-                        Deriving...
-                      </>
-                    ) : (
-                      'Continue'
-                    )}
-                  </button>
-                </div>
-              </>
+            {error && (
+              <div style={{
+                display: 'flex', alignItems: 'flex-start', gap: 8,
+                background: 'rgba(255,45,120,0.08)',
+                border: '1px solid rgba(255,45,120,0.2)',
+                borderRadius: 8, padding: '10px 12px',
+                marginBottom: 16,
+              }}>
+                <Warning size={14} color="#ff2d78" style={{ marginTop: 1, flexShrink: 0 }} />
+                <span style={{ fontSize: 12, color: '#ff2d78', lineHeight: 1.4 }}>{error}</span>
+              </div>
             )}
+
+            <input
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleConnect() }}
+              autoFocus
+              style={{
+                width: '100%', padding: '12px 14px',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 8, fontSize: 14,
+                color: '#fff', fontFamily: 'var(--font-sans)',
+                outline: 'none', marginBottom: 16,
+                transition: 'border-color 0.15s',
+                boxSizing: 'border-box',
+              }}
+              onFocus={e => { e.currentTarget.style.borderColor = 'rgba(0,255,135,0.4)' }}
+              onBlur={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' }}
+            />
+
+            <button
+              onClick={handleConnect}
+              disabled={isLoading || !password.trim()}
+              className="btn-primary"
+              style={{
+                width: '100%', padding: '12px 0', fontSize: 13,
+                borderRadius: 8, fontWeight: 600,
+                opacity: isLoading || !password.trim() ? 0.5 : 1,
+                cursor: isLoading || !password.trim() ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}
+            >
+              {isLoading ? (
+                <>
+                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}>
+                    <SpinnerGap size={14} />
+                  </motion.div>
+                  Deriving...
+                </>
+              ) : (
+                'Continue'
+              )}
+            </button>
 
             <p style={{
               fontSize: 11, color: 'rgba(255,255,255,0.2)',
               textAlign: 'center', marginTop: 16,
             }}>
-              Gasless on Arc &middot; testnet
+              Gasless &middot; testnet
             </p>
           </Dialog.Content>
         </Dialog.Portal>
@@ -374,54 +295,6 @@ export function ConnectButton() {
         )}
       </AnimatePresence>
     </div>
-  )
-}
-
-/* ─── Subcomponents ─── */
-
-function ModalOption({
-  onClick, disabled, icon, iconBg, hoverBg, hoverBorder, title, subtitle,
-}: {
-  onClick: () => void; disabled?: boolean;
-  icon: ReactNode; iconBg: string; hoverBg: string; hoverBorder: string;
-  title: string; subtitle: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        width: '100%', padding: '14px 16px',
-        background: 'rgba(255,255,255,0.04)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        borderRadius: 10, cursor: disabled ? 'wait' : 'pointer',
-        marginBottom: 10,
-        transition: 'background 0.15s, border-color 0.15s',
-        textAlign: 'left',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.background = hoverBg
-        e.currentTarget.style.borderColor = hoverBorder
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.background = 'rgba(255,255,255,0.04)'
-        e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
-      }}
-    >
-      <div style={{
-        width: 36, height: 36, borderRadius: 8,
-        background: iconBg,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        flexShrink: 0,
-      }}>
-        {icon}
-      </div>
-      <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: '#fff', fontFamily: 'var(--font-sans)', marginBottom: 2 }}>{title}</div>
-        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)' }}>{subtitle}</div>
-      </div>
-    </button>
   )
 }
 

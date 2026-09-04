@@ -10,7 +10,7 @@ import {
   totalVaultPool,
   validateOptionsVaultSide
 } from "../src/model/index.js";
-import { fixtureResolvedVault, fixtureVault } from "./helpers/fake-transport.js";
+import { fixtureResolvedVault, fixtureVault } from "./helpers/fake-chain.js";
 
 describe("options model", () => {
   it("allows YES and NO sides", () => {

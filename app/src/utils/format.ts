@@ -5,7 +5,7 @@ export function formatUSDC(n: number, decimals = 2): string {
 export function formatUSDCFull(n: number): string {
   return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
-export function formatFlow(n: number): string { return n.toLocaleString('en-US') + ' $FLOW' }
+export function formatLvst(n: number): string { return n.toLocaleString('en-US') + ' $LVST' }
 export function formatMultiplier(n: number): string { return n.toFixed(2) + 'x' }
 export function formatCountdown(ms: number): string {
   if (ms <= 0) return '0:00'

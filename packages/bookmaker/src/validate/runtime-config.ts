@@ -1,12 +1,12 @@
 import type { BookmakerVaultPolicy } from "../decision/choose.js";
 import type { BookmakerRuntimeConfig } from "../runtime/config.js";
 import type { BookmakerSimilarityClient } from "../similarity/client.js";
+import { hasBookmakerChainAddresses } from "../chains/config.js";
 import type { ValidationResult } from "./result.js";
 import { validateDetection } from "./detection.js";
 import { validateBookmakerMarketContext } from "./market-context.js";
 import { validationFailure, validationSuccess } from "./result.js";
 import { validateBookmakerWatchSource } from "./watch-source.js";
-import { hasContractsWriteSurface } from "../write/contracts-boundary.js";
 
 // --- exports ---
 
@@ -47,14 +47,26 @@ export const validateBookmakerRuntimeConfig = (
     issues.push("similarityClient must provide a findSimilar function when provided");
   }
 
-  if (value.contracts !== undefined && hasContractsWriteSurface(value.contracts) === false) {
-    issues.push("contracts must include a non-empty vaultAddress when provided");
+  if (value.addresses === undefined || hasBookmakerChainAddresses(value.addresses) === false) {
+    issues.push("addresses must include vaultDriver, marketRegistry, vault, and usdc");
+  }
+
+  if (!isPlainObject(value.walletInit) || typeof (value.walletInit as { chain?: unknown }).chain !== "string") {
+    issues.push("walletInit with chain is required");
+  }
+
+  if (typeof value.seed !== "string" && !(value.seed instanceof Uint8Array)) {
+    issues.push("seed must be a string or Uint8Array");
   }
 
   if (value.chainId !== undefined) {
     if (typeof value.chainId !== "number" || Number.isFinite(value.chainId) === false) {
       issues.push("chainId must be a finite number when provided");
     }
+  }
+
+  if (value.readRpcUrl !== undefined) {
+    requireNonEmptyString(value.readRpcUrl, "readRpcUrl", issues);
   }
 
   if (issues.length > 0 || runtimeId === undefined || fundingToken === undefined || policy === undefined) {
@@ -71,19 +83,25 @@ export const validateBookmakerRuntimeConfig = (
     watchSource: watchSource.value,
     policy,
     fundingToken,
+    walletInit: value.walletInit as BookmakerRuntimeConfig["walletInit"],
+    seed: value.seed as BookmakerRuntimeConfig["seed"],
+    addresses: value.addresses as BookmakerRuntimeConfig["addresses"],
     ...(value.similarityClient === undefined || isSimilarityClientShape(value.similarityClient) === false
       ? {}
       : { similarityClient: value.similarityClient }),
-    ...(value.contracts === undefined || hasContractsWriteSurface(value.contracts) === false
-      ? {}
-      : { contracts: value.contracts }),
     ...(typeof value.chainId === "number" && Number.isFinite(value.chainId)
       ? { chainId: value.chainId }
+      : {}),
+    ...(typeof value.readRpcUrl === "string" && value.readRpcUrl.trim().length > 0
+      ? { readRpcUrl: value.readRpcUrl.trim() }
       : {})
   });
 };
 
 // --- helpers ---
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 const validateNested = <T>(
   input: unknown,

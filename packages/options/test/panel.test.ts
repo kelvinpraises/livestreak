@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { asMarketId } from "../src/model/index.js";
-import { projectOptionsPanel } from "../src/panel/project.js";
-import { readUserOptionsSnapshot } from "../src/read/snapshot.js";
+import { projectOptionsPanel } from "../src/bridge/panel/project.js";
+import { readUserOptionsSnapshot } from "../src/flows/snapshot.js";
 import {
-  createFakeOptionsReadTransport,
+  createFakeOptionsReader,
   fixtureNft,
   fixtureResolvedVault,
   fixtureSeed,
   fixtureShareTotals,
   fixtureUser
-} from "./helpers/fake-transport.js";
+} from "./helpers/fake-chain.js";
 
 describe("projectOptionsPanel", () => {
   it("includes total pool per vault and market", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const transport = createFakeOptionsReader(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
@@ -26,7 +26,7 @@ describe("projectOptionsPanel", () => {
 
   it("projects NFT lane rates and accrued shares", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const transport = createFakeOptionsReader(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
@@ -43,7 +43,7 @@ describe("projectOptionsPanel", () => {
 
   it("includes vault share totals from snapshot enrichment", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const transport = createFakeOptionsReader(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
@@ -54,7 +54,7 @@ describe("projectOptionsPanel", () => {
 
   it("includes LVST balance, staked amount, and pending dividends", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const transport = createFakeOptionsReader(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
@@ -67,7 +67,7 @@ describe("projectOptionsPanel", () => {
 
   it("includes market creator on market panel", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const transport = createFakeOptionsReader(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
@@ -76,7 +76,7 @@ describe("projectOptionsPanel", () => {
 
   it("projects resolved vault status and outcome", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       ...fixtureSeed(user),
       vaults: [fixtureResolvedVault()],
       shareTotals: {
@@ -94,7 +94,7 @@ describe("projectOptionsPanel", () => {
 
   it("does not leak transport objects or unrelated domain fields", async () => {
     const user = fixtureUser();
-    const transport = createFakeOptionsReadTransport(fixtureSeed(user));
+    const transport = createFakeOptionsReader(fixtureSeed(user));
     const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
     const serialized = JSON.stringify(panel);
@@ -123,7 +123,7 @@ describe("projectOptionsPanel", () => {
       ],
       laneCount: 1
     });
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       ...fixtureSeed(user),
       nfts: [nft]
     });

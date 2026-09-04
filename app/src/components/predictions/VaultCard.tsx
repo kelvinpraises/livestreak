@@ -246,7 +246,7 @@ function LossState({ flowReceived }: { flowReceived: number }) {
     }}>
       <div>
         <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginBottom: 1 }}>LOSERS BECOME OWNERS</div>
-        <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }}>+{flowReceived.toLocaleString()} $FLOW</span>
+        <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }}>+{flowReceived.toLocaleString()} $LVST</span>
       </div>
       <button className="btn-ghost" style={{ fontSize: 10, padding: '4px 10px' }}>Stake</button>
     </motion.div>

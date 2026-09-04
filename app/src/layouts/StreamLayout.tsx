@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Link } from '@tanstack/react-router'
 import { AnimatePresence } from 'framer-motion'
 import { StreamBar } from '#/components/hud/StreamBar.tsx'
@@ -30,15 +30,16 @@ export function StreamLayout({ streamTitle, category, totalPooled }: StreamLayou
 
   const floatingVaults = vaults.filter(v => v.status === 'open' || v.status === 'hot')
 
-  // Demo: show win notification after 4 seconds
-  useEffect(() => {
-    const t = setTimeout(() => push({ type: 'win', amount: 26.98, option: 'Panel reaches consensus on AI safety' }), 4000)
-    return () => clearTimeout(t)
-  }, [])
-
   const handleNikoClick = useCallback((vaultId: string) => {
     setSelectedVaultId(prev => prev === vaultId ? null : vaultId)
   }, [])
+
+  const handleStream = useCallback((vaultId: string, side: 'yes' | 'no', rate: number) => {
+    // mock commit — Tier 2 swaps this for options writer.fund(vaultId, side, rate)
+    const vault = vaults.find(v => v.id === vaultId)
+    push({ type: 'stream', rate, side, option: vault?.option ?? vaultId })
+    setSelectedVaultId(null)
+  }, [vaults, push])
 
   return (
     <div style={{
@@ -62,7 +63,7 @@ export function StreamLayout({ streamTitle, category, totalPooled }: StreamLayou
               background: 'linear-gradient(135deg, #00ff87, #00c8ff)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <span style={{ fontSize: 13, fontWeight: 800, color: '#000', fontFamily: 'var(--font-display)' }}>F</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: '#000', fontFamily: 'var(--font-display)' }}>L</span>
             </div>
             <span className="display" style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em' }}>LiveStreak</span>
           </Link>
@@ -100,7 +101,7 @@ export function StreamLayout({ streamTitle, category, totalPooled }: StreamLayou
 
         {/* RIGHT — Predictions (40%) */}
         <div className="stream-predictions-pane" style={{ flex: '2 1 40%', minWidth: 0, display: 'flex', flexDirection: 'column', background: 'rgba(7,7,15,0.98)', overflow: 'hidden' }}>
-          <VaultList vaults={vaults} events={events} positions={mockPositions} selectedVaultId={selectedVaultId} onDismissVault={() => setSelectedVaultId(null)} />
+          <VaultList vaults={vaults} events={events} positions={mockPositions} selectedVaultId={selectedVaultId} onDismissVault={() => setSelectedVaultId(null)} onStream={handleStream} />
         </div>
       </div>
 

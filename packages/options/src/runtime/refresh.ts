@@ -8,29 +8,29 @@ import type {
   OptionsUserOptionsSnapshot,
   OptionsVaultSnapshot
 } from "../model/snapshot.js";
+import type { OptionsReader } from "../chains/types.js";
 import {
   readMarketSnapshot,
   readUserOptionsSnapshot,
   readVaultSnapshot
-} from "../read/snapshot.js";
-import type { OptionsReadTransport } from "../read/transport.js";
+} from "../flows/snapshot.js";
 import type { OptionsRuntimeLastError } from "./store.js";
 
 export const refreshMarketSnapshot = async (
-  transport: OptionsReadTransport,
+  reader: OptionsReader,
   marketId: MarketId
-): Promise<OptionsMarketSnapshot> => readMarketSnapshot(transport, marketId);
+): Promise<OptionsMarketSnapshot> => readMarketSnapshot(reader, marketId);
 
 export const refreshVaultSnapshot = async (
-  transport: OptionsReadTransport,
+  reader: OptionsReader,
   vaultId: VaultId
-): Promise<OptionsVaultSnapshot> => readVaultSnapshot(transport, vaultId);
+): Promise<OptionsVaultSnapshot> => readVaultSnapshot(reader, vaultId);
 
 export const refreshUserSnapshot = async (
-  transport: OptionsReadTransport,
+  reader: OptionsReader,
   user: UserAddress,
   marketId?: MarketId
-): Promise<OptionsUserOptionsSnapshot> => readUserOptionsSnapshot(transport, user, marketId);
+): Promise<OptionsUserOptionsSnapshot> => readUserOptionsSnapshot(reader, user, marketId);
 
 export const toRuntimeLastError = (error: unknown): OptionsRuntimeLastError => {
   if (error instanceof LiveStreakConfigError) {

@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { BASE_PRICE, CURVE_K, projectShares, segMath, SHARE_SCALE, WAD } from "../src/model/curve.js";
+import { BASE_PRICE, CURVE_K, projectShares, segMath, SHARE_SCALE, WAD } from "../src/model/math/curve.js";
 
 describe("bonding curve", () => {
   it("priceOf returns base price at zero pool", async () => {
-    const { priceOf } = await import("../src/model/curve.js");
+    const { priceOf } = await import("../src/model/math/curve.js");
     expect(priceOf(0n)).toBe(BASE_PRICE);
   });
 
   it("priceOf scales linearly with pool over CURVE_K", async () => {
-    const { priceOf } = await import("../src/model/curve.js");
+    const { priceOf } = await import("../src/model/math/curve.js");
     expect(priceOf(CURVE_K)).toBe(BASE_PRICE * 2n);
     expect(priceOf(CURVE_K * 2n)).toBe(BASE_PRICE * 3n);
   });
 
   it("sharesPerUsdc inverts price at SHARE_SCALE", async () => {
-    const { priceOf, sharesPerUsdc } = await import("../src/model/curve.js");
+    const { priceOf, sharesPerUsdc } = await import("../src/model/math/curve.js");
     const pool = 100_000_000n;
     const price = priceOf(pool);
 
@@ -23,7 +23,7 @@ describe("bonding curve", () => {
   });
 
   it("sharesPerUsdc at zero pool uses base price", async () => {
-    const { priceOf, sharesPerUsdc } = await import("../src/model/curve.js");
+    const { priceOf, sharesPerUsdc } = await import("../src/model/math/curve.js");
     expect(sharesPerUsdc(0n)).toBe(SHARE_SCALE / BASE_PRICE);
   });
 

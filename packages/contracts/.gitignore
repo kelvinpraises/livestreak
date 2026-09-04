@@ -2,6 +2,9 @@
 chains/evm/cache/
 chains/evm/out/
 
+# Sui compiler artifacts
+chains/sui/build/
+
 # Legacy paths (pre-chains/ relocate)
 evm/cache/
 evm/out/

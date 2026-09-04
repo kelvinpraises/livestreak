@@ -111,7 +111,10 @@ const validateCandidate = (
     marketId: candidateMarketId,
     score: value.score,
     reason,
-    suggestedAction: value.suggestedAction
+    suggestedAction: value.suggestedAction,
+    ...(optionalNonEmptyString(value.vaultKey) === undefined
+      ? {}
+      : { vaultKey: optionalNonEmptyString(value.vaultKey) })
   };
 };
 
@@ -163,6 +166,9 @@ const optionalDuplicateRisk = (
   value: unknown
 ): "low" | "medium" | "high" | undefined =>
   value === "low" || value === "medium" || value === "high" ? value : undefined;
+
+const optionalNonEmptyString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 
 const optionalStringArray = (value: unknown): readonly string[] | undefined => {
   if (!Array.isArray(value)) {

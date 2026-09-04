@@ -3,7 +3,7 @@ import type { Hex } from "viem";
 import { assertPaymasterSignerMatchesChain } from "../../config/aa/boot-assert.js";
 import { readChainsFromFile } from "../../config/aa/chains-file.js";
 import type { HostServerConfig } from "../../config/host.js";
-import { resolveEvmExecutorPrivateKey } from "../../infrastructure/wallet/wallet.js";
+import { startAlto } from "../../infrastructure/bundler/alto.js";
 import { createPaymasterSigner, type PaymasterSigner } from "./paymaster.js";
 
 // --- exports ---
@@ -28,8 +28,9 @@ export interface AaServerConfig {
 }
 
 export const readAaServerConfig = (config: HostServerConfig): AaServerConfig => {
+  void config;
   const fileChains = readFileChains();
-  const envChain = buildEnvChain(config);
+  const envChain = buildEnvChain();
   const chains = mergeChains(fileChains, envChain);
 
   return {
@@ -45,67 +46,44 @@ export const resolveAaChain = (
   routeKey: string
 ): AaChainConfig | undefined => aa.chains.find((chain) => chain.routeKey === routeKey);
 
-export const buildPaymasterSigners = async (
-  aa: AaServerConfig,
-  config: HostServerConfig
-): Promise<Map<string, PaymasterSigner>> => {
+export const buildPaymasterSigners = (aa: AaServerConfig): Map<string, PaymasterSigner> => {
   const signers = new Map<string, PaymasterSigner>();
 
   for (const chain of aa.chains) {
-    if (chain.paymasterAddress === undefined) {
-      continue;
-    }
-
-    const executorPrivateKey =
-      chain.executorPrivateKey ?? (await resolveChainExecutorKey(config, chain));
-    if (executorPrivateKey === undefined) {
+    if (chain.executorPrivateKey === undefined || chain.paymasterAddress === undefined) {
       continue;
     }
 
     signers.set(
       chain.routeKey,
-      createPaymasterSigner(executorPrivateKey, chain.paymasterAddress)
+      createPaymasterSigner(chain.executorPrivateKey, chain.paymasterAddress)
     );
   }
 
   return signers;
 };
 
-export const bootstrapAaFromConfig = async (
-  aa: AaServerConfig,
-  config: HostServerConfig
-): Promise<void> => {
+export const bootstrapAaFromConfig = async (aa: AaServerConfig): Promise<void> => {
   for (const chain of aa.chains) {
-    if (chain.paymasterAddress === undefined) {
+    if (chain.paymasterAddress !== undefined && chain.executorPrivateKey !== undefined) {
+      await assertPaymasterSignerMatchesChain(chain);
+    }
+
+    if (
+      chain.rpcUrl === undefined ||
+      chain.entryPoint === undefined ||
+      chain.executorPrivateKey === undefined
+    ) {
       continue;
     }
 
-    const executorPrivateKey =
-      chain.executorPrivateKey ?? (await resolveChainExecutorKey(config, chain));
-    if (executorPrivateKey === undefined) {
-      continue;
-    }
-
-    await assertPaymasterSignerMatchesChain({
-      ...chain,
-      executorPrivateKey
+    await startAlto(chain.routeKey, {
+      entryPointAddress: chain.entryPoint,
+      rpcUrl: chain.rpcUrl,
+      executorPrivateKey: chain.executorPrivateKey,
+      port: 0
     });
   }
-};
-
-export const resolveChainExecutorKey = async (
-  config: HostServerConfig,
-  chain: AaChainConfig
-): Promise<Hex | undefined> => {
-  if (chain.executorPrivateKey !== undefined) {
-    return chain.executorPrivateKey;
-  }
-
-  if (chain.rpcUrl === undefined) {
-    return undefined;
-  }
-
-  return (await resolveEvmExecutorPrivateKey(config, chain)) ?? undefined;
 };
 
 // --- helpers ---
@@ -119,12 +97,13 @@ const readFileChains = (): AaChainConfig[] => {
   return readChainsFromFile(filePath);
 };
 
-const buildEnvChain = (config: HostServerConfig): AaChainConfig | null => {
+const buildEnvChain = (): AaChainConfig | null => {
   const rpcUrl = process.env.LIVESTREAK_AA_RPC_URL;
   if (rpcUrl === undefined || rpcUrl.length === 0) {
     return null;
   }
 
+  const executorPrivateKey = readExecutorPrivateKey();
   const paymasterAddress = readPaymasterAddress();
 
   return {
@@ -136,6 +115,7 @@ const buildEnvChain = (config: HostServerConfig): AaChainConfig | null => {
     safeModule: process.env.LIVESTREAK_AA_SAFE_MODULE,
     bundlerUrl: process.env.LIVESTREAK_AA_BUNDLER_URL,
     rpcUrl,
+    ...(executorPrivateKey === undefined ? {} : { executorPrivateKey }),
     ...(paymasterAddress === undefined ? {} : { paymasterAddress })
   };
 };
@@ -166,6 +146,12 @@ const mergeChains = (
   }
 
   return [...byRouteKey.values()];
+};
+
+const readExecutorPrivateKey = (): Hex | undefined => {
+  const value =
+    process.env.LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY ?? process.env.LIVESTREAK_AA_OPERATOR_KEY;
+  return value === undefined || value.length === 0 ? undefined : (value as Hex);
 };
 
 const readPaymasterAddress = (): Hex | undefined => {

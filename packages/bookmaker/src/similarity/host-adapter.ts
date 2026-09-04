@@ -1,3 +1,4 @@
+import { LiveStreakConfigError } from "@livestreak/core";
 import type {
   HostSimilarityRequest,
   HostSimilarityResult,
@@ -19,7 +20,9 @@ export const vaultDraftToHostSimilarityDraft = (draft: VaultDraft): HostSimilari
 
 export const similarityQueryToHostRequest = (query: SimilarityQuery): HostSimilarityRequest => {
   if (query.vaultDraft.marketId !== query.marketId) {
-    throw new Error("SimilarityQuery.marketId must match vaultDraft.marketId");
+    throw new LiveStreakConfigError({
+      message: "SimilarityQuery.marketId must match vaultDraft.marketId"
+    });
   }
 
   return {

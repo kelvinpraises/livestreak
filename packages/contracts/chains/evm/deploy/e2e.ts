@@ -241,9 +241,7 @@ const expectRevert = async (
 };
 
 const parseVaultCreated = (logs: readonly { address: Address; data: Hex; topics: readonly Hex[] }[]) => {
-  const events = parseEventLogs({ abi: ABIS.vaultDriver, logs: logs as never, eventName: "VaultCreated" }).filter(
-    (e) => e.address.toLowerCase() === A.vaultDriver.toLowerCase()
-  );
+  const events = parseEventLogs({ abi: ABIS.vaultDriver, logs: logs as never, eventName: "VaultCreated" });
   if (events.length === 0) throw new Error("VaultCreated event not found in receipt");
   return (events[0] as { args: { vaultId: Hex } }).args.vaultId;
 };

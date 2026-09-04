@@ -4,7 +4,8 @@ import type { SimilarityCandidate } from "./similarity.js";
 import type { Detection } from "./detection.js";
 import type { VaultDraft } from "./vault-draft.js";
 import type { BookmakerWatchSource } from "./watch-source.js";
-import type { BookmakerWriteIntent, BookmakerWritePlan } from "./write-plan.js";
+import type { BookmakerWriteIntent } from "./write-intent.js";
+import type { CreateVaultResult } from "../chains/types.js";
 
 // --- exports ---
 
@@ -32,9 +33,12 @@ export interface BookmakerPanelView {
   readonly lastDecision?: BookmakerDecision;
   readonly decisionAction?: BookmakerDecision["action"];
   readonly skipReason?: BookmakerSkipReason;
-  readonly pendingWritePlan?: BookmakerWritePlan;
+  readonly pendingWriteIntents?: readonly BookmakerWriteIntent[];
   readonly writeIntents: readonly BookmakerWriteIntent[];
-  readonly completedWritePlans: readonly BookmakerWritePlan[];
+  readonly completedVaultCreations: readonly {
+    readonly intent: Extract<BookmakerWriteIntent, { readonly action: "createVault" }>;
+    readonly result: CreateVaultResult;
+  }[];
   readonly lastError?: string;
   readonly updatedAtMs: number;
 }

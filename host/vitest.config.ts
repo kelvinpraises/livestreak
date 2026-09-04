@@ -11,7 +11,7 @@ export default defineConfig({
   },
   resolve: {
     alias: [
-      { find: /^#api\//, replacement: `${sourceDirectory}/interfaces/api/` },
+      { find: /^#api\//, replacement: `${sourceDirectory}/api/` },
       { find: /^#config\//, replacement: `${sourceDirectory}/config/` },
       { find: /^#services\//, replacement: `${sourceDirectory}/services/` },
       { find: /^#infrastructure\//, replacement: `${sourceDirectory}/infrastructure/` },

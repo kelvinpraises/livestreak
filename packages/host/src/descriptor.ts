@@ -15,9 +15,7 @@ export const HostModuleToken = Schema.Literal(
   "media",
   "walrus_memory",
   "walrus_content",
-  "discovery",
-  "runtime",
-  "tenancy"
+  "discovery"
 );
 
 export type HostModuleToken = Schema.Schema.Type<typeof HostModuleToken>;

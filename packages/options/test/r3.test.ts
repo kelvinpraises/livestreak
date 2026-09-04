@@ -1,21 +1,23 @@
 import { describe, expect, it } from "vitest";
 
 import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../src/model/ids.js";
-import { mapStreamsStateBalance } from "../src/read/contracts/mapping.js";
-import { readClaimsView } from "../src/read/claims.js";
-import { readSessionPnl } from "../src/read/pnl.js";
-import { projectOptionsPanel } from "../src/panel/project.js";
-import { readUserOptionsSnapshot } from "../src/read/snapshot.js";
+import { mapStreamsStateBalance } from "../src/chains/evm/decode.js";
+import { readClaimsView } from "../src/flows/claims.js";
+import { readSessionPnl } from "../src/flows/pnl.js";
+import { projectOptionsPanel } from "../src/bridge/panel/project.js";
+import { readUserOptionsSnapshot } from "../src/flows/snapshot.js";
 import { createOptionsRuntime } from "../src/runtime/index.js";
 import {
-  createFakeOptionsReadTransport,
+  createFakeChainConfig,
+  createFakeChainWriter,
+  createFakeOptionsReader,
   fixtureLvstAccount,
   fixtureMarket,
   fixtureNft,
   fixtureResolvedVault,
   fixtureUser,
   fixtureVault
-} from "./helpers/fake-transport.js";
+} from "./helpers/fake-chain.js";
 
 const user = fixtureUser();
 const tokenOne = asTokenId(1n);
@@ -24,7 +26,7 @@ const vaultWin = asVaultId("vault_win");
 const vaultLoss = asVaultId("vault_loss");
 
 describe("session PnL", () => {
-  const transport = createFakeOptionsReadTransport({
+  const transport = createFakeOptionsReader({
     markets: [fixtureMarket()],
     vaults: [
       fixtureResolvedVault({ vaultId: vaultWin, marketId: asMarketId("market_01") }),
@@ -104,7 +106,7 @@ describe("session PnL", () => {
 
 describe("claims view", () => {
   it("enumerates active vaults across multiple NFTs", async () => {
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       markets: [fixtureMarket()],
       vaults: [
         fixtureResolvedVault({ vaultId: vaultWin }),
@@ -181,7 +183,7 @@ describe("nft drips balance", () => {
 
 describe("runtime memory API", () => {
   it("set/get round-trips and onChange fires on set and refresh", async () => {
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       markets: [fixtureMarket()],
       vaults: [fixtureVault()],
       shareTotals: { vault_01: { yes: 1n, no: 1n } },
@@ -196,7 +198,8 @@ describe("runtime memory API", () => {
         marketIds: [asMarketId("market_01")],
         defaultMarketId: asMarketId("market_01")
       },
-      transport
+      chainConfig: createFakeChainConfig(),
+      chain: { reader: transport, writer: createFakeChainWriter() }
     });
 
     const revisions: number[] = [];
@@ -219,7 +222,7 @@ describe("runtime memory API", () => {
 describe("panel flags and market total", () => {
   it("projects LVST stake flags, NFT transfer fields, and market total pool", async () => {
     const operator = asUserAddress("0xoperator");
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       markets: [
         fixtureMarket({
           vaultIds: [asVaultId("vault_01"), asVaultId("vault_02")]

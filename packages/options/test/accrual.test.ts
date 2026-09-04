@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import { asMarketId, asTokenId, asVaultId } from "../src/model/index.js";
-import { isAccrualFrozen, projectStreamAccrual } from "../src/model/accrual.js";
-import { projectOptionsPanel } from "../src/panel/project.js";
-import { readUserOptionsSnapshot } from "../src/read/snapshot.js";
+import { isAccrualFrozen, projectStreamAccrual } from "../src/model/math/accrual.js";
+import { projectOptionsPanel } from "../src/bridge/panel/project.js";
+import { readUserOptionsSnapshot } from "../src/flows/snapshot.js";
 import {
-  createFakeOptionsReadTransport,
+  createFakeOptionsReader,
   fixtureNft,
   fixtureResolvedVault,
   fixtureSeed,
   fixtureShareTotals,
   fixtureUser
-} from "./helpers/fake-transport.js";
+} from "./helpers/fake-chain.js";
 
 describe("stream accrual projector", () => {
   const board = {
@@ -148,7 +148,7 @@ describe("claim panel projection", () => {
       laneCount: 2
     });
 
-    const transport = createFakeOptionsReadTransport({
+    const transport = createFakeOptionsReader({
       ...fixtureSeed(user),
       vaults: [fixtureResolvedVault()],
       nfts: [nft],

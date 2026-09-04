@@ -14,6 +14,7 @@ export interface SimilarityCandidate {
   readonly score: number;
   readonly reason: string;
   readonly suggestedAction: "join-existing" | "create-new" | "skip";
+  readonly vaultKey?: string;
 }
 
 export interface SimilarityResult {

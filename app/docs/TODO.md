@@ -70,3 +70,29 @@ transport. The app never touches `@livestreak/wallet`.
       dependency (the only tie to `context/quary`).
 - [x] Removed the `pnpm` block; standardized on npm.
 - [x] `npm run build` green (client + SSR + Nitro).
+
+---
+
+## 2026-06-20 — hygiene + dead-interaction slice (done, verified)
+
+- [x] Deleted orphans `hooks/useWallet.ts`, `components/wallet/SessionKey.tsx`.
+- [x] User-visible `$FLOW`→`$LVST` (`formatFlow`→`formatLvst`); chain copy neutralized (no Mantle/Arc); stream nav logo `F`→`L`.
+- [x] Removed the fake 4s win-toast; collapsed the fake two-option connect modal to a single password flow.
+- [x] Wired the dead STREAM CTA → mock `handleStream` (seam for options `writer.fund`) + `'stream'` toast variant.
+- [x] Stake/unstake controls added to `BalanceBar` (wired to `useFlow`).
+- check / lint / build green; master-prompter verified against the diff.
+
+## Frontend backlog
+
+### Bug-fix slice (pure UI, no options dep) — prompt active
+- [ ] `StreamSlider` thumb shows a pink/green blend at center (`useTransform` over `[-5,5]`) — must be neutral when `side===null`; reuse the existing `sideColor` for the thumb, drop the unused `thumbColor` motion value.
+- [ ] `StreamSlider` init `x` to match `initialSide`/`initialRate` so an existing position doesn't render a centered-but-colored thumb (thumb, fill, color must agree).
+- [ ] Stake / Unstake buttons grey-out (disable) when amount is invalid / exceeds available / staked.
+
+### Options integration (Tier 2 — design-defense round FIRST, then implement)
+Wire `app/` to `@livestreak/options` (`createOptionsChain`/`createOptionsRuntime`/`createOptionsBridge`), chain-dispatched on `walletInit.chain`; retire `config/contracts.ts` fictional ABIs; adopt the NFT-lane model. Folds in the user-requested features:
+- [ ] Claim affordances: claim-for-win (green) + claim-for-loss (red) buttons → options `withdraw` / `claimLossLvst` (reads `claimable` / `lossClaimable`).
+- [ ] Stake grey-out driven by the real options stake flag (supersedes the mock disable above).
+- [ ] "Cost of newer shares per streamed funds" — bonding-curve price preview near the slider (`priceOf` / `sharesPerUsdc` / `projectStreamAccrual` / `OptionsStreamAccrualView`).
+- [ ] NFT transfer panel — list owned MarketDriver position NFTs (`tokensOfOwner` / `OptionsNft`) + transfer (`transferNft` / `approveNft` / `setApprovalForAll`). Each market (= a stream) has one position NFT bundling the user's lanes.
+- [ ] Chain selector UI + wallet-layering refactor (app hands `{seed, WalletInit}` to options; stops importing `@livestreak/wallet`).

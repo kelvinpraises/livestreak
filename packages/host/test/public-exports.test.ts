@@ -4,7 +4,7 @@ import * as Public from "#index.js";
 const publicExport = (name: string): unknown => (Public as Record<string, unknown>)[name];
 
 describe("host public exports", () => {
-  it("exposes descriptor, policy, session, manifest, cache, tenancy, aa, discovery, and memory shapes", () => {
+  it("exposes descriptor, policy, session, manifest, cache, aa, discovery, and memory shapes", () => {
     expect(publicExport("HostProviderDescriptor")).toBeDefined();
     expect(publicExport("HostModuleToken")).toBeDefined();
     expect(publicExport("OutputMode")).toBeDefined();
@@ -17,7 +17,6 @@ describe("host public exports", () => {
     expect(publicExport("EndpointKind")).toBeDefined();
     expect(publicExport("HostCacheReceipt")).toBeDefined();
     expect(publicExport("HostCacheReceiptRequest")).toBeDefined();
-    expect(publicExport("HostTenantDescriptor")).toBeDefined();
     expect(publicExport("AaCapabilityDescriptor")).toBeDefined();
     expect(publicExport("MemoryAccessRequest")).toBeDefined();
     expect(publicExport("MemoryAccessResponse")).toBeDefined();

@@ -1,4 +1,5 @@
 import type { Detection } from "../model/detection.js";
+import { LiveStreakConfigError } from "@livestreak/core";
 import { validateDetection } from "../validate/detection.js";
 import type {
   BookmakerDetectionEvaluation,
@@ -65,7 +66,9 @@ const validateConfidenceThreshold = (confidenceThreshold: number): number => {
     confidenceThreshold < 0 ||
     confidenceThreshold > 1
   ) {
-    throw new Error("confidenceThreshold must be a finite number between 0 and 1");
+    throw new LiveStreakConfigError({
+      message: "confidenceThreshold must be a finite number between 0 and 1"
+    });
   }
 
   return confidenceThreshold;
@@ -73,12 +76,16 @@ const validateConfidenceThreshold = (confidenceThreshold: number): number => {
 
 const validateDetectors = (detectors: readonly PatternDetector[]): readonly PatternDetector[] => {
   if (!Array.isArray(detectors)) {
-    throw new Error("detectors must be an array");
+    throw new LiveStreakConfigError({
+      message: "detectors must be an array"
+    });
   }
 
   for (const [index, detector] of detectors.entries()) {
     if (isPatternDetector(detector) === false) {
-      throw new Error(`detectors[${index}] must include a non-empty id and detect function`);
+      throw new LiveStreakConfigError({
+        message: `detectors[${index}] must include a non-empty id and detect function`
+      });
     }
   }
 

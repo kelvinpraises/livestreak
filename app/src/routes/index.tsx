@@ -21,7 +21,7 @@ function HomePage() {
           <motion.div initial={{ opacity: 0, transform: 'translateY(12px)' }} animate={{ opacity: 1, transform: 'translateY(0px)' }} transition={{ delay: 0.1, duration: 0.4 }} style={{ marginBottom: 32 }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(0,255,135,0.06)', border: '1px solid rgba(0,255,135,0.18)', borderRadius: 20, padding: '5px 16px' }}>
               <div className="live-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: '#00ff87' }} />
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#00ff87', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em' }}>LIVE ON MANTLE</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#00ff87', fontFamily: 'var(--font-mono)', letterSpacing: '0.08em' }}>LIVE · TESTNET</span>
             </div>
           </motion.div>
 
@@ -40,7 +40,7 @@ function HomePage() {
           </div>
 
           <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7, duration: 0.4 }} style={{ fontSize: 16, color: 'rgba(255,255,255,0.4)', lineHeight: 1.7, maxWidth: 500, margin: '0 auto 36px', fontWeight: 300 }}>
-            Watch live video. Predict what happens next with streaming USDC. AI agents create markets in real-time. Losers earn $FLOW and become protocol owners.
+            Watch live video. Predict what happens next with streaming USDC. AI agents create markets in real-time. Losers earn $LVST and become protocol owners.
           </motion.p>
 
           <motion.div initial={{ opacity: 0, transform: 'translateY(10px)' }} animate={{ opacity: 1, transform: 'translateY(0px)' }} transition={{ delay: 0.9, duration: 0.3 }}>
@@ -152,7 +152,7 @@ function HomePage() {
           {[
             { step: '01', icon: Eye, title: 'Watch', desc: 'Tune into any live stream. AI agents analyze the video and generate real-time prediction markets.', accent: '#00ff87' },
             { step: '02', icon: Play, title: 'Predict', desc: 'Stream USDC into YES or NO positions. No "place bet" button — your money flows continuously.', accent: '#00c8ff' },
-            { step: '03', icon: Trophy, title: 'Earn', desc: 'Win and collect USDC. Lose and receive $FLOW tokens — every loss makes you a protocol owner.', accent: '#ffd553' },
+            { step: '03', icon: Trophy, title: 'Earn', desc: 'Win and collect USDC. Lose and receive $LVST tokens — every loss makes you a protocol owner.', accent: '#ffd553' },
           ].map((item, i) => (
             <motion.div key={item.step} initial={{ opacity: 0, transform: 'translateY(16px)' }} animate={{ opacity: 1, transform: 'translateY(0px)' }} transition={{ delay: 0.3 + i * 0.1 }}
               className="broadcast-corners" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 12, padding: '32px 24px', position: 'relative', overflow: 'visible' }}>
@@ -171,7 +171,7 @@ function HomePage() {
       <footer>
         <div className="broadcast-rule" />
         <div style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em' }}>FLOWSTREAM PROTOCOL &middot; BUILT ON ARC</span>
+          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.18)', fontFamily: 'var(--font-mono)', letterSpacing: '0.06em' }}>LIVESTREAK PROTOCOL &middot; TESTNET</span>
         </div>
       </footer>
     </div>

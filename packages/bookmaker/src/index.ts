@@ -6,10 +6,11 @@ export type {
   PatternDetector
 } from "./detection/index.js";
 export type { BuildVaultDraftOptions } from "./draft/index.js";
-export type { BookmakerPanelSnapshot } from "./panel/index.js";
+export type { BookmakerPanelView } from "./model/panel.js";
+export type { BookmakerPanelSnapshot } from "./bridge/panel/index.js";
 export type { BookmakerSimilarityClient } from "./similarity/index.js";
 export type { BookmakerDuplicatePolicy, BookmakerVaultPolicy } from "./decision/index.js";
-export type { BookmakerRuntimeConfig } from "./runtime/index.js";
+export type { BookmakerRuntimeConfig, BookmakerRuntime, BookmakerRuntimeInput } from "./runtime/index.js";
 export type {
   ObservationEvent,
   ObservationFeed,
@@ -19,14 +20,13 @@ export type {
 export type {
   BookmakerDecision,
   BookmakerMarketContext,
-  BookmakerPanelView,
-  BookmakerSkipReason,
   BookmakerWatchRef,
   BookmakerWatchRefKind,
   BookmakerWatchSource,
-  BookmakerContractsSurface,
+  BookmakerSkipReason,
   BookmakerWriteIntent,
-  BookmakerWritePlan,
+  CreateVaultIntent,
+  JoinVaultIntent,
   Detection,
   SimilarityCandidate,
   SimilarityQuery,
@@ -35,10 +35,24 @@ export type {
   VaultResolutionWindow
 } from "./model/index.js";
 export type {
-  BookmakerExecutableWriteIntent,
-  BookmakerIntentOnlyWriteIntent,
-  BookmakerContractMarketRef
-} from "./write/index.js";
+  BookmakerChain,
+  BookmakerChainConfig,
+  BookmakerChainReader,
+  BookmakerChainWriter,
+  BookmakerContractAddresses,
+  CreateVaultInput,
+  CreateVaultResult,
+  TxId,
+  VaultId
+} from "./chains/index.js";
+export type {
+  BookmakerBridge,
+  BridgeCaller,
+  CallActionEnvelope,
+  CapabilityGrant,
+  CapabilityScope,
+  CreateBookmakerBridgeInput
+} from "./bridge/index.js";
 export type {
   HostSimilarityDuplicateRisk,
   HostSimilarityRequest,
@@ -52,18 +66,20 @@ export type {
   ValidationResult,
   ValidationSuccess
 } from "./validate/index.js";
+export type { OriginateVaultInput, OriginateVaultResult, GuardedCreateVault } from "./flows/index.js";
 export { detectOpportunity } from "./detection/index.js";
 export { buildVaultDraft } from "./draft/index.js";
 export { chooseVaultAction } from "./decision/index.js";
 export {
-  contractsWriteSurfaceAvailable,
-  hasContractsWriteSurface,
-  mapCreateVaultIntentToDescriptor,
-  mapExecutableIntentsToDescriptors,
-  partitionWriteIntents,
-  planBookmakerWrite
-} from "./write/index.js";
-export { projectBookmakerPanel } from "./panel/index.js";
+  buildCreateVaultIntent,
+  buildWriteIntentsFromDecision
+} from "./model/write-intent.js";
+export {
+  idempotencyKeyFor,
+  idempotencyKeyFromDraft,
+  normalizeVaultQuestion
+} from "./model/idempotency.js";
+export { projectBookmakerPanel } from "./bridge/panel/index.js";
 export {
   buildObservationSubscriptionInput,
   validateObservationEvent
@@ -72,7 +88,9 @@ export {
   findSimilar,
   hostSimilarityResultToBookmaker,
   similarityQueryToHostRequest,
-  vaultDraftToHostSimilarityDraft
+  vaultDraftToHostSimilarityDraft,
+  createHostDiscoveryClient,
+  DISCOVERY_FIND_PATH
 } from "./similarity/index.js";
 export {
   validateBookmakerDecision,
@@ -82,6 +100,26 @@ export {
   validateDetection,
   validateSimilarityResult,
   validateVaultDraft,
+  validateCreateVaultIntent,
+  validateBookmakerWriteIntent,
   validationFailure,
   validationSuccess
 } from "./validate/index.js";
+export {
+  createBookmakerChain,
+  validateBookmakerChainConfig,
+  hasBookmakerChainAddresses,
+  asTxId,
+  asVaultId
+} from "./chains/index.js";
+export { originateVault, snapshotBookmakerPanel } from "./flows/index.js";
+export { createBookmakerRuntime, createIdempotencyStore, createVaultOnce } from "./runtime/index.js";
+export {
+  createBookmakerBridge,
+  authorizeBridgeCaller,
+  requireAnyScope,
+  bridgeActionScope,
+  bridgeBoardReadScope,
+  bridgeBoardSubscribeScope,
+  bridgeControlsReadScope
+} from "./bridge/index.js";

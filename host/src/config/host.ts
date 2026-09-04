@@ -62,9 +62,7 @@ const allModules: readonly HostModuleToken[] = [
   "media",
   "walrus_memory",
   "walrus_content",
-  "discovery",
-  "runtime",
-  "tenancy"
+  "discovery"
 ];
 
 export const defaultHostServerConfig = (): HostServerConfig => ({

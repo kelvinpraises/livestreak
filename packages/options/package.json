@@ -21,7 +21,10 @@
   "dependencies": {
     "@livestreak/core": "file:../core",
     "@livestreak/contracts": "file:../contracts",
-    "@livestreak/host": "file:../host"
+    "@livestreak/host": "file:../host",
+    "@livestreak/schema": "file:../schema",
+    "@livestreak/wallet": "file:../wallet",
+    "viem": "^2.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

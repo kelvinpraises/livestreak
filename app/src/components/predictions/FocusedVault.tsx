@@ -8,13 +8,14 @@ import type { Vault } from '#/data/mock'
 interface Props {
   vault: Vault
   onDismiss: () => void
+  onStream?: (vaultId: string, side: 'yes' | 'no', rate: number) => void
 }
 
-export function FocusedVault({ vault, onDismiss }: Props) {
+export function FocusedVault({ vault, onDismiss, onStream }: Props) {
   const [hotMs, setHotMs] = useState(vault.hotUntil ? Math.max(0, vault.hotUntil - Date.now()) : 0)
   const [expiryMs, setExpiryMs] = useState(Math.max(0, vault.expiresAt - Date.now()))
   const [streamSide, setStreamSide] = useState<'yes' | 'no' | null>(vault.userPosition?.side ?? null)
-  const [streamRate, setStreamRate] = useState(0)
+  const [streamRate, setStreamRate] = useState(vault.userPosition ? 0.8 : 0)
 
   useEffect(() => {
     if (vault.status !== 'hot' && vault.status !== 'open') return
@@ -127,6 +128,7 @@ export function FocusedVault({ vault, onDismiss }: Props) {
       {/* Start streaming button */}
       <button
         disabled={!streamSide || streamRate < 0.01}
+        onClick={() => streamSide && onStream?.(vault.id, streamSide, streamRate)}
         style={{
           width: '100%', marginTop: 18, padding: '12px 0',
           fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-display)',

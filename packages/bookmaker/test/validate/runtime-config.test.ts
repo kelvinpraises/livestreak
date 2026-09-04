@@ -2,6 +2,32 @@ import { describe, expect, it } from "vitest";
 import { validateBookmakerRuntimeConfig } from "../../src/validate/runtime-config.js";
 import { detection, marketContext, watchSource } from "../helpers/fixtures.js";
 
+const chainFields = {
+  walletInit: {
+    chain: "evm",
+    seedSource: "raw",
+    config: {
+      chainId: 31_337,
+      provider: "http://127.0.0.1:8545",
+      bundlerUrl: "http://127.0.0.1:4337",
+      isSponsored: false,
+      useNativeCoins: false,
+      entryPointAddress: "0x0000000000000000000000000000000000000001",
+      safe4337ModuleAddress: "0x0000000000000000000000000000000000000002",
+      safeModulesSetupAddress: "0x0000000000000000000000000000000000000003",
+      safeModulesVersion: "0.3.0",
+      contractNetworks: {}
+    }
+  },
+  seed: "test-seed",
+  addresses: {
+    vaultDriver: "0x0000000000000000000000000000000000000010",
+    marketRegistry: "0x0000000000000000000000000000000000000011",
+    vault: "0x0000000000000000000000000000000000000014",
+    usdc: "0x00000000000000000000000000000000000000aa"
+  }
+} as const;
+
 describe("validateBookmakerRuntimeConfig", () => {
   const validConfig = {
     runtimeId: "bookmaker-1",
@@ -11,7 +37,8 @@ describe("validateBookmakerRuntimeConfig", () => {
       duplicatePolicy: "prefer-join",
       detection: detection()
     },
-    fundingToken: "0x0000000000000000000000000000000000000002"
+    fundingToken: "0x0000000000000000000000000000000000000002",
+    ...chainFields
   } as const;
 
   it("accepts a valid runtime config", () => {
@@ -21,6 +48,7 @@ describe("validateBookmakerRuntimeConfig", () => {
     if (result.ok) {
       expect(result.value.runtimeId).toBe("bookmaker-1");
       expect(result.value.marketContext.marketId).toBe("market-1");
+      expect(result.value.addresses.vaultDriver).toBe(chainFields.addresses.vaultDriver);
     }
   });
 
@@ -78,15 +106,17 @@ describe("validateBookmakerRuntimeConfig", () => {
     expect(called).toBe(false);
   });
 
-  it("rejects invalid optional contracts surface", () => {
+  it("rejects invalid addresses", () => {
     const result = validateBookmakerRuntimeConfig({
       ...validConfig,
-      contracts: { vaultAddress: "" }
+      addresses: { vaultDriver: "" }
     });
 
     expect(result.ok).toBe(false);
     if (result.ok === false) {
-      expect(result.issues).toContain("contracts must include a non-empty vaultAddress when provided");
+      expect(result.issues).toContain(
+        "addresses must include vaultDriver, marketRegistry, vault, and usdc"
+      );
     }
   });
 });

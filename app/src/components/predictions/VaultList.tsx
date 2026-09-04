@@ -13,9 +13,10 @@ interface Props {
   positions: Position[]
   selectedVaultId: string | null
   onDismissVault: () => void
+  onStream?: (vaultId: string, side: 'yes' | 'no', rate: number) => void
 }
 
-export function VaultList({ vaults, events, positions, selectedVaultId, onDismissVault }: Props) {
+export function VaultList({ vaults, events, positions, selectedVaultId, onDismissVault, onStream }: Props) {
   const [tab, setTab] = useState<Tab>('feed')
   const selectedVault = selectedVaultId ? vaults.find(v => v.id === selectedVaultId) : null
 
@@ -24,7 +25,7 @@ export function VaultList({ vaults, events, positions, selectedVaultId, onDismis
       {/* Focused vault from NikoNiko click */}
       <AnimatePresence>
         {selectedVault && (
-          <FocusedVault key="focused-vault" vault={selectedVault} onDismiss={onDismissVault} />
+          <FocusedVault key="focused-vault" vault={selectedVault} onDismiss={onDismissVault} onStream={onStream} />
         )}
       </AnimatePresence>
 

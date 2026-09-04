@@ -12,4 +12,5 @@ export {
   similarityQueryToHostRequest,
   vaultDraftToHostSimilarityDraft
 } from "./host-adapter.js";
+export { createHostDiscoveryClient, DISCOVERY_FIND_PATH } from "./host-client.js";
 export { findSimilar } from "./find.js";

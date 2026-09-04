@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { asVaultId } from "../src/model/ids.js";
-import {
-  createContractsOptionsReadTransport,
-  type ContractReader,
-  type ContractReadRequest,
-  type OptionsContractAddresses
-} from "../src/read/contracts/index.js";
+import { createEvmOptionsReaderFromCall } from "../src/chains/evm/reader.js";
+import type { OptionsContractAddresses } from "../src/chains/evm/addresses.js";
+import { createFakeChainWriter } from "./helpers/fake-chain.js";
 
 const VAULT_ID = asVaultId(
   "0x00000000000000000000000000000000000000000000000000000000000000aa"
@@ -25,12 +22,12 @@ const ADDRESSES: OptionsContractAddresses = {
 describe("readWinningSide guard", () => {
   it("never calls winningSide for an open vault", async () => {
     const calls: string[] = [];
-    const transport = createContractsOptionsReadTransport({
-      reader: createGuardReader(calls, { status: 0 }),
-      addresses: ADDRESSES
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, async (_address, _abi, functionName) => {
+      calls.push(functionName);
+      return respondGuard(functionName, { status: 0 });
     });
 
-    const winningSide = await transport.readWinningSide(VAULT_ID);
+    const winningSide = await reader.readWinningSide(VAULT_ID);
 
     expect(winningSide).toBeUndefined();
     expect(calls).not.toContain("winningSide");
@@ -39,83 +36,68 @@ describe("readWinningSide guard", () => {
 
   it("calls winningSide only when vault status is resolved", async () => {
     const calls: string[] = [];
-    const transport = createContractsOptionsReadTransport({
-      reader: createGuardReader(calls, { status: 3, winningSide: 0 }),
-      addresses: ADDRESSES
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, async (_address, _abi, functionName) => {
+      calls.push(functionName);
+      return respondGuard(functionName, { status: 3, winningSide: 0 });
     });
 
-    const winningSide = await transport.readWinningSide(VAULT_ID);
+    const winningSide = await reader.readWinningSide(VAULT_ID);
 
     expect(winningSide).toBe("yes");
     expect(calls.filter((name) => name === "winningSide")).toHaveLength(1);
   });
-});
 
-const createGuardReader = (
-  calls: string[],
-  vault: { readonly status: number; readonly winningSide?: number }
-): ContractReader => ({
-  read: async (request) => {
-    calls.push(request.functionName);
-    return respondGuard(request, vault);
-  }
+  it("fake writer is independent of reader guard tests", () => {
+    expect(createFakeChainWriter().fund).toBeTypeOf("function");
+  });
 });
 
 const respondGuard = (
-  request: ContractReadRequest,
+  functionName: string,
   vault: { readonly status: number; readonly winningSide?: number }
 ): unknown => {
-  const { address, functionName } = request;
-
-  if (address === ADDRESSES.vault) {
-    if (functionName === "getVault") {
-      return {
-        id: VAULT_ID,
-        marketId:
-          "0x0000000000000000000000000000000000000000000000000000000000000001",
-        question: "Next goal",
-        creator: "0x00000000000000000000000000000000000000cc",
-        status: vault.status,
-        outcome: vault.status === 3 ? 1 : 0,
-        resolvedAt: vault.status === 3 ? 1_700_001_000 : 0,
-        exists: true
-      };
-    }
-
-    if (functionName === "getVaultPools") {
-      return {
-        yesTotal: 1_000_000n,
-        noTotal: 500_000n,
-        yesShareTotal: 100n,
-        noShareTotal: 50n
-      };
-    }
-
-    if (functionName === "winningSide") {
-      return vault.winningSide ?? 0;
-    }
+  if (functionName === "getVault") {
+    return {
+      id: VAULT_ID,
+      marketId: "0x0000000000000000000000000000000000000000000000000000000000000001",
+      question: "Next goal",
+      creator: "0x00000000000000000000000000000000000000cc",
+      status: vault.status,
+      outcome: vault.status === 3 ? 1 : 0,
+      resolvedAt: vault.status === 3 ? 1_700_001_000 : 0,
+      exists: true
+    };
   }
 
-  if (address === ADDRESSES.stewardRegistry) {
-    if (functionName === "vaultHotState") {
-      return {
-        active: false,
-        until: 0n,
-        severity: 0,
-        reasonHash:
-          "0x0000000000000000000000000000000000000000000000000000000000000000"
-      };
-    }
-
-    if (functionName === "disputeState") {
-      return {
-        active: false,
-        challengeUntil: 0n,
-        proofRef:
-          "0x0000000000000000000000000000000000000000000000000000000000000000"
-      };
-    }
+  if (functionName === "getVaultPools") {
+    return {
+      yesTotal: 1_000_000n,
+      noTotal: 500_000n,
+      yesShareTotal: 100n,
+      noShareTotal: 50n
+    };
   }
 
-  throw new Error(`Unhandled guard read ${address}.${functionName}`);
+  if (functionName === "winningSide") {
+    return vault.winningSide ?? 0;
+  }
+
+  if (functionName === "vaultHotState") {
+    return {
+      active: false,
+      until: 0n,
+      severity: 0,
+      reasonHash: "0x0000000000000000000000000000000000000000000000000000000000000000"
+    };
+  }
+
+  if (functionName === "disputeState") {
+    return {
+      active: false,
+      challengeUntil: 0n,
+      proofRef: "0x0000000000000000000000000000000000000000000000000000000000000000"
+    };
+  }
+
+  throw new Error(`Unhandled guard read ${functionName}`);
 };

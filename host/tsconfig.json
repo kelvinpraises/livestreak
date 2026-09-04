@@ -4,7 +4,7 @@
     "noEmit": true,
     "types": ["node"],
     "paths": {
-      "#api/*": ["./src/interfaces/api/*"],
+      "#api/*": ["./src/api/*"],
       "#config/*": ["./src/config/*"],
       "#services/*": ["./src/services/*"],
       "#infrastructure/*": ["./src/infrastructure/*"],

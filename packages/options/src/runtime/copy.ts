@@ -53,6 +53,7 @@ export const copyUserOptionsSnapshot = (
   vaults: snapshot.vaults.map(copyVaultSnapshot),
   nfts: snapshot.nfts.map(copyNftSnapshot),
   lvstAccount: { ...snapshot.lvstAccount },
+  ...(snapshot.usdcBalance === undefined ? {} : { usdcBalance: snapshot.usdcBalance }),
   ...(snapshot.protocol === undefined ? {} : { protocol: { ...snapshot.protocol } })
 });
 

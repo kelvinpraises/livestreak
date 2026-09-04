@@ -6,7 +6,7 @@ no `Effect.run*`. **Wallet-direct** (R6): options imports `@livestreak/wallet` a
 observe/market/chains); view reads via a viem public client. ABIs from `@livestreak/contracts/evm/abis`.
 `walletInit` + seed injected at runtime (seed never baked).
 
-## ✅ Shipped — R1–R3 core (decode / mapping / projection logic; 120 tests). R6 restructures the connection layer; R4/R5 media is superseded.
+## ✅ Shipped & verified — R1–R3 + R6 + R7. `check`/`build` green, 47 src files / 127 tests.
 
 - **R1 — NFT-lane core** (committed `8d120aa`). Model keyed `tokenId → lanes` (one side per vault;
   multi-NFT via `tokensOfOwner`). Reads: `getVault` + `getVaultPools`, `getPosition`, steward
@@ -19,24 +19,19 @@ observe/market/chains); view reads via a viem public client. ABIs from `@livestr
   fabricated; Drips `streamsState[3]` = remaining balance); exhaustive `OptionsClaimsView`; runtime
   `set`/`get`/`onChange` in-memory API; stake grey-out flags + market total-pool + NFT transfer reads.
 
-- ~~**R4 / R5 — media read + resolvers**~~ — **SUPERSEDED**: gateway/URL resolution is not options'
-  layer (options does only contract I/O). R6 strips it; only the raw `readStreamState` read survives.
+- **R6 — multi-chain + wallet-direct + observe structure.** `chains/{evm,sui}` dispatched on
+  `walletInit.chain`; writes via `createWalletManager` + AA userOps (mirror observe); reads via a viem
+  public client; injected ports dropped. Structure: `chains/` region, `model/math/`, `read/decode/`,
+  every region `index.ts`. VOD stripped (raw `readStreamState` kept). Verified: 129 tests + structure/functional audits.
+- ~~**R4 / R5 — media resolvers**~~ — superseded by R6 (gateway/URL resolution is not options' layer).
 
-> R2–R4 are in the working tree, **uncommitted** (R1 = `8d120aa`).
+> **R6 is uncommitted** (last code commit `ac7ec31` = R4; R2/R3 also committed). R5 (media) is uncommitted and deleted by R6.
 
 ## ▢ Open
 
-- [ ] **R6 — multi-chain + wallet-direct realignment** (prompt written, awaiting run). Three corrections
-  (2026-06-20): **(a) strip VOD** — gateway/URL resolution (R4/R5) is media plumbing, not contract I/O;
-  keep only the raw `readStreamState`. **(b) wallet-direct** — drop the injected `ContractWriter` /
-  `ContractReader`; connect via `createWalletManager(walletInit.chain, seed, config)` + AA userOps,
-  **mirroring `observe/src/market/chains`**. **(c) multi-chain** — restructure into `chains/{evm,sui}` +
-  `chains/index.ts` dispatched on `walletInit.chain` (Sui stubbed; reads via a viem public client).
-  **(d) restructure to the observe aesthetic** — `chains/` region, sub-grouped `model/` (+ `model/math/`),
-  thin roots, consistent `index`/`types` per region, kill the cross-layer `media` split. R1–R5 logic
-  **moves**, not rewritten. Prompt is hardened (grounding preamble + structure audits).
+- [x] **R7 — operation-boundary chains + bridge externality** — shipped.
 
-After R6: app integration (below, not options) + phase-2 `Live` playback.
+After R7: app integration (below, not options) + phase-2 `Live` playback.
 
 ## Next (not options)
 

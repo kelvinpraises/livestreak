@@ -11,22 +11,31 @@ const requiredExports = [
   "detectOpportunity",
   "buildVaultDraft",
   "chooseVaultAction",
-  "planBookmakerWrite",
+  "buildCreateVaultIntent",
+  "buildWriteIntentsFromDecision",
   "projectBookmakerPanel",
   "buildObservationSubscriptionInput",
   "validateObservationEvent",
   "similarityQueryToHostRequest",
   "hostSimilarityResultToBookmaker",
   "vaultDraftToHostSimilarityDraft",
+  "createHostDiscoveryClient",
+  "DISCOVERY_FIND_PATH",
   "validateBookmakerRuntimeConfig",
-  "contractsWriteSurfaceAvailable",
-  "mapCreateVaultIntentToDescriptor",
-  "mapExecutableIntentsToDescriptors",
-  "partitionWriteIntents",
-  "hasContractsWriteSurface",
+  "createBookmakerChain",
+  "validateBookmakerChainConfig",
+  "hasBookmakerChainAddresses",
+  "originateVault",
+  "createBookmakerRuntime",
+  "createVaultOnce",
+  "createIdempotencyStore",
+  "idempotencyKeyFor",
+  "idempotencyKeyFromDraft",
+  "createBookmakerBridge",
   "validateBookmakerMarketContext",
   "validateBookmakerWatchSource",
   "validateVaultDraft",
+  "validateCreateVaultIntent",
   "validateDetection",
   "validateSimilarityResult",
   "validateBookmakerDecision"
@@ -38,7 +47,6 @@ const forbiddenPatterns = [
   /#options/,
   /#run/,
   /#worker/,
-  /#bridge/,
   /host\/src/,
   /Effect\.runSync\s*\(/,
   /Effect\.runPromise\s*\(/,
@@ -47,7 +55,7 @@ const forbiddenPatterns = [
 ];
 
 describe("bookmaker public API", () => {
-  it("exports the pure workflow surface from the package root", () => {
+  it("exports the workflow surface from the package root", () => {
     for (const symbol of requiredExports) {
       expect(bookmaker).toHaveProperty(symbol);
     }
@@ -140,7 +148,6 @@ const scanFile = (file: string, violations: string[]) => {
         pattern.source.includes("options") ||
         pattern.source.includes("#run") ||
         pattern.source.includes("#worker") ||
-        pattern.source.includes("#bridge") ||
         pattern.source.includes("host\\/src")
       ) {
         violations.push(`${relative}:${index + 1}: ${line.trim()}`);

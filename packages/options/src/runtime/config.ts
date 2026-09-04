@@ -3,7 +3,8 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
 import { asMarketId, asUserAddress, type MarketId, type UserAddress } from "../model/ids.js";
-import type { OptionsReadTransport } from "../read/transport.js";
+import type { OptionsChain, OptionsChainConfig } from "../chains/types.js";
+import { createOptionsChain } from "../chains/index.js";
 
 export interface OptionsRuntimeConfig {
   readonly runtimeId: string;
@@ -15,7 +16,8 @@ export interface OptionsRuntimeConfig {
 
 export interface OptionsRuntimeInput {
   readonly config: unknown;
-  readonly transport: OptionsReadTransport;
+  readonly chainConfig: OptionsChainConfig;
+  readonly chain?: OptionsChain;
 }
 
 export const validateOptionsRuntimeConfig = (input: unknown): OptionsRuntimeConfig => {

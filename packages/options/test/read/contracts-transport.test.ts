@@ -2,12 +2,10 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it } from "vitest";
 
 import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../src/model/ids.js";
-import {
-  createContractsOptionsReadTransport,
-  type ContractReader,
-  type ContractReadRequest,
-  type OptionsContractAddresses
-} from "../../src/read/contracts/index.js";
+
+import type { OptionsContractAddresses } from "../../src/chains/evm/addresses.js";
+import { createEvmOptionsReaderFromCall } from "../../src/chains/evm/reader.js";
+import { createFakeChainWriter } from "../helpers/fake-chain.js";
 
 const MARKET_ID = asMarketId(
   "0x0000000000000000000000000000000000000000000000000000000000000001"
@@ -29,14 +27,11 @@ const ADDRESSES: OptionsContractAddresses = {
   dripsStreaming: "0x0000000000000000000000000000000000000019"
 };
 
-describe("contracts read transport", () => {
+describe("options reader", () => {
   it("maps stream state from marketRegistry", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake());
 
-    const state = await transport.readStreamState(MARKET_ID);
+    const state = await reader.readStreamState(MARKET_ID);
     expect(state.status).toBe("ended");
     expect(state.scheme).toBe("walrus-testnet");
     expect(state.id).toBe("blob_contract_id");
@@ -44,12 +39,9 @@ describe("contracts read transport", () => {
   });
 
   it("maps market read with creator", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake());
 
-    const market = await transport.readMarket(MARKET_ID);
+    const market = await reader.readMarket(MARKET_ID);
     expect(market.title).toBe("Derby stream");
     expect(market.creator).toBe(CREATOR);
     expect(market.vaultIds).toEqual([VAULT_ID]);
@@ -57,22 +49,16 @@ describe("contracts read transport", () => {
   });
 
   it("maps market vault ids via listMarketVaults", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake());
 
-    const vaultIds = await transport.listMarketVaults(MARKET_ID);
+    const vaultIds = await reader.listMarketVaults(MARKET_ID);
     expect(vaultIds).toEqual([VAULT_ID]);
   });
 
   it("maps vault read with steward state and pools", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake());
 
-    const vault = await transport.readVault(VAULT_ID);
+    const vault = await reader.readVault(VAULT_ID);
     expect(vault.question).toBe("Next goal");
     expect(vault.pools.yes).toBe(1_000_000n);
     expect(vault.pools.no).toBe(500_000n);
@@ -80,33 +66,24 @@ describe("contracts read transport", () => {
   });
 
   it("maps vault share totals via getVaultPools", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake());
 
-    const totals = await transport.readVaultShareTotals(VAULT_ID);
+    const totals = await reader.readVaultShareTotals(VAULT_ID);
     expect(totals.yes).toBe(100n);
     expect(totals.no).toBe(50n);
   });
 
   it("maps tokensOfOwner for multi-NFT holders", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake());
 
-    const tokenIds = await transport.listOwnerTokens(USER);
+    const tokenIds = await reader.listOwnerTokens(USER);
     expect(tokenIds).toEqual([TOKEN_ID, asTokenId(43n)]);
   });
 
   it("maps NFT lanes from MarketDriver and Vault getPosition", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake());
 
-    const nft = await transport.readNft(TOKEN_ID, USER);
+    const nft = await reader.readNft(TOKEN_ID, USER);
     expect(nft.tokenId).toBe(TOKEN_ID);
     expect(nft.owner).toBe(USER);
     expect(nft.marketId).toBe(MARKET_ID);
@@ -119,61 +96,50 @@ describe("contracts read transport", () => {
   });
 
   it("maps LVST account from token balance and treasury staking", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake());
 
-    const account = await transport.readLvstAccount(USER);
+    const account = await reader.readLvstAccount(USER);
     expect(account.balance).toBe(50n * 10n ** 18n);
     expect(account.staked).toBe(20n * 10n ** 18n);
     expect(account.pendingDividends).toBe(5_000_000n);
   });
 
   it("maps protocol summary when enabled", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader(),
-      addresses: ADDRESSES,
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake(), {
       includeProtocolSummary: true
     });
 
-    const summary = await transport.readProtocolSummary?.();
+    const summary = await reader.readProtocolSummary?.();
     expect(summary).toEqual({ marketCount: 1, vaultCount: 1 });
   });
 
   it("fails typed when market is missing", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader({ marketExists: false }),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake({ marketExists: false }));
 
-    await expect(transport.readMarket(MARKET_ID)).rejects.toBeInstanceOf(LiveStreakConfigError);
+    await expect(reader.readMarket(MARKET_ID)).rejects.toBeInstanceOf(LiveStreakConfigError);
   });
 
   it("fails typed when vault is missing", async () => {
-    const transport = createContractsOptionsReadTransport({
-      reader: createFakeReader({ vaultExists: false }),
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, contractCallFromFake({ vaultExists: false }));
 
-    await expect(transport.readVault(VAULT_ID)).rejects.toBeInstanceOf(LiveStreakConfigError);
+    await expect(reader.readVault(VAULT_ID)).rejects.toBeInstanceOf(LiveStreakConfigError);
   });
 
   it("does not share mutable reader state across adapters", async () => {
     const callsA: string[] = [];
     const callsB: string[] = [];
 
-    const transportA = createContractsOptionsReadTransport({
-      reader: createRecordingReader(callsA),
-      addresses: ADDRESSES
+    const readerA = createEvmOptionsReaderFromCall(ADDRESSES, async (address, _abi, functionName, args = []) => {
+      callsA.push(`${address}:${functionName}`);
+      return respond({ address, functionName, args }, {});
     });
-    const transportB = createContractsOptionsReadTransport({
-      reader: createRecordingReader(callsB),
-      addresses: ADDRESSES
+    const readerB = createEvmOptionsReaderFromCall(ADDRESSES, async (address, _abi, functionName, args = []) => {
+      callsB.push(`${address}:${functionName}`);
+      return respond({ address, functionName, args }, {});
     });
 
-    await transportA.readMarket(MARKET_ID);
-    await transportB.readMarket(MARKET_ID);
+    await readerA.readMarket(MARKET_ID);
+    await readerB.readMarket(MARKET_ID);
 
     expect(callsA.length).toBeGreaterThan(0);
     expect(callsB.length).toBeGreaterThan(0);
@@ -182,40 +148,33 @@ describe("contracts read transport", () => {
 
   it("rejects invalid contract addresses at construction", () => {
     expect(() =>
-      createContractsOptionsReadTransport({
-        reader: createFakeReader(),
-        addresses: {
+      createEvmOptionsReaderFromCall(
+        {
           ...ADDRESSES,
           marketRegistry: "not-an-address" as `0x${string}`
-        }
-      })
+        },
+        contractCallFromFake()
+      )
     ).toThrow(LiveStreakConfigError);
   });
 
   it("rejects invalid market, vault, token, and user ids before reader calls", async () => {
     let readerCalls = 0;
-    const reader: ContractReader = {
-      read: async () => {
-        readerCalls += 1;
-        return true;
-      }
-    };
-
-    const transport = createContractsOptionsReadTransport({
-      reader,
-      addresses: ADDRESSES
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, async () => {
+      readerCalls += 1;
+      return true;
     });
 
-    await expect(transport.readMarket(asMarketId("market_01"))).rejects.toBeInstanceOf(
+    await expect(reader.readMarket(asMarketId("market_01"))).rejects.toBeInstanceOf(
       LiveStreakConfigError
     );
-    await expect(transport.readVault(asVaultId("vault_01"))).rejects.toBeInstanceOf(
+    await expect(reader.readVault(asVaultId("vault_01"))).rejects.toBeInstanceOf(
       LiveStreakConfigError
     );
-    await expect(transport.readNft(asTokenId(-1n), USER)).rejects.toBeInstanceOf(
+    await expect(reader.readNft(asTokenId(-1n), USER)).rejects.toBeInstanceOf(
       LiveStreakConfigError
     );
-    await expect(transport.readLvstAccount(asUserAddress("0xbad"))).rejects.toBeInstanceOf(
+    await expect(reader.readLvstAccount(asUserAddress("0xbad"))).rejects.toBeInstanceOf(
       LiveStreakConfigError
     );
     expect(readerCalls).toBe(0);
@@ -223,38 +182,30 @@ describe("contracts read transport", () => {
 
   it("accepts valid hex ids and reaches reader", async () => {
     let readerCalls = 0;
-    const transport = createContractsOptionsReadTransport({
-      reader: {
-        read: async (request) => {
-          readerCalls += 1;
-          return respond(request, {});
-        }
-      },
-      addresses: ADDRESSES
-    });
+    const reader = createEvmOptionsReaderFromCall(ADDRESSES, async (address, _abi, functionName, args = []) => { readerCalls += 1; return respond({ address, functionName, args }, {}); });
 
-    await transport.readMarket(MARKET_ID);
+    await reader.readMarket(MARKET_ID);
     expect(readerCalls).toBeGreaterThan(0);
   });
 });
+
 
 type FakeReaderOptions = {
   readonly marketExists?: boolean;
   readonly vaultExists?: boolean;
 };
 
-const createFakeReader = (options: FakeReaderOptions = {}): ContractReader => ({
-  read: async (request) => respond(request, options)
-});
+type SimRequest = {
+  readonly address: `0x${string}`;
+  readonly functionName: string;
+  readonly args?: readonly unknown[];
+};
 
-const createRecordingReader = (calls: string[]): ContractReader => ({
-  read: async (request) => {
-    calls.push(`${request.address}:${request.functionName}`);
-    return respond(request, {});
-  }
-});
+const contractCallFromFake = (options: FakeReaderOptions = {}) =>
+  async (address: `0x${string}`, _abi: readonly unknown[], functionName: string, args: readonly unknown[] = []) =>
+    respond({ address, functionName, args }, options);
 
-const respond = (request: ContractReadRequest, options: FakeReaderOptions): unknown => {
+const respond = (request: SimRequest, options: FakeReaderOptions): unknown => {
   const { address, functionName, args = [] } = request;
 
   if (address === ADDRESSES.marketRegistry) {

@@ -43,6 +43,7 @@ export interface OptionsVaultStewardState {
   readonly hotUntilMs?: number;
   readonly hotReason?: string;
   readonly exitBurnBps?: number;
+  readonly severity?: number;
   readonly disputeId?: string;
 }
 

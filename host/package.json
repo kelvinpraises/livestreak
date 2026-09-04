@@ -21,6 +21,11 @@
     "@mysten/seal": "^1.2.1",
     "@mysten/sui": "^2.19.0",
     "@mysten/walrus": "^1.2.1",
+    "@pimlico/alto": "^0.0.20",
+    "@types/express": "^5.0.6",
+    "@types/supertest": "^7.2.0",
+    "express": "^5.2.1",
+    "supertest": "^7.2.2",
     "viem": "^2.50.4",
     "zod": "^3.25.76"
   },

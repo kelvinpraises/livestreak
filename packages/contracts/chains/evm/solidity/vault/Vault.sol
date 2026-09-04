@@ -114,7 +114,7 @@ contract Vault {
     ITreasurySkim public treasury; // house pot; receives the winner-skim at resolution (0 = skim off)
     mapping(bytes32 => uint256) public skimOwed; // skim computed at first collect, flushed once cash is in
 
-    event VaultCreated(bytes32 indexed vaultId, bytes32 indexed marketId, address indexed creator, string question);
+    event VaultOpened(bytes32 indexed vaultId, bytes32 indexed marketId, address indexed creator, string question);
     event VaultResolved(bytes32 indexed vaultId, Outcome outcome);
     event MarketDriverSet(address indexed marketDriver);
     event ResolverSet(address indexed resolver);
@@ -205,7 +205,7 @@ contract Vault {
             exists: true
         });
 
-        emit VaultCreated(vaultId, marketId, creator, question);
+        emit VaultOpened(vaultId, marketId, creator, question);
     }
 
     function vaultExists(bytes32 vaultId) external view returns (bool) {
@@ -378,6 +378,12 @@ contract Vault {
 
     function caughtUp(bytes32 vaultId, Side side) external view returns (bool) {
         return _boardCaughtUp(vaultId, side);
+    }
+
+    /// @notice Count of un-drained depletion boundaries on (vaultId, side). Lets a caller plan how many
+    /// bounded `advance` calls precede a `fund` when the board is behind. `_boundaryHead <= length` always.
+    function pendingBoundaries(bytes32 vaultId, Side side) external view returns (uint256) {
+        return _boundaries[vaultId][side].length - _boundaryHead[vaultId][side];
     }
 
     function getAccountVaultIds(uint256 account) external view returns (bytes32[] memory) {

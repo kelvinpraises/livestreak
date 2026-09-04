@@ -54,6 +54,7 @@ export const vaultDraft = (overrides: Partial<VaultDraft> = {}): VaultDraft => (
   fundingToken: "0x0000000000000000000000000000000000000002",
   creatorSide: "yes",
   creatorStake: 5_000_000n,
+  seedRate: 8_333n,
   ...overrides
 });
 

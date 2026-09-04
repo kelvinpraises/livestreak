@@ -15,7 +15,7 @@ import {
 import { randomUUID } from "node:crypto";
 import type { HostServerConfig } from "../../config/host.js";
 import { isModuleEnabled } from "../../config/host.js";
-import type { MediaRouteDeps } from "../../interfaces/api/deps.js";
+import type { MediaRouteDeps } from "../../api/deps.js";
 import { buildDevManifest, appendManifestCacheReceiptRef } from "./manifest.js";
 import { evaluateHostPolicy, type PolicyEvaluatorDeps } from "./policy.js";
 import { createLiveKitMediaProvider } from "../../infrastructure/livekit.js";

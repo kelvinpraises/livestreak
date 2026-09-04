@@ -11,6 +11,7 @@ export interface EventKindDetectorConfig {
   readonly durationSeconds: number;
   readonly confidence: number;
   readonly suggestedSide?: "yes" | "no";
+  readonly suggestedStake?: bigint;
 }
 
 export interface PayloadThresholdDetectorConfig {
@@ -71,6 +72,9 @@ const buildDetection = (
   observationRef,
   ...("suggestedSide" in config && config.suggestedSide !== undefined
     ? { suggestedSide: config.suggestedSide }
+    : {}),
+  ...("suggestedStake" in config && config.suggestedStake !== undefined
+    ? { suggestedStake: config.suggestedStake }
     : {})
 });
 

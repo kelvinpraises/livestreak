@@ -12,15 +12,22 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
     "@effect/cli": "0.69.2",
     "@effect/platform-node": "0.96.1",
+    "@livestreak/contracts": "file:../packages/contracts",
+    "@livestreak/host": "file:../packages/host",
     "@livestreak/observe": "file:../packages/observe",
-    "effect": "3.21.3"
+    "@livestreak/options": "file:../packages/options",
+    "@livestreak/schema": "file:../packages/schema",
+    "@livestreak/wallet": "file:../packages/wallet",
+    "effect": "3.21.3",
+    "viem": "^2.23.0"
   },
   "devDependencies": {
+    "@types/node": "^22.15.30",
     "typescript": "6.0.3",
     "vitest": "^4.1.8"
   }

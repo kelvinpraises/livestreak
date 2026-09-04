@@ -2,6 +2,7 @@ import type { BookmakerDecision } from "../model/decision.js";
 import type { Detection } from "../model/detection.js";
 import type { SimilarityResult } from "../model/similarity.js";
 import type { VaultDraft } from "../model/vault-draft.js";
+import { idempotencyKeyFromDraft } from "../model/idempotency.js";
 import { validateVaultDraft } from "../validate/vault-draft.js";
 
 // --- exports ---
@@ -52,6 +53,16 @@ export const chooseVaultAction = (
     };
   }
 
+  const exactMatch = selectExactVaultKeyCandidate(draft, similarity);
+  if (exactMatch !== undefined) {
+    return {
+      action: "joinVault",
+      vaultId: exactMatch.vaultId,
+      draft,
+      detection: policy.detection
+    };
+  }
+
   const joinCandidate = selectJoinCandidate(similarity, policy);
 
   if (joinCandidate !== undefined) {
@@ -71,6 +82,18 @@ export const chooseVaultAction = (
 };
 
 // --- helpers ---
+
+const selectExactVaultKeyCandidate = (
+  draft: VaultDraft,
+  similarity: SimilarityResult
+) => {
+  const draftKey = idempotencyKeyFromDraft(draft);
+
+  return similarity.candidates.find(
+    (candidate) =>
+      candidate.marketId === similarity.marketId && candidate.vaultKey === draftKey
+  );
+};
 
 const selectJoinCandidate = (
   similarity: SimilarityResult,

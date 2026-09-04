@@ -1,89 +1,56 @@
 # @livestreak/bookmaker — TODO
 
-See [architecture.md](./architecture.md). See [repo TODO](../../../README.md).
+See [architecture.md](./architecture.md) and [flow.md](./flow.md).
 
-**Role:** vault origination under observer-registered `marketId`. Does not create markets. Does not depend on `@livestreak/options`.
-
----
-
-## Slice A — model + validators
-
-- [x] Pure validators: `BookmakerMarketContext`, `BookmakerWatchSource`, `VaultDraft`, `Detection`, `SimilarityResult`
-- [x] `BookmakerDecision` skip reasons typed
-- [x] Tests for invalid drafts and policy inputs
-- [x] `buildVaultDraft`, `chooseVaultAction`, `projectBookmakerPanel`
-- [x] `BookmakerSimilarityClient` interface shape
-- [x] `BookmakerWriteIntent` data plan (`createVault`, `joinExistingVault`)
-- [x] Public export + architecture guard tests
+**Role:** in-package vault executor under observer-registered `marketId`. Does not register markets. Does not depend on `@livestreak/options`.
 
 ---
 
-## Slice A.1 — runtime integration boundaries
+## Slice 1 — in-package multichain executor
 
-- [x] `observation/` feed interfaces + `validateObservationEvent` + `buildObservationSubscriptionInput`
-- [x] Host similarity types from `@livestreak/host`
-- [x] Host adapter mappers — no `host/src` import
-- [x] `BookmakerRuntimeConfig` + `validateBookmakerRuntimeConfig`
-- [x] Panel polish + JSON serialization boundary test
-- [x] Contracts boundary: local `BookmakerContractWriteDescriptor` for `createVault` args (no ABI fragments)
-- [x] `joinExistingVault` remains intent-only — no contract join write in v0
-- [ ] Blocker: `marketId` string → `Bytes32` encoding helper belongs at execution edge (CLI/contracts), not bookmaker core
+- [x] `chains/` EVM writer + Sui stub
+- [x] `flows/originate.ts`, `runtime/`, `bridge/`
+- [x] `createHostDiscoveryClient` → `POST /discovery/find`
+- [x] 80 tests baseline
 
 ---
 
-## Slice B — detection + draft
+## Slice 2 — idempotency + central-core errors
 
-- [x] Preflight: removed unused `@livestreak/core`, `@livestreak/schema`, `effect`; added `.gitignore`; no `Date.now()` in `src/`
-- [x] `PatternDetector`, `PatternDetectionInput`, `BookmakerDetectionPolicy`, `BookmakerDetectionInput`, `BookmakerDetectionEvaluation`
-- [x] `detectOpportunity` — confidence threshold, invalid output ignored, detector-order tie-break
-- [x] Example detector factories (`createEventKindDetector`, `createPayloadThresholdDetector`) for tests only under `src/detection/factories.ts`
-- [x] Pure chain integration test: events → detect → draft → decide → plan
-- [x] `buildVaultDraft` requires explicit `nowMs`; `projectBookmakerPanel` uses snapshot time only
-
----
-
-## Slice C — similarity + decision
-
-- [x] `chooseVaultAction(draft, similarity, policy)` — join | create | skip
-- [x] Host client shape for `findSimilar({ marketId, vaultDraft })`
-- [x] `findSimilar(draft, client)` async glue + fake host client tests
-- [x] No global cross-market similarity enforcement in validators/policy
+- [x] All `src/` throws use `@livestreak/core` (no raw `Error`)
+- [x] `idempotencyKeyFor` / `idempotencyKeyFromDraft` (vault-defining fields only)
+- [x] `runtime/idempotency.ts` — at-most-once store with in-flight dedup + failure release
+- [x] `originateVault` wires store; `idempotent` on created result
+- [x] `chooseVaultAction` exact `vaultKey` candidate → join
+- [x] Tests: store semantics, key determinism, core error types
+- [x] `docs/flow.md` replay handled + receipt-timeout residual documented
 
 ---
 
-## Slice D — write plan
+## Slice 2b — wire idempotency into both entry points (Phase 6)
 
-- [x] `planBookmakerWrite(decision, contracts)` as pure data intents
-- [x] No direct ABI fragments
-- [x] `createVault` and `joinExistingVault` intents only
-- [x] Map `createVault` intent → local `BookmakerContractWriteDescriptor` when `marketIdBytes` supplied
-- [ ] Blocker: `@livestreak/contracts` exports wagmi ABIs only — restore public TS write encoders before wiring descriptor mapping to contracts package
-- [ ] Wire full write execution via AA transport at CLI edge
-
----
-
-## Slice E — runtime / Bridge (later)
-
-- [ ] Long-running agent loop — blocked until observation feed execution is owned by CLI/host edge
-- [ ] `BookmakerRuntime`, Bridge edge
-- [ ] AA execute via injected transport + host bundler
+- [x] `runtime/create-vault-once.ts` — sole `chain.writer.createVault` caller via `createVaultOnce`
+- [x] `originateVault` requires `guardedCreateVault` (no ephemeral `?? createIdempotencyStore()` default)
+- [x] `bridge.callAction("createVault")` validates intent + routes through `runtime.createVaultOnce`
+- [x] Bridge methods take injected `nowMs` for capability expiry (not `readSnapshot().updatedAtMs`)
+- [x] Tests: originate + bridge share one store; expiry fail/pass; non-bigint rejection
+- [x] `docs/flow.md` + this file updated
 
 ---
 
-## Explicit non-goals
+## Follow-ups
 
-- [x] No `registerMarket` / market creation in write intents
-- [x] No user funding streams (options)
-- [x] No steward approval gate in v0
-- [x] No auto-merge / vault collapse on-chain
+- [ ] **Residual:** receipt poll timeout after on-chain inclusion — re-check userOp receipt before retry send
+- [ ] **UNHANDLED:** insufficient USDC balance preflight
+- [ ] **UNHANDLED:** unknown market on-chain gate in `originateVault`
+- [ ] Richer host discovery HTTP error mapping
+- [ ] Wire long-running runtime loop to live observation feed at CLI edge
+- [ ] `joinExistingVault` on-chain path (still intent-only)
 
 ---
 
-## Hardening (every slice)
+## Hardening
 
-Run after touching this package. Full checklist: [repo TODO § Hardening loop](../../../README.md#hardening-loop).
-
-- [x] check / build / test for `packages/bookmaker`
-- [x] Pure-layer tests for validators/decision policy; no `Effect.run*` in `src/`
-- [x] Negative-path test for every new public API
-- [x] Update this `docs/TODO.md`
+- [x] `npm run check && npm run build && npm test`
+- [x] No `new Error(` in `src/`; no `Effect.run*` in `src/`
+- [x] Public-export guard updated

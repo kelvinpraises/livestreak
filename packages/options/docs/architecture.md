@@ -1,8 +1,7 @@
-# @livestreak/options — architecture
+# @livestreak/options — architecture (R7)
 
-Consumer SDK for LiveStreak prediction markets on EVM. The package maps on-chain
-`MarketDriver` / `Vault` / `Treasury` state into typed snapshots and UI panels. It
-does **not** own wallets, signing, or deployment — those live at the app / CLI edge.
+Consumer SDK for LiveStreak prediction markets. Maps on-chain `MarketDriver` / `Vault` /
+`Treasury` state into typed snapshots, UI panels, and authorized bridge actions.
 
 ## NFT-lane account model
 
@@ -17,170 +16,93 @@ owner (EOA) ──owns──▶ MarketDriver NFT (tokenId)
 | --- | --- |
 | One side per vault per NFT | Each lane picks YES **or** NO for a vault |
 | Multi-vault exposure | Add lanes on the same NFT, or hold multiple NFTs |
-| Multi-NFT holders | `MarketDriver.tokensOfOwner(owner)` lists all token ids |
-| Vault reads use `tokenId` | `getPosition`, `claimable`, `lossClaimable`, `pendingShares` take `tokenId` as the account arg |
+| Vault reads use `tokenId` | `getPosition`, `claimable`, `lossClaimable`, `pendingShares` take `tokenId` |
 
-There is no “hold both sides on one lane” product path. Opposing exposure requires
-separate NFTs (or separate vault lanes on different sides across NFTs).
+Side enum on-chain: `yes = 0`, `no = 1`.
 
 ## Layering
 
 ```text
-panel/          UI projection (bigint → string, action flags)
-read/           transport + snapshot assembly
-model/          pure domain types, curve math, accrual projector
-write/          Effect-free write blueprints → injected ContractWriter
-runtime/        polling loop at the app edge
+chains/           protocol operations (OptionsReader / OptionsWriter, per-chain)
+  evm/            abis · addresses · encode · decode · reader · writer
+  sui/            notImplemented stub (drops in when contracts exist)
+model/            pure domain types + model/math/ + model/validate.ts
+flows/            snapshot · claims · pnl · stream orchestration over chain.reader
+bridge/           authorized outward edge (readBoard / readControls / callAction / subscribe / watch)
+  panel/          UI projection (bigint → string, action flags)
+runtime/          polling + board assembly + subscription registry + session memory
 ```
 
-Dependency order: `model` → `read` / `write` → `panel` / `runtime`.
-
-### Purity
-
-- `model/`, `panel/`, `read/snapshot.ts` — vanilla TypeScript, no `Effect.run*`.
-- `write/` returns encoded requests; the host calls `ContractWriter.write`.
-- ABIs import **only** from `@livestreak/contracts/evm/abis` (never `@livestreak/contracts/evm`).
-
-### Wallet boundary
+Dependency order: `chains` → `model` → `flows` → `runtime` / `bridge`.
 
 ```text
 app / CLI
-  ├── ContractReader  ──▶ createContractsOptionsReadTransport
-  ├── ContractWriter  ──▶ createContractsOptionsWriteTransport
-  └── createOptionsRuntime (poll + panel refresh)
+  ├── createOptionsChain(chainConfig)     → chains/{evm|sui}
+  │     EVM reads:  viem publicClient (RPC from config)
+  │     EVM writes: createWalletManager → AA userOp → poll receipt → TxId
+  ├── createOptionsRuntime({ config, chainConfig })
+  └── createOptionsBridge({ runtime })    → scope-gated external API
 ```
 
-`@livestreak/wallet` must not appear in `packages/options/src`.
+There are **no** injected `ContractReader` / `ContractWriter` ports and no generic
+`ChainReadRequest` / `chain.reader.read` escape hatches.
 
-## On-chain roles
+## Chain boundary
 
-| Contract | Role in this SDK |
+### OptionsReader (~22 ops)
+
+Domain-typed reads: `readMarket`, `readVault`, `readNft`, `readClaimable`,
+`readWinningSide` (guarded: only when `vault.status === "resolved"`), etc.
+
+### OptionsWriter (~12 ops)
+
+Domain-typed writes returning branded `TxId`: `fund`, `setLanes`, `stopFunding`,
+`stopAllFunding`, `withdraw`, `withdrawMany`, `claimLossLvst`, `stakeLvst`,
+`unstakeLvst`, `claimDividends`, `transferNft`, `approveNft`, `setApprovalForAll`.
+
+### encode vs validate
+
+| Layer | Responsibility |
 | --- | --- |
-| `MarketRegistry` | Markets, vault index per market |
-| `MarketDriver` | NFT mint, `tokensOfOwner`, `laneAt`, `setLanes`, funding controls |
-| `Vault` | Pools, positions, bonding board, claims, resolution |
-| `StewardRegistry` | Hot / dispute overlay on vault reads |
-| `Treasury` | LVST staking + dividend reads |
-| `LvstToken` | LVST balance |
+| `chains/evm/encode.ts` | bytes32 coercion, `0x` address regex, `sideToSolidityValue` |
+| `model/validate.ts` | pure domain rules: rate > 0, tokenId ≥ 0, non-empty branded ids |
 
-Side enum on-chain: `yes = 0`, `no = 1`.
+## Bridge
 
-## Read transport
+Vanilla Promises (no `Effect`). Mirrors observe bridge shape:
 
-`OptionsReadTransport` is the seam for all chain reads. The contracts adapter
-(`createContractsOptionsReadTransport`) takes an injected `ContractReader`.
-
-### Core reads (R1)
-
-- Markets: `readMarket`, `listMarketVaults`
-- Vaults: `readVault`, `readVaultShareTotals`
-- NFTs: `listOwnerTokens`, `readNft` (lanes from `laneAt` + `getPosition`)
-- LVST: `readLvstAccount`
-
-### Claim previews (R2)
-
-| Method | On-chain | Notes |
-| --- | --- | --- |
-| `readClaimable(tokenId, vaultId, side)` | `Vault.claimable` | Winner payout preview |
-| `readLossClaimable(tokenId, vaultId, side)` | `Vault.lossClaimable` | Loser USDC basis for LVST |
-| `readWinningSide(vaultId)` | `Vault.winningSide` | **Only after** `status === resolved` |
-| `readPot(vaultId)` | `Vault.pot` | Non-zero after collection |
-| `readCollected(vaultId)` | `Vault.collected` | |
-| `readAccountVaultIds(tokenId)` | `Vault.getAccountVaultIds` | All funded vaults for token |
-
-`readNft` enriches each lane with `claimable`, `lossClaimable`, and `won`
-(`side === winningSide` when resolved). `readVaultSnapshot` adds `winningSide`,
-`pot`, and `collected` for resolved vaults.
-
-⚠️ **Never call `winningSide` on open vaults** — it reverts. The transport reads
-`getVault` first and returns `undefined` unless status is `resolved`.
-
-### Live ln() ticker (R2)
-
-Bonding curve constants (display layer): `BASE_PRICE = 100_000`,
-`CURVE_K = 10_000_000_000`, `SHARE_SCALE = 1_000_000`, `WAD = 1e18`.
-
-| Method | On-chain |
+| Scope | Method |
 | --- | --- |
-| `readBoard(vaultId, side)` | `getBoard` → pool, sideRate, g, lastAdvance |
-| `readSharePrice(vaultId, side)` | `getSharePrice` |
-| `readPendingShares(vaultId, side, tokenId)` | `pendingShares` |
+| `bridge:board:read` | `readBoard(caller)` |
+| `bridge:controls:read` | `readControls(caller)` |
+| `bridge:action` | `callAction(caller, envelope)` → `TxId` |
+| `bridge:board:subscribe` | `subscribeBoard(caller, listener)` / `watch(caller, key, listener)` |
 
-`projectShares` advances `g` locally via `segMath` (`Math.log` display estimate).
-`projectStreamAccrual` builds `OptionsStreamAccrualView`:
+`BridgeCaller.trusted === true` short-circuits grant checks. Otherwise `CapabilityGrant`
+records are evaluated via `requireAnyScope`.
 
-- `pendingShares` — projected or frozen `pendingShares`
-- `valueUSDC` — `pendingShares × (yesTotal + noTotal) / sideShareTotal`
-- `sharesPerSec` — finite difference over 1s (zero when frozen)
-- `sharePriceNow` — `priceOf(board.pool)`
+Writes from external callers go through `callAction` — standalone `write/*` helpers are
+not public exports.
 
-Freezes when the lane is depleted, past `maxEndMs`, or past `resolvedAtMs`.
-Re-anchors on every fresh `readPendingShares` RPC read.
+## Runtime
 
-## Snapshots and panel
+`createOptionsRuntime` owns:
 
-```text
-readUserOptionsSnapshot(transport, user, marketId?)
-  → OptionsUserOptionsSnapshot
-  → projectOptionsPanel(snapshot)
-  → OptionsPanel
+- `chain` (from `createOptionsChain` or injected fake in tests)
+- in-memory snapshot store (`set` / `get` session memory map)
+- `readBoard` / `subscribeBoard` via `runtime/board.ts` + `subscriptions.ts`
+- optional polling when `refreshIntervalMs` is set
+
+## Public exports (`src/index.ts`)
+
+Exported: `createOptionsChain`, `createOptionsBridge`, `TxId`, flow reads, bridge panel
+projection, runtime, model/math.
+
+Not exported: `createOptionsReader`, `OptionsReadTransport`, generic chain requests,
+standalone write helpers, `getStreamMedia`, `ContractReader`/`ContractWriter`.
+
+## Verify
+
+```bash
+cd packages/options && npm run check && npm run build && npm test
 ```
-
-Lane panel fields (R2): `claimableUSDC`, `lossClaimableLVST`, `won`,
-`canClaimWin`, `canClaimLoss`.
-
-## Write transport
-
-NFT-lane writes only (no vault/market creation in this package):
-
-- `fundStream`, `setLanes`, `stopFunding`, `stopAll`
-- `withdraw`, `withdrawMany`
-- `claimLossLvst`
-- `stakeLvst`, `unstakeLvst`, `claimDividends`
-- NFT: `transferNft`, `approveNft`, `setApprovalForAll`
-
-## Tests
-
-- Unit: model curve, accrual projector, panel projection, transport mapping
-- Guards: no `Effect.run*` in `src/`, ABI import path, `winningSide` guard
-- Fakes: `test/helpers/fake-transport.ts` implements full `OptionsReadTransport`
-
-## R3 — aggregation + app-integration (complete)
-
-### Drips + USDC reads
-
-`OptionsContractAddresses` includes `dripsStreaming`. `readUsdcAddress()` caches
-`MarketDriver.USDC()`. `readNftBalance(tokenId)` calls
-`DripsStreaming.streamsState(tokenId, usdc)` and maps tuple index **3** (`balance`,
-`uint128`) as `remainingUSDC`.
-
-### Session PnL
-
-`readSessionPnl(transport, user, investedUSDC?)` → `OptionsSessionPnlView`:
-
-| Field | Fold |
-| --- | --- |
-| `returnedUSDC` | Σ `claimable(tokenId, vault, winningSide)` on resolved vaults |
-| `lossBasisUSDC` | Σ `lossClaimable(tokenId, vault, losingSide)` |
-| `remainingUSDC` | Σ `readNftBalance(tokenId)` across `tokensOfOwner` |
-| `investedUSDC?` | Caller-supplied only — never invented |
-| `netPnlUSDC?` | `returned + remaining − invested` when invested is supplied |
-
-### Claims view
-
-`readClaimsView(transport, user)` → `OptionsClaimsView` spanning all NFTs via
-`tokensOfOwner` → `getAccountVaultIds` + lane enrichment. Reuses R2 claim reads.
-
-### Runtime memory
-
-`OptionsRuntime.set(key, value)` / `get(key)` — in-memory map on the store (reconstructable).
-`onChange(cb)` fires on `set` **and** snapshot refresh; returns unsubscribe. `subscribeSnapshots`
-remains snapshot-only.
-
-### Panel (R3 flags)
-
-- LVST: `canStake`, `canUnstake`, `canClaimDividends` (unchanged logic, explicit tests)
-- Market: `totals.totalPooledUSDC` = Σ `(yesTotal + noTotal)` over market vaults
-- NFT: `owner`, `approved`, `isOperator` from `ownerOf` / `getApproved` / `isApprovedForAll`
-
-**Next step (app package):** wire `/stream` mock hooks to injected viem reader + `createOptionsRuntime`.

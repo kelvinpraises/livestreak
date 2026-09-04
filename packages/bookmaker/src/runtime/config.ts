@@ -1,6 +1,8 @@
+import type { WalletInit } from "@livestreak/schema";
+
+import type { BookmakerContractAddresses } from "../chains/addresses.js";
 import type { BookmakerVaultPolicy } from "../decision/choose.js";
 import type { BookmakerMarketContext } from "../model/market-context.js";
-import type { BookmakerContractsSurface } from "../model/write-plan.js";
 import type { BookmakerWatchSource } from "../model/watch-source.js";
 import type { BookmakerSimilarityClient } from "../similarity/client.js";
 
@@ -13,6 +15,9 @@ export interface BookmakerRuntimeConfig {
   readonly policy: BookmakerVaultPolicy;
   readonly fundingToken: string;
   readonly similarityClient?: BookmakerSimilarityClient;
-  readonly contracts?: BookmakerContractsSurface;
+  readonly walletInit: WalletInit;
+  readonly seed: string | Uint8Array;
+  readonly addresses: BookmakerContractAddresses;
+  readonly readRpcUrl?: string;
   readonly chainId?: number;
 }

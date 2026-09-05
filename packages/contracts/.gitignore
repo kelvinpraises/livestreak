@@ -4,6 +4,9 @@ chains/evm/out/
 
 # Sui compiler artifacts
 chains/sui/build/
+chains/sui/Pub.*.toml
+chains/sui/deploy/output/*.json
+!chains/sui/deploy/output/.gitkeep
 
 # Legacy paths (pre-chains/ relocate)
 evm/cache/

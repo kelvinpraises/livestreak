@@ -9,6 +9,9 @@ export { projectClaimsView } from "./claims.js";
 export type {
   OptionsBoardState,
   OptionsStreamAccrualView,
+  OptionsAccrualPreview,
+  PreviewAccrualInput,
+  ProjectAccrualPreviewInput,
   ProjectStreamAccrualInput,
   OptionsSessionPnlView,
   ProjectSessionPnlInput,
@@ -18,6 +21,7 @@ export type {
 export {
   isAccrualFrozen,
   projectStreamAccrual,
+  projectAccrualPreview,
   projectSessionPnl,
   BASE_PRICE,
   CURVE_K,

@@ -1,4 +1,4 @@
-import type { BookmakerSimilarityClient } from "../../src/similarity/client.js";
+import type { BookmakerSimilarityClient } from "../../src/pipeline/similarity/client.js";
 import type { SimilarityResult } from "../../src/index.js";
 
 // --- exports ---

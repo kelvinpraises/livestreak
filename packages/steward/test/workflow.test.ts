@@ -65,6 +65,7 @@ describe("steward pure workflow", () => {
 
     const panel = projectStewardPanel({
       runtimeId: "runtime-1",
+      revision: 1,
       watchedSubjects: [subject],
       latestFindings: [finding],
       latestDecisions: [
@@ -91,7 +92,6 @@ describe("steward pure workflow", () => {
           hostActions: []
         }
       ],
-      completedActionPlans: [],
       updatedAtMs: 300
     });
 
@@ -99,7 +99,6 @@ describe("steward pure workflow", () => {
       watchedSubjectCount: 1,
       findingCount: 1,
       pendingPlanCount: 1,
-      completedPlanCount: 0,
       criticalFindingCount: 1
     });
     expect(panel.latestDecision?.action).toBe("triggerHot");

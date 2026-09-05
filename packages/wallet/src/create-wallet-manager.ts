@@ -1,5 +1,5 @@
 import { ConfigurationError, WalletManagerEvmErc4337 } from '#chains/evm.js'
-import { WalletManagerSui } from '#chains/sui.js'
+import { WalletManagerSui } from '#chains/sui/index.js'
 
 import type { WalletChain, WalletConfigByChain, WalletManagerForChain } from '#types.js'
 

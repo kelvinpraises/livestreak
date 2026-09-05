@@ -2,7 +2,7 @@
 
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import type { TxId } from "../chains/types.js";
+import type { MintResult, TxId } from "../chains/types.js";
 import { projectOptionsControls, projectOptionsPanel } from "./panel/project.js";
 import type { OptionsControlsView } from "./panel/types.js";
 import { authorizeBridgeCaller } from "./scope.js";
@@ -52,7 +52,7 @@ export const createOptionsBridge = (input: CreateOptionsBridgeInput): OptionsBri
     readControls: async (caller) => {
       authorizeBridgeCaller(caller, bridgeControlsReadScope);
       const board = await runtime.readBoard();
-      return projectOptionsControls(board.panel);
+      return projectOptionsControls(board.panel, board.revision);
     },
 
     readClaims: async (caller) => {
@@ -68,6 +68,11 @@ export const createOptionsBridge = (input: CreateOptionsBridgeInput): OptionsBri
     readStreamState: async (caller, marketId) => {
       authorizeBridgeCaller(caller, bridgeBoardReadScope);
       return runtime.readStreamState(marketId);
+    },
+
+    previewAccrual: async (caller, input) => {
+      authorizeBridgeCaller(caller, bridgeBoardReadScope);
+      return runtime.previewAccrual(input);
     },
 
     callAction: async (caller, envelope) => {
@@ -101,14 +106,16 @@ const dispatchWriterAction = async (
   runtime: CreateOptionsBridgeInput["runtime"],
   action: string,
   args: unknown
-): Promise<TxId> => {
+): Promise<TxId | MintResult> => {
   const writer = runtime.chain.writer;
 
   switch (action) {
     case "mint":
       return writer.mint(readArgs(args));
+    case "mintWithSalt":
+      return writer.mintWithSalt(readArgs(args));
     case "fund":
-      return writer.fund(readArgs(args));
+      return runtime.fundStream(readArgs(args));
     case "setLanes":
       return writer.setLanes(readArgs(args));
     case "stopFunding":

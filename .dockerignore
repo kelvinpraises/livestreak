@@ -18,13 +18,10 @@
 context
 host
 cli
-packages/contracts
-packages/core
-packages/schema
 packages/observe
-packages/options
 packages/bookmaker
 packages/steward
-packages/host
 
-# keep: app/** and packages/wallet/**
+# keep: app/** + the workspace packages app needs:
+#   packages/wallet, packages/options, packages/schema, packages/contracts,
+#   packages/core, packages/host

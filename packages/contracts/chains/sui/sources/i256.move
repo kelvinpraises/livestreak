@@ -86,7 +86,10 @@ public fun is_zero(x: &I256): bool {
 
 /// @notice Whether or not `x` is negative.
 public fun is_neg(x: &I256): bool {
-    x.bits >= U256_WITH_FIRST_BIT_SET
+    // Sign-magnitude: a pure sign bit (== U256_WITH_FIRST_BIT_SET, i.e. negative zero) counts as
+    // non-negative, matching i128::is_neg. `neg(0)` returns `*x` so the sign-only pattern is never
+    // constructed; this `>` is pure consistency hardening with no live-path change.
+    x.bits > U256_WITH_FIRST_BIT_SET
 }
 
 /// @notice Flips the sign of `x`.

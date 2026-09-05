@@ -15,8 +15,7 @@ export const createMarketRegistrar = (
       return Effect.succeed(createEvmMarketRegistrar({ ...config, walletInit }));
     }
     case "sui": {
-      void walletInit;
-      return Effect.succeed(createSuiMarketRegistrar());
+      return Effect.succeed(createSuiMarketRegistrar({ ...config, walletInit }));
     }
     default: {
       return Effect.fail(

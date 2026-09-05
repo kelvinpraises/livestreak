@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { motion } from 'framer-motion'
-import { Play, Users, Stack, Fire, ArrowRight, Eye, CurrencyDollar, Trophy, Clock, CheckCircle, XCircle } from '@phosphor-icons/react'
-import { mockStreams, mockLiveVaults, mockLifetimeVaults, mockProtocolStats } from '#/data/mock'
+import { Play, Stack, Fire, ArrowRight, Eye, CurrencyDollar, Trophy, Clock, CheckCircle, XCircle } from '@phosphor-icons/react'
+import type { HomepageLiveVaultCard, HomepageStreamCard } from '#/types/homepage'
+import { useHomepageData } from '#/hooks/use-homepage-data'
 import { formatUSDCFull } from '#/utils/format'
 
 export const Route = createFileRoute('/')({
@@ -9,6 +10,8 @@ export const Route = createFileRoute('/')({
 })
 
 function HomePage() {
+  const { streams, liveVaults, lifetimeVaults, protocolStats } = useHomepageData()
+
   return (
     <div style={{ overflowY: 'auto', height: 'calc(100vh - 56px)' }}>
       {/* Hero */}
@@ -56,10 +59,10 @@ function HomePage() {
         <div className="broadcast-rule" />
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, padding: '14px 24px', background: 'rgba(255,255,255,0.015)' }}>
           {[
-            { label: 'VAULTS', value: mockProtocolStats.totalVaults.toLocaleString(), accent: '#00ff87' },
-            { label: 'VOLUME', value: formatUSDCFull(mockProtocolStats.totalVolume), accent: '#00c8ff' },
-            { label: 'LIVE', value: mockProtocolStats.activeStreams.toString(), accent: '#ff2d78' },
-            { label: 'AGENTS', value: mockProtocolStats.activeAgents.toString(), accent: '#ffd553' },
+            { label: 'VAULTS', value: protocolStats.totalVaults.toLocaleString(), accent: '#00ff87' },
+            { label: 'VOLUME', value: formatUSDCFull(protocolStats.totalVolume), accent: '#00c8ff' },
+            { label: 'LIVE', value: protocolStats.activeStreams.toString(), accent: '#ff2d78' },
+            { label: 'RESOLVED', value: protocolStats.resolvedVaults.toString(), accent: '#ffd553' },
           ].map((stat, i) => (
             <div key={stat.label} style={{ display: 'flex', alignItems: 'center' }}>
               {i > 0 && <span className="sep-dot" style={{ fontSize: 18 }}>&middot;</span>}
@@ -80,7 +83,7 @@ function HomePage() {
           <h2 className="display" style={{ fontSize: 22, fontWeight: 700, color: '#fff', letterSpacing: '0.02em' }}>Live Now</h2>
         </motion.div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
-          {mockStreams.map((stream, i) => <StreamCard key={stream.id} stream={stream} index={i} />)}
+          {streams.map((stream, i) => <StreamCard key={stream.id} stream={stream} index={i} />)}
         </div>
       </section>
 
@@ -89,10 +92,10 @@ function HomePage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
           <Stack size={18} color="#00ff87" />
           <h2 className="display" style={{ fontSize: 22, fontWeight: 700, color: '#fff', letterSpacing: '0.02em' }}>Live Vaults</h2>
-          <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginLeft: 4 }}>{mockLiveVaults.length} active</span>
+          <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginLeft: 4 }}>{liveVaults.length} active</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
-          {mockLiveVaults.map((vault, i) => <LiveVaultCard key={vault.id} vault={vault} index={i} />)}
+          {liveVaults.map((vault, i) => <LiveVaultCard key={vault.vaultId} vault={vault} index={i} />)}
         </div>
       </section>
 
@@ -108,23 +111,25 @@ function HomePage() {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
           <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '14px 16px' }}>
             <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>RESOLVED</div>
-            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>{mockProtocolStats.totalVaults}</div>
+            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>{protocolStats.resolvedVaults}</div>
           </div>
           <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '14px 16px' }}>
             <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>TOTAL VOLUME</div>
-            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: '#00c8ff' }}>{formatUSDCFull(mockProtocolStats.totalVolume)}</div>
+            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: '#00c8ff' }}>{formatUSDCFull(protocolStats.totalVolume)}</div>
           </div>
           <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '14px 16px' }}>
             <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.08em', marginBottom: 4, fontFamily: 'var(--font-mono)' }}>YES WIN RATE</div>
-            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: '#00ff87' }}>62%</div>
+            <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: '#00ff87' }}>
+              {protocolStats.yesWinRatePct !== null ? `${protocolStats.yesWinRatePct}%` : '—'}
+            </div>
           </div>
         </div>
 
         {/* Recent resolutions */}
         <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.25)', padding: '4px 0 10px' }}>RECENT RESOLUTIONS</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {mockLifetimeVaults.map(vault => (
-            <div key={vault.id} style={{
+          {lifetimeVaults.map(vault => (
+            <div key={vault.vaultId} style={{
               display: 'flex', alignItems: 'center', gap: 12,
               background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
               borderRadius: 8, padding: '10px 14px',
@@ -138,7 +143,7 @@ function HomePage() {
               <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: vault.outcome === 'yes' ? '#00ff87' : '#ff2d78', marginLeft: 8 }}>
                 {vault.outcome.toUpperCase()}
               </span>
-              <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginLeft: 4 }}>${vault.totalPool}</span>
+              <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', marginLeft: 4 }}>{formatUSDCFull(vault.totalPool)}</span>
             </div>
           ))}
         </div>
@@ -180,7 +185,7 @@ function HomePage() {
 
 /* ─── Stream Card ─── */
 
-function StreamCard({ stream, index }: { stream: typeof mockStreams[0]; index: number }) {
+function StreamCard({ stream, index }: { stream: HomepageStreamCard; index: number }) {
   const categoryColors: Record<string, string> = { Tech: '#00ff87', Esports: '#00c8ff', Politics: '#ff7a00', Entertainment: '#ffd553' }
   const accent = categoryColors[stream.category] ?? '#00ff87'
 
@@ -193,10 +198,12 @@ function StreamCard({ stream, index }: { stream: typeof mockStreams[0]; index: n
           <div style={{ width: 48, height: 48, borderRadius: '50%', background: `${accent}10`, border: `1px solid ${accent}25`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Play size={20} color={accent} />
           </div>
-          <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '3px 8px', backdropFilter: 'blur(4px)' }}>
-            <div className="live-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#ff2d78' }} />
-            <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: '#ff2d78', letterSpacing: '0.1em' }}>LIVE</span>
-          </div>
+          {stream.isLive && (
+            <div style={{ position: 'absolute', top: 10, left: 10, display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,0,0,0.7)', borderRadius: 4, padding: '3px 8px', backdropFilter: 'blur(4px)' }}>
+              <div className="live-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#ff2d78' }} />
+              <span className="mono" style={{ fontSize: 9, fontWeight: 700, color: '#ff2d78', letterSpacing: '0.1em' }}>LIVE</span>
+            </div>
+          )}
           <div style={{ position: 'absolute', top: 10, right: 10, background: `${accent}12`, border: `1px solid ${accent}25`, borderRadius: 4, padding: '2px 8px' }}>
             <span style={{ fontSize: 10, fontWeight: 600, color: accent, fontFamily: 'var(--font-mono)', letterSpacing: '0.04em' }}>{stream.category}</span>
           </div>
@@ -204,11 +211,12 @@ function StreamCard({ stream, index }: { stream: typeof mockStreams[0]; index: n
         <div style={{ padding: '12px 14px' }}>
           <p style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.85)', marginBottom: 8, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{stream.title}</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Users size={11} color="rgba(255,255,255,0.3)" /><span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{stream.viewers.toLocaleString()}</span></div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Stack size={11} color="rgba(255,255,255,0.3)" /><span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{stream.activeVaults} vaults</span></div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><CurrencyDollar size={11} color="#00c8ff" /><span className="mono" style={{ fontSize: 11, color: '#00c8ff' }}>{formatUSDCFull(stream.totalPooled)}</span></div>
           </div>
-          <div style={{ marginTop: 8 }}><span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)' }}>{stream.elapsed}</span></div>
+          {stream.elapsed && (
+            <div style={{ marginTop: 8 }}><span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)' }}>{stream.elapsed}</span></div>
+          )}
         </div>
       </motion.div>
     </Link>
@@ -217,7 +225,7 @@ function StreamCard({ stream, index }: { stream: typeof mockStreams[0]; index: n
 
 /* ─── Live Vault Card ─── */
 
-function LiveVaultCard({ vault, index }: { vault: typeof mockLiveVaults[0]; index: number }) {
+function LiveVaultCard({ vault, index }: { vault: HomepageLiveVaultCard; index: number }) {
   const isHot = vault.status === 'hot'
   return (
     <Link to="/stream/$id" params={{ id: vault.streamId }} style={{ textDecoration: 'none' }}>
@@ -242,11 +250,11 @@ function LiveVaultCard({ vault, index }: { vault: typeof mockLiveVaults[0]; inde
         <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>Pool</span>
-            <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>${vault.totalPool}</span>
+            <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>{formatUSDCFull(vault.totalPool)}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <Clock size={10} color="rgba(255,255,255,0.2)" />
-            <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{Math.floor(vault.expiresIn / 60)}m left</span>
+            <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>{Math.floor(vault.expiresInSec / 60)}m left</span>
           </div>
         </div>
       </motion.div>

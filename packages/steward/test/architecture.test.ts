@@ -28,16 +28,14 @@ const forbiddenImportPatterns = [
 const forbiddenCreationPatterns = [/\bcreateMarket\b/, /\bcreateVault\b/, /\bstoreForumThread\b/];
 
 describe("steward architecture guards", () => {
-  it("typechecks tests via tsconfig.json include", () => {
-    const tsconfig = JSON.parse(readFileSync(path.join(packageRoot, "tsconfig.json"), "utf8")) as {
-      include?: string[];
-    };
-    const buildTsconfig = JSON.parse(
-      readFileSync(path.join(packageRoot, "tsconfig.build.json"), "utf8")
-    ) as { include?: string[] };
+  it("keeps top-level src folders in house shape", () => {
+    const topLevel = readdirSync(sourceRoot).filter((entry) => {
+      const absolute = path.join(sourceRoot, entry);
+      return statSync(absolute).isDirectory();
+    });
 
-    expect(tsconfig.include).toEqual(expect.arrayContaining(["src", "test"]));
-    expect(buildTsconfig.include).toEqual(["src"]);
+    expect(topLevel.sort()).toEqual(["bridge", "model", "runtime", "validate", "workflow"]);
+    expect(readdirSync(sourceRoot)).not.toContain("panel");
   });
 
   it("src/index.ts is re-export only", () => {

@@ -4,15 +4,21 @@ import { Command } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
 import { hostCommand, produceCommand } from "./commands/produce.js";
-import { optionsCommands } from "./commands/options.js";
+import { initCommand } from "./commands/init.js";
+import { loginCommand } from "./commands/login.js";
+import { vaultConsumerCommands } from "./commands/vaults.js";
+import { vaultCommand } from "./commands/vault.js";
 import { laneCommands } from "./commands/lanes.js";
 import { nftCommands } from "./commands/nft.js";
 
 const root = Command.make("livestreak", {}, () => Effect.void).pipe(
   Command.withSubcommands([
+    initCommand,
+    loginCommand,
     produceCommand,
     hostCommand,
-    ...optionsCommands,
+    ...vaultConsumerCommands,
+    vaultCommand,
     ...laneCommands,
     ...nftCommands
   ])

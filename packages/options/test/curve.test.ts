@@ -35,12 +35,35 @@ describe("bonding curve", () => {
     const { dG, newPool } = segMath({ pool, sideRate, dtSeconds });
     const p0 = Number(BASE_PRICE + (BASE_PRICE * pool) / CURVE_K);
     const p1 = Number(BASE_PRICE + (BASE_PRICE * newPool) / CURVE_K);
-    const expected =
-      (Number(SHARE_SCALE) * Number(CURVE_K) * Math.log(p1 / p0)) /
-      (Number(BASE_PRICE) * Number(sideRate));
+    // dG is now WAD-scaled (×1e18) to match the on-chain g units.
+    const expectedDG = BigInt(
+      Math.floor(
+        ((Number(SHARE_SCALE) * Number(CURVE_K) * Math.log(p1 / p0)) /
+          (Number(BASE_PRICE) * Number(sideRate))) *
+          1e18
+      )
+    );
 
     expect(newPool).toBe(pool + sideRate * BigInt(dtSeconds));
-    expect(dG).toBeCloseTo(expected, 6);
+    expect(dG).toBe(expectedDG);
+  });
+
+  it("credits the on-chain share-units for a live streamed segment ($1/s, $5k pool, 60s)", () => {
+    // Funds-at-risk regression: before the WAD fix this credited 0 share-units. The contract credits
+    // ~399,202,126 share-units for $1/s streamed for 60s into a $5,000 pool (all values at 6 dp).
+    const lastAdvanceMs = 1_700_000_000_000;
+    const board = {
+      pool: 5_000_000_000n, // 5,000 USDC
+      sideRate: 1_000_000n, // 1 USDC/s on this side
+      g: 0n,
+      lastAdvanceMs
+    };
+    const position = { rate: 1_000_000n, gPaid: 0n, depleted: false };
+
+    const shares = projectShares({ board, position, atMs: lastAdvanceMs + 60_000 });
+
+    expect(shares).toBe(399_202_126n);
+    expect(shares).toBeGreaterThan(0n); // the bug returned 0n
   });
 
   it("projectShares advances g over elapsed time", () => {
@@ -60,7 +83,7 @@ describe("bonding curve", () => {
 
     const shares = projectShares({ board, position, atMs });
     const { dG } = segMath({ pool: board.pool, sideRate: board.sideRate, dtSeconds: 10 });
-    const expected = (position.rate * (board.g + BigInt(Math.floor(dG)) - position.gPaid)) / WAD;
+    const expected = (position.rate * (board.g + dG - position.gPaid)) / WAD;
 
     expect(shares).toBe(expected);
   });

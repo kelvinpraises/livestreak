@@ -1,9 +1,9 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import type { StewardActionContext } from "../action/types.js";
-import type { StewardDecisionPolicy } from "../decision/types.js";
+import type { StewardActionContext } from "../workflow/action/types.js";
+import type { StewardDecisionPolicy } from "../workflow/decision/types.js";
 import type { StewardSubject } from "../model/subject.js";
-import type { StewardRuleset } from "../rules/types.js";
+import type { StewardRuleset } from "../workflow/rules/types.js";
 import { isStewardSubject, validateStewardSubject } from "../validate/subject.js";
 import type { ContractFactSource, HostFactSource, MemoryFactSource, ObserveFactSource } from "./sources.js";
 import type { StewardActionPlanSink, StewardMemorySink } from "./sink.js";

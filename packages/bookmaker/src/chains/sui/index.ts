@@ -15,6 +15,7 @@ export const createSuiBookmakerChain = (): BookmakerChain => ({
     marketExists: notImplemented("marketExists")
   },
   writer: {
-    createVault: notImplemented("createVault")
+    createVault: notImplemented("createVault"),
+    confirmCreateVault: notImplemented("confirmCreateVault")
   }
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateObservationEvent } from "../../src/observation/validate.js";
+import { validateObservationEvent } from "../../src/pipeline/observation/validate.js";
 
 describe("validateObservationEvent", () => {
   it("rejects events missing marketId and observationId", () => {

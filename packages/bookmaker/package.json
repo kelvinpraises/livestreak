@@ -16,7 +16,8 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e:chain": "npm run build -w @livestreak/wallet && tsx test/e2e/create-vault.e2e.ts"
   },
   "dependencies": {
     "@livestreak/contracts": "file:../contracts",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
+    "tsx": "^4.19.0",
     "typescript": "6.0.3",
     "vitest": "^4.1.8"
   }

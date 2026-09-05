@@ -7,9 +7,9 @@ import {
   type SetApprovalForAllInput,
   type TransferNftInput
 } from "@livestreak/options";
-import { resolveOperatorContext } from "./context.js";
-import { createOptionsEdge } from "../edges/options.js";
-import { operatorMintNft } from "../edges/nft-mint.js";
+import { operatorMintNft } from "../adapters/onchain.js";
+import { resolveOperatorContext } from "../gateway/operator.js";
+import { createOptionsEdge } from "../adapters/options.js";
 import { defaultInitDocPath, saveInitDoc } from "../prefs/init-doc.js";
 import {
   configOpt,
@@ -18,7 +18,7 @@ import {
   parseTokenId,
   passwordOpt,
   readCommandConfig
-} from "./cli-args.js";
+} from "./args.js";
 import { renderNftMintResult, renderTxResult } from "../render/output.js";
 
 export const runNftMint = async (input: {

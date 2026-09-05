@@ -19,6 +19,7 @@ export type DeploymentName = "localhost";
 
 export type EvmDeployScope = {
   readonly status: string;
+  readonly deployedAt?: string;
   readonly contracts?: Readonly<Record<string, Address>>;
 };
 
@@ -26,6 +27,8 @@ export type EvmDeployOutput = {
   readonly chain: string;
   readonly chainId: number;
   readonly rpc: string;
+  readonly deployedAt?: string;
+  readonly deployer?: Address;
   readonly scopes: Readonly<Record<string, EvmDeployScope>>;
 };
 

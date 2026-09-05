@@ -1,19 +1,18 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
 import type { BookmakerMarketContext } from "../model/market-context.js";
-import type { BookmakerDetectionEvaluation } from "../detection/types.js";
-import type { BookmakerVaultPolicy } from "../decision/choose.js";
-import { chooseVaultAction } from "../decision/choose.js";
-import { buildVaultDraft } from "../draft/build.js";
+import type { BookmakerDetectionEvaluation } from "../pipeline/detection/types.js";
+import type { BookmakerVaultPolicy } from "../pipeline/decision/choose.js";
+import { chooseVaultAction } from "../pipeline/decision/choose.js";
+import { buildVaultDraft } from "../pipeline/draft/build.js";
 import type { BookmakerDecision } from "../model/decision.js";
 import type { Detection } from "../model/detection.js";
 import type { VaultDraft } from "../model/vault-draft.js";
 import { buildCreateVaultIntent, type CreateVaultIntent } from "../model/write-intent.js";
-import type { SimilarityResult } from "../model/similarity.js";
-import type { BookmakerSimilarityClient } from "../similarity/client.js";
-import { findSimilar } from "../similarity/find.js";
+import type { BookmakerSimilarityClient } from "../pipeline/similarity/client.js";
+import { findSimilar } from "../pipeline/similarity/find.js";
 import type { CreateVaultOnceResult } from "../runtime/create-vault-once.js";
-import { validateVaultDraftForCreate } from "../validate/vault-draft.js";
+import { validateVaultDraftForCreate } from "../model/validate.js";
 
 // --- exports ---
 
@@ -30,6 +29,14 @@ export interface OriginateVaultInput {
   readonly similarityClient: BookmakerSimilarityClient;
   readonly nowMs: number;
   readonly guardedCreateVault: GuardedCreateVault;
+  /** Optional observer for fail-open discovery-index errors (never throws). */
+  readonly onIndexError?: (error: unknown) => void;
+  /**
+   * Chain streaming minimum seed rate (resolved per-chain from config, never a
+   * constant). A create whose seed rate would fall below this is rejected with a
+   * clear error so funding can't round to zero per cycle. Defaults to 1n.
+   */
+  readonly minSeedRate?: bigint;
 }
 
 export type OriginateVaultResult =
@@ -101,7 +108,9 @@ const finalizeOriginateDecision = async (
     };
   }
 
-  const draftValidated = validateVaultDraftForCreate(draft, input.nowMs);
+  const draftValidated = validateVaultDraftForCreate(draft, input.nowMs, {
+    ...(input.minSeedRate === undefined ? {} : { minSeedRate: input.minSeedRate })
+  });
   if (draftValidated.ok === false) {
     throw new LiveStreakConfigError({
       message: draftValidated.issues.join("; "),
@@ -115,6 +124,15 @@ const finalizeOriginateDecision = async (
     input.nowMs
   );
 
+  // B2: register the just-created vault in the host discovery index so the next
+  // origination for the same opportunity FINDS it (the real duplicate-vault fix)
+  // — carrying the precomputed `vaultKey` (= idempotencyKey) so the deterministic
+  // exact-match (B1) fires too. Fail-OPEN: a discovery hiccup must never fail or
+  // roll back a created vault. Skip idempotent re-creates (already indexed).
+  if (idempotent === false) {
+    await registerCreatedVaultFailOpen(input, draftValidated.value, result.vaultId, idempotencyKey);
+  }
+
   return {
     action: "created",
     draft,
@@ -124,4 +142,28 @@ const finalizeOriginateDecision = async (
     idempotent,
     idempotencyKey
   };
+};
+
+const registerCreatedVaultFailOpen = async (
+  input: OriginateVaultInput,
+  draft: VaultDraft,
+  vaultId: string,
+  vaultKey: string
+): Promise<void> => {
+  const indexVault = input.similarityClient.indexVault;
+  if (indexVault === undefined) {
+    return;
+  }
+
+  try {
+    await indexVault({
+      vaultId,
+      marketId: draft.marketId,
+      draft,
+      vaultKey
+    });
+  } catch (error) {
+    // Fail-open: swallow so a discovery-index failure never fails the create.
+    input.onIndexError?.(error);
+  }
 };

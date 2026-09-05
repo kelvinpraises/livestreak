@@ -37,8 +37,15 @@ export const resolveWalletPrivateKey = async (init: WalletInit): Promise<string 
       });
     }
     case "sui": {
-      void init;
-      return resolveSuiOwnerPrivateKey();
+      if (init.rpcUrl === undefined) {
+        throw new Error("sui_wallet_context_incomplete");
+      }
+
+      return resolveSuiOwnerPrivateKey({
+        memorySuiOwnerPrivateKey: init.seed,
+        memoryOwnerSeed: null,
+        walletSeed: init.seed
+      });
     }
     default: {
       throw new Error(`unsupported_wallet_chain:${String(init.chain)}`);
@@ -47,7 +54,7 @@ export const resolveWalletPrivateKey = async (init: WalletInit): Promise<string 
 };
 
 export const resolveMemoryOwnerKey = async (
-  config: Pick<HostServerConfig, "walletSeed" | "memoryOwnerSeed">,
+  config: Pick<HostServerConfig, "walletSeed" | "memoryOwnerSeed" | "memorySuiOwnerPrivateKey">,
   suiRpcUrl: string
 ): Promise<string> => {
   void suiRpcUrl;
@@ -59,5 +66,9 @@ export const resolveMemoryOwnerKey = async (
     });
   }
 
-  return resolveSuiOwnerPrivateKey();
+  return resolveSuiOwnerPrivateKey({
+    memorySuiOwnerPrivateKey: config.memorySuiOwnerPrivateKey,
+    memoryOwnerSeed: config.memoryOwnerSeed,
+    walletSeed: config.walletSeed
+  });
 };

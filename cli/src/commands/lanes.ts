@@ -9,9 +9,9 @@ import {
   type StopFundingInput,
   type WithdrawManyInput
 } from "@livestreak/options";
-import { ensureErc20Approval } from "../chains/evm-tx.js";
-import { resolveOperatorContext } from "./context.js";
-import { createOptionsEdge, buildCallActionEnvelope } from "../edges/options.js";
+import { ensureErc20Approval } from "../adapters/onchain.js";
+import { resolveOperatorContext } from "../gateway/operator.js";
+import { createOptionsEdge, buildCallActionEnvelope } from "../adapters/options.js";
 import {
   configOpt,
   parseLaneSpecs,
@@ -23,7 +23,7 @@ import {
   readCommandConfig,
   resolveTokenArg,
   tokenOpt
-} from "./cli-args.js";
+} from "./args.js";
 import { renderTxResult } from "../render/output.js";
 
 const laneOpt = Options.text("lane").pipe(

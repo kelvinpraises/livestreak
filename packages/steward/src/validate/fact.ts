@@ -1,8 +1,8 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import { STEWARD_FACT_SOURCES } from "../facts/fact.js";
-import type { StewardFact, StewardFactSource } from "../facts/fact.js";
-import { isTeeAttestationRef } from "../facts/tee.js";
+import { STEWARD_FACT_SOURCES } from "../workflow/facts/fact.js";
+import type { StewardFact, StewardFactSource } from "../workflow/facts/fact.js";
+import { isTeeAttestationRef } from "../workflow/facts/tee.js";
 import { isStewardSubject, validateStewardSubject } from "./subject.js";
 
 // --- exports ---

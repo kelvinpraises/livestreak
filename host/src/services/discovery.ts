@@ -7,11 +7,26 @@ import type {
 
 // --- exports ---
 
-export type IndexedVault = HostSimilarityIndexRequest;
+// Host-local supersets that carry an optional `vaultKey` (bookmaker dedup key).
+// The canonical schema types (schema-foundations, `packages/host`) do not yet
+// include this field; cross-ask filed. The host stores and echoes whatever
+// `vaultKey` the indexer supplied so bookmaker can dedup off an exact key.
+export interface IndexedVault extends HostSimilarityIndexRequest {
+  readonly vaultKey?: string;
+}
+
+export interface HostSimilarVaultCandidateWithKey extends HostSimilarVaultCandidate {
+  readonly vaultKey?: string;
+}
+
+export interface HostSimilarityResultWithKeys
+  extends Omit<HostSimilarityResult, "candidates"> {
+  readonly candidates: readonly HostSimilarVaultCandidateWithKey[];
+}
 
 export interface DiscoveryStore {
   readonly indexVault: (vault: IndexedVault) => void;
-  readonly findSimilar: (query: HostSimilarityRequest) => HostSimilarityResult;
+  readonly findSimilar: (query: HostSimilarityRequest) => HostSimilarityResultWithKeys;
 }
 
 export const createDiscoveryStore = (): DiscoveryStore => {
@@ -44,8 +59,10 @@ export const createDiscoveryStore = (): DiscoveryStore => {
             score,
             reason: score > 0 ? "token overlap within market" : "no overlap",
             suggestedAction:
-              score >= 0.5 ? ("join-existing" as const) : ("create-new" as const)
-          } satisfies HostSimilarVaultCandidate;
+              score >= 0.5 ? ("join-existing" as const) : ("create-new" as const),
+            // Echo the dedup key the indexer supplied (if any).
+            ...(vault.vaultKey === undefined ? {} : { vaultKey: vault.vaultKey })
+          } satisfies HostSimilarVaultCandidateWithKey;
         })
         .filter((candidate) => candidate.score > 0)
         .sort((left, right) => right.score - left.score);

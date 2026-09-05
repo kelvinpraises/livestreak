@@ -94,7 +94,7 @@ export const createPaymasterSigner = (executorKey: Hex, paymasterAddress: Hex) =
   return {
     address: paymasterAddress,
 
-    async signStub(): Promise<PaymasterSignResult> {
+    async signStub(chainId: bigint = 31337n): Promise<PaymasterSignResult> {
       const dummyOp: PackedUserOp = {
         sender: "0x0000000000000000000000000000000000000000" as Hex,
         nonce: "0x0" as Hex,
@@ -107,7 +107,7 @@ export const createPaymasterSigner = (executorKey: Hex, paymasterAddress: Hex) =
         signature: "0x" as Hex
       };
       const validUntil = Math.floor(Date.now() / 1000) + 3600;
-      const hash = getHash(dummyOp, validUntil, 0, 31337n);
+      const hash = getHash(dummyOp, validUntil, 0, chainId);
       const signature = await account.signMessage({ message: { raw: toBytes(hash) } });
       const timeData = encodeAbiParameters(parseAbiParameters("uint48, uint48"), [validUntil, 0]);
       return {

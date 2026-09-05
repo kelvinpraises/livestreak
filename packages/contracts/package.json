@@ -15,9 +15,29 @@
       "types": "./dist/chains/evm/index.d.ts",
       "default": "./dist/chains/evm/index.js"
     },
+    "./evm/node": {
+      "types": "./dist/chains/evm/node.d.ts",
+      "default": "./dist/chains/evm/node.js"
+    },
+    "./evm/deployments/localhost": {
+      "types": "./dist/chains/evm/deployments/localhost.d.ts",
+      "default": "./dist/chains/evm/deployments/localhost.js"
+    },
     "./evm/abis": {
       "types": "./dist/chains/evm/abis-entry.d.ts",
       "default": "./dist/chains/evm/abis-entry.js"
+    },
+    "./sui": {
+      "types": "./dist/chains/sui/index.d.ts",
+      "default": "./dist/chains/sui/index.js"
+    },
+    "./sui/node": {
+      "types": "./dist/chains/sui/node.d.ts",
+      "default": "./dist/chains/sui/node.js"
+    },
+    "./sui/deployments/localnet": {
+      "types": "./dist/chains/sui/deployments/localnet.d.ts",
+      "default": "./dist/chains/sui/deployments/localnet.js"
     },
     "./package": {
       "default": "./package.json"
@@ -30,21 +50,28 @@
     "chains/evm/generated",
     "chains/evm/deployments",
     "chains/evm/foundry.toml",
-    "chains/evm/solidity"
+    "chains/evm/solidity",
+    "chains/sui/deployments"
   ],
   "scripts": {
     "clean": "rm -rf dist chains/evm/out chains/evm/cache chains/evm/generated/abis.ts",
-    "build": "cd chains/evm && forge build && FOUNDRY_PROFILE=aa forge build && wagmi generate && cd ../.. && tsc -p tsconfig.build.json && mkdir -p dist/chains/evm/deployments && for f in chains/evm/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/evm/deployments/; done",
+    "build": "cd chains/evm && forge build && FOUNDRY_PROFILE=aa forge build && wagmi generate && cd ../.. && npm run build:ts",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint . && cd chains/evm && forge fmt --check solidity test",
     "deploy": "tsx chains/evm/deploy/main.ts",
+    "deploy:sui": "tsx chains/sui/deploy/publish.ts",
     "e2e": "tsx chains/evm/deploy/e2e.ts",
-    "test": "cd chains/evm && forge test"
+    "e2e:sui": "tsx chains/sui/deploy/e2e.ts",
+    "e2e:4337": "npm run build -w @livestreak/wallet && tsx chains/evm/deploy/e2e-4337.ts",
+    "test": "cd chains/evm && forge test",
+    "build:ts": "tsc -p tsconfig.build.json && mkdir -p dist/chains/evm/deployments && for f in chains/evm/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/evm/deployments/; done && mkdir -p dist/chains/sui/deployments && for f in chains/sui/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/sui/deployments/; done"
   },
   "dependencies": {
+    "@mysten/sui": "^2.19.0",
     "viem": "^2.23.0"
   },
   "devDependencies": {
+    "@livestreak/wallet": "file:../wallet",
     "@wagmi/cli": "^2.10.0",
     "@types/node": "^22.15.30",
     "tsx": "^4.19.0",

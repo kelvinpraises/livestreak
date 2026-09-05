@@ -28,7 +28,7 @@ const SCHEME_ARWEAVE: u8 = 3;
 
 const STREAM_LOCK_GRACE: u64 = 86_400;
 
-const E_INDEX_OOB: u64 = 10;
+const E_INDEX_OOB: u64 = 11; // was 10, colliding with E_BAD_SCHEME; distinct codes aid client debugging
 
 public struct MarketRegistry has key {
     id: UID,

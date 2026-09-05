@@ -9,9 +9,10 @@
 # wherever npm hoists them (via createRequire), so the client build works against
 # this hoisted layout — no `--install-links` needed.
 #
-# Only the root manifest, packages/wallet, and app are in the build context (see
-# .dockerignore). A root `npm install` tolerates the other workspace members being
-# absent and just installs the app + wallet subtree.
+# The build context includes the root manifest, app, and the workspace packages
+# app needs (wallet, options, schema, contracts, core, host) - see .dockerignore.
+# A root `npm install` tolerates the remaining workspace members (observe,
+# bookmaker, steward, cli, host-server) being absent.
 #
 # We deliberately use `npm install` (NOT `npm ci`) and do NOT copy the lockfile, so
 # native binaries (rollup / esbuild / lightningcss / tailwind-oxide) resolve for
@@ -34,21 +35,33 @@ WORKDIR /repo
 #    postinstall runs patch-package against packages/wallet/patches, so the patches
 #    must be present before the install.
 COPY package.json ./
+COPY packages/core/package.json ./packages/core/package.json
+COPY packages/schema/package.json ./packages/schema/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/host/package.json ./packages/host/package.json
+COPY packages/options/package.json ./packages/options/package.json
 COPY packages/wallet/package.json ./packages/wallet/package.json
 COPY packages/wallet/patches ./packages/wallet/patches
 COPY app/package.json ./app/package.json
 
-# 2) Root workspace install. Re-resolves native binaries for this platform; absent
-#    workspace members (host, cli, packages/* except wallet) are simply skipped.
+# 2) Root workspace install. Re-resolves native binaries for this platform; the
+#    remaining absent workspace members (observe, bookmaker, steward, cli,
+#    host-server) are simply skipped.
 RUN npm install --no-audit --no-fund
 
-# 3) Build the vendored wallet. Its tsc build extends the root tsconfig.base.json
-#    (via packages/wallet/tsconfig.json), and its dist/ is gitignored with no
-#    prepare script, so the app cannot resolve @livestreak/wallet's entry until it
-#    is built here.
+# 3) Build the workspace packages app needs. Their dist/ is gitignored with no
+#    prepare script, so the app cannot resolve them until built here. Build in
+#    dependency order: leaves (core, schema, contracts, wallet) -> host -> options.
 COPY tsconfig.base.json ./
+COPY packages/core ./packages/core
+COPY packages/schema ./packages/schema
+COPY packages/contracts ./packages/contracts
+COPY packages/host ./packages/host
+COPY packages/options ./packages/options
 COPY packages/wallet ./packages/wallet
-RUN npm run build -w @livestreak/wallet
+RUN npm run build -w @livestreak/core -w @livestreak/schema -w @livestreak/wallet \
+ && npm run build:ts -w @livestreak/contracts \
+ && npm run build -w @livestreak/host -w @livestreak/options
 
 # 4) App source + build. Public config (chain id, RPC/bundler/paymaster URLs,
 #    contract addresses) is committed in app/src/config/contracts.ts, so there are

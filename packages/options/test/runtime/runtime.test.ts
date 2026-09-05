@@ -432,6 +432,10 @@ const wrapReader = (
     onCall();
     return reader.readSharePrice(vaultId, side);
   },
+  readPendingBoundaries: async (vaultId, side) => {
+    onCall();
+    return reader.readPendingBoundaries(vaultId, side);
+  },
   readPendingShares: async (vaultId, side, tokenId) => {
     onCall();
     return reader.readPendingShares(vaultId, side, tokenId);

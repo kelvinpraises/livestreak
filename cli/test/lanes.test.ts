@@ -4,7 +4,7 @@ import {
   parseLaneSpec,
   parseLaneSpecs,
   parseVaultIdList
-} from "../src/commands/cli-args.js";
+} from "../src/commands/args.js";
 import { buildSetLanesEnvelope } from "../src/commands/lanes.js";
 
 const vaultA = `0x${"aa".repeat(32)}`;

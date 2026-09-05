@@ -6,7 +6,7 @@ no `Effect.run*`. **Wallet-direct** (R6): options imports `@livestreak/wallet` a
 observe/market/chains); view reads via a viem public client. ABIs from `@livestreak/contracts/evm/abis`.
 `walletInit` + seed injected at runtime (seed never baked).
 
-## ✅ Shipped & verified — R1–R3 + R6 + R7. `check`/`build` green, 47 src files / 127 tests.
+## ✅ Shipped & verified — R1–R3 + R6–R13 + Sui chain leg. `check`/`build` green, 210 tests / 20 test files.
 
 - **R1 — NFT-lane core** (committed `8d120aa`). Model keyed `tokenId → lanes` (one side per vault;
   multi-NFT via `tokensOfOwner`). Reads: `getVault` + `getVaultPools`, `getPosition`, steward
@@ -25,18 +25,19 @@ observe/market/chains); view reads via a viem public client. ABIs from `@livestr
   every region `index.ts`. VOD stripped (raw `readStreamState` kept). Verified: 129 tests + structure/functional audits.
 - ~~**R4 / R5 — media resolvers**~~ — superseded by R6 (gateway/URL resolution is not options' layer).
 
-> **R6 is uncommitted** (last code commit `ac7ec31` = R4; R2/R3 also committed). R5 (media) is uncommitted and deleted by R6.
-
 ## ▢ Open
 
-- [x] **R7 — operation-boundary chains + bridge externality** — shipped.
+- [x] **R7** — operation-boundary chains + bridge externality — shipped.
+- [x] **R8–R12** — UI reads (usdcBalance/account/severity), self-describing `functions[]` registry,
+  one-lane-per-vault fund gating, share-price/`previewAccrual`, opt-in `autoAdvanceOverflow` — shipped.
+- [x] **Sui chain leg** — wallet-direct reader/writer over Move `module::fn` calls (`7bb9fb9`) — shipped.
 
-After R7: app integration (below, not options) + phase-2 `Live` playback.
+Next: app integration (below) + R13 (Position console) + phase-2 `Live` playback.
 
 ## Next (not options)
 
-App integration — wire `app/` `/stream` mock hooks (`useVaults`/`useFlow`) to `createOptionsRuntime`
-+ a viem `ContractReader`/`ContractWriter` at the app edge. Separate app-package prompt.
+App integration — wire `app/` `/stream` hooks to `createOptionsBridge` (via `createOptionsRuntime`),
+chain-dispatched (EVM + `createOptionsSuiConfig` for Sui). Wallet-direct — NO injected ContractReader/Writer.
 
 ## Invariants (keep)
 
@@ -49,3 +50,18 @@ dispatch (mirror observe/market/chains); view reads via a viem public client; **
 ```
 cd packages/options && npm run check && npm run build && npm test
 ```
+
+## Queued from inbox (2026-06-21)
+
+- [x] **R13 — Position console reads** (from app `nft-balance-and-stream-media`) — shipped. `OptionsNftPanel`
+  gains `balanceUSDC` + `runwayEndMs` (one `streamsState(tokenId, usdc)` read = balance + account `maxEnd`;
+  Sui leaves both undefined). `OptionsMarketPanel.stream` carries the RAW on-chain pointer
+  `{ status, scheme, id, updatedAtMs?, endedAtMs? }` from `readStreamState` — pointer only; the app resolves
+  the document at `(scheme, id)`. Top-up already works (`setLanes(..., addDeposit)`).
+  The stream-manifest DOCUMENT body schema (what the `(scheme, id)` doc contains for live vs VOD) is being
+  converged by host + app + observe — see `from-options__stream-manifest-body-schema` in their inboxes.
+
+### Done / resolved (cleared from this queue)
+- ~~R11 (share-price / `previewAccrual`)~~ — shipped `d9ec674`.
+- ~~R12 (opt-in `autoAdvanceOverflow`)~~ — shipped `c06b796`.
+- ~~`exitBurnBps` population~~ — resolved: contracts confirmed no on-chain exit-burn exists; field stays `undefined`.

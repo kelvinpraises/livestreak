@@ -1,6 +1,55 @@
 import type { Board } from "#run/control/board/model.js";
 import { incrementBoardRevision } from "#run/control/board/model.js";
+import type { BoardPatch } from "#run/control/bus/types.js";
 import type { MarketLifecycleState } from "./types.js";
+
+// The full universe of `readonly` keys the market cell may carry across all
+// lifecycle states. A cell-scoped patch (O2) sets the keys for the new state and
+// unsets the rest, reproducing the full-replacement semantics of
+// `applyMarketLifecycleToBoard` while only ever touching the `market` cell.
+const ALL_MARKET_READONLY_KEYS = [
+  "registrationState",
+  "startedAtMs",
+  "marketId",
+  "streamId",
+  "userOpHash",
+  "registeredAtMs",
+  "scheme",
+  "pointerId",
+  "liveAtMs",
+  "endedAtMs",
+  "reason",
+  "phase",
+  "failedAtMs"
+] as const;
+
+/**
+ * O2: build a BoardPatch that mutates ONLY the `market` cell's status + readonly.
+ * Because the market-registration fiber writes through this disjoint cell-scoped
+ * patch (merge reducer) instead of a full-board `commitBoard`, it can never
+ * clobber the worker fiber's other cells regardless of interleave — the
+ * lost-update race is designed out at the source.
+ */
+export const marketLifecyclePatch = (
+  lifecycle: MarketLifecycleState,
+  nowMs: number = Date.now()
+): BoardPatch => {
+  const nextReadonly = marketReadonlyFromLifecycle(lifecycle);
+  const presentKeys = new Set(Object.keys(nextReadonly));
+  const unset = ALL_MARKET_READONLY_KEYS.filter((key) => !presentKeys.has(key));
+
+  return {
+    cells: {
+      market: {
+        status: [lifecycle.status, lifecycleReason(lifecycle), nowMs],
+        readonly: {
+          set: nextReadonly,
+          ...(unset.length > 0 ? { unset } : {})
+        }
+      }
+    }
+  };
+};
 
 export const applyMarketLifecycleToBoard = (
   board: Board,
@@ -50,6 +99,12 @@ const lifecycleReason = (lifecycle: MarketLifecycleState): string | null => {
     case "registered": {
       return `registered ${lifecycle.marketId}`;
     }
+    case "live": {
+      return `live ${lifecycle.marketId}`;
+    }
+    case "ended": {
+      return `ended ${lifecycle.marketId}`;
+    }
     case "failed": {
       return lifecycle.reason;
     }
@@ -73,6 +128,26 @@ const marketReadonlyFromLifecycle = (
         streamId: lifecycle.streamId,
         userOpHash: lifecycle.userOpHash,
         registeredAtMs: lifecycle.registeredAtMs
+      };
+    }
+    case "live": {
+      return {
+        registrationState: "live",
+        marketId: lifecycle.marketId,
+        scheme: lifecycle.scheme,
+        pointerId: lifecycle.pointerId,
+        userOpHash: lifecycle.userOpHash,
+        liveAtMs: lifecycle.liveAtMs
+      };
+    }
+    case "ended": {
+      return {
+        registrationState: "ended",
+        marketId: lifecycle.marketId,
+        scheme: lifecycle.scheme,
+        pointerId: lifecycle.pointerId,
+        userOpHash: lifecycle.userOpHash,
+        endedAtMs: lifecycle.endedAtMs
       };
     }
     case "failed": {

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import type { HostRouteDeps } from "../deps.js";
+import type { HostRouteDeps } from "../../deps.js";
 import { createDiscoveryController } from "../controllers/discovery.js";
 
 // --- exports ---

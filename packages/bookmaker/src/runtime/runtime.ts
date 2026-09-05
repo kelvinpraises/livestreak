@@ -1,7 +1,7 @@
 import { LiveStreakRuntimeError } from "@livestreak/core";
 
 import { projectBookmakerPanel, type BookmakerPanelSnapshot } from "../bridge/panel/project.js";
-import type { BookmakerPanelView } from "../model/panel.js";
+import type { BookmakerPanelView } from "../model/watch-source.js";
 import { createBookmakerChain, type BookmakerChain } from "../chains/index.js";
 import { validateBookmakerChainConfig } from "../chains/config.js";
 import type { BookmakerRuntimeConfig } from "./config.js";
@@ -10,7 +10,7 @@ import { createVaultOnce, type CreateVaultOnceResult } from "./create-vault-once
 import { createSnapshotSubscriptionRegistry } from "./subscriptions.js";
 import { createBookmakerRuntimeStore, type BookmakerRuntimeState, type BookmakerRuntimeStore } from "./store.js";
 import type { CreateVaultIntent } from "../model/write-intent.js";
-import { validateBookmakerRuntimeConfig } from "../validate/runtime-config.js";
+import { validateBookmakerRuntimeConfig } from "../runtime/validate.js";
 
 // --- exports ---
 
@@ -45,6 +45,7 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
   readonly idempotencyStore: IdempotencyStore;
   private readonly store: BookmakerRuntimeStore;
   private readonly subscriptions = createSnapshotSubscriptionRegistry();
+  // Open per-runtime scratch space for bridge/edge callers — not vault idempotency state.
   private readonly memory = new Map<string, unknown>();
   private readonly memoryWatchers = new Map<string, Set<(value: unknown) => void>>();
 

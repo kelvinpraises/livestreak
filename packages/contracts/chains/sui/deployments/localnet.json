@@ -1,0 +1,22 @@
+{
+  "chain": "localnet",
+  "rpc": "http://127.0.0.1:9000",
+  "deployedAt": "2026-06-20T21:27:00.207Z",
+  "deployer": "0x184692a4d95ec8c54940b58b501356d903c2c0bef8a5c215c3b4dd1551c325f6",
+  "packageId": "0x8e0a52fb5114ed1fb9c5f8b30050a279a4840bbd3c519e61ef7b56a03d22ebbb",
+  "objects": {
+    "packageId": "0x8e0a52fb5114ed1fb9c5f8b30050a279a4840bbd3c519e61ef7b56a03d22ebbb",
+    "protocol": "0xe044b7e4bf41df74c46fc75d5c0b6bd0134cd485e659d87537841d0541e3ccf9",
+    "marketRegistry": "0x6edb515ad918fa8153d7017c029087151255baca003aafa20e711d0704247640",
+    "vaultRegistry": "0x80544e82b5f7c3e76891108b13612f7da32a32eba82d9656e0b17bd81c5e58ae",
+    "stewardRegistry": "0x83a5b7cc9d8a23d8dd5379dca46f824533fdc200a868c0080802ca37e736d59d",
+    "treasuryRegistry": "0x4db6110de883f26c154b4175bbca36cb3aeb653c4e845392f1ad236db9505a07",
+    "dripsRegistry": "0xe4295769a33f5b2dafba3a529b19125125777e60fcd0cb3b29e2e5c4afed9408",
+    "streamsRegistry": "0x0d9e2a2ed46f28cc1bd621888a242c50a091e3235d6998a1f3d1ddae4a685d68",
+    "vaultDriverRegistry": "0x507a254209694f9dbe0201a5a9e3d0f3c5b148929a4c3f85bef08d3c8a08f6dc",
+    "marketDriverRegistry": "0x552411f7b04fbbf6c19504cf984d30e741492daad19da4abb22ef74a4e098961",
+    "driverRegistry": "0x141ee5878cc16b3c303a47bcd9545901e6d70e7127cfd40f17084bdea54b856f",
+    "lvstTreasuryCap": "0x9b085e2769dbd999f8cfb5621bac3325407883a0b89a283f935fb398eaf61f43",
+    "usdcMintCap": "0x634cb13e620965212d94ad64ba48f3024acbf728a423e8bf09f51911b79c5758"
+  }
+}

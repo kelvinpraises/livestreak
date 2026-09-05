@@ -4,6 +4,8 @@
     "noEmit": true,
     "types": ["node"],
     "paths": {
+      "#server.js": ["./src/server.ts"],
+      "#deps.js": ["./src/deps.ts"],
       "#api/*": ["./src/api/*"],
       "#config/*": ["./src/config/*"],
       "#services/*": ["./src/services/*"],

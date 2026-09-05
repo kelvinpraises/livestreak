@@ -1,6 +1,6 @@
 import type { Hex } from "viem";
 import { describe, expect, it } from "vitest";
-import { createAaRouteDeps } from "#api/aa-deps.js";
+import { createAaRouteDeps } from "#deps.js";
 import { proxyBundlerRpc } from "#services/aa/bundler.js";
 import { createPaymasterSigner } from "#services/aa/paymaster.js";
 import { createAaController } from "#api/controllers/aa.js";

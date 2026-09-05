@@ -72,12 +72,21 @@ const pullNextFrame = (
       return pending.shift();
     }
 
-    const chunkOption = yield* pullChunk.pipe(Effect.option);
-    if (Option.isNone(chunkOption)) {
+    // O5: Stream.toPull's failure channel is Option<E>: Left(None) means the
+    // stream ended cleanly (EOS), Left(Some(e)) is a REAL error (e.g. ffmpeg
+    // decode failure mid-stream). `Effect.option` collapses both to None and
+    // would silently report a corrupt capture as a clean end. Use `Effect.either`
+    // and inspect the Option so genuine failures propagate (run reaches `failed`).
+    const chunkEither = yield* pullChunk.pipe(Effect.either);
+    if (chunkEither._tag === "Left") {
+      const failure = chunkEither.left;
+      if (Option.isSome(failure)) {
+        return yield* Effect.fail(failure.value);
+      }
       return;
     }
 
-    const chunk = chunkOption.value;
+    const chunk = chunkEither.right;
     if (Chunk.isEmpty(chunk)) {
       return;
     }

@@ -35,7 +35,11 @@ const E_VAULT_HAS_LANE: u64 = 6;
 const E_TOO_MANY_LANES: u64 = 7;
 const E_NO_LANE: u64 = 8;
 const E_DUPLICATE_VAULT: u64 = 9;
+// Retained (10) to document the EVM operator-redirect semantics gap; Sui object-ownership enforces
+// the payee redirect, so it is no longer asserted (see `payee`).
+#[allow(unused_const)]
 const E_ONLY_OWNER_REDIRECT: u64 = 10;
+const E_LENGTH_MISMATCH: u64 = 11;
 
 public struct MARKET_DRIVER has drop {}
 
@@ -347,7 +351,7 @@ public fun set_lanes<T>(
     assert!(desired_len <= MAX_LANES, E_TOO_MANY_LANES);
     assert!(
         desired_len == vector::length(&desired_sides) && desired_len == vector::length(&desired_rates),
-        E_DUPLICATE_VAULT,
+        E_LENGTH_MISMATCH,
     );
 
     let market_id = *table::borrow(&registry.market_id_of, token_id);
@@ -491,6 +495,31 @@ public fun withdraw<T>(
     vault::withdraw(vault_registry, token_id, vault_id, payee, clock, ctx)
 }
 
+/// Pull winnings + overage for many vaults in one call (batch form).
+/// Same ownership / redirect rules as the single-vault `withdraw`.
+/// The caller builds `vault_ids` from `vault::account_vault_ids`.
+public fun withdraw_many<T>(
+    _registry: &MarketDriverRegistry,
+    nft: &MarketPositionNFT,
+    vault_registry: &mut VaultRegistry<T>,
+    vault_ids: vector<vector<u8>>,
+    to: address,
+    clock: &Clock,
+    ctx: &mut TxContext,
+): u128 {
+    let token_id = nft.token_id;
+    let payee = payee(nft, to, ctx);
+    let len = vector::length(&vault_ids);
+    let mut total = 0u128;
+    let mut i = 0;
+    while (i < len) {
+        let vault_id = *vector::borrow(&vault_ids, i);
+        total = total + vault::withdraw(vault_registry, token_id, vault_id, payee, clock, ctx);
+        i = i + 1;
+    };
+    total
+}
+
 public fun claim_loss_lvst<T>(
     _registry: &MarketDriverRegistry,
     nft: &MarketPositionNFT,
@@ -504,15 +533,16 @@ public fun claim_loss_lvst<T>(
 ): u256 {
     let token_id = nft.token_id;
     let payee = payee(nft, to, ctx);
-    let lost_usdc = vault::loss_claimable(vault_registry, token_id, &vault_id, side) as u256;
+    // CON.S2: Treasury now reads the claimable loss from the Vault itself (EVM-identical trust
+    // boundary). We pass the &VaultRegistry instead of a caller-computed `lost_usdc` basis.
     treasury::mint_loss_lvst(
         treasury,
         lvst_cap,
+        vault_registry,
         token_id,
         payee,
         vault_id,
         side,
-        lost_usdc,
         ctx,
     )
 }
@@ -833,7 +863,10 @@ fun payee(_nft: &MarketPositionNFT, to: address, ctx: &TxContext): address {
     if (to == @0x0 || to == owner) {
         owner
     } else {
-        assert!(ctx.sender() == owner, E_ONLY_OWNER_REDIRECT);
+        // EVM gates redirect on ERC721 owner/approved (operator-redirect). On Sui the NFT is an owned
+        // object: only its owner can pass it into this PTB, so object-ownership already enforces the
+        // gate — the old `assert!(ctx.sender() == owner)` was a tautology (owner == ctx.sender()).
+        // Kept as a deliberate marker of the EVM operator-redirect semantics gap (no approve on Sui).
         to
     }
 }

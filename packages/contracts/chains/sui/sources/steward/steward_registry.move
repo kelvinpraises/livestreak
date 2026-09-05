@@ -52,6 +52,22 @@ public struct VaultResolved has copy, drop {
     steward: address,
 }
 
+// EVM-parity events (mirror StewardRegistry.sol HotTriggered/HotEnded/DisputeOpened/DisputeClosed).
+// Sui previously emitted none of these; off-chain steward indexers need a Sui analog of each EVM event.
+public struct HotTriggered has copy, drop {
+    vault_id: vector<u8>,
+    severity: u8,
+    until: u64,
+    reason_hash: vector<u8>,
+}
+public struct HotEnded has copy, drop { vault_id: vector<u8> }
+public struct DisputeOpened has copy, drop {
+    vault_id: vector<u8>,
+    challenge_until: u64,
+    proof_ref: vector<u8>,
+}
+public struct DisputeClosed has copy, drop { vault_id: vector<u8> }
+
 public fun create(owner: address, ctx: &mut TxContext) {
     let registry = StewardRegistry {
         id: object::new(ctx),
@@ -125,6 +141,10 @@ public fun hot_severity(state: &HotState): u8 {
     state.severity
 }
 
+public fun hot_reason_hash(state: &HotState): vector<u8> {
+    state.reason_hash
+}
+
 public fun dispute_active(state: &DisputeState): bool {
     state.active
 }
@@ -170,11 +190,16 @@ public fun trigger_hot<T>(
 ) {
     let market_id = vault::market_id(vault_registry, &vault_id);
     require_market_steward(registry, &market_id, ctx);
-    table::add(
-        &mut registry.vault_hot_state,
-        vault_id,
-        HotState { active: true, until, severity, reason_hash },
-    );
+    // UPSERT (EVM `vaultHotState[vaultId] = ...` overwrite semantics). Mirror set_market_steward,
+    // NOT table::add — re-escalation (Hot -> Critical, or extending `until`) must overwrite, not abort.
+    // HotState has `drop`, so replacing the old value via borrow_mut is safe (no resource leak).
+    let new_state = HotState { active: true, until, severity, reason_hash };
+    if (table::contains(&registry.vault_hot_state, vault_id)) {
+        *table::borrow_mut(&mut registry.vault_hot_state, vault_id) = new_state;
+    } else {
+        table::add(&mut registry.vault_hot_state, vault_id, new_state);
+    };
+    event::emit(HotTriggered { vault_id, severity, until, reason_hash });
 }
 
 public fun end_hot<T>(
@@ -188,6 +213,8 @@ public fun end_hot<T>(
     if (table::contains(&registry.vault_hot_state, vault_id)) {
         table::remove(&mut registry.vault_hot_state, vault_id);
     };
+    // Emit unconditionally to match EVM (delete-then-emit; EVM emits even when nothing was set).
+    event::emit(HotEnded { vault_id });
 }
 
 public fun open_dispute<T>(
@@ -200,11 +227,15 @@ public fun open_dispute<T>(
 ) {
     let market_id = vault::market_id(vault_registry, &vault_id);
     require_market_steward(registry, &market_id, ctx);
-    table::add(
-        &mut registry.dispute_state,
-        vault_id,
-        DisputeState { active: true, challenge_until, proof_ref },
-    );
+    // UPSERT (EVM `disputeState[vaultId] = ...` overwrite semantics) — mirror set_market_steward,
+    // not table::add, so re-opening a dispute overwrites instead of aborting. DisputeState has `drop`.
+    let new_state = DisputeState { active: true, challenge_until, proof_ref };
+    if (table::contains(&registry.dispute_state, vault_id)) {
+        *table::borrow_mut(&mut registry.dispute_state, vault_id) = new_state;
+    } else {
+        table::add(&mut registry.dispute_state, vault_id, new_state);
+    };
+    event::emit(DisputeOpened { vault_id, challenge_until, proof_ref });
 }
 
 public fun close_dispute<T>(
@@ -218,6 +249,8 @@ public fun close_dispute<T>(
     if (table::contains(&registry.dispute_state, vault_id)) {
         table::remove(&mut registry.dispute_state, vault_id);
     };
+    // Emit unconditionally to match EVM (delete-then-emit).
+    event::emit(DisputeClosed { vault_id });
 }
 
 // --- helpers ---

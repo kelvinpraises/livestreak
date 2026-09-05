@@ -8,12 +8,16 @@ import { validateOptionsChainConfig } from "./config.js";
 import { resolveEvmAccountAddress } from "./evm/account.js";
 import { createEvmOptionsChain } from "./evm/index.js";
 import { createSuiOptionsChain } from "./sui/index.js";
+import { resolveSuiAccountAddress } from "./sui/account.js";
 import type { OptionsChain, OptionsChainConfig } from "./types.js";
 
 export type { OptionsContractAddresses } from "./evm/addresses.js";
+export type { OptionsSuiObjectIds } from "./sui/addresses.js";
+export { validateOptionsSuiObjectIds } from "./sui/addresses.js";
 export { validateOptionsChainConfig } from "./config.js";
 export type {
   ApproveNftInput,
+  AdvanceInput,
   ClaimLossLvstInput,
   FundStreamInput,
   LaneWriteInput,
@@ -43,8 +47,7 @@ export const createOptionsChain = (config: OptionsChainConfig): OptionsChain => 
       return createEvmOptionsChain({ ...validated, walletInit });
     }
     case "sui": {
-      void walletInit;
-      return createSuiOptionsChain();
+      return createSuiOptionsChain({ ...validated, walletInit });
     }
     default: {
       return unreachableChain(walletInit);
@@ -63,9 +66,7 @@ export const resolveOptionsAccountAddress = async (
       return resolveEvmAccountAddress({ ...validated, walletInit });
     }
     case "sui": {
-      throw new LiveStreakConfigError({
-        message: "Sui options chain: account resolution is not implemented"
-      });
+      return resolveSuiAccountAddress({ ...validated, walletInit });
     }
     default: {
       return unreachableChain(walletInit);

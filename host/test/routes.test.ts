@@ -1,15 +1,15 @@
 import type { EndpointDescriptor } from "@livestreak/host";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { createApp, createHostRouteDeps } from "#api/server.js";
-import { handleFindSimilar, handleIndexVault } from "#services/discovery-routes.js";
+import { createApp, createHostRouteDeps } from "#server.js";
+import { handleFindSimilar, handleIndexVault } from "#api/controllers/discovery.js";
 import { handleMemoryAccess } from "#services/walrus/memory/routes.js";
 import { handlePolicyEvaluate } from "#services/media/policy-routes.js";
 import {
   handleCacheReceipt,
   handleCreateSession,
   handleGetManifest
-} from "#services/media/routes.js";
+} from "#api/controllers/media.js";
 import { createEvidenceStore } from "#services/media/evidence.js";
 import { createManifestStore } from "#services/media/manifest.js";
 import { createSessionStore } from "#services/media/session.js";

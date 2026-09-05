@@ -17,6 +17,25 @@ export const malformedJsonHandler: ErrorRequestHandler = (err, _req, _res, next)
   next(err);
 };
 
+// H6: map body-parser's "entity.too.large" (raw status 413) to a typed error
+// envelope instead of letting it fall through to a generic 500.
+export const payloadTooLargeHandler: ErrorRequestHandler = (err, _req, res, next) => {
+  if (
+    err !== null &&
+    typeof err === "object" &&
+    (err as { type?: unknown }).type === "entity.too.large"
+  ) {
+    const error = new LiveStreakConfigError({
+      message: "Request body exceeds the maximum allowed size",
+      metadata: { retryable: false }
+    });
+    res.status(413).json({ error: serializeLiveStreakError(error) });
+    return;
+  }
+
+  next(err);
+};
+
 export const notFoundHandler: RequestHandler = (req, res) => {
   const error = new LiveStreakConfigError({
     message: `No route for ${req.method} ${req.path}`,

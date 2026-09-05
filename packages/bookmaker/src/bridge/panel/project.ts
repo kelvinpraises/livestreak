@@ -1,4 +1,4 @@
-import type { BookmakerPanelView, BookmakerWatchRef } from "../../model/panel.js";
+import type { BookmakerPanelView, BookmakerWatchRef } from "../../model/watch-source.js";
 import type { BookmakerPanelSnapshot } from "./types.js";
 
 // --- exports ---

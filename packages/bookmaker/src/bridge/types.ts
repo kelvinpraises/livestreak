@@ -1,7 +1,5 @@
 // --- exports ---
 
-import { LiveStreakCapabilityError } from "@livestreak/core";
-
 export type CapabilityScope =
   | `${string}:${string}`
   | `${string}:${string}:${string}`
@@ -34,6 +32,16 @@ export interface CallActionEnvelope {
   readonly args: unknown;
 }
 
+/**
+ * Result of a createVault bridge action. The runtime already produces the new
+ * vaultId; the bridge now returns it alongside the txId (previously dropped) so
+ * the CLI/console can reference the created vault without a second lookup.
+ */
+export interface CreateVaultActionResult {
+  readonly txId: import("../chains/types.js").TxId;
+  readonly vaultId: import("../chains/types.js").VaultId;
+}
+
 export interface CreateBookmakerBridgeInput {
   readonly runtime: import("../runtime/runtime.js").BookmakerRuntime;
 }
@@ -43,7 +51,7 @@ export interface BookmakerBridge {
   readonly readBoard: (
     caller: BridgeCaller,
     nowMs: number
-  ) => Promise<import("../model/panel.js").BookmakerPanelView>;
+  ) => Promise<import("../model/watch-source.js").BookmakerPanelView>;
   readonly readControls: (
     caller: BridgeCaller,
     nowMs: number
@@ -52,10 +60,10 @@ export interface BookmakerBridge {
     caller: BridgeCaller,
     envelope: CallActionEnvelope,
     nowMs: number
-  ) => Promise<import("../chains/types.js").TxId>;
+  ) => Promise<CreateVaultActionResult>;
   readonly subscribeBoard: (
     caller: BridgeCaller,
-    listener: (board: import("../model/panel.js").BookmakerPanelView) => void,
+    listener: (board: import("../model/watch-source.js").BookmakerPanelView) => void,
     nowMs: number
   ) => () => void;
 }

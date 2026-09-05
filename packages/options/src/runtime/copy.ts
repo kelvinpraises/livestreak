@@ -21,7 +21,8 @@ export const copyMarketSnapshot = (
     pools: { ...vault.pools },
     steward: { ...vault.steward },
     timing: { ...vault.timing }
-  }))
+  })),
+  ...(snapshot.streamState === undefined ? {} : { streamState: { ...snapshot.streamState } })
 });
 
 export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultSnapshot => ({
@@ -40,7 +41,9 @@ export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultS
 export const copyNftSnapshot = (snapshot: OptionsNftSnapshot): OptionsNftSnapshot => ({
   nft: {
     ...snapshot.nft,
-    lanes: snapshot.nft.lanes.map((lane) => ({ ...lane }))
+    lanes: snapshot.nft.lanes.map((lane) => ({ ...lane })),
+    ...(snapshot.nft.balance === undefined ? {} : { balance: snapshot.nft.balance }),
+    ...(snapshot.nft.runwayEndMs === undefined ? {} : { runwayEndMs: snapshot.nft.runwayEndMs })
   }
 });
 

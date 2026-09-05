@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { detectOpportunity } from "../../src/detection/evaluate.js";
-import { createEventKindDetector } from "../../src/detection/factories.js";
+import { detectOpportunity } from "../../src/pipeline/detection/evaluate.js";
+import { createEventKindDetector } from "../../src/pipeline/detection/factories.js";
 import { buildWriteIntentsFromDecision } from "../../src/model/write-intent.js";
 import { originateVault } from "../../src/flows/originate.js";
-import { DISCOVERY_FIND_PATH } from "../../src/similarity/host-client.js";
+import { DISCOVERY_FIND_PATH } from "../../src/pipeline/similarity/host-client.js";
 import { createFakeBookmakerChain, FAKE_MARKET_ID, FAKE_VAULT_ID } from "../helpers/fake-bookmaker-chain.js";
 import { createTestRuntime } from "../helpers/test-runtime.js";
 import { marketContext, similarityResult } from "../helpers/fixtures.js";

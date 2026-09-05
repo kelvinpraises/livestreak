@@ -86,13 +86,19 @@ export async function deployWire(
     if (alreadyWired) {
       marketDriverProxy = await readProtocol("marketDriver");
       const priorLogic = previousScopes.wire?.contracts?.marketDriverLogic as Address | undefined;
+      // Read the real driverId from the on-chain proxy instead of hardcoding `1`: if driver
+      // registration order ever changes, a literal would silently mis-wire the redeployed logic.
+      const marketDriverAbi = loadAbi("out/MarketDriver.sol/MarketDriver.json");
+      const driverId = Number(
+        await client.readContract({ address: marketDriverProxy, abi: marketDriverAbi, functionName: "DRIVER_ID" })
+      );
       marketDriverLogic =
         priorLogic ??
         ((await deployFromArtifact(
           walletClient,
           client,
           "out/MarketDriver.sol/MarketDriver.json",
-          [dripsProxy, caller, 1, protocol, vault, vaultDriver, mockUsdc],
+          [dripsProxy, caller, driverId, protocol, vault, vaultDriver, mockUsdc],
           undefined,
           `${LABEL}.marketDriverLogic`
         )) as Address);

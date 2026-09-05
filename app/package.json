@@ -16,9 +16,12 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
-    "@livestreak/wallet": "file:../packages/wallet",
-    "@phosphor-icons/react": "^2.1.10",
+    "@livestreak/contracts": "file:../packages/contracts",
+    "@livestreak/options": "file:../packages/options",
+    "@livestreak/schema": "file:../packages/schema",
     "sodium-javascript": "^0.8.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "effect": "3.21.3",
     "@radix-ui/react-dialog": "^1.1.15",
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",

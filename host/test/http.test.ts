@@ -1,6 +1,6 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createApp, createHostRouteDeps } from "#api/server.js";
+import { createApp, createHostRouteDeps } from "#server.js";
 import { defaultHostServerConfig } from "#config/host.js";
 
 describe("express api", () => {

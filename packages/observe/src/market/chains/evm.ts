@@ -1,10 +1,12 @@
 import { Effect } from "effect";
-import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
+import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 import { createWalletManager } from "@livestreak/wallet";
 import { evm } from "@livestreak/contracts";
 import { encodeAbiParameters, encodeFunctionData, keccak256 } from "viem";
 import type {
   EvmAddress,
+  MarketLifecycleInput,
+  MarketLifecycleTxResult,
   MarketRegisterResult,
   MarketRegistrar,
   ObserveRunMarketConfig,
@@ -35,9 +37,86 @@ export const computeMarketId = (
     )
   );
 
+/** Validate the storage pointer shared by goLive/setEnded (matches the on-chain guards). */
+const validateLifecycleInput = (
+  input: MarketLifecycleInput
+): Effect.Effect<MarketLifecycleInput, LiveStreakConfigError> => {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(input.marketId)) {
+    return Effect.fail(
+      new LiveStreakConfigError({ message: "goLive/setEnded marketId must be a 0x-prefixed bytes32" })
+    );
+  }
+  if (input.scheme !== 0 && input.scheme !== 1 && input.scheme !== 2 && input.scheme !== 3) {
+    return Effect.fail(
+      new LiveStreakConfigError({ message: `Invalid StorageScheme ${String(input.scheme)} (expected 0..3)` })
+    );
+  }
+  if (input.id.length === 0 || input.id.length > 64) {
+    return Effect.fail(
+      new LiveStreakConfigError({ message: `Storage id length must be 1..64 bytes, got ${input.id.length}` })
+    );
+  }
+  return Effect.succeed(input);
+};
+
 export const createEvmMarketRegistrar = (
   config: ObserveRunMarketConfig
-): MarketRegistrar => ({
+): MarketRegistrar => {
+  // Shared wallet/account plumbing for the creator-gated lifecycle writes. The
+  // registrar derives the SAME operator Safe as registerMarket, so the on-chain
+  // `onlyMarketCreator` gate lines up (golden-vector / keccak invariant protected).
+  const sendLifecycleCall = (
+    functionName: "goLive" | "setEnded",
+    input: MarketLifecycleInput
+  ): Effect.Effect<MarketLifecycleTxResult, LiveStreakError> =>
+    Effect.gen(function* () {
+      if (config.walletInit.chain !== "evm") {
+        return yield* Effect.fail(
+          new LiveStreakConfigError({
+            message: "EVM market registrar requires walletInit.chain === evm"
+          })
+        );
+      }
+
+      const validated = yield* validateLifecycleInput(input);
+
+      const manager = createWalletManager(
+        "evm",
+        config.seed,
+        config.walletInit.config as import("@livestreak/wallet").EvmErc4337WalletConfig
+      );
+      const account = yield* Effect.tryPromise({
+        try: () => manager.getAccount(),
+        catch: (error) => toRuntimeError("Failed to open wallet account", error)
+      });
+
+      const data = encodeFunctionData({
+        abi: marketRegistryAbi,
+        functionName,
+        args: [validated.marketId, validated.scheme, validated.id]
+      });
+
+      const sendResult = yield* Effect.tryPromise({
+        try: () =>
+          account.sendTransaction({
+            to: config.marketRegistryAddress,
+            data,
+            value: 0n
+          }),
+        catch: (error) => classifySendFailure(error)
+      });
+
+      const readOnly = yield* Effect.tryPromise({
+        try: () => account.toReadOnlyAccount(),
+        catch: (error) => toRuntimeError("Failed to open read-only wallet account", error)
+      });
+
+      yield* pollUntilUserOperationIncluded(readOnly, sendResult.hash);
+
+      return { userOpHash: sendResult.hash } satisfies MarketLifecycleTxResult;
+    });
+
+  return {
   registerMarket: (input) =>
     Effect.gen(function* () {
       if (config.walletInit.chain !== "evm") {
@@ -97,8 +176,11 @@ export const createEvmMarketRegistrar = (
         streamId,
         title: input.title
       } satisfies MarketRegisterResult;
-    })
-});
+    }),
+  goLive: (input) => sendLifecycleCall("goLive", input),
+  setEnded: (input) => sendLifecycleCall("setEnded", input)
+  };
+};
 
 export const assertUserOperationSucceeded = (
   receipt: unknown

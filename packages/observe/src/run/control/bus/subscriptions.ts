@@ -20,8 +20,16 @@ export const createBoardSubscriptionRegistry = (): {
       };
     },
     notify: (board) => {
+      // O8: listeners are arbitrary consumer callbacks (registered via the
+      // bridge). A throw here runs inside the committing fiber (commitBoard /
+      // applyPatch) and would defect that fiber AND skip the remaining
+      // subscribers. Isolate each listener so one bad subscriber can do neither.
       for (const listener of listeners) {
-        listener(board);
+        try {
+          listener(board);
+        } catch {
+          // swallow: a misbehaving subscriber must not affect peers or the committer.
+        }
       }
     }
   };
@@ -44,8 +52,13 @@ export const createArtifactSubscriptionRegistry = (): {
       };
     },
     notify: (artifact) => {
+      // O8: isolate each artifact subscriber (see board notify above).
       for (const listener of listeners) {
-        listener(artifact);
+        try {
+          listener(artifact);
+        } catch {
+          // swallow: a misbehaving subscriber must not affect peers or the committer.
+        }
       }
     }
   };

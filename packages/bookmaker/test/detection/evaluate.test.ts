@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { detectOpportunity } from "../../src/detection/evaluate.js";
-import type { PatternDetector } from "../../src/detection/types.js";
+import { detectOpportunity } from "../../src/pipeline/detection/evaluate.js";
+import type { PatternDetector } from "../../src/pipeline/detection/types.js";
 import { detection, marketContext } from "../helpers/fixtures.js";
 
 describe("detectOpportunity", () => {

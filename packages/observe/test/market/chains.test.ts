@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Exit } from "effect";
-import { keccak256, encodeAbiParameters } from "viem";
+import { keccak256, encodeAbiParameters, encodeFunctionData } from "viem";
+import { evm } from "@livestreak/contracts";
+
+const { marketRegistryAbi } = evm;
 import {
   assertUserOperationSucceeded,
   computeMarketId,
@@ -151,7 +154,7 @@ describe("market chain seam", () => {
     }
   });
 
-  it("returns typed not-supported for sui wallet chain", async () => {
+  it("Sui registrar fails clearly when the deployed registry id is not configured", async () => {
     const config: ObserveRunMarketConfig = {
       walletInit: {
         chain: "sui",
@@ -173,7 +176,59 @@ describe("market chain seam", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      expect(String(exit.cause)).toContain("not supported");
+      // O4: Sui registrar is now wired to the real Move contract; it resolves the
+      // deployed registry object id from config (never a constant) and fails
+      // clearly when that deployment input is absent.
+      expect(String(exit.cause)).toContain("suiRegistry");
     }
+  });
+
+  it("EVM goLive/setEnded encode the marketRegistry calldata and poll inclusion", async () => {
+    const registrar = createEvmMarketRegistrar(minimalEvmConfig());
+    const lifecycleInput = {
+      marketId: GOLDEN_MARKET_ID,
+      scheme: 2 as const,
+      id: "bafyStoragePointerId"
+    };
+
+    const goLiveExit = await Effect.runPromiseExit(registrar.goLive(lifecycleInput));
+    expect(Exit.isSuccess(goLiveExit)).toBe(true);
+    if (Exit.isSuccess(goLiveExit)) {
+      expect(goLiveExit.value.userOpHash).toBe("0xuserop");
+    }
+
+    const goLiveData = encodeFunctionData({
+      abi: marketRegistryAbi,
+      functionName: "goLive",
+      args: [lifecycleInput.marketId, lifecycleInput.scheme, lifecycleInput.id]
+    });
+    expect(evmWalletMocks.account.sendTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ data: goLiveData })
+    );
+
+    const setEndedExit = await Effect.runPromiseExit(registrar.setEnded(lifecycleInput));
+    expect(Exit.isSuccess(setEndedExit)).toBe(true);
+
+    const setEndedData = encodeFunctionData({
+      abi: marketRegistryAbi,
+      functionName: "setEnded",
+      args: [lifecycleInput.marketId, lifecycleInput.scheme, lifecycleInput.id]
+    });
+    expect(evmWalletMocks.account.sendTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ data: setEndedData })
+    );
+  });
+
+  it("EVM goLive rejects an out-of-range storage scheme", async () => {
+    const registrar = createEvmMarketRegistrar(minimalEvmConfig());
+    const exit = await Effect.runPromiseExit(
+      registrar.goLive({
+        marketId: GOLDEN_MARKET_ID,
+        // deliberately invalid scheme
+        scheme: 7 as unknown as 0,
+        id: "ptr"
+      })
+    );
+    expect(Exit.isFailure(exit)).toBe(true);
   });
 });

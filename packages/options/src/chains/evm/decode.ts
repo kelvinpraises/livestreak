@@ -231,7 +231,8 @@ export const mapNft = (
   marketId: MarketId,
   laneCount: number,
   lanes: readonly OptionsLane[],
-  transfer?: { readonly approved?: UserAddress; readonly isOperator?: boolean }
+  transfer?: { readonly approved?: UserAddress; readonly isOperator?: boolean },
+  account?: { readonly balance?: bigint; readonly runwayEndMs?: number }
 ): OptionsNft => ({
   tokenId,
   owner,
@@ -239,7 +240,9 @@ export const mapNft = (
   laneCount,
   lanes,
   ...(transfer?.approved === undefined ? {} : { approved: transfer.approved }),
-  ...(transfer?.isOperator === undefined ? {} : { isOperator: transfer.isOperator })
+  ...(transfer?.isOperator === undefined ? {} : { isOperator: transfer.isOperator }),
+  ...(account?.balance === undefined ? {} : { balance: account.balance }),
+  ...(account?.runwayEndMs === undefined ? {} : { runwayEndMs: account.runwayEndMs })
 });
 
 export type RawStreamsState = {
@@ -251,6 +254,13 @@ export type RawStreamsState = {
 };
 
 export const mapStreamsStateBalance = (state: RawStreamsState): bigint => state.balance;
+
+export const mapStreamsStateFull = (
+  state: RawStreamsState
+): { balance: bigint; runwayEndMs: number | undefined } => ({
+  balance: state.balance,
+  runwayEndMs: state.maxEnd > 0 ? state.maxEnd * 1000 : undefined
+});
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -301,6 +311,7 @@ export type ContractsReadEntity =
   | "winning side"
   | "board"
   | "share price"
+  | "pending boundaries"
   | "pending shares"
   | "USDC address"
   | "USDC balance"

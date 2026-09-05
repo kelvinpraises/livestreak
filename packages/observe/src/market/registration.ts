@@ -1,7 +1,7 @@
 import { Effect, type Scope } from "effect";
 import { type LiveStreakError } from "@livestreak/core";
 import type { ControlBus } from "#run/control/bus/index.js";
-import { applyMarketLifecycleToBoard } from "./board.js";
+import { marketLifecyclePatch } from "./board.js";
 import { createMarketRegistrar } from "./chains/index.js";
 import type {
   MarketFailurePhase,
@@ -19,11 +19,15 @@ export interface MarketRegistrationForkInput {
   readonly registrar: MarketRegistrar;
 }
 
-const startedRunIds = new Set<string>();
-
-export const resetMarketRegistrationRunsForTests = (): void => {
-  startedRunIds.clear();
-};
+// O7: idempotency ("fire registration at most once per run") is keyed on the
+// per-run ControlBus instance, held in a WeakSet. This designs out the three
+// defects of the previous module-global `Set<runId>`:
+//   - no cross-runtime bleed: each run owns a distinct bus;
+//   - no unbounded growth: the bus (and its WeakSet entry) is GC'd with the run;
+//   - reused runId after removeRun re-registers correctly (a new run = a new bus).
+// The guard stays synchronous (set membership recorded before the fork), so a
+// double-start against the same bus still fires exactly one registration.
+const startedRegistrationBuses = new WeakSet<ControlBus>();
 
 export const forkMarketRegistrationIfNeeded = (
   input: Omit<MarketRegistrationForkInput, "registration"> & {
@@ -31,11 +35,11 @@ export const forkMarketRegistrationIfNeeded = (
   }
 ): Effect.Effect<void, LiveStreakError, Scope.Scope> =>
   Effect.gen(function* () {
-    if (startedRunIds.has(input.runId)) {
+    if (startedRegistrationBuses.has(input.bus)) {
       return;
     }
 
-    startedRunIds.add(input.runId);
+    startedRegistrationBuses.add(input.bus);
     yield* Effect.forkScoped(runMarketRegistrationLifecycle(input));
   });
 
@@ -82,8 +86,15 @@ const commitMarketLifecycle = (
   lifecycle: MarketLifecycleState
 ): Effect.Effect<void, LiveStreakError> =>
   Effect.gen(function* () {
+    // O2: write through a disjoint cell-scoped patch (merge) so this fiber can
+    // never clobber the worker fiber's cells. Preserve the prior no-op behaviour
+    // when the board carries no `market` cell (applyBoardPatch would otherwise
+    // fail on an unknown cell).
     const board = yield* bus.readBoard();
-    yield* bus.commitBoard(applyMarketLifecycleToBoard(board, lifecycle));
+    if (board.cells["market"] === undefined) {
+      return;
+    }
+    yield* bus.applyBoardPatch(marketLifecyclePatch(lifecycle));
   });
 
 const failureFromError = (error: LiveStreakError): MarketLifecycleState => {

@@ -7,7 +7,7 @@ import {
   encodeMintWithSaltCall,
   parseMarketNftMintedTokenId,
   parseMintSalt
-} from "../src/edges/nft-mint.js";
+} from "../src/adapters/onchain.js";
 
 const marketDriver = "0x84a89612fcd2f84edc6d2f19062c4a01988229d7" as const;
 const marketId =

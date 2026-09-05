@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildVaultDraft } from "../../src/draft/build.js";
+import { buildVaultDraft } from "../../src/pipeline/draft/build.js";
 import { projectBookmakerPanel } from "../../src/bridge/panel/project.js";
 import { detection, marketContext } from "../helpers/fixtures.js";
 

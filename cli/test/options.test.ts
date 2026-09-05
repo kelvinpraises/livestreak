@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { validateOptionsVaultSide, bridgeActionScope } from "@livestreak/options";
-import { buildCallActionEnvelope } from "../src/edges/options.js";
-import { routeClaimAction } from "../src/commands/claim-routing.js";
+import { buildCallActionEnvelope } from "../src/adapters/options.js";
+import { routeClaimAction } from "../src/commands/vaults.js";
 import { renderOptionsBoard } from "../src/render/output.js";
 
 describe("edges/options", () => {

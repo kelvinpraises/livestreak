@@ -25,16 +25,41 @@ export const AaChainDescriptor = Schema.Struct({
 
 export type AaChainDescriptor = Schema.Schema.Type<typeof AaChainDescriptor>;
 
+export const SuiSponsorshipDescriptor = Schema.Struct({
+  gasStationPath: Schema.NonEmptyString,
+  sponsorAddress: Schema.optional(Schema.NonEmptyString),
+  rpcUrl: Schema.optional(Schema.NonEmptyString)
+});
+
+export type SuiSponsorshipDescriptor = Schema.Schema.Type<typeof SuiSponsorshipDescriptor>;
+
 export const AaCapabilityDescriptor = Schema.Struct({
   version: Schema.Literal("0.1.0"),
   hostId: Schema.NonEmptyString,
   sponsorshipMode: AaSponsorshipMode,
   supportedOperations: Schema.Array(AaOperationKind),
   paymasterPath: Schema.NonEmptyString,
-  chains: Schema.Array(AaChainDescriptor)
+  chains: Schema.Array(AaChainDescriptor),
+  suiSponsorship: Schema.optional(SuiSponsorshipDescriptor)
 });
 
 export type AaCapabilityDescriptor = Schema.Schema.Type<typeof AaCapabilityDescriptor>;
+
+export const SuiSponsorRequest = Schema.Struct({
+  txKindBytes: Schema.NonEmptyString,
+  sender: Schema.NonEmptyString,
+  gasBudget: Schema.optional(Schema.Union(Schema.Number, Schema.String))
+});
+
+export type SuiSponsorRequest = Schema.Schema.Type<typeof SuiSponsorRequest>;
+
+export const SuiSponsorResponse = Schema.Struct({
+  txBytes: Schema.NonEmptyString,
+  sponsorSignature: Schema.NonEmptyString,
+  sponsorAddress: Schema.NonEmptyString
+});
+
+export type SuiSponsorResponse = Schema.Schema.Type<typeof SuiSponsorResponse>;
 
 export const AaBundlerProxyRequest = Schema.Struct({
   chainId: Schema.NonNegativeInt,

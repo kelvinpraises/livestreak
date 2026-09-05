@@ -38,9 +38,54 @@ See [architecture.md](./architecture.md) and [flow.md](./flow.md).
 
 ---
 
+## Slice 3 — encode unit tests + on-chain createVault proof
+
+- [x] `test/chains/evm/encode.test.ts` — coercion layer (side, marketId, deposit, seedRate)
+- [x] `test/e2e/create-vault.e2e.ts` + `npm run e2e:chain` (opt-in; not in `npm test`)
+- [x] `e2e:chain` run against live anvil + deploy + host (see `docs/flow.md`)
+
+---
+
+## Slice 4 — adopt contracts VaultCreated fix (drop emitter filter)
+
+- [x] Inner `Vault.VaultCreated` renamed → `VaultOpened` in `@livestreak/contracts` (`7461f19`)
+- [x] `parseVaultCreatedFromLogs(logs)` — no `vaultDriverAddress` filter; topic0 unique to driver
+- [x] Regression test: driver `VaultCreated` + inner `VaultOpened` → correct `vaultId`
+- [x] E2e re-run without emitter filter
+
+---
+
+## Slice 5 — createVault retry-safety + cross-runtime doc
+
+- [x] `confirmCreateVault(userOpHash)` on `BookmakerChainWriter` (EVM + fake + Sui stub)
+- [x] Receipt-timeout carries `userOpHash`; idempotency store tracks pending hashes
+- [x] `createVaultOnce` never blind-resubmits a pending key — confirm first
+- [x] Tests: timeout+recover, pending-then-pending, pre-hash retry, concurrency
+- [x] `docs/flow.md` cross-runtime limitation documented
+
+---
+
+## Slice 6 — region barrel alignment
+
+- [x] Region `index.ts` files reordered to match options convention (exports only, no logic)
+
+---
+
+## Slice 7 — observe-style 6-region layout
+
+- [x] Top-level `src/` is exactly: `model`, `pipeline`, `chains`, `flows`, `runtime`, `bridge`, `index.ts`
+- [x] Pipeline stages grouped under `pipeline/` (`observation`, `detection`, `draft`, `similarity`, `decision`)
+- [x] Model validators collapsed to `model/validate.ts`; runtime config validator in `runtime/validate.ts`
+- [x] `BookmakerPanelView` + watch refs live in `model/watch-source.ts`; projection stays in `bridge/panel/`
+- [x] `create-vault-recovery.ts` under `chains/evm/`
+- [x] Tests relocated: `test/model/validate-*.ts`, `test/runtime/validate-runtime-config.test.ts`
+- [x] `docs/architecture.md` + `docs/flow.md` updated
+- [x] 117 tests green; public API membership unchanged
+
+---
+
 ## Follow-ups
 
-- [ ] **Residual:** receipt poll timeout after on-chain inclusion — re-check userOp receipt before retry send
 - [ ] **UNHANDLED:** insufficient USDC balance preflight
 - [ ] **UNHANDLED:** unknown market on-chain gate in `originateVault`
 - [ ] Richer host discovery HTTP error mapping

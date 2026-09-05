@@ -53,10 +53,16 @@ export interface OptionsBridge {
     caller: BridgeCaller,
     marketId: import("../model/ids.js").MarketId
   ) => Promise<import("../model/stream.js").OptionsStreamState>;
+  readonly previewAccrual: (
+    caller: BridgeCaller,
+    input: import("../model/math/accrual.js").PreviewAccrualInput
+  ) => Promise<import("../model/math/accrual.js").OptionsAccrualPreview>;
   readonly callAction: (
     caller: BridgeCaller,
     envelope: CallActionEnvelope
-  ) => Promise<import("../chains/types.js").TxId>;
+  ) => Promise<
+    import("../chains/types.js").TxId | import("../chains/types.js").MintResult
+  >;
   readonly subscribeBoard: (
     caller: BridgeCaller,
     listener: (board: import("../runtime/board.js").OptionsBoard) => void

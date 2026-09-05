@@ -26,6 +26,9 @@ describe("steward public exports", () => {
   it("exports runtime factory and config without test fakes", () => {
     expect(publicExport("createStewardRuntime")).toBeTypeOf("function");
     expect(publicExport("validateStewardRuntimeConfig")).toBeTypeOf("function");
+    expect(publicExport("createStewardBridge")).toBeTypeOf("function");
+    expect(publicExport("projectStewardControls")).toBeTypeOf("function");
+    expect(publicExport("assembleBoard")).toBeTypeOf("function");
     expect(publicExport("makeFakeContractFactSource")).toBeUndefined();
     expect(publicExport("makeFakeHostFactSource")).toBeUndefined();
     expect(publicExport("makeFakeObserveFactSource")).toBeUndefined();

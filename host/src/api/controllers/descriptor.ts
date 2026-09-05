@@ -1,4 +1,4 @@
-import type { HostRouteDeps } from "../deps.js";
+import type { HostRouteDeps } from "../../deps.js";
 import { handleDescriptor, handleHealth } from "../../services/descriptor.js";
 
 // --- exports ---

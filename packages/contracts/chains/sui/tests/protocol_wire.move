@@ -721,15 +721,14 @@ public fun claim_loss_lvst(
     let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(scenario);
     let nft = ts::take_from_address<MarketPositionNFT>(scenario, who);
     let token_id = market_driver::get_token_id(&nft);
-    let lost_usdc = vault::loss_claimable(&vault_registry, token_id, &vault_id, loss_side);
     let ctx = ts::ctx(scenario);
     let minted = treasury::mint_loss_lvst_for_test(
         &mut treasury,
+        &vault_registry,
         token_id,
         who,
         vault_id,
         loss_side,
-        lost_usdc,
         ctx,
     );
     ts::return_to_address(who, nft);

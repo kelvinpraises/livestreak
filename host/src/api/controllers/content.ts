@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
-import type { HostRouteDeps } from "../deps.js";
-import { asyncHandler, param, sendRouteResult } from "../respond.js";
+import type { HostRouteDeps } from "../../deps.js";
+import { asyncHandler, param, sendRouteResult } from "../middleware/respond.js";
 import {
   handleContentBlobResolve,
   handleContentBlobStore

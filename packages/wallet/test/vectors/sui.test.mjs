@@ -5,10 +5,9 @@ import WalletAccountSui from '../../src/vendor/sui/wallet-account-sui.js'
 
 const TEST_MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-const TEST_PATH = "0'/0/0" // SLIP-0010 hardened -> m/44'/784'/0'/0'/0'
+const TEST_PATH = "0'/0/0"
 const TEST_MESSAGE = 'livestreak-vector-v1'
 
-// Captured from the vendored Sui WDK (Ed25519 / signPersonalMessage is deterministic).
 export const GOLDEN_SUI_ADDRESS =
   '0x5e93a736d04fbb25737aa40bee40171ef79f65fae833749e3c089fe7cc2161f1'
 export const GOLDEN_SUI_SIGNATURE =

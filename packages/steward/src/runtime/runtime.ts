@@ -1,13 +1,18 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import { projectStewardPanel } from "../panel/project.js";
+import { projectStewardPanel } from "../bridge/panel/project.js";
 import type { StewardPanelView } from "../model/panel.js";
-import type { StewardStateSnapshot } from "../panel/types.js";
+import type { StewardStateSnapshot } from "./store.js";
+import type { StewardActionPlan } from "../model/action-plan.js";
+import type { StewardDecisionAction } from "../model/decision.js";
+import { planStewardActions } from "../workflow/action/plan.js";
+import { isStewardDecisionAction } from "../validate/decision.js";
 import {
   validateStewardRuntimeConfig,
   type StewardRuntimeConfig,
   type StewardRuntimeInput
 } from "./config.js";
+import { assembleBoard, type StewardBoard } from "./board.js";
 import { refreshWatchedSubjects, toRuntimeLastError } from "./refresh.js";
 import type {
   ContractFactSource,
@@ -24,8 +29,11 @@ export interface StewardRuntime {
   readonly config: StewardRuntimeConfig;
   readSnapshot: () => StewardStateSnapshot;
   readPanel: () => StewardPanelView;
+  readBoard: () => StewardBoard;
   refresh: () => Promise<StewardStateSnapshot>;
+  submitBridgeAction: (action: string, args: unknown) => Promise<StewardActionPlan>;
   subscribe: (listener: (snapshot: StewardStateSnapshot) => void) => () => void;
+  subscribeBoard: (listener: (board: StewardBoard) => void) => () => void;
   startPolling: () => { readonly stop: () => void };
 }
 
@@ -42,6 +50,7 @@ class StewardRuntimeFacade implements StewardRuntime {
   private readonly actionPlanSink: StewardActionPlanSink;
   private readonly memorySink: StewardMemorySink;
   private readonly listeners = new Set<(snapshot: StewardStateSnapshot) => void>();
+  private readonly boardListeners = new Set<(board: StewardBoard) => void>();
   private pollingTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(input: StewardRuntimeInput) {
@@ -56,11 +65,20 @@ class StewardRuntimeFacade implements StewardRuntime {
   }
 
   readSnapshot(): StewardStateSnapshot {
-    return this.store.readSnapshot();
+    const snapshot = this.store.readSnapshot();
+    return {
+      ...snapshot,
+      watchedSubjects: [...this.config.watchedSubjects]
+    };
   }
 
   readPanel(): StewardPanelView {
     return projectStewardPanel(this.store.readSnapshot());
+  }
+
+  readBoard(): StewardBoard {
+    const snapshot = this.store.readSnapshot();
+    return assembleBoard(snapshot.revision, projectStewardPanel(snapshot));
   }
 
   async refresh(): Promise<StewardStateSnapshot> {
@@ -92,7 +110,6 @@ class StewardRuntimeFacade implements StewardRuntime {
         latestDecisions: result.latestDecisions,
         pendingActionPlans: result.pendingActionPlans
       });
-      this.store.setLastError(undefined);
 
       return this.publish();
     } catch (error) {
@@ -100,10 +117,72 @@ class StewardRuntimeFacade implements StewardRuntime {
     }
   }
 
+  async submitBridgeAction(action: string, args: unknown): Promise<StewardActionPlan> {
+    if (!isStewardDecisionAction(action)) {
+      throw new LiveStreakConfigError({
+        message: `Unknown steward bridge action: ${action}`,
+        metadata: { details: action }
+      });
+    }
+
+    const snapshot = this.readSnapshot();
+    const bridgeArgs = readBridgeActionArgs(args);
+    const subject = snapshot.watchedSubjects.find((entry) => entry.id === bridgeArgs.subjectId);
+
+    if (subject === undefined) {
+      throw new LiveStreakConfigError({
+        message: "Steward bridge action requires a watched subjectId",
+        metadata: { details: bridgeArgs.subjectId }
+      });
+    }
+
+    const finding =
+      snapshot.latestFindings.find(
+        (entry) =>
+          entry.subject.id === subject.id &&
+          (bridgeArgs.findingId === undefined || entry.id === bridgeArgs.findingId)
+      ) ??
+      ({
+        id: `bridge:${action}:${subject.id}`,
+        kind: "manual_note" as const,
+        subject,
+        severity: "info" as const,
+        message: bridgeArgs.reason ?? action
+      } as const);
+
+    const [plan] = planStewardActions(
+      [
+        {
+          action,
+          finding,
+          reason: bridgeArgs.reason ?? `Bridge action ${action}`
+        }
+      ],
+      this.config.actionContext
+    );
+
+    if (plan === undefined) {
+      throw new LiveStreakConfigError({
+        message: "Steward bridge action did not produce an action plan",
+        metadata: { details: action }
+      });
+    }
+
+    await this.actionPlanSink.submit([plan]);
+    return plan;
+  }
+
   subscribe(listener: (snapshot: StewardStateSnapshot) => void): () => void {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  subscribeBoard(listener: (board: StewardBoard) => void): () => void {
+    this.boardListeners.add(listener);
+    return () => {
+      this.boardListeners.delete(listener);
     };
   }
 
@@ -147,8 +226,14 @@ class StewardRuntimeFacade implements StewardRuntime {
 
   private publish(): StewardStateSnapshot {
     const snapshot = this.store.readSnapshot();
+    const board = assembleBoard(snapshot.revision, projectStewardPanel(snapshot));
+
     for (const listener of this.listeners) {
       listener(snapshot);
+    }
+
+    for (const listener of this.boardListeners) {
+      listener(board);
     }
 
     return snapshot;
@@ -160,3 +245,30 @@ class StewardRuntimeFacade implements StewardRuntime {
     throw error;
   }
 }
+
+// --- helpers ---
+
+const readBridgeActionArgs = (
+  args: unknown
+): { readonly subjectId: string; readonly reason?: string; readonly findingId?: string } => {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) {
+    throw new LiveStreakConfigError({
+      message: "Steward bridge action args must be an object",
+      metadata: { details: String(args) }
+    });
+  }
+
+  const record = args as Record<string, unknown>;
+  if (typeof record.subjectId !== "string" || record.subjectId.trim().length === 0) {
+    throw new LiveStreakConfigError({
+      message: "Steward bridge action args require subjectId",
+      metadata: { details: String(record.subjectId) }
+    });
+  }
+
+  return {
+    subjectId: record.subjectId.trim(),
+    ...(typeof record.reason === "string" ? { reason: record.reason } : {}),
+    ...(typeof record.findingId === "string" ? { findingId: record.findingId } : {})
+  };
+};

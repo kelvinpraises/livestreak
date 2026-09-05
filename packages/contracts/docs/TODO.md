@@ -13,6 +13,7 @@ The shipped EVM surface (markets + `streamState`, NFT-lane `MarketDriver`, bonde
 - [ ] Steward challenge / finalize / penalty / veto surfaces (quorum + slashing)
 - [ ] Resolution helper reads consolidated for options consumers
 - [ ] Full AA stack — host owns bundler routes; contracts deploy Solidity pieces when needed
+- [ ] **Hot-period exit burn — DEFERRED, not in the protocol.** App shows an "EXIT BURN %" badge during hot periods (`app/src/data/mock.ts` `exitBurn: 20`) and `options` plumbs `exitBurnBps`, but there is **no on-chain burn**: `Vault.withdraw`/`resolve` apply no hot-state penalty (exits stay open) and `StewardRegistry.HotState` carries only `{active, until, severity, reasonHash}` — no bps anywhere (EVM **or** Sui). A real hot-exit penalty is a token-economics decision (owner): it must be specced into the EVM source first (Vault penalty + `StewardRegistry` config + a read), then ported to Sui. Until then `exitBurnBps` stays unsupported (`undefined`) and the app hides the badge. (app + options notified 2026-06-20)
 
 ---
 
@@ -72,6 +73,11 @@ USDC / LVST       -> Coin<USDC> / Coin<LVST>
 - [x] Steward reads — hot / dispute metadata
 - [x] Sui TS kit — `@livestreak/contracts/sui` (`LiveStreakSuiClient`, `loadDeployment`, `deploy:sui`)
 - [x] resolution helper reads — `resolution_reads::view_vault`
+- [x] **Consumer-surface parity gaps (found via options Sui integration 2026-06-21) — DONE** (sui 121/0, forge 137/0, tsc clean):
+  - [x] `vault::claimable<T>(registry, account, vault_id, side) -> u256` — live winnings+overage view; parity with EVM `Vault.claimable` (`Vault.sol:410`). Read-only; no clock param (only non-zero post-`collect`, when the board is final). Commit `080e3c0`.
+  - [x] `market_driver::withdraw_many<T>(..., vault_ids: vector<vector<u8>>, ...)` — batch withdraw; parity with EVM `MarketDriver.withdraw(tokenId, bytes32[], to)` (`MarketDriver.sol:308`). Commit `d141493`.
+  - [x] `steward_registry::hot_reason_hash(state: &HotState) -> vector<u8>` — accessor (EVM exposes `HotState.reasonHash`). Commit `9c40db1`.
+- [x] **Browser-safe Sui deployment export — DONE.** `deploy:sui` now emits a typed `export const localnetDeployment: SuiDeployment` (`chains/sui/deployments/localnet.ts`, type-only import → browser-safe) via `writeDeploymentTs` in `promoteDeployment`; package `exports` subpath `./sui/deployments/localnet`; `build` copies `chains/sui/deployments` into `dist/`. `loadDeployment` stays for Node. Commit `16e6c2c`. Consumers import from `@livestreak/contracts/sui/deployments/localnet` (not the index, which still re-exports the node:fs `loadDeployment`).
 
 ### Stage 5 — Parity verification
 - [ ] Move unit tests mirroring the forge suite (the 137 EVM cases → Move equivalents)

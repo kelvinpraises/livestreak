@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { asMarketId, asTokenId, asVaultId } from "../src/model/index.js";
-import { isAccrualFrozen, projectStreamAccrual } from "../src/model/math/accrual.js";
+import { isAccrualFrozen, projectStreamAccrual, projectAccrualPreview } from "../src/model/math/accrual.js";
 import { projectOptionsPanel } from "../src/bridge/panel/project.js";
 import { readUserOptionsSnapshot } from "../src/flows/snapshot.js";
 import {
@@ -109,6 +109,67 @@ describe("stream accrual projector", () => {
     expect(first.pendingShares).toBe(firstRead.toString());
     expect(second.pendingShares).toBe(secondRead.toString());
     expect(BigInt(second.pendingShares)).toBeGreaterThan(BigInt(first.pendingShares));
+  });
+});
+
+describe("accrual preview projector", () => {
+  const board = {
+    pool: 20_000_000n,
+    sideRate: 1_000_000n,
+    g: 5_000_000_000_000_000_000n,
+    lastAdvanceMs: 1_700_000_000_000
+  };
+
+  const pools = { yes: 100_000_000n, no: 50_000_000n };
+  const shareTotals = { yes: 10_000_000n, no: 5_000_000n };
+  const atMs = board.lastAdvanceMs + 5_000;
+
+  it("projects shares and value for a positive rate over a horizon", () => {
+    const preview = projectAccrualPreview({
+      board,
+      pools,
+      shareTotals,
+      side: "yes",
+      rate: 1_000_000_000_000_000_000n,
+      horizonSec: 60,
+      atMs
+    });
+
+    expect(BigInt(preview.projectedShares)).toBeGreaterThan(0n);
+    expect(BigInt(preview.valueUSDC)).toBeGreaterThan(0n);
+    expect(BigInt(preview.sharesPerSec)).toBeGreaterThan(0n);
+    expect(preview.sharePriceUSDC).toBeTruthy();
+  });
+
+  it("returns zero accrual when rate is zero", () => {
+    const preview = projectAccrualPreview({
+      board,
+      pools,
+      shareTotals,
+      side: "yes",
+      rate: 0n,
+      horizonSec: 60,
+      atMs
+    });
+
+    expect(preview.projectedShares).toBe("0");
+    expect(preview.valueUSDC).toBe("0");
+    expect(preview.sharesPerSec).toBe("0");
+  });
+
+  it("returns zero value when the side share total is zero", () => {
+    const preview = projectAccrualPreview({
+      board,
+      pools,
+      shareTotals: { yes: 0n, no: 0n },
+      side: "yes",
+      rate: 1_000_000_000_000_000_000n,
+      horizonSec: 60,
+      atMs
+    });
+
+    expect(BigInt(preview.projectedShares)).toBeGreaterThan(0n);
+    expect(preview.valueUSDC).toBe("0");
   });
 });
 

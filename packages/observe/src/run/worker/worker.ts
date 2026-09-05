@@ -104,13 +104,19 @@ export const runScopedWorkerUntilStoppedWithBoard = (
 
 // --- helpers ---
 
-const defaultMaxTurns = 512;
+// O1: the worker budget counts CONSECUTIVE no-progress ("idle") turns, NOT raw
+// frame turns. This makes the cap a measure of *liveness* (a stuck loop) rather
+// than content length, so long files and unbounded live capture are never killed
+// by the budget while a genuinely stalled run still terminates. The `maxTurns`
+// input is reinterpreted as this idle-turn budget (callers — incl. the kernel —
+// keep passing the same field; no signature change).
+const defaultMaxIdleTurns = 512;
 
-const resolveMaxTurns = (maxTurns: number | undefined): number => {
-  if (maxTurns === undefined) {
-    return defaultMaxTurns;
+const resolveMaxIdleTurns = (maxIdleTurns: number | undefined): number => {
+  if (maxIdleTurns === undefined) {
+    return defaultMaxIdleTurns;
   }
-  return maxTurns;
+  return maxIdleTurns;
 };
 
 interface WorkerLoopInput {
@@ -133,19 +139,28 @@ const runWorkerLoop = (
     const initialBoard = yield* input.bus.readBoard();
     yield* validateWorkerPrepare(input.state, projectWorkerControlView(initialBoard));
 
-    const maxTurns = resolveMaxTurns(input.maxTurns);
+    const maxIdleTurns = resolveMaxIdleTurns(input.maxTurns);
     let turns = 0;
+    let consecutiveIdleTurns = 0;
+    let stalled = false;
     const state = input.state;
 
     if (state.lifecycle === "idle") {
       state.lifecycle = "running";
     }
 
-    while (turns < maxTurns) {
+    while (true) {
       const board = yield* input.bus.readBoard();
       const view = projectWorkerControlView(board);
       const turn = yield* supervisorTurn(state, view);
       turns += 1;
+
+      // O1: only no-progress turns count against the budget; any work resets it.
+      if (turn.didWork === true) {
+        consecutiveIdleTurns = 0;
+      } else {
+        consecutiveIdleTurns += 1;
+      }
 
       if (input.afterTurn === true) {
         const latestBoard = yield* input.bus.readBoard();
@@ -157,15 +172,28 @@ const runWorkerLoop = (
         break;
       }
 
+      if (consecutiveIdleTurns >= maxIdleTurns) {
+        stalled = true;
+        break;
+      }
+
       if (shouldWaitForControl(state)) {
         yield* input.boardWake.waitForWake();
+        continue;
+      }
+
+      // O6: on a no-progress turn, stop hot-spinning. Wait on the board wake
+      // (instant control response) raced with a short sleep (bounds drain latency
+      // and keeps a live source between frames cheap). A progress turn yields.
+      if (turn.didWork === false) {
+        yield* Effect.race(input.boardWake.waitForWake(), Effect.sleep("5 millis"));
         continue;
       }
 
       yield* Effect.yieldNow();
     }
 
-    const outcome = resolveWorkerRunOutcome(state, turns, maxTurns);
+    const outcome = resolveWorkerRunOutcome(state, stalled);
 
     return {
       state,
@@ -190,8 +218,7 @@ const activeWorkerLifecycles = [
 
 const resolveWorkerRunOutcome = (
   state: WorkerState,
-  turns: number,
-  maxTurns: number
+  stalled: boolean
 ): WorkerRunOutcome => {
   if (state.lifecycle === "stopped") {
     return "stopped";
@@ -201,8 +228,8 @@ const resolveWorkerRunOutcome = (
     return "failed";
   }
 
-  if (turns >= maxTurns && (activeWorkerLifecycles as readonly string[]).includes(state.lifecycle)) {
-    failWorker(state, `Worker exceeded maxTurns while ${state.lifecycle}`);
+  if (stalled && (activeWorkerLifecycles as readonly string[]).includes(state.lifecycle)) {
+    failWorker(state, `Worker stalled: no progress for the idle-turn budget while ${state.lifecycle}`);
     return "max-turns-exceeded";
   }
 

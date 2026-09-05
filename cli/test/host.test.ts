@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createHostClient } from "../src/edges/host.js";
+import { createHostClient } from "../src/adapters/host.js";
 
 describe("edges/host", () => {
   it("maps POST /content/blobs to StorePointer", async () => {

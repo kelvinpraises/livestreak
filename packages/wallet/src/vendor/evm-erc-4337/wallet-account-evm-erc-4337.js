@@ -242,6 +242,11 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
    */
   dispose () {
     this._ownerAccount.dispose()
+    // F2: release cached Safe4337Pack instances. Each may hold the owner signer (the hex private key
+    // passed to Safe4337Pack.init). We can't zeroize it (the Safe SDK owns it internally) — drop the
+    // references so GC can reclaim them, so key material does not outlive dispose() in a long-lived
+    // daemon (the new gateway).
+    this._safe4337Packs.clear()
   }
 
   /** @private */

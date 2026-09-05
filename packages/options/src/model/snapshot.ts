@@ -4,6 +4,7 @@ import type { LvstAccount } from "./lvst.js";
 import type { MarketId, UserAddress } from "./ids.js";
 import type { OptionsNft } from "./nft.js";
 import type { OptionsMarket } from "./market.js";
+import type { OptionsStreamState } from "./stream.js";
 import type {
   OptionsVault,
   OptionsVaultPools,
@@ -20,6 +21,8 @@ export interface OptionsProtocolSummary {
 export interface OptionsMarketSnapshot {
   readonly market: OptionsMarket;
   readonly vaults: readonly OptionsVault[];
+  /** Raw stream pointer for this market. Undefined when none has been set on-chain. */
+  readonly streamState?: OptionsStreamState;
 }
 
 export interface OptionsVaultSnapshot {

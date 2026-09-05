@@ -40,7 +40,7 @@ export default [
             {
               group: vendorImportBlocks,
               message:
-                "Import vendor only via #chains/evm.js or #chains/sui.js.",
+                "Import vendor only via #chains/evm.js or #chains/sui/index.js.",
             },
             {
               group: ["../*", "../../*", "../../../*", "../../../../*"],

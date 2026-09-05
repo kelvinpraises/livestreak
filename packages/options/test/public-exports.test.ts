@@ -34,6 +34,7 @@ describe("options public exports", () => {
   it("exports panel projection under bridge", () => {
     expect(publicExport("projectOptionsPanel")).toBeTypeOf("function");
     expect(publicExport("projectOptionsControls")).toBeTypeOf("function");
+    expect(publicExport("projectOptionsFunctions")).toBeTypeOf("function");
   });
 
   it("does not export retired reader or standalone write helpers", () => {

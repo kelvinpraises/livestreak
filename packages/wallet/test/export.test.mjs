@@ -1,8 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-// Imports the BUILT public surface (dist) via the package's own exports map —
-// `npm test` builds first (pretest), so this verifies what consumers actually get.
 import createWalletManager, * as wallet from '@livestreak/wallet'
 
 const EXPECTED_EXPORTS = [
@@ -14,11 +12,17 @@ const EXPECTED_EXPORTS = [
   'WalletManagerSui',
   'WalletAccountSui',
   'WalletAccountReadOnlySui',
+  'createSuiAccount',
+  'assertGasStationReturnedTxMatchesKind',
   'ConfigurationError',
+  'executeSponsoredTransaction',
+  'assembleSponsoredTxBytes',
+  'createLocalGasStation',
+  'isSponsoredSuiConfig',
 ]
 
 describe('public export surface', () => {
-  it('exports the unified factory + every per-chain class + ConfigurationError', () => {
+  it('exports the unified factory + per-chain classes + sponsored AA surface', () => {
     for (const name of EXPECTED_EXPORTS) {
       assert.ok(name in wallet, `missing export: ${name}`)
     }

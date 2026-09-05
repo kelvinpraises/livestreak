@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Robot, Eye, Shield, Crosshair, CaretDown, Pulse, TrendUp, Medal } from '@phosphor-icons/react'
-import { mockAgents, type Agent, type AgentRole } from '#/data/mock'
+import { mockAgents, type Agent, type AgentRole } from '#/utils/mock'
 import { formatUSDCFull } from '#/utils/format'
-import { isDeployed, publicClient, contracts, AGENT_REGISTRY_ABI } from '#/config/contracts'
 
 export const Route = createFileRoute('/agents')({
   component: AgentsPage,
@@ -19,62 +18,8 @@ const tabs: { key: FilterTab; label: string }[] = [
   { key: 'observer', label: 'Observers' },
 ]
 
-const AGENT_TYPE_MAP: Record<number, AgentRole> = { 0: 'bookmaker', 1: 'steward', 2: 'observer' }
-
 function useAgents(): Agent[] {
-  const [agents, setAgents] = useState<Agent[]>(mockAgents)
-
-  useEffect(() => {
-    if (!isDeployed()) return
-
-    async function fetchOnChain() {
-      try {
-        const addrs = await publicClient.readContract({
-          address: contracts.agentRegistry,
-          abi: AGENT_REGISTRY_ABI,
-          functionName: 'getAgentList',
-        }) as `0x${string}`[]
-
-        if (addrs.length === 0) return // no agents registered yet, keep mocks
-
-        const onChainAgents = await Promise.all(
-          addrs.map(async (addr) => {
-            const r = await publicClient.readContract({
-              address: contracts.agentRegistry,
-              abi: AGENT_REGISTRY_ABI,
-              functionName: 'getAgent',
-              args: [addr],
-            }) as [string, string, number, bigint, bigint, bigint, bigint, bigint, boolean]
-
-            const role = AGENT_TYPE_MAP[Number(r[2])] ?? 'bookmaker'
-            const wins = Number(r[4])
-            const accuracy = Number(r[6]) / 100 // basis points to %
-
-            return {
-              id: addr,
-              name: r[1] as string,
-              address: `${addr.slice(0, 6)}...${addr.slice(-4)}`,
-              role,
-              accuracy,
-              winRate: accuracy,
-              vaultsCreated: Number(r[3]),
-              vaultsMonitored: Number(r[3]),
-              totalVolume: 0,
-              reputation: Math.min(100, accuracy + (wins * 2)),
-            } satisfies Agent
-          })
-        )
-
-        setAgents(onChainAgents)
-      } catch {
-        // Contract not responding — keep mock data
-      }
-    }
-
-    fetchOnChain()
-  }, [])
-
-  return agents
+  return mockAgents
 }
 
 function AgentsPage() {

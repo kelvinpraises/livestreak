@@ -1,6 +1,6 @@
 import type { BookmakerPanelSnapshot } from "../bridge/panel/project.js";
 import { projectBookmakerPanel } from "../bridge/panel/project.js";
-import type { BookmakerPanelView } from "../model/panel.js";
+import type { BookmakerPanelView } from "../model/watch-source.js";
 
 // --- exports ---
 

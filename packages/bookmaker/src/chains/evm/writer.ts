@@ -1,13 +1,21 @@
 // --- exports ---
 
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
-import { createWalletManager, type EvmErc4337WalletConfig } from "@livestreak/wallet";
+import {
+  createWalletManager,
+  pollUntilUserOperationIncluded as pollUntilUserOperationIncludedShared,
+  readUserOperationSuccess,
+  type EvmErc4337WalletConfig
+} from "@livestreak/wallet";
 import { encodeFunctionData, type Abi } from "viem";
 
+import { receiptTimeoutError } from "./create-vault-recovery.js";
 import type {
   BookmakerChainConfig,
   BookmakerChainWriter,
-  CreateVaultInput
+  CreateVaultInput,
+  CreateVaultResult,
+  TxId
 } from "../types.js";
 import { asTxId } from "../types.js";
 import { DEFAULT_ABIS } from "./abis.js";
@@ -30,6 +38,12 @@ export const createEvmBookmakerWriter = (config: BookmakerChainConfig): Bookmake
   const evmConfig = config.walletInit.config as EvmErc4337WalletConfig;
   const addresses = validateBookmakerContractAddresses(config.addresses);
   const abis = DEFAULT_ABIS;
+
+  const openReadOnlyAccount = async (): Promise<ReadOnlyAccount> => {
+    const manager = createWalletManager("evm", config.seed, evmConfig);
+    const account = await manager.getAccount();
+    return account.toReadOnlyAccount();
+  };
 
   return {
     createVault: async (input: CreateVaultInput) => {
@@ -63,17 +77,17 @@ export const createEvmBookmakerWriter = (config: BookmakerChainConfig): Bookmake
 
       await pollUntilUserOperationIncluded(readOnly, sendResult.hash);
 
-      const receipt = await readOnly.getTransactionReceipt(sendResult.hash);
-      if (receipt === null || receipt === undefined) {
+      const resolved = await resolveCreateVaultFromUserOp(readOnly, sendResult.hash);
+      if (resolved === undefined) {
         throw receiptFailure(`Transaction receipt missing for ${sendResult.hash}`);
       }
 
-      const vaultId = parseVaultCreatedFromLogs(receipt.logs);
+      return resolved;
+    },
 
-      return {
-        txId: asTxId(sendResult.hash),
-        vaultId
-      };
+    confirmCreateVault: async (userOpHash: TxId) => {
+      const readOnly = await openReadOnlyAccount();
+      return resolveCreateVaultFromUserOp(readOnly, userOpHash);
     }
   };
 };
@@ -94,6 +108,31 @@ type WritableAccount = {
     readonly value: bigint;
   }) => Promise<{ hash: string }>;
   readonly toReadOnlyAccount: () => Promise<ReadOnlyAccount>;
+};
+
+const resolveCreateVaultFromUserOp = async (
+  readOnly: ReadOnlyAccount,
+  userOpHash: string
+): Promise<CreateVaultResult | undefined> => {
+  const userOpReceipt = await readOnly.getUserOperationReceipt(userOpHash);
+
+  if (userOpReceipt === null || userOpReceipt === undefined) {
+    return undefined;
+  }
+
+  assertUserOperationSucceeded(userOpReceipt);
+
+  const receipt = await readOnly.getTransactionReceipt(userOpHash);
+  if (receipt === null || receipt === undefined) {
+    return undefined;
+  }
+
+  const vaultId = parseVaultCreatedFromLogs(receipt.logs);
+
+  return {
+    txId: asTxId(userOpHash),
+    vaultId
+  };
 };
 
 const ensureUsdcAllowance = async (
@@ -129,24 +168,26 @@ const ensureUsdcAllowance = async (
   await pollUntilUserOperationIncluded(readOnly, approveResult.hash);
 };
 
+// B3/B4: delegate inclusion polling + success reading to the single shared
+// helper (`@livestreak/wallet`): ≥60s budget with backoff (the old 40×50ms=2s
+// timed out on real bundlers) and success read as boolean|hex|number|string.
+// The shared poller throws a plain Error; we re-map its TIMEOUT to the
+// `receiptTimeoutError` shape so the pending-recovery path
+// (`readReceiptTimeoutUserOpHash` → markPending) still fires, and any other
+// failure (revert/missing-success) to the local `receiptFailure` runtime error.
 const pollUntilUserOperationIncluded = async (
   readOnly: ReadOnlyAccount,
-  userOpHash: string,
-  maxAttempts = 40,
-  delayMs = 50
+  userOpHash: string
 ): Promise<void> => {
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const receipt = await readOnly.getUserOperationReceipt(userOpHash);
-
-    if (receipt !== null && receipt !== undefined) {
-      assertUserOperationSucceeded(receipt);
-      return;
+  try {
+    await pollUntilUserOperationIncludedShared(readOnly, userOpHash, { timeoutMs: 60_000 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("Timed out waiting for UserOperation receipt")) {
+      throw receiptTimeoutError(userOpHash);
     }
-
-    await sleep(delayMs);
+    throw receiptFailure(message);
   }
-
-  throw receiptFailure(`Timed out waiting for UserOperation receipt for ${userOpHash}`);
 };
 
 const assertUserOperationSucceeded = (receipt: unknown): void => {
@@ -162,15 +203,6 @@ const assertUserOperationSucceeded = (receipt: unknown): void => {
   if (success === false) {
     throw receiptFailure("UserOperation included but reverted");
   }
-};
-
-const readUserOperationSuccess = (receipt: Record<string, unknown>): boolean | undefined => {
-  const direct = receipt["success"];
-  if (typeof direct === "boolean") {
-    return direct;
-  }
-
-  return undefined;
 };
 
 const receiptFailure = (message: string): LiveStreakRuntimeError =>
@@ -197,11 +229,6 @@ const classifySendFailure = (error: unknown): LiveStreakRuntimeError => {
     message: `UserOperation send failed: ${message}`
   });
 };
-
-const sleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;

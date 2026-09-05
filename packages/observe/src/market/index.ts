@@ -20,7 +20,6 @@ export { applyMarketLifecycleToBoard } from "./board.js";
 export {
   forkMarketRegistrationIfNeeded,
   resolveMarketRegistrarFromOptions,
-  resetMarketRegistrationRunsForTests,
   runMarketRegistrationLifecycle
 } from "./registration.js";
 export type { MarketRegistrationForkInput } from "./registration.js";

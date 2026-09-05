@@ -9,17 +9,16 @@ export interface StewardPanelSummary {
   readonly watchedSubjectCount: number;
   readonly findingCount: number;
   readonly pendingPlanCount: number;
-  readonly completedPlanCount: number;
   readonly criticalFindingCount: number;
 }
 
 export interface StewardPanelView {
   readonly runtimeId: string;
+  readonly revision?: number;
   readonly watchedSubjects: readonly StewardSubject[];
   readonly latestFindings: readonly StewardFinding[];
   readonly latestDecision?: StewardDecision;
   readonly pendingActionPlan?: StewardActionPlan;
-  readonly completedActionPlans: readonly StewardActionPlan[];
   readonly lastError?: string;
   readonly updatedAtMs?: number;
   readonly summary?: StewardPanelSummary;

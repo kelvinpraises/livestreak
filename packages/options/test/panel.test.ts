@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asMarketId } from "../src/model/index.js";
+import { asMarketId, asTokenId, asVaultId, priceOf } from "../src/model/index.js";
 import { projectOptionsPanel } from "../src/bridge/panel/project.js";
 import { readUserOptionsSnapshot } from "../src/flows/snapshot.js";
 import {
@@ -21,6 +21,8 @@ describe("projectOptionsPanel", () => {
 
     const vault = panel.markets[0]?.vaults[0];
     expect(vault?.pools.totalUSDC).toBe("279000000");
+    expect(vault?.pools.sharePriceYes).toBe(priceOf(94_000_000n).toString());
+    expect(vault?.pools.sharePriceNo).toBe(priceOf(185_000_000n).toString());
     expect(panel.markets[0]?.totals.pooledUSDC).toBe("279000000");
   });
 

@@ -134,30 +134,31 @@ The package should model TEE attestation refs and steward identity. It should no
 packages/steward/src/
   index.ts              re-exports only
 
-  model/
-    subject.ts          StewardSubject
-    finding.ts          StewardFinding
-    decision.ts         StewardDecision
-    action-plan.ts      StewardActionPlan
-    panel.ts            StewardPanelView
-    index.ts
+  bridge/
+    bridge.ts           createStewardBridge (plans only — edge executes)
+    types.ts            scopes + StewardBridge interface
+    scope.ts            capability authorization
+    panel/              panel + functions registry projection
 
-  facts/                StewardFact + TeeAttestationRef metadata
+  workflow/
+    facts/              StewardFact + TeeAttestationRef metadata
+    rules/              pure rule evaluation
+    decision/           pure decision policy
+    action/             pure action planning
+
+  model/                subject, finding, decision, action-plan, panel view
   validate/             subject/finding/decision/action-plan validators
-  rules/                pure rule evaluation
-  decision/             pure decision policy
-  action/               pure action planning
-  panel/                panel projection
+  runtime/              injected fact-source loop, board, revision snapshot
 ```
 
 Dependency order:
 
-1. `model/` + `facts/`
+1. `model/` + `workflow/facts/`
 2. `validate/`
-3. `rules/`
-4. `decision/`
-5. `action/`
-6. `panel/`
+3. `workflow/rules` → `decision` → `action`
+4. `bridge/panel/`
+5. `runtime/`
+6. `bridge/`
 
 May import: `@livestreak/core`, `@livestreak/contracts` when write encoders exist, and `@livestreak/schema` for shared public shapes.
 
@@ -165,7 +166,7 @@ Must **not** depend on `@livestreak/options` or `@livestreak/bookmaker`.
 
 ## Core API Target
 
-Public functions should feel like:
+Public surface should feel like:
 
 ```ts
 evaluateStewardRules(subject, facts, ruleset) -> StewardFinding[]
@@ -174,7 +175,14 @@ chooseStewardDecisions(findings, policy) -> StewardDecision[]
 
 planStewardActions(decisions, actionContext) -> StewardActionPlan[]
 
-projectStewardPanel(stateOrSnapshot) -> StewardPanelView
+createStewardRuntime(config) -> { refresh, readBoard, readPanel, subscribeBoard, ... }
+
+createStewardBridge({ runtime }) -> {
+  readBoard(caller),
+  readControls(caller),      // StewardControlsView + functions registry
+  callAction(caller, env),   // returns StewardActionPlan — does NOT execute
+  subscribeBoard(caller, listener)
+}
 ```
 
 Not:
@@ -185,7 +193,7 @@ createVault
 streamFunds
 storeForumThread
 runTeeEnclave
-autoResolveEverything
+executeContractWrite   // edge only
 ```
 
 ## First Build Slice

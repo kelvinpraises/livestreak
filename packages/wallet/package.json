@@ -61,6 +61,10 @@
       "bare": "./bare.js",
       "default": "./dist/index.js"
     },
+    "./keystore": {
+      "types": "./dist/keystore.d.ts",
+      "default": "./dist/keystore.js"
+    },
     "./package": {
       "default": "./package.json"
     }

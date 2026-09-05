@@ -2,14 +2,12 @@
 
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import type { TxId } from "../chains/types.js";
+import type { CreateVaultActionResult } from "./types.js";
 import type { CreateVaultIntent } from "../model/write-intent.js";
-import { validateCreateVaultIntent } from "../validate/write-intent.js";
+import { validateCreateVaultIntent } from "../model/validate.js";
 import { authorizeBridgeCaller } from "./scope.js";
 import type {
   BookmakerBridge,
-  BridgeCaller,
-  CallActionEnvelope,
   CreateBookmakerBridgeInput
 } from "./types.js";
 import {
@@ -94,7 +92,7 @@ const dispatchWriterAction = async (
   action: string,
   args: unknown,
   nowMs: number
-): Promise<TxId> => {
+): Promise<CreateVaultActionResult> => {
   if (action !== "createVault") {
     throw new LiveStreakConfigError({
       message: `Unsupported bookmaker bridge action: ${action}`,
@@ -111,7 +109,8 @@ const dispatchWriterAction = async (
 
   const intent = parseCreateVaultIntentFromArgs(args as Record<string, unknown>, nowMs);
   const result = await runtime.createVaultOnce(intent, nowMs);
-  return result.result.txId;
+  // P1: return the vaultId the runtime already produced (previously dropped).
+  return { txId: result.result.txId, vaultId: result.result.vaultId };
 };
 
 const parseCreateVaultIntentFromArgs = (args: Record<string, unknown>, nowMs: number): CreateVaultIntent => {

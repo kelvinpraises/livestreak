@@ -1,6 +1,7 @@
+// --- exports ---
+
 export { createBookmakerBridge } from "./bridge.js";
-export { projectBookmakerPanel } from "./panel/index.js";
-export type { BookmakerPanelSnapshot } from "./panel/index.js";
+export { authorizeBridgeCaller, requireAnyScope } from "./scope.js";
 export type {
   BookmakerBridge,
   BridgeCaller,
@@ -15,4 +16,5 @@ export {
   bridgeBoardSubscribeScope,
   bridgeControlsReadScope
 } from "./types.js";
-export { authorizeBridgeCaller, requireAnyScope } from "./scope.js";
+export { projectBookmakerPanel } from "./panel/index.js";
+export type { BookmakerPanelSnapshot } from "./panel/index.js";

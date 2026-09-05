@@ -128,8 +128,12 @@ describe("worker loop", () => {
     });
   });
 
-  it("returns max-turns-exceeded when the loop cannot finish in time", async () => {
-    const frameCount = 8;
+  // O1: the budget counts CONSECUTIVE no-progress (idle) turns, not raw frame
+  // turns — so a long run is never killed by content length. A large synthetic
+  // run (well beyond the old ~2048-frame/68s ceiling) completes even with a tiny
+  // idle budget, because every producing turn resets the idle counter.
+  it("completes a long run without hitting the turn budget (length-independent)", async () => {
+    const frameCount = 5000;
     const driver = createSyntheticCaptureDriver();
     const captureConfig = {
       ...defaultSyntheticCaptureConfig,
@@ -139,7 +143,7 @@ describe("worker loop", () => {
     const validatedConfig = await Effect.runPromise(driver.validate(captureConfig));
     const delivered: number[] = [];
     const sinkId = "memory-test";
-    const runId = "run_test_max_turns";
+    const runId = "run_test_long_run";
     const bus = await Effect.runPromise(
       createControlBus({
         runId,
@@ -154,13 +158,15 @@ describe("worker loop", () => {
         manifest: createPassthroughVideoManifest(),
         sinks: createMemorySinkRecord(sinkId, delivered),
         bus,
-        maxTurns: 2
+        // Tiny idle budget: would have killed even an 8-frame run under the old
+        // raw-turn cap, yet a 5000-frame run still reaches `stopped`.
+        maxTurns: 4
       })
     );
 
-    expect(result.outcome).toBe("max-turns-exceeded");
-    expect(result.snapshot.lifecycle).toBe("failed");
-    expect(result.snapshot.error).toContain("maxTurns");
+    expect(result.outcome).toBe("stopped");
+    expect(result.snapshot.lifecycle).toBe("stopped");
+    expect(delivered).toHaveLength(frameCount);
   });
 
   it("stops from Board stop request before natural eos", async () => {

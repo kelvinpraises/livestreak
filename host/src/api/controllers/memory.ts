@@ -1,6 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
-import type { HostRouteDeps } from "../deps.js";
-import { asyncHandler, sendRouteResult } from "../respond.js";
+import type { HostRouteDeps } from "../../deps.js";
+import { asyncHandler, sendRouteResult } from "../middleware/respond.js";
 import { handleMemoryAccess } from "../../services/walrus/memory/routes.js";
 
 // --- exports ---

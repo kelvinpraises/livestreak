@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command, Options } from "@effect/cli";
 import { Console, Effect, Option } from "effect";
-import { createCreatorWallet } from "../chains/evm.js";
-import { createHostClient } from "../edges/host.js";
-import { publishVod } from "../edges/market.js";
-import { runProducerCapture } from "../edges/observe.js";
+import { createCreatorWallet, publishVod } from "../adapters/onchain.js";
+import type { OnChainStreamState } from "../adapters/onchain.js";
+import { createHostClient } from "../adapters/host.js";
+import { runProducerCapture } from "../adapters/observe.js";
 import { resolveOperator } from "../gateway/identity.js";
+import { resolvePassword } from "../gateway/password.js";
 import { defaultInitDocPath, loadInitDoc, saveInitDoc } from "../prefs/init-doc.js";
 import { renderHostHealth, renderProduceResult } from "../render/output.js";
 
@@ -19,18 +20,8 @@ export interface ProduceOutcome {
   readonly vodUrl: string;
   readonly goLiveTx: string;
   readonly setEndedTx: string;
-  readonly streamState: import("../edges/market.js").OnChainStreamState;
+  readonly streamState: OnChainStreamState;
 }
-
-const readPassword = (password: string | undefined): string => {
-  const resolved = password ?? process.env["LIVESTREAK_PASSWORD"];
-  if (resolved === undefined || resolved.length === 0) {
-    throw new Error(
-      "Operator password required: set LIVESTREAK_PASSWORD or pass --password"
-    );
-  }
-  return resolved;
-};
 
 const assertReadableFile = async (path: string): Promise<void> => {
   await access(path);
@@ -44,7 +35,7 @@ export const runProduce = async (input: {
 }): Promise<ProduceOutcome> => {
   const configPath = input.configPath ?? defaultInitDocPath;
   const doc = await loadInitDoc(configPath);
-  const { seed } = resolveOperator(readPassword(input.password));
+  const { seed } = resolveOperator(await resolvePassword(input.password));
 
   await assertReadableFile(input.videoPath);
 

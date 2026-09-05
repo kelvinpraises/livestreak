@@ -117,6 +117,9 @@ contract StewardRegistry is Ownable {
     function _requireMarketSteward(bytes32 vaultId) internal view {
         bytes32 marketId = Vault(protocol.vault()).marketId(vaultId);
         address effective = effectiveSteward(marketId);
+        // E1 TODO: if a `removeSteward` path is ever added, also re-assert `stewards[effective]`
+        // here so a de-registered (but still assigned) steward cannot continue acting. No live risk
+        // today — there is no removal path, so an assigned steward is always registered.
         require(effective != address(0), "StewardRegistry: no steward");
         require(msg.sender == effective, "StewardRegistry: not market steward");
     }

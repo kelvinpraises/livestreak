@@ -4,95 +4,77 @@ LiveStreak frontend (TanStack Start + React 19, Vite 7). Browser SPA/SSR.
 
 ---
 
-## ⚠️ Wallet architecture — interim, must refactor
+## ✅ Wallet layering — DONE (slice 1, 2026-06-21)
 
-**Current (interim, stopgap):** `src/hooks/useStealthWallet.ts` instantiates
-`@livestreak/wallet` (`WalletManagerEvmErc4337`) directly inside the app and
-exposes it through `WalletContext`. This was the fastest path to a building app
-after dropping Circle, but it is the **wrong layering** — the app should not
-import the wallet SDK at all.
-
-**Intended design:** the app's only wallet responsibilities are
-
-1. **Seed interface** — derive the seed from the user's password
-   (`secret = sha256("livestreak-stealth-v1" + password)`; testnet-only, replace
-   with real auth later).
-2. **Config assembly** — build the `WalletInit` / `EvmWalletInitConfig` object using
-   the Effect Schema in **`@livestreak/schema`** (`src/wallet.ts`). `config/contracts.ts`
-   `walletConfig()` already returns this shape; it should be validated against the
-   schema and typed from it.
-
-The app then **passes `{ seed, WalletInit }` into the options SDK**
-(`@livestreak/options`). The **options SDK owns `@livestreak/wallet`**: it
-instantiates the account and builds its own `ContractWriter` for the write
-transport. The app never touches `@livestreak/wallet`.
-
-### Refactor steps (blocked on options-SDK work)
-
-- [ ] **options SDK:** add a wallet integration that accepts `{ seed, WalletInit }`
-      (or a derived account) and produces the `ContractWriter` its
-      `write/transport.ts` already expects. Decide whether options imports
-      `@livestreak/wallet` directly or consumes a `contractWriterFromAccount(account)`
-      shim injected at the edge.
-- [ ] **app:** reduce `useStealthWallet` to a seed + `WalletInit` provider; delete
-      the direct `WalletManagerEvmErc4337` usage; obtain address/balance/write
-      capability from the options runtime instead.
-- [ ] Validate `walletConfig()` output against `@livestreak/schema` `WalletInit`.
-- [ ] Remove `@livestreak/wallet` from `app/package.json` once the app no longer
-      imports it.
-
-### Notes
-
-- The wallet edge **fails soft**: `@livestreak/wallet` is lazy-imported and every
-  wallet operation warns (never hard-throws), so a wallet/bundling failure can't
-  crash the app. Keep this property through the refactor.
-- Bundler/paymaster come from `VITE_BUNDLER_URL` / `VITE_PAYMASTER_URL` (host
-  server); AA/Safe addresses are the CREATE2 defaults in `config/contracts.ts`.
+The app no longer imports `@livestreak/wallet`. It derives `secret = sha256("livestreak-stealth-v1"+password)`,
+fetches host `GET /aa/descriptor`, builds `EvmWalletInitConfig`/`WalletInit` (validated against `@livestreak/schema`),
+and hands `{ seed, WalletInit, addresses }` to `@livestreak/options`, which owns the wallet + write transport.
+`useStealthWallet.ts` + fictional `config/contracts.ts` ABIs deleted; `WalletContext` is a thin shim over
+`OptionsContext` / mock-off. Slice 1 committed as `6acf67f`.
 
 ---
 
 ## Build / toolchain notes
 
-- Pinned **Vite 7** + `@vitejs/plugin-react` 5 (not 8/6): the wallet SDK needs
-  `vite-plugin-node-polyfills`, which does not work under Vite 8's rolldown
-  bundler. Matches xylkstream's proven stack.
-- Node polyfills are **client-only** with `protocolImports: false` so Nitro's
-  server adapter keeps native `node:` builtins. See `vite.config.ts`.
-- `app` is a **standalone npm install** (its own toolchain + floating
-  `@tanstack/*` versions), intentionally **not** part of the root npm workspace.
+- Pinned **Vite 7** + `@vitejs/plugin-react` 5 (node polyfills break under Vite 8's rolldown). Client-only
+  polyfills, `protocolImports: false`. `app` is a **standalone npm install**, not in the root workspace.
+- Build `packages/schema` + `packages/options` (`tsc`) before `app` check/build.
+- Heavy transitive graph: `npm run lint` needs `NODE_OPTIONS=--max-old-space-size=4096`, `build` needs `=8192`
+  (plain runs OOM, exit 134).
+- Dev note: after a `package.json`/lockfile change, the first cold request can 500 during Vite optimizeDeps
+  re-optimization (module graph invalidated mid-render); it self-heals on the next request.
 
 ---
 
 ## Cleanup done (2026-06)
 
-- [x] Removed Circle modular wallets (`@circle-fin/modular-wallets-core`) + passkey hook.
-- [x] Dropped the `/control` route and the legacy `@livestreak/control-surface`
-      dependency (the only tie to `context/quary`).
-- [x] Removed the `pnpm` block; standardized on npm.
-- [x] `npm run build` green (client + SSR + Nitro).
+- [x] Removed Circle wallets + passkey; dropped `/control` + `@livestreak/control-surface`; pnpm→npm.
+- [x] 2026-06-20 hygiene: `$FLOW`→`$LVST`, fake-toast/two-option-modal removed, dead STREAM CTA wired.
+- [x] 2026-06-20 bug-fix: `StreamSlider` neutral center thumb + init `x`; stake/unstake grey-out.
 
 ---
 
-## 2026-06-20 — hygiene + dead-interaction slice (done, verified)
+## Options integration (multichain, via `@livestreak/options` **bridge**)
 
-- [x] Deleted orphans `hooks/useWallet.ts`, `components/wallet/SessionKey.tsx`.
-- [x] User-visible `$FLOW`→`$LVST` (`formatFlow`→`formatLvst`); chain copy neutralized (no Mantle/Arc); stream nav logo `F`→`L`.
-- [x] Removed the fake 4s win-toast; collapsed the fake two-option connect modal to a single password flow.
-- [x] Wired the dead STREAM CTA → mock `handleStream` (seam for options `writer.fund`) + `'stream'` toast variant.
-- [x] Stake/unstake controls added to `BalanceBar` (wired to `useFlow`).
-- check / lint / build green; master-prompter verified against the diff.
+Conform outward: consume `createOptionsBridge({ runtime })` only (`readBoard`/`readControls`/`subscribeBoard`/
+`callAction`/`previewAccrual`) — never `model/`/`chains/` internals, never app-side viem reads. Gaps → options inbox.
 
-## Frontend backlog
+### Slice 1 — descriptor connect + board reads + one `fund` write — DONE 2026-06-21 (verified, `6acf67f`)
+- [x] `OptionsProvider` + connect (`resolveOptionsAccountAddress`) + `readBoard`/`subscribeBoard` via `adapters/optionsBoard.ts`.
+- [x] STREAM CTA → `callAction('fund', …)`; USDC from `panel.user.usdcBalanceUSDC`; `useStealthWallet`/`contracts.ts` gone.
+- Verified: check exit 0; atomic-string units correct; off-mode `/`+`/stream` HTTP 200.
 
-### Bug-fix slice (pure UI, no options dep) — prompt active
-- [ ] `StreamSlider` thumb shows a pink/green blend at center (`useTransform` over `[-5,5]`) — must be neutral when `side===null`; reuse the existing `sideColor` for the thumb, drop the unused `thumbColor` motion value.
-- [ ] `StreamSlider` init `x` to match `initialSide`/`initialRate` so an existing position doesn't render a centered-but-colored thumb (thumb, fill, color must agree).
-- [ ] Stake / Unstake buttons grey-out (disable) when amount is invalid / exceeds available / staked.
+### Slice 2 — controls registry (`functions[]`) + claims/stake UI — DONE 2026-06-21 (verified)
+- [x] `OptionsContext`: `readControls`→`controls`; `findFunction`; `claimWin`/`claimLoss`/`stake`/`unstake`/`claimDividends`
+      building grounded Inputs from `target` + address.
+- [x] Green `withdraw` / red `claimLossLvst` on resolved vaults (`VaultCard`, `MyPositions`) via `OptionsActionButton`;
+      `BalanceBar` stake/unstake/dividends from `functions[]`; enable/tooltip from `fn.disabled`/`disabledReason`.
+- [x] Deposit-duration UX: removed `chainRate * 50n` magic; `fundDepositForDuration` (60-min default, 15–120 selector,
+      "Funding $X over Y min").
+- Verified by master prompter: check exit 0 (re-run); lint/build/test green; audits clean; args match
+      `WithdrawInput`/`ClaimLossLvstInput`/`StakeLvstInput`/`UnstakeLvstInput`; `parseUnits(...,18)` for amounts;
+      **no hot UI added** (dormant mock UI only). Off-mode all routes HTTP 200 (one-time cold-start 500 was a Vite
+      optimizeDeps race, self-healed — not a code regression).
 
-### Options integration (Tier 2 — design-defense round FIRST, then implement)
-Wire `app/` to `@livestreak/options` (`createOptionsChain`/`createOptionsRuntime`/`createOptionsBridge`), chain-dispatched on `walletInit.chain`; retire `config/contracts.ts` fictional ABIs; adopt the NFT-lane model. Folds in the user-requested features:
-- [ ] Claim affordances: claim-for-win (green) + claim-for-loss (red) buttons → options `withdraw` / `claimLossLvst` (reads `claimable` / `lossClaimable`).
-- [ ] Stake grey-out driven by the real options stake flag (supersedes the mock disable above).
-- [ ] "Cost of newer shares per streamed funds" — bonding-curve price preview near the slider (`priceOf` / `sharesPerUsdc` / `projectStreamAccrual` / `OptionsStreamAccrualView`).
-- [ ] NFT transfer panel — list owned MarketDriver position NFTs (`tokensOfOwner` / `OptionsNft`) + transfer (`transferNft` / `approveNft` / `setApprovalForAll`). Each market (= a stream) has one position NFT bundling the user's lanes.
-- [ ] Chain selector UI + wallet-layering refactor (app hands `{seed, WalletInit}` to options; stops importing `@livestreak/wallet`).
+### Slice 3 — Funding UX: fund-gating (R10) + share-cost/accrual preview (R11) — DONE 2026-06-21 (verified)
+- [x] **Fund gating (R10):** `useVaultFundingControls` reads `fund`/`stopFunding` from `functions[]`; FocusedVault `canStream`
+      requires `!selectedFundFn.disabled` so a funded vault cannot fire a revert; slider locks + shows Stop (`stopFunding`).
+- [x] **Share-cost (R11):** adapter maps `pools.sharePriceYes/No` (÷1e6); slider shows "Next share ~$X USDC";
+      `useAccrualPreview` debounces `bridge.previewAccrual` (250ms). Share scale grounded `SHARE_SCALE=1e6`.
+- Verified by master prompter: check exit 0 (re-run); lint/build/test green; audits clean (no curve math/wallet/deep-imports);
+      off-mode `/`+`/stream` HTTP 200 (independently re-curled). Collapsed-card YES/NO buttons only `setExpanded` (harmless).
+
+### Slice 4 — NFT transfer panel + exit-burn badge removal — ACTIVE (prompt written)
+- [ ] NFT transfer panel: list `panel.nfts[]` (tokenId/marketId/laneCount/owner/approved/isOperator); transfer/approve/
+      setApprovalForAll via `functions[]` (`target.kind==='nft'` + global), inputs `TransferNftInput {from,to,tokenId}`/
+      `ApproveNftInput {operator,tokenId}`/`SetApprovalForAllInput {operator,approved}`; viem `isAddress` validation.
+- [ ] Remove dead "EXIT BURN %" badge (permanent, no on-chain source): drop mock `exitBurn` + badge blocks in
+      `VaultCard`/`FocusedVault`. Per `from-contracts__disable-exit-burn.md` + `from-options__new-capabilities.md`.
+
+### Slice 5 — Sui — blocked (options `chains/sui` throws; host AA is EVM-only).
+
+### Open findings / non-blocking
+- **Runtime acceptance gate:** live path (`VITE_OPTIONS_MODE=on` + anvil 31337 + host:8787 → connect → board →
+  fund/claim TxId) still **unproven** — only static + off-mode boot verified.
+- **No hot/severity UI** from options (adapter maps `hot`→`open`); `exitBurnBps` is permanently `undefined`.
+- Placeholders to revisit: `apy: 14.2`, position `minute` (wall-clock) — no options source.

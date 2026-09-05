@@ -5,7 +5,7 @@ import {
   pointerSchemeToStorageScheme,
   STORAGE_SCHEME,
   validateStorageId
-} from "../src/edges/market.js";
+} from "../src/adapters/onchain.js";
 
 const marketId =
   "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as const;

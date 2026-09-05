@@ -25,20 +25,57 @@ export interface AaServerConfig {
   readonly supportedOperations: readonly AaOperationKind[];
   readonly paymasterPath: string;
   readonly chains: readonly AaChainConfig[];
+  /**
+   * H1: when true the paymaster route refuses to sponsor unless the request
+   * carries a matching bearer token. Set on any non-loopback bind so a public
+   * host cannot be drained of free gas via the open `dev_open` mode.
+   */
+  readonly requirePaymasterAuth: boolean;
+  /** Bearer token the paymaster route checks when `requirePaymasterAuth`. */
+  readonly paymasterAuthToken?: string;
 }
 
 export const readAaServerConfig = (config: HostServerConfig): AaServerConfig => {
-  void config;
+  const loopback = isLoopbackBind(config.bindHost);
+  const authToken = readPaymasterAuthToken();
   const fileChains = readFileChains();
   const envChain = buildEnvChain();
   const chains = mergeChains(fileChains, envChain);
 
+  // H1 posture: `dev_open` (open sponsorship) is only safe on a loopback bind.
+  // On any public/non-loopback bind we require a bearer token; the advertised
+  // sponsorship mode reflects whether sponsorship is even available.
+  const sponsorshipMode: AaSponsorshipMode = loopback
+    ? "dev_open"
+    : authToken === undefined
+      ? "none"
+      : "paymaster_signed";
+
   return {
-    sponsorshipMode: "dev_open",
+    sponsorshipMode,
     supportedOperations: ["user_operation", "safe_module_call"],
     paymasterPath: "/aa/paymaster",
-    chains
+    chains,
+    requirePaymasterAuth: !loopback,
+    ...(authToken === undefined ? {} : { paymasterAuthToken: authToken })
   };
+};
+
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
+
+// `0.0.0.0` binds all interfaces (publicly reachable) and is intentionally
+// treated as NON-loopback so it cannot run open sponsorship.
+const isLoopbackBind = (bindHost: string): boolean => {
+  const host = bindHost.trim().toLowerCase();
+  if (host === "0.0.0.0" || host === "::") {
+    return false;
+  }
+  return LOOPBACK_HOSTS.has(host) || host.startsWith("127.");
+};
+
+const readPaymasterAuthToken = (): string | undefined => {
+  const value = process.env.LIVESTREAK_AA_PAYMASTER_AUTH_TOKEN;
+  return value === undefined || value.length === 0 ? undefined : value;
 };
 
 export const resolveAaChain = (

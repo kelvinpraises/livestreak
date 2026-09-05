@@ -58,7 +58,12 @@ describe("bookmaker bridge createVault wiring", () => {
     const second = await bridge.callAction(caller, envelope, nowMs);
 
     expect(createCalls).toBe(1);
-    expect(second).toBe(first);
+    // P1: callAction now returns { txId, vaultId } (vaultId previously dropped).
+    expect(first).toEqual({
+      txId: `0x${"aa".repeat(32)}`,
+      vaultId: `0x${"22".repeat(32)}`
+    });
+    expect(second).toEqual(first);
   });
 
   it("rejects non-bigint creatorStake without calling the writer", async () => {

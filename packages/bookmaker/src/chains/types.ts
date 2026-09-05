@@ -31,6 +31,7 @@ export interface BookmakerChainReader {
 
 export interface BookmakerChainWriter {
   readonly createVault: (input: CreateVaultInput) => Promise<CreateVaultResult>;
+  readonly confirmCreateVault: (userOpHash: TxId) => Promise<CreateVaultResult | undefined>;
 }
 
 export interface BookmakerChain {

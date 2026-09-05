@@ -14,6 +14,8 @@ export type {
   OptionsProtocolSummary,
   OptionsSessionPnlView,
   OptionsStreamAccrualView,
+  OptionsAccrualPreview,
+  PreviewAccrualInput,
   OptionsStreamState,
   OptionsStreamStatus,
   OptionsUserOptionsSnapshot,
@@ -50,6 +52,7 @@ export {
   projectSessionPnl,
   projectShares,
   projectStreamAccrual,
+  projectAccrualPreview,
   segMath,
   SHARE_SCALE,
   sharesPerUsdc,
@@ -78,9 +81,16 @@ export type {
   OptionsProtocolPanel,
   OptionsUserPanel,
   OptionsVaultPanel,
-  OptionsControlsView
+  OptionsControlsView,
+  OptionsFunctionTarget,
+  OptionsFunctionTargetKind,
+  OptionsFunctionView
 } from "./bridge/panel/index.js";
-export { projectOptionsPanel, projectOptionsControls } from "./bridge/panel/index.js";
+export {
+  projectOptionsPanel,
+  projectOptionsControls,
+  projectOptionsFunctions
+} from "./bridge/panel/index.js";
 export type {
   BridgeCaller,
   CallActionEnvelope,
@@ -113,8 +123,10 @@ export type {
   OptionsReader,
   OptionsWriter,
   OptionsContractAddresses,
+  OptionsSuiObjectIds,
   TxId,
   FundStreamInput,
+  AdvanceInput,
   SetLanesInput,
   StopFundingInput,
   StopAllFundingInput,
@@ -132,5 +144,7 @@ export {
   createOptionsChain,
   resolveOptionsAccountAddress,
   validateOptionsChainConfig,
+  validateOptionsSuiObjectIds,
   asTxId
 } from "./chains/index.js";
+export { createOptionsSuiConfig } from "./chains/sui/config.js";

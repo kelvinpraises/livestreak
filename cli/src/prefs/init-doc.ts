@@ -24,6 +24,8 @@ export interface LivestreakRunCache {
   readonly marketId?: `0x${string}`;
   readonly tokenId?: string;
   readonly status?: "pending" | "registered" | "ended" | "failed";
+  /** AA wallet address cached by `livestreak login`. Seed is never stored. */
+  readonly operator?: `0x${string}`;
 }
 
 /** Options contract addresses + vaultDriver for operator vault-seed. */
@@ -188,6 +190,9 @@ const readRun = (value: unknown): LivestreakRunCache => {
     record["status"] === "ended" ||
     record["status"] === "failed"
       ? { status: record["status"] }
+      : {}),
+    ...(typeof record["operator"] === "string"
+      ? { operator: record["operator"] as `0x${string}` }
       : {})
   };
 };

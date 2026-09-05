@@ -19,11 +19,11 @@ export type {
   StewardFact,
   StewardFactSource,
   TeeAttestationRef
-} from "./facts/index.js";
+} from "./workflow/facts/index.js";
 export {
   isTeeAttestationRef,
   STEWARD_FACT_SOURCES
-} from "./facts/index.js";
+} from "./workflow/facts/index.js";
 
 export {
   isStewardActionPlan,
@@ -49,25 +49,57 @@ export {
   validateStewardSubjectKind
 } from "./validate/index.js";
 
-export { evaluateStewardRules } from "./rules/index.js";
-export type { StewardRule, StewardRuleCondition, StewardRuleset } from "./rules/index.js";
+export {
+  evaluateStewardRules,
+  chooseStewardDecisions,
+  planStewardActions
+} from "./workflow/index.js";
+export type {
+  StewardRule,
+  StewardRuleCondition,
+  StewardRuleset,
+  StewardDecisionMapping,
+  StewardDecisionPolicy,
+  StewardActionContext
+} from "./workflow/index.js";
 
-export { chooseStewardDecisions } from "./decision/index.js";
-export type { StewardDecisionMapping, StewardDecisionPolicy } from "./decision/index.js";
+export {
+  createStewardBridge,
+  projectStewardControls,
+  projectStewardFunctions,
+  projectStewardPanel,
+  authorizeBridgeCaller,
+  bridgeActionScope,
+  bridgeBoardReadScope,
+  bridgeBoardSubscribeScope,
+  bridgeControlsReadScope
+} from "./bridge/index.js";
+export type {
+  BridgeCaller,
+  CallActionEnvelope,
+  CapabilityGrant,
+  CapabilityScope,
+  CreateStewardBridgeInput,
+  StewardBridge,
+  StewardControlsView,
+  StewardFunctionTarget,
+  StewardFunctionView,
+  StewardPanelInput,
+  StewardStateSnapshot
+} from "./bridge/index.js";
 
-export { planStewardActions } from "./action/index.js";
-export type { StewardActionContext } from "./action/index.js";
-
-export { projectStewardPanel } from "./panel/index.js";
-export type { StewardPanelInput, StewardStateSnapshot } from "./panel/index.js";
-
-export { createStewardRuntime, validateStewardRuntimeConfig } from "./runtime/index.js";
+export {
+  createStewardRuntime,
+  validateStewardRuntimeConfig,
+  assembleBoard
+} from "./runtime/index.js";
 export type {
   ContractFactSource,
   HostFactSource,
   MemoryFactSource,
   ObserveFactSource,
   StewardActionPlanSink,
+  StewardBoard,
   StewardMemoryRememberInput,
   StewardMemorySink,
   StewardRuntime,

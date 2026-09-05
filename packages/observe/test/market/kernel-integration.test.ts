@@ -4,14 +4,11 @@ import { prepareObserveRun, startObserveRun } from "#run/kernel.js";
 import { createSyntheticKernelOptions } from "#test/helpers/runtime.js";
 import { createFakeMarketRegistrar } from "#test/helpers/fake-market-registrar.js";
 import { minimalEvmMarketRegistrationConfig } from "#test/helpers/market-config.js";
-import { resetMarketRegistrationRunsForTests } from "#market/registration.js";
 import { makeObserveRunSync } from "#test/helpers/observe-run.js";
 import { syntheticCaptureRunConfig } from "#test/helpers/run-config.js";
 
 describe("market registration kernel integration", () => {
   it("does not block the media worker when registration never resolves", async () => {
-    resetMarketRegistrationRunsForTests();
-
     const { options } = createSyntheticKernelOptions(3);
     const run = makeObserveRunSync(
       syntheticCaptureRunConfig("run_market_nonblocking", "/tmp/out.mp4")

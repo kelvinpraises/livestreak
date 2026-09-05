@@ -3,7 +3,7 @@ import {
   hostSimilarityResultToBookmaker,
   similarityQueryToHostRequest,
   vaultDraftToHostSimilarityDraft
-} from "../../src/similarity/host-adapter.js";
+} from "../../src/pipeline/similarity/host-adapter.js";
 import { vaultDraft } from "../helpers/fixtures.js";
 
 describe("similarity host adapter", () => {

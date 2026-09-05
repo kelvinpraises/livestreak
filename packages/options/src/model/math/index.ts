@@ -1,9 +1,12 @@
 export type {
   OptionsBoardState,
   OptionsStreamAccrualView,
+  OptionsAccrualPreview,
+  PreviewAccrualInput,
+  ProjectAccrualPreviewInput,
   ProjectStreamAccrualInput
 } from "./accrual.js";
-export { isAccrualFrozen, projectStreamAccrual } from "./accrual.js";
+export { isAccrualFrozen, projectStreamAccrual, projectAccrualPreview } from "./accrual.js";
 export type {
   OptionsSessionPnlView,
   ProjectSessionPnlInput,

@@ -1,16 +1,16 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import { planStewardActions } from "../action/plan.js";
-import type { StewardActionContext } from "../action/types.js";
-import type { StewardFact } from "../facts/fact.js";
-import { chooseStewardDecisions } from "../decision/choose.js";
-import type { StewardDecisionPolicy } from "../decision/types.js";
+import { planStewardActions } from "../workflow/action/plan.js";
+import type { StewardActionContext } from "../workflow/action/types.js";
+import type { StewardFact } from "../workflow/facts/fact.js";
+import { chooseStewardDecisions } from "../workflow/decision/choose.js";
+import type { StewardDecisionPolicy } from "../workflow/decision/types.js";
 import type { StewardActionPlan } from "../model/action-plan.js";
 import type { StewardDecision } from "../model/decision.js";
 import type { StewardFinding } from "../model/finding.js";
 import type { StewardSubject } from "../model/subject.js";
-import { evaluateStewardRules } from "../rules/evaluate.js";
-import type { StewardRuleset } from "../rules/types.js";
+import { evaluateStewardRules } from "../workflow/rules/evaluate.js";
+import type { StewardRuleset } from "../workflow/rules/types.js";
 import { validateStewardFact } from "../validate/fact.js";
 import type { StewardFactSources } from "./sources.js";
 import type { StewardRuntimeLastError } from "./store.js";

@@ -1,4 +1,3 @@
-import type { StewardFact } from "../facts/fact.js";
 import type { StewardSubject } from "../model/subject.js";
 
 // --- exports ---
@@ -25,5 +24,3 @@ export interface StewardFactSources {
   readonly observe: ObserveFactSource;
   readonly memory: MemoryFactSource;
 }
-
-export type StewardFactSourceReader = (subject: StewardSubject) => Promise<readonly StewardFact[]>;

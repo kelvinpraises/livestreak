@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { detectOpportunity } from "../../src/detection/evaluate.js";
-import { createEventKindDetector } from "../../src/detection/factories.js";
-import { buildVaultDraft } from "../../src/draft/build.js";
-import { chooseVaultAction } from "../../src/decision/choose.js";
+import { detectOpportunity } from "../../src/pipeline/detection/evaluate.js";
+import { createEventKindDetector } from "../../src/pipeline/detection/factories.js";
+import { buildVaultDraft } from "../../src/pipeline/draft/build.js";
+import { chooseVaultAction } from "../../src/pipeline/decision/choose.js";
 import { buildWriteIntentsFromDecision } from "../../src/model/write-intent.js";
 import { marketContext, similarityResult } from "../helpers/fixtures.js";
 

@@ -17,14 +17,18 @@ const nodeRequire = createRequire(import.meta.url)
 // @livestreak/wallet (vendored wdk-4337) is a Node/bare-runtime SDK. The browser
 // build needs node polyfills; the Nitro server build runs in real Node and must
 // keep native builtins. We therefore scope all polyfills to the client only.
+// Externalized from the Nitro *server* bundle (scope-level so subpaths + sibling
+// packages match): the wallet SDK and its native deps. Kept external so Rollup
+// never bundles their native code into the server output. @mysten/sui is added to
+// the same external list at the nitro() call below. With SSR disabled none of
+// these are evaluated server-side anyway (they load only in the RootApp client
+// chunk); externalizing just keeps the shell build light.
 const walletExternals = [
-  '@livestreak/wallet',
-  '@tetherto/wdk-wallet',
-  '@tetherto/wdk-wallet-evm',
-  '@safe-global/protocol-kit',
-  '@safe-global/relay-kit',
-  'sodium-javascript',
-  'bare-node-runtime',
+  /^@livestreak\/wallet(\/|$)/,
+  /^@tetherto\//,
+  /^@safe-global\//,
+  /^sodium-javascript(\/|$)/,
+  /^bare-node-runtime(\/|$)/,
 ]
 
 // vite-plugin-node-polyfills rewrites `buffer`/`process`/`global` imports to its
@@ -110,12 +114,19 @@ const config = defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['@livestreak/wallet'],
+    include: ['@livestreak/options'],
   },
   plugins: [
     nodePolyfillShimResolver(),
     devtools(),
-    nitro({ rollupConfig: { external: [/^@sentry\//, ...walletExternals] } }),
+    nitro({
+      // Externalized from the server bundle so Rollup never inlines their heavy /
+      // native code: @mysten/sui (large CJS) and the wallet's Holepunch deps. With
+      // SSR off they are only loaded client-side (RootApp lazy chunk), so the
+      // server/shell build never evaluates them — inlining @mysten here previously
+      // OOM'd the build, and externalizing it under SSR 500'd every route.
+      rollupConfig: { external: [/^@sentry\//, /^@mysten\//, ...walletExternals] },
+    }),
     ...clientScopedPolyfills({
       include: ['buffer', 'crypto', 'stream', 'assert', 'process', 'util', 'events'],
       globals: { Buffer: true, global: true, process: true },
@@ -127,7 +138,10 @@ const config = defineConfig({
       overrides: { fs: 'empty' },
     }),
     tailwindcss(),
-    tanstackStart(),
+    // Client-only SPA: there are no server functions or loaders, and the wallet/
+    // chain SDKs cannot run in the Node ESM server build. SSR is disabled; the
+    // server only prerenders a static shell (see __root.tsx -> RootApp lazy split).
+    tanstackStart({ spa: { enabled: true } }),
     viteReact(),
   ],
 })

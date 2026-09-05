@@ -222,3 +222,40 @@ fun test_conservation_seed_99999() {
     clock::destroy_for_testing(clock);
     ts::end(scenario);
 }
+
+
+// Move has no native fuzzer (this is why Sui's assurance here is lower than EVM's Foundry fuzz over
+// bound(seed,1,u128::MAX)). To narrow the gap we add a DENSE TABLE of extra fixed seeds chosen to
+// stress edges: 0 (min steps), seeds that bias toward warp-only / advance-only op mixes, boundary
+// multiples of wire::rate(), and seeds near the u64 ceiling. Each runs its own fresh stack (the
+// full-stack fixture is not re-entrant within a single test) and re-asserts the same invariant
+// total_deposits == skim + stop_all_refunds + withdraws + dust (dust <= DUST_TOLERANCE).
+//
+// NOTE: each seed is a separate #[test] (mirroring the seeds above) rather than a loop, because
+// repeated begin/end of the full protocol stack inside one test leaks shared-object inventory.
+fun run_one(seed: u64) {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    run_conservation_seed(&mut scenario, &mut clock, seed);
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test] fun test_conservation_seed_0() { run_one(0) }
+#[test] fun test_conservation_seed_2() { run_one(2) }
+#[test] fun test_conservation_seed_3() { run_one(3) }
+#[test] fun test_conservation_seed_5() { run_one(5) }
+#[test] fun test_conservation_seed_7() { run_one(7) }
+#[test] fun test_conservation_seed_11() { run_one(11) }
+#[test] fun test_conservation_seed_23() { run_one(23) }
+#[test] fun test_conservation_seed_64() { run_one(64) }
+#[test] fun test_conservation_seed_255() { run_one(255) }
+#[test] fun test_conservation_seed_256() { run_one(256) }
+#[test] fun test_conservation_seed_1024() { run_one(1024) }
+#[test] fun test_conservation_seed_65535() { run_one(65535) }
+#[test] fun test_conservation_seed_100003() { run_one(100003) }
+#[test] fun test_conservation_seed_1000003() { run_one(1000003) }
+#[test] fun test_conservation_seed_4294967295() { run_one(4294967295) }
+#[test] fun test_conservation_seed_4294967296() { run_one(4294967296) }
+#[test] fun test_conservation_seed_9999999967() { run_one(9999999967) }
+#[test] fun test_conservation_seed_u64_max() { run_one(18446744073709551615) }

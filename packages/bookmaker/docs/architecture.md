@@ -368,84 +368,67 @@ readUserPositions
 
 ## Reference shape — `src/`
 
+Six top-level regions (observe-style layout). Moves only — public exports unchanged.
+
 ```text
 packages/bookmaker/src/
-  index.ts              re-exports only
+  index.ts              re-exports only (6-region cluster)
 
   model/
     market-context.ts   BookmakerMarketContext
-    watch-source.ts     BookmakerWatchSource
+    watch-source.ts     BookmakerWatchSource, BookmakerWatchRef, BookmakerPanelView
     detection.ts        Detection
     vault-draft.ts      VaultDraft
     decision.ts         BookmakerDecision, skip reasons
     similarity.ts       query/result types (host protocol mirrors)
-    write-plan.ts       BookmakerWritePlan
-    panel.ts            panel view types
+    write-intent.ts     CreateVaultIntent, JoinVaultIntent, buildWriteIntentsFromDecision
+    idempotency.ts      vaultKey helpers
+    validate.ts         all model validators + ValidationResult primitives
     index.ts
 
-  validate/
-    market-context.ts   validateBookmakerMarketContext
-    watch-source.ts     validateBookmakerWatchSource
-    vault-draft.ts      validateVaultDraft
-    detection.ts        validateDetection
-    similarity.ts       validateSimilarityResult
-    decision.ts         validateBookmakerDecision
+  pipeline/
+    observation/        feed boundary, subscription input, event validation
+    detection/          PatternDetector, detectOpportunity
+    draft/              buildVaultDraft
+    similarity/         findSimilar, host adapter, discovery client
+    decision/           chooseVaultAction (pure policy)
     index.ts
 
-  detection/
-    types.ts            PatternDetector, detectOpportunity input/evaluation types
-    evaluate.ts         detectOpportunity
-    factories.ts        generic example detector factories (not exported from root)
+  chains/
+    evm/                reader, writer, encode, create-vault-recovery
+    sui/                stub
     index.ts
 
-  draft/
-    build.ts            buildVaultDraft from Detection + market context
+  flows/
+    originate.ts        originateVault
+    snapshot.ts         snapshotBookmakerPanel
     index.ts
 
-  similarity/
-    client.ts           BookmakerSimilarityClient shape
-    index.ts
-
-  decision/
-    choose.ts           chooseVaultAction (pure policy)
-    index.ts
-
-  write/
-    plan.ts             planBookmakerWrite as pure data intents
-    index.ts
-
-  panel/
-    project.ts          projectBookmakerPanel
-    index.ts
-
-  strategy/             (later slice)
-    detector.ts         PatternDetector interface
-    evaluate.ts         detectOpportunity, confidence policy
-    index.ts
-
-  runtime/              (later slice)
+  runtime/
     config.ts           BookmakerRuntimeConfig
+    validate.ts         validateBookmakerRuntimeConfig
     store.ts            in-memory agent state per marketId
-    loop.ts             watch → detect → decide → plan → execute
     runtime.ts          BookmakerRuntime public owner
+    idempotency.ts      at-most-once store
+    create-vault-once.ts
     index.ts
 
-  bridge/               (later slice)
+  bridge/
     panel/
-      project.ts        BookmakerPanel projection
-      types.ts
+      project.ts        projectBookmakerPanel
+      types.ts          BookmakerPanelSnapshot
     types.ts
     index.ts            callable edge
 ```
 
 Dependency order (bottom → top):
 
-1. `model/`, `validate/`
-2. `detection/`, `draft/`
-3. `similarity/`, `decision/`
-4. `write/`
-5. `panel/`
-6. `strategy/`, `runtime/`, `bridge/` (later slices)
+1. `model/`
+2. `pipeline/` (`observation` → `detection` → `draft` → `similarity` → `decision`)
+3. `chains/`
+4. `flows/`
+5. `runtime/`
+6. `bridge/`
 
 May import: `@livestreak/host`.
 Must **not** depend on `@livestreak/options` or import contract ABI fragments — bookmaker creates vaults; options consumes them; contracts execution stays at the edge.

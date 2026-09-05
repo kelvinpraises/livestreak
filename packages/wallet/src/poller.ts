@@ -1,0 +1,108 @@
+// Shared userOperation inclusion poller (systemic P0: POLL + SUCCESS).
+//
+// Previously FOUR identical copies polled with maxAttempts=40, delayMs=50 = 2s total and accepted
+// success ONLY as boolean. relay-kit returns the hash WITHOUT awaiting inclusion, so on a real bundler
+// 2s is far too short (every chain write "times out"); and a bundler returning success as "0x1"/1
+// produced false-failures. This is the single source of truth. See scope-foundations.md (C3).
+//
+// Wallet stays Effect-free: this throws plain `Error`. Effect callers (observe) wrap it in
+// `Effect.tryPromise` and map to their LiveStreakRuntimeError; promise callers classify at the call-site.
+
+export interface UserOperationReceiptReader {
+  getUserOperationReceipt(hash: string): Promise<unknown>;
+}
+
+export interface PollUserOperationOptions {
+  readonly timeoutMs?: number; // default 60_000 (was effectively 2_000 — the bug)
+  readonly intervalMs?: number; // default 1_000 (first delay)
+  readonly backoff?: number; // default 1.5 (multiplier, capped)
+  readonly maxIntervalMs?: number; // default 5_000
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Canonical success reader: accepts boolean | number | hex/decimal/textual string. `undefined` =
+// unknown shape (caller throws "missing success").
+export const readUserOperationSuccess = (receipt: unknown): boolean | undefined => {
+  if (!isRecord(receipt)) {
+    return undefined;
+  }
+
+  const value = receipt["success"];
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+
+  if (typeof value === "string") {
+    const lower = value.toLowerCase();
+    if (lower === "0x1" || lower === "1" || lower === "true") {
+      return true;
+    }
+    if (lower === "0x0" || lower === "0" || lower === "false") {
+      return false;
+    }
+    if (lower.startsWith("0x")) {
+      const n = Number(value);
+      return Number.isNaN(n) ? undefined : n !== 0;
+    }
+  }
+
+  return undefined;
+};
+
+// Throws on a present-but-reverted receipt or a receipt missing a readable success field.
+export const assertUserOperationSucceeded = (receipt: unknown): void => {
+  if (!isRecord(receipt)) {
+    throw new Error("UserOperation receipt payload is not an object");
+  }
+
+  const success = readUserOperationSuccess(receipt);
+  if (success === undefined) {
+    throw new Error("UserOperation receipt is missing success");
+  }
+  if (success === false) {
+    throw new Error("UserOperation included but reverted");
+  }
+};
+
+// Polls until the userOp is included & succeeded, then resolves with the receipt (cli reads its
+// txHash off the return value). Throws on revert or timeout. Exponential backoff capped at
+// maxIntervalMs, polling until cumulative wait reaches timeoutMs.
+export const pollUntilUserOperationIncluded = async (
+  readOnly: UserOperationReceiptReader,
+  userOpHash: string,
+  options: PollUserOperationOptions = {}
+): Promise<unknown> => {
+  const timeoutMs = options.timeoutMs ?? 60_000;
+  const maxIntervalMs = options.maxIntervalMs ?? 5_000;
+  const backoff = options.backoff ?? 1.5;
+  let interval = options.intervalMs ?? 1_000;
+
+  const deadline = Date.now() + timeoutMs;
+
+  // Always attempt at least once, then keep polling until the deadline.
+  for (;;) {
+    const receipt = await readOnly.getUserOperationReceipt(userOpHash);
+
+    if (receipt !== null && receipt !== undefined) {
+      assertUserOperationSucceeded(receipt);
+      return receipt;
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for UserOperation receipt for ${userOpHash}`);
+    }
+
+    const remaining = deadline - Date.now();
+    await sleep(Math.min(interval, Math.max(0, remaining)));
+    interval = Math.min(interval * backoff, maxIntervalMs);
+  }
+};

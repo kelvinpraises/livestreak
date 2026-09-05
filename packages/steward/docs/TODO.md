@@ -41,14 +41,16 @@ See [architecture.md](./architecture.md). See [repo TODO](../../../README.md).
 
 ## Slice E — runtime / Bridge
 
-- [x] Injected `ContractFactSource`, `HostFactSource`, `ObserveFactSource` interfaces
-- [x] `createStewardRuntime` with `refresh`, `readPanel`, `subscribe`, opt-in `startPolling`
-- [x] In-memory snapshot; plans handed to injected `StewardActionPlanSink`
-- [x] No host/contracts/observe value imports in `src/`
+- [x] Injected `ContractFactSource`, `HostFactSource`, `ObserveFactSource`, `MemoryFactSource` interfaces
+- [x] `createStewardRuntime` with `refresh`, `readBoard`, `readPanel`, `subscribeBoard`, opt-in `startPolling`
+- [x] `createStewardBridge` with scope-gated `readBoard`, `readControls`, `callAction`, `subscribeBoard`
+- [x] `StewardBoard` revision + `projectStewardControls` / `projectStewardFunctions` registry
+- [x] `callAction` returns `StewardActionPlan` and hands to sink — edge executes
+- [x] Folder regroup: `workflow/` + `bridge/panel/`
 - [ ] Bridge wiring at CLI/app edge (real readers + plan sink)
 - [ ] No market/vault creation, no user streaming
 
-**Runtime gate (edge):** CLI/app must inject real contract/host/observe fact readers and an action-plan sink that submits to bridge/contracts/host. The package defines interfaces + loop only.
+**Runtime gate (edge):** CLI/app must inject real contract/host/observe/memory fact readers and an action-plan sink that submits via bridge/wallet.
 
 ---
 

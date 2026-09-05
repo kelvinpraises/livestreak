@@ -11,4 +11,8 @@ export interface OptionsNft {
   readonly lanes: readonly OptionsLane[];
   readonly approved?: UserAddress;
   readonly isOperator?: boolean;
+  /** Shared Drips account balance (USDC raw units). EVM only; undefined on Sui. */
+  readonly balance?: bigint;
+  /** Account-level runway: seconds-since-epoch*1000 when balance runs out. EVM only; undefined on Sui. */
+  readonly runwayEndMs?: number;
 }

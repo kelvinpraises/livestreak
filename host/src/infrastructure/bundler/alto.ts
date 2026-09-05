@@ -42,6 +42,9 @@ export const startAlto = async (chainName: string, config: AltoConfig): Promise<
   const port = assignPort(chainName);
   console.log(`[alto]: starting bundler for ${chainName} on port ${port}`);
 
+  // H4: the executor/utility private keys are passed to Alto via env vars
+  // (Alto's yargs CLI reads `.env("ALTO")`), NOT as argv. Keys in argv are
+  // visible to any local user via `ps`/`/proc/<pid>/cmdline`.
   const child = spawn(
     "npx",
     [
@@ -50,10 +53,6 @@ export const startAlto = async (chainName: string, config: AltoConfig): Promise<
       config.entryPointAddress,
       "--rpc-url",
       config.rpcUrl,
-      "--executor-private-keys",
-      config.executorPrivateKey,
-      "--utility-private-key",
-      config.executorPrivateKey,
       "--port",
       String(port),
       "--safe-mode",
@@ -65,7 +64,11 @@ export const startAlto = async (chainName: string, config: AltoConfig): Promise<
     {
       stdio: ["ignore", "pipe", "pipe"],
       cwd: HOST_ROOT,
-      env: { ...process.env }
+      env: {
+        ...process.env,
+        ALTO_EXECUTOR_PRIVATE_KEYS: config.executorPrivateKey,
+        ALTO_UTILITY_PRIVATE_KEY: config.executorPrivateKey
+      }
     }
   );
 

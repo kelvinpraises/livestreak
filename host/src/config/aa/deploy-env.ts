@@ -5,28 +5,31 @@ import { readFileSync } from "node:fs";
 const ANVIL_DEV_KEY =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
+interface DeployScope {
+  readonly contracts?: Record<string, string>;
+}
+
 interface DeploySnapshot {
   readonly chainId?: number | string;
-  readonly rpcUrl?: string;
-  readonly entryPoint?: string;
-  readonly safeModule?: string;
-  readonly paymaster?: string;
-  readonly paymasterAddress?: string;
+  readonly rpc?: string;
+  readonly scopes?: {
+    readonly aa?: DeployScope;
+    readonly paymaster?: DeployScope;
+  };
 }
 
 export const applyDeploySnapshotEnv = (snapshotPath: string): void => {
   const raw = readFileSync(snapshotPath, "utf8");
   const snapshot = JSON.parse(raw) as DeploySnapshot;
   const chainId = parseChainId(snapshot.chainId);
+  const aa = snapshot.scopes?.aa?.contracts;
+  const paymaster = snapshot.scopes?.paymaster?.contracts;
 
   setEnvIfUnset("LIVESTREAK_AA_CHAIN_ID", chainId === undefined ? undefined : String(chainId));
-  setEnvIfUnset("LIVESTREAK_AA_RPC_URL", snapshot.rpcUrl);
-  setEnvIfUnset("LIVESTREAK_AA_ENTRY_POINT", snapshot.entryPoint);
-  setEnvIfUnset("LIVESTREAK_AA_SAFE_MODULE", snapshot.safeModule);
-  setEnvIfUnset(
-    "LIVESTREAK_AA_PAYMASTER_ADDRESS",
-    snapshot.paymasterAddress ?? snapshot.paymaster
-  );
+  setEnvIfUnset("LIVESTREAK_AA_RPC_URL", snapshot.rpc);
+  setEnvIfUnset("LIVESTREAK_AA_ENTRY_POINT", aa?.entryPoint);
+  setEnvIfUnset("LIVESTREAK_AA_SAFE_MODULE", aa?.safe4337Module);
+  setEnvIfUnset("LIVESTREAK_AA_PAYMASTER_ADDRESS", paymaster?.verifyingPaymaster);
 
   if (chainId === 31337 && process.env.LIVESTREAK_AA_ALLOW_DEV_KEY === "1") {
     if (process.env.LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY === undefined) {

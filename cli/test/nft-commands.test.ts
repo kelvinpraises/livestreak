@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bridgeActionScope } from "@livestreak/options";
 import { buildSetLanesEnvelope, buildStopFundingEnvelope, buildWithdrawManyEnvelope } from "../src/commands/lanes.js";
-import { buildCallActionEnvelope } from "../src/edges/options.js";
+import { buildCallActionEnvelope } from "../src/adapters/options.js";
 
 const vaultA = `0x${"aa".repeat(32)}`;
 const vaultB = `0x${"bb".repeat(32)}`;

@@ -11,7 +11,15 @@ export {
   WalletManagerSui,
   WalletAccountSui,
   WalletAccountReadOnlySui,
-} from '#chains/sui.js'
+  createSuiAccount,
+  assertGasStationReturnedTxMatchesKind,
+  assembleSponsoredTxBytes,
+  createLocalGasStation,
+  executeSponsoredTransaction,
+  isSponsoredSuiConfig,
+  signSenderForSponsoredTransaction,
+  verifySponsoredSignatures,
+} from '#chains/sui/index.js'
 
 export type {
   WalletChain,
@@ -28,7 +36,12 @@ export type {
   EvmErc4337WalletNativeCoinsConfig,
 } from '#chains/evm.js'
 
-export type { SuiTransaction } from '#chains/sui.js'
+export type {
+  SuiTransaction,
+  LiveStreakSuiWalletConfig,
+  SuiGasStation,
+  SuiGasCoinRef,
+} from '#chains/sui/index.js'
 
 export type { IWalletAccount } from '@tetherto/wdk-wallet'
 export type {
@@ -39,3 +52,18 @@ export type {
 } from '@tetherto/wdk-wallet'
 
 export type { FeeRates, EvmTransaction } from '@tetherto/wdk-wallet-evm'
+
+// Shared userOperation poller (systemic POLL + SUCCESS fix). All chain writers import this.
+export {
+  pollUntilUserOperationIncluded,
+  readUserOperationSuccess,
+  assertUserOperationSucceeded,
+} from './poller.js'
+export type {
+  UserOperationReceiptReader,
+  PollUserOperationOptions,
+} from './poller.js'
+
+// MetaMask-style at-rest keystore for the gateway daemon. Node-only — it pulls
+// sodium-native, which must never enter a browser/SSR bundle. Import it from the
+// dedicated subpath instead of the package root: `@livestreak/wallet/keystore`.

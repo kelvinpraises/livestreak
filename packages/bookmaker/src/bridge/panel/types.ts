@@ -1,5 +1,4 @@
 import type { BookmakerDecision } from "../../model/decision.js";
-import type { BookmakerPanelView } from "../../model/panel.js";
 import type { SimilarityResult } from "../../model/similarity.js";
 import type { Detection } from "../../model/detection.js";
 import type { VaultDraft } from "../../model/vault-draft.js";
@@ -9,6 +8,8 @@ import type { BookmakerMarketContext } from "../../model/market-context.js";
 import type { BookmakerWatchSource } from "../../model/watch-source.js";
 
 // --- exports ---
+
+export type { BookmakerPanelView } from "../../model/watch-source.js";
 
 export interface BookmakerPanelSnapshot {
   readonly runtimeId: string;
@@ -26,5 +27,3 @@ export interface BookmakerPanelSnapshot {
   readonly lastError?: string;
   readonly updatedAtMs?: number;
 }
-
-export { projectBookmakerPanel } from "./project.js";

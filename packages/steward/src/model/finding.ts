@@ -1,4 +1,4 @@
-import type { TeeAttestationRef } from "../facts/tee.js";
+import type { TeeAttestationRef } from "../workflow/facts/tee.js";
 import type { StewardSubject } from "./subject.js";
 
 // --- exports ---

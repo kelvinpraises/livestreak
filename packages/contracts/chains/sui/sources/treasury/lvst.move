@@ -11,10 +11,16 @@ public struct LvstTreasuryCap has key {
     cap: TreasuryCap<LVST>,
 }
 
+// D2 DECISION: LVST decimals are chain-LOCAL and intentionally divergent — Sui = 9, EVM = 18
+// (see LvstToken.sol). Do NOT "standardize" this 9. Sui `Coin` value is u64, so 9 decimals is the
+// idiomatic choice and preserves headroom; the mint RATE (100/1/$10k per USDC) is identical to EVM.
+// Any consumer that formats LVST must read decimals per-chain (app `LVST_SCALE` is chain-aware).
+const LVST_DECIMALS: u8 = 9;
+
 fun init(otw: LVST, ctx: &mut TxContext) {
     let (treasury_cap, metadata) = coin::create_currency<LVST>(
         otw,
-        9,
+        LVST_DECIMALS,
         b"LiveStreak",
         b"LVST",
         b"",
@@ -57,6 +63,5 @@ public fun mint_for_test(amount: u128, recipient: address, ctx: &mut TxContext) 
     };
 }
 
-public fun pull_from(_cap: &mut LvstTreasuryCap, _from: address, _amount: u64, _ctx: &mut TxContext) {
-    // Staking uses Coin<LVST> passed into treasury::stake_lvst instead of allowance pulls.
-}
+// NOTE: there is intentionally no `pull_from`. Sui staking moves `Coin<LVST>` directly into
+// treasury::stake_lvst (object-transfer model), so EVM's allowance-pull entrypoint has no Sui analog.

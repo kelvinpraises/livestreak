@@ -808,3 +808,202 @@ fun test_fund_zero_deposit_reverts() {
     clock::destroy_for_testing(clock);
     ts::end(scenario);
 }
+
+// ─── Gap 1: vault::claimable ─────────────────────────────────────────────────
+
+/// Before collection claimable returns 0; after collection the winner sees a
+/// positive payout preview equal to what withdraw actually delivers.
+#[test]
+fun test_claimable_matches_withdraw_after_collect() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (market_id, v1, alice_token, bob_token) = setup_fixture(&mut scenario, &clock);
+    wire::setup_steward(&mut scenario, wire::admin(), wire::steward());
+
+    // alice funds YES, bob funds NO — equal stakes
+    fund_holder(&mut scenario, wire::alice(), v1, side::yes(), wire::rate(), deposit_units(50), &clock);
+    fund_holder(&mut scenario, wire::bob(), v1, side::no(), wire::rate(), deposit_units(50), &clock);
+
+    // advance time so both sides have accrued
+    wire::warp(&mut clock, wire::start_secs() + 50);
+
+    // resolve YES wins, then collect
+    wire::resolve_vault(&mut scenario, wire::steward(), v1, true, &clock);
+    wire::collect_vault(&mut scenario, v1, &clock);
+    wire::warp(&mut clock, wire::start_secs() + 50 + wire::cycle_secs());
+
+    // before withdraw: claimable should be positive for winner (alice), 0 for loser (bob)
+    ts::next_tx(&mut scenario, wire::admin());
+    let preview = {
+        let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        let alice_preview = vault::claimable(&vault_registry, alice_token, &v1, side::yes());
+        let bob_preview   = vault::claimable(&vault_registry, bob_token, &v1, side::yes());
+        let bob_wrong     = vault::claimable(&vault_registry, bob_token, &v1, side::no());
+        assert!(alice_preview > 0, 0);
+        assert!(bob_preview == 0, 1);   // bob has no YES position
+        assert!(bob_wrong == 0, 2);     // bob is loser side
+        ts::return_shared(vault_registry);
+        alice_preview
+    };
+
+    // withdraw delivers exactly what claimable previewed
+    let paid = wire::withdraw_market(&mut scenario, wire::alice(), v1, &clock);
+    assert!((paid as u256) == preview, 3);
+
+    // after withdraw claimable is 0 (position is claimed)
+    ts::next_tx(&mut scenario, wire::admin());
+    {
+        let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        assert!(vault::claimable(&vault_registry, alice_token, &v1, side::yes()) == 0, 4);
+        ts::return_shared(vault_registry);
+    };
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+/// claimable returns 0 when vault is not yet resolved.
+#[test]
+fun test_claimable_zero_before_resolution() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (_, v1, alice_token, _) = setup_fixture(&mut scenario, &clock);
+    fund_holder(&mut scenario, wire::alice(), v1, side::yes(), wire::rate(), deposit_units(50), &clock);
+
+    ts::next_tx(&mut scenario, wire::admin());
+    {
+        let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        assert!(vault::claimable(&vault_registry, alice_token, &v1, side::yes()) == 0, 0);
+        ts::return_shared(vault_registry);
+    };
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+// ─── Gap 2: market_driver::withdraw_many ─────────────────────────────────────
+
+/// withdraw_many over two resolved vaults delivers the sum of two single withdraws.
+#[test]
+fun test_withdraw_many_equals_sum_of_singles() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (market_id, v1, alice_token, bob_token) = setup_fixture(&mut scenario, &clock);
+    wire::setup_steward(&mut scenario, wire::admin(), wire::steward());
+
+    // create a second vault on the same market
+    let v2 = wire::bond_vault_question(&mut scenario, market_id, b"Q2?", side::no(), &clock);
+
+    // alice funds YES on v1; alice funds YES on v2 (v2 seed side is NO, so YES is valid funder side)
+    fund_holder(&mut scenario, wire::alice(), v1, side::yes(), wire::rate(), deposit_units(50), &clock);
+    fund_holder(&mut scenario, wire::alice(), v2, side::yes(), wire::rate(), deposit_units(50), &clock);
+    // bob funds the losing side on both so the pot is non-zero
+    fund_holder(&mut scenario, wire::bob(), v1, side::no(), wire::rate(), deposit_units(50), &clock);
+    fund_holder(&mut scenario, wire::bob(), v2, side::no(), wire::rate(), deposit_units(50), &clock);
+
+    wire::warp(&mut clock, wire::start_secs() + 50);
+    wire::resolve_vault(&mut scenario, wire::steward(), v1, true, &clock);
+    wire::resolve_vault(&mut scenario, wire::steward(), v2, true, &clock);
+    wire::collect_vault(&mut scenario, v1, &clock);
+    wire::collect_vault(&mut scenario, v2, &clock);
+    wire::warp(&mut clock, wire::start_secs() + 50 + wire::cycle_secs());
+
+    // snapshot individual claimable previews before withdrawing
+    let (preview_v1, preview_v2) = {
+        ts::next_tx(&mut scenario, wire::admin());
+        let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        let p1 = vault::claimable(&vault_registry, alice_token, &v1, side::yes());
+        let p2 = vault::claimable(&vault_registry, alice_token, &v2, side::yes());
+        assert!(p1 > 0, 0);
+        assert!(p2 > 0, 1);
+        ts::return_shared(vault_registry);
+        (p1, p2)
+    };
+
+    // execute withdraw_many and confirm total
+    ts::next_tx(&mut scenario, wire::alice());
+    {
+        let registry = ts::take_shared<MarketDriverRegistry>(&scenario);
+        let mut vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        let nft = ts::take_from_address<MarketPositionNFT>(&scenario, wire::alice());
+        let ctx = ts::ctx(&mut scenario);
+        let total = market_driver::withdraw_many(
+            &registry,
+            &nft,
+            &mut vault_registry,
+            vector[v1, v2],
+            @0x0,
+            &clock,
+            ctx,
+        );
+        assert!((total as u256) == preview_v1 + preview_v2, 2);
+        ts::return_to_address(wire::alice(), nft);
+        ts::return_shared(registry);
+        ts::return_shared(vault_registry);
+    };
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+/// withdraw_many on an empty vault_ids list returns 0.
+#[test]
+fun test_withdraw_many_empty_list_returns_zero() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (_, _, _, _) = setup_fixture(&mut scenario, &clock);
+
+    ts::next_tx(&mut scenario, wire::alice());
+    {
+        let registry = ts::take_shared<MarketDriverRegistry>(&scenario);
+        let mut vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        let nft = ts::take_from_address<MarketPositionNFT>(&scenario, wire::alice());
+        let ctx = ts::ctx(&mut scenario);
+        let total = market_driver::withdraw_many(
+            &registry,
+            &nft,
+            &mut vault_registry,
+            vector[],
+            @0x0,
+            &clock,
+            ctx,
+        );
+        assert!(total == 0, 0);
+        ts::return_to_address(wire::alice(), nft);
+        ts::return_shared(registry);
+        ts::return_shared(vault_registry);
+    };
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+
+// CON.S3: a desired_sides/desired_rates length mismatch must abort with E_LENGTH_MISMATCH (11),
+// NOT the misleading E_DUPLICATE_VAULT (9) it used to report.
+#[test, expected_failure(abort_code = 11)]
+fun test_set_lanes_length_mismatch_aborts() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (market_id, _, _, _) = setup_fixture(&mut scenario, &clock);
+    let v0 = wire::bond_vault(&mut scenario, market_id, b"L0", side::yes(), &clock);
+    let v1 = wire::bond_vault(&mut scenario, market_id, b"L1", side::yes(), &clock);
+
+    // 2 vault ids, but only 1 side and 1 rate → length mismatch.
+    let desired_vaults = vector[v0, v1];
+    let desired_sides = vector[side::yes()];
+    let desired_rates = vector[wire::rate()];
+
+    wire::set_lanes(
+        &mut scenario,
+        wire::alice(),
+        desired_vaults,
+        desired_sides,
+        desired_rates,
+        deposit_units(10),
+        &clock,
+    );
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}

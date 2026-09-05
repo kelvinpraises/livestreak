@@ -2,7 +2,40 @@
 
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import type { OptionsChain, OptionsReader, OptionsWriter } from "../types.js";
+import type { OptionsChain, OptionsChainConfig, OptionsReader, OptionsWriter } from "../types.js";
+import type { OptionsSuiObjectIds } from "./addresses.js";
+import { createSuiOptionsReader } from "./reader.js";
+import { createSuiOptionsWriter } from "./writer.js";
+
+export const createSuiOptionsChain = (config?: OptionsChainConfig): OptionsChain => {
+  if (config === undefined) {
+    return {
+      reader: createNotImplementedReader(),
+      writer: createNotImplementedWriter()
+    };
+  }
+
+  if (config.walletInit.chain !== "sui") {
+    throw new LiveStreakConfigError({
+      message: "Sui options chain requires walletInit.chain === sui"
+    });
+  }
+
+  const suiConfig = config.walletInit.config as { rpcUrl?: string | string[] };
+  const rpcUrl =
+    config.readRpcUrl ??
+    (Array.isArray(suiConfig.rpcUrl) ? suiConfig.rpcUrl[0] : suiConfig.rpcUrl) ??
+    "http://127.0.0.1:9000";
+
+  const ids = config.addresses as OptionsSuiObjectIds;
+
+  return {
+    reader: createSuiOptionsReader(ids, rpcUrl),
+    writer: createSuiOptionsWriter(config)
+  };
+};
+
+// --- helpers ---
 
 const notImplemented = (operation: string): (() => Promise<never>) => async () => {
   throw new LiveStreakConfigError({
@@ -27,6 +60,7 @@ const createNotImplementedReader = (): OptionsReader => ({
   readWinningSide: notImplemented("readWinningSide"),
   readBoard: notImplemented("readBoard"),
   readSharePrice: notImplemented("readSharePrice"),
+  readPendingBoundaries: notImplemented("readPendingBoundaries"),
   readPendingShares: notImplemented("readPendingShares"),
   readUsdcAddress: notImplemented("readUsdcAddress"),
   readUsdcBalance: notImplemented("readUsdcBalance"),
@@ -38,7 +72,9 @@ const createNotImplementedReader = (): OptionsReader => ({
 
 const createNotImplementedWriter = (): OptionsWriter => ({
   mint: notImplemented("mint"),
+  mintWithSalt: notImplemented("mintWithSalt"),
   fund: notImplemented("fund"),
+  advance: notImplemented("advance"),
   setLanes: notImplemented("setLanes"),
   stopFunding: notImplemented("stopFunding"),
   stopAllFunding: notImplemented("stopAllFunding"),
@@ -51,9 +87,4 @@ const createNotImplementedWriter = (): OptionsWriter => ({
   transferNft: notImplemented("transferNft"),
   approveNft: notImplemented("approveNft"),
   setApprovalForAll: notImplemented("setApprovalForAll")
-});
-
-export const createSuiOptionsChain = (): OptionsChain => ({
-  reader: createNotImplementedReader(),
-  writer: createNotImplementedWriter()
 });

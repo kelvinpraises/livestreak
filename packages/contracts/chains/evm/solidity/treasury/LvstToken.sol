@@ -14,6 +14,14 @@ contract LvstToken is ERC20 {
         protocol = protocol_;
     }
 
+    /// @dev D2 DECISION: LVST decimals are chain-LOCAL. EVM = 18 (ERC-20 norm), Sui = 9 (see
+    ///      lvst.move). This is an intentional divergence — do NOT standardize. Stated explicitly
+    ///      here (rather than relying on the ERC20 default) so no consumer has to guess the scale;
+    ///      the mint RATE is identical across chains, only the base-unit scale differs.
+    function decimals() public pure override returns (uint8) {
+        return 18;
+    }
+
     function mint(address to, uint256 amount) external {
         require(msg.sender == protocol.treasury(), "LvstToken: not treasury");
         _mint(to, amount);

@@ -1,6 +1,6 @@
 import type { BookmakerDecision } from "../model/decision.js";
 import type { Detection } from "../model/detection.js";
-import type { BookmakerPanelView } from "../model/panel.js";
+import type { BookmakerPanelView } from "../model/watch-source.js";
 import type { SimilarityResult } from "../model/similarity.js";
 import type { VaultDraft } from "../model/vault-draft.js";
 import type { BookmakerWriteIntent } from "../model/write-intent.js";

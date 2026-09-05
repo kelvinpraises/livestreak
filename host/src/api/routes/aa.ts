@@ -1,7 +1,7 @@
 import { Router } from "express";
-import type { AaRouteDeps } from "../aa-deps.js";
+import type { AaRouteDeps } from "../../deps.js";
 import { createAaController } from "../controllers/aa.js";
-import { asyncHandler } from "../respond.js";
+import { asyncHandler } from "../middleware/respond.js";
 
 // --- exports ---
 
@@ -17,6 +17,10 @@ export const createAaRouter = (deps: AaRouteDeps): Router => {
   router.post(
     "/aa/paymaster/:chain",
     asyncHandler(async (req, res) => controller.paymaster(req, res))
+  );
+  router.post(
+    "/aa/sui/sponsor",
+    asyncHandler(async (req, res, next) => controller.suiSponsor(req, res, next))
   );
 
   return router;

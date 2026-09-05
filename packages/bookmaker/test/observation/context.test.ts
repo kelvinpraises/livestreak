@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildObservationSubscriptionInput } from "../../src/observation/context.js";
+import { buildObservationSubscriptionInput } from "../../src/pipeline/observation/context.js";
 import { marketContext, watchSource } from "../helpers/fixtures.js";
 
 describe("buildObservationSubscriptionInput", () => {

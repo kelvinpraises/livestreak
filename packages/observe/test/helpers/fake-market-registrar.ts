@@ -1,6 +1,8 @@
 import { Effect } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
 import type {
+  MarketLifecycleInput,
+  MarketLifecycleTxResult,
   MarketRegisterInput,
   MarketRegisterResult,
   MarketRegistrar
@@ -8,6 +10,8 @@ import type {
 
 export interface FakeMarketRegistrarOptions {
   readonly onRegister?: (input: MarketRegisterInput) => void;
+  readonly onGoLive?: (input: MarketLifecycleInput) => void;
+  readonly onSetEnded?: (input: MarketLifecycleInput) => void;
   readonly result?: MarketRegisterResult;
   readonly delayMs?: number;
   readonly failWith?: LiveStreakConfigError | LiveStreakRuntimeError;
@@ -38,6 +42,22 @@ export const createFakeMarketRegistrar = (
       }
 
       return defaultFakeRegisterResult(input);
+    }),
+  goLive: (input) =>
+    Effect.gen(function* () {
+      options.onGoLive?.(input);
+      if (options.failWith !== undefined) {
+        return yield* Effect.fail(options.failWith);
+      }
+      return { userOpHash: "0xgolive" } satisfies MarketLifecycleTxResult;
+    }),
+  setEnded: (input) =>
+    Effect.gen(function* () {
+      options.onSetEnded?.(input);
+      if (options.failWith !== undefined) {
+        return yield* Effect.fail(options.failWith);
+      }
+      return { userOpHash: "0xsetended" } satisfies MarketLifecycleTxResult;
     })
 });
 

@@ -1,10 +1,10 @@
 import type { WalletInit } from "@livestreak/schema";
 
 import type { BookmakerContractAddresses } from "../chains/addresses.js";
-import type { BookmakerVaultPolicy } from "../decision/choose.js";
+import type { BookmakerVaultPolicy } from "../pipeline/decision/choose.js";
 import type { BookmakerMarketContext } from "../model/market-context.js";
 import type { BookmakerWatchSource } from "../model/watch-source.js";
-import type { BookmakerSimilarityClient } from "../similarity/client.js";
+import type { BookmakerSimilarityClient } from "../pipeline/similarity/client.js";
 
 // --- exports ---
 

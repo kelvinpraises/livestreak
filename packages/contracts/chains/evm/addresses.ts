@@ -1,54 +1,18 @@
+import { flattenDeploymentScopes } from "./flatten-deployment.js";
+import type {
+  DeploymentName,
+  EvmAddresses,
+  EvmDeployOutput,
+  EvmDeploymentAddresses,
+} from "./types.js";
+
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { Address } from "viem";
-
-import type {
-  DeploymentName,
-  EvmAddresses,
-  EvmContract,
-  EvmDeployOutput,
-  EvmDeploymentAddresses
-} from "./types.js";
-
 const deploymentsDir = join(dirname(fileURLToPath(import.meta.url)), "deployments");
 
 const KNOWN_DEPLOYMENTS = ["localhost"] as const satisfies readonly DeploymentName[];
-
-/** Maps flattened deploy keys to consumer `EvmContract` names (callable proxy addresses). */
-const CONTRACT_FROM_DEPLOY_KEY: Readonly<Record<string, EvmContract>> = {
-  protocol: "protocol",
-  marketRegistry: "marketRegistry",
-  stewardRegistry: "stewardRegistry",
-  vault: "vault",
-  dripsProxy: "dripsStreaming",
-  caller: "caller",
-  marketDriverProxy: "marketDriver",
-  vaultDriver: "vaultDriver",
-  treasury: "treasury",
-  lvstToken: "lvstToken",
-  verifyingPaymaster: "paymaster"
-};
-
-const flattenScopes = (output: EvmDeployOutput): EvmDeploymentAddresses => {
-  const flat: Record<string, Address> = {
-    ...(output.scopes.aa?.contracts ?? {}),
-    ...(output.scopes.streaming?.contracts ?? {}),
-    ...(output.scopes.protocol?.contracts ?? {}),
-    ...(output.scopes.wire?.contracts ?? {}),
-    ...(output.scopes.paymaster?.contracts ?? {})
-  };
-
-  const mapped: EvmDeploymentAddresses = {};
-  for (const [deployKey, address] of Object.entries(flat)) {
-    const contract = CONTRACT_FROM_DEPLOY_KEY[deployKey];
-    if (contract !== undefined) {
-      mapped[contract] = address;
-    }
-  }
-  return mapped;
-};
 
 const readDeploymentFile = (name: string): EvmDeployOutput | undefined => {
   const path = join(deploymentsDir, `${name}.json`);
@@ -68,7 +32,7 @@ const loadDeployment = (name: DeploymentName): EvmDeploymentAddresses => {
   if (output === undefined) {
     return {};
   }
-  return flattenScopes(output);
+  return flattenDeploymentScopes(output);
 };
 
 const discoverDeployments = (): DeploymentName[] => {

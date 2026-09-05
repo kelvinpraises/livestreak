@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createHostDiscoveryClient, DISCOVERY_FIND_PATH } from "../../src/similarity/host-client.js";
+import { createHostDiscoveryClient, DISCOVERY_FIND_PATH } from "../../src/pipeline/similarity/host-client.js";
 import { vaultDraft } from "../helpers/fixtures.js";
 
 describe("createHostDiscoveryClient", () => {

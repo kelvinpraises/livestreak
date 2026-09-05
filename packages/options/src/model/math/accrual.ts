@@ -17,6 +17,75 @@ export type OptionsStreamAccrualView = {
   readonly sharePriceNow: string;
 };
 
+export type PreviewAccrualInput = {
+  readonly vaultId: import("../ids.js").VaultId;
+  readonly side: OptionsVaultSide;
+  readonly rate: bigint;
+  readonly horizonSec?: number;
+};
+
+export type OptionsAccrualPreview = {
+  readonly sharePriceUSDC: string;
+  readonly sharesPerSec: string;
+  readonly projectedShares: string;
+  readonly valueUSDC: string;
+};
+
+export type ProjectAccrualPreviewInput = {
+  readonly board: OptionsBoardState;
+  readonly pools: OptionsVaultPools;
+  readonly shareTotals: OptionsVaultShareTotals;
+  readonly side: OptionsVaultSide;
+  readonly rate: bigint;
+  readonly horizonSec?: number;
+  readonly atMs?: number;
+  readonly resolvedAtMs?: number;
+};
+
+export const projectAccrualPreview = (
+  input: ProjectAccrualPreviewInput
+): OptionsAccrualPreview => {
+  const horizonSec = input.horizonSec ?? 60;
+  const atMs = input.atMs ?? Date.now();
+  const position = {
+    rate: input.rate,
+    gPaid: input.board.g,
+    depleted: false
+  };
+
+  const sharesNow = projectShares({
+    board: input.board,
+    position,
+    atMs,
+    resolvedAtMs: input.resolvedAtMs
+  });
+  const sharesHorizon = projectShares({
+    board: input.board,
+    position,
+    atMs: atMs + horizonSec * 1000,
+    resolvedAtMs: input.resolvedAtMs
+  });
+  const projectedShares = sharesHorizon > sharesNow ? sharesHorizon - sharesNow : 0n;
+
+  const sharesPerSec =
+    input.rate === 0n || input.board.sideRate === 0n
+      ? 0n
+      : estimateSharesPerSec(input.board, position, atMs, input.resolvedAtMs);
+
+  const totalPool = input.pools.yes + input.pools.no;
+  const sideShareTotal =
+    input.side === "yes" ? input.shareTotals.yes : input.shareTotals.no;
+  const valueUSDC =
+    sideShareTotal > 0n ? (projectedShares * totalPool) / sideShareTotal : 0n;
+
+  return {
+    sharePriceUSDC: priceOf(input.board.pool).toString(),
+    sharesPerSec: sharesPerSec.toString(),
+    projectedShares: projectedShares.toString(),
+    valueUSDC: valueUSDC.toString()
+  };
+};
+
 export type ProjectStreamAccrualInput = {
   readonly board: OptionsBoardState;
   readonly position: {

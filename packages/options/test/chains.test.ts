@@ -1,6 +1,8 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it } from "vitest";
 
+import type { Address } from "@livestreak/schema";
+
 import { asTokenId } from "../src/model/ids.js";
 import { createOptionsChain, asTxId } from "../src/chains/index.js";
 import { createSuiOptionsChain } from "../src/chains/sui/index.js";
@@ -16,9 +18,9 @@ const evmChainConfig = {
       bundlerUrl: "http://127.0.0.1:4337",
       isSponsored: false,
       useNativeCoins: false,
-      entryPointAddress: "0x0000000000000000000000000000000000000001",
-      safe4337ModuleAddress: "0x0000000000000000000000000000000000000002",
-      safeModulesSetupAddress: "0x0000000000000000000000000000000000000003",
+      entryPointAddress: "0x0000000000000000000000000000000000000001" as Address,
+      safe4337ModuleAddress: "0x0000000000000000000000000000000000000002" as Address,
+      safeModulesSetupAddress: "0x0000000000000000000000000000000000000003" as Address,
       safeModulesVersion: "0.3.0",
       contractNetworks: {}
     }
@@ -52,23 +54,29 @@ describe("createOptionsChain", () => {
     expect(txId).toBe(asTxId("0xfake_user_op_hash"));
   });
 
-  it("dispatches sui walletInit to a stub chain whose operations throw", async () => {
-    const chain = createOptionsChain({
-      walletInit: {
-        chain: "sui",
-        seedSource: "raw",
-        config: { rpcUrl: "https://fullnode.testnet.sui.io:443" }
-      },
-      seed: "test-seed",
-      addresses: DEFAULT_FAKE_ADDRESSES
-    });
+  it("rejects sui walletInit with invalid (EVM-format) addresses at config time", () => {
+    expect(() =>
+      createOptionsChain({
+        walletInit: {
+          chain: "sui",
+          seedSource: "raw",
+          config: { rpcUrl: "https://fullnode.testnet.sui.io:443" }
+        },
+        seed: "test-seed",
+        addresses: DEFAULT_FAKE_ADDRESSES
+      })
+    ).toThrow(LiveStreakConfigError);
+  });
 
-    await expect(chain.reader.readMarket("0x01" as never)).rejects.toBeInstanceOf(
-      LiveStreakConfigError
-    );
-
+  it("createSuiOptionsChain with no config returns a stub whose operations throw", async () => {
     const suiChain = createSuiOptionsChain();
     await expect(suiChain.writer.fund({} as never)).rejects.toBeInstanceOf(LiveStreakConfigError);
+    await expect(
+      suiChain.reader.readPendingBoundaries("0x01" as never, "yes")
+    ).rejects.toBeInstanceOf(LiveStreakConfigError);
+    await expect(
+      suiChain.writer.advance({ vaultId: "0x01" as never, side: "yes" })
+    ).rejects.toBeInstanceOf(LiveStreakConfigError);
   });
 
   it("rejects unknown wallet chains", () => {

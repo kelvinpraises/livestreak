@@ -1,6 +1,11 @@
-import type { OnChainStreamState } from "../edges/market.js";
-import type { OperatorCreateVaultResult } from "../edges/vault.js";
+import type { OnChainStreamState } from "../adapters/onchain.js";
 import type { OptionsBoard } from "@livestreak/options";
+
+export interface VaultCreateRenderInput {
+  readonly vaultId: string;
+  readonly createTx: string;
+  readonly idempotent?: boolean;
+}
 
 export interface NftMintRenderInput {
   readonly tokenId: string;
@@ -122,12 +127,12 @@ export const renderTxResult = (
   return lines.join("\n");
 };
 
-export const renderVaultCreateResult = (result: OperatorCreateVaultResult): string => {
+export const renderVaultCreateResult = (result: VaultCreateRenderInput): string => {
   const lines = ["livestreak vault create", "", `vaultId: ${result.vaultId}`];
-  if (result.approveTx !== undefined) {
-    lines.push(`approveTx: ${result.approveTx}`);
-  }
   lines.push(`createTx: ${result.createTx}`);
+  if (result.idempotent === true) {
+    lines.push("note: confirmed an already-submitted createVault (idempotent)");
+  }
   return lines.join("\n");
 };
 

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import type { HostRouteDeps } from "../deps.js";
+import type { HostRouteDeps } from "../../deps.js";
 import { createMediaController } from "../controllers/media.js";
 
 // --- exports ---

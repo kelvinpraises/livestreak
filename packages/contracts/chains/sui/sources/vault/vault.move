@@ -366,6 +366,65 @@ public fun loss_claimable<T>(
     loss_usdc(p, data.resolved_at)
 }
 
+/// Preview the USDC payout `withdraw` would deliver for `account` on `vault_id`.
+/// Returns 0 until resolved AND collected (pot is final only after collect).
+/// Returns 0 for the losing side, a non-funder, or an already-claimed position.
+/// Read-only and devInspect-friendly: no `&mut` references.
+public fun claimable<T>(
+    registry: &VaultRegistry<T>,
+    account: u256,
+    vault_id: &vector<u8>,
+    side: u8,
+): u256 {
+    side::assert_valid(side);
+    if (!vault_exists(registry, vault_id)) {
+        return 0
+    };
+    let data = table::borrow(&registry.vaults, *vault_id);
+    if (data.status != STATUS_RESOLVED) {
+        return 0
+    };
+    if (!table::contains(&registry.collected, *vault_id)
+        || !*table::borrow(&registry.collected, *vault_id)) {
+        return 0
+    };
+    let winning = if (data.outcome == OUTCOME_YES) {
+        side::yes()
+    } else {
+        side::no()
+    };
+    if (side != winning) {
+        return 0
+    };
+    let claim_key = PositionKey { vault_id: *vault_id, side, account };
+    if (table::contains(&registry.claimed, claim_key)
+        && *table::borrow(&registry.claimed, claim_key)) {
+        return 0
+    };
+    let board_key = BoardKey { vault_id: *vault_id, side };
+    if (!table::contains(&registry.boards, board_key)) {
+        return 0
+    };
+    let b = table::borrow(&registry.boards, board_key);
+    if (b.side_shares == 0) {
+        return 0
+    };
+    if (!table::contains(&registry.positions, claim_key)) {
+        return 0
+    };
+    let p = table::borrow(&registry.positions, claim_key);
+    let shares = p.shares_accrued + p.rate * (b.g - p.g_paid);
+    if (shares == 0) {
+        return 0
+    };
+    let pot_amt = if (table::contains(&registry.pot, *vault_id)) {
+        *table::borrow(&registry.pot, *vault_id)
+    } else {
+        0
+    };
+    full_mul_div(pot_amt, shares, b.side_shares)
+}
+
 public fun advance<T>(
     registry: &mut VaultRegistry<T>,
     vault_id: vector<u8>,
@@ -852,6 +911,11 @@ fun catch_up_side<T>(
         advance_internal(registry, vault_id, side, MAX_STEPS, clock);
         guard = guard + 1;
     };
+    // If the backlog exceeds the in-tx guard, abort with a clear signal rather than silently
+    // finalizing on a half-advanced board. The brick-free drain is the permissionless `advance`
+    // entrypoint: the operator should call it (bounded, off the collect/withdraw critical path)
+    // until the board is caught up, then retry. (EVM uses a single `_advance(max)`.)
+    assert!(board_caught_up(registry, &vault_id, side, clock), E_BOARD_BEHIND);
 }
 
 fun advance_internal<T>(

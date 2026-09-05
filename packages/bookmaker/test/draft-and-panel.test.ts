@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildVaultDraft } from "../src/draft/build.js";
+import { buildVaultDraft } from "../src/pipeline/draft/build.js";
 import { projectBookmakerPanel } from "../src/bridge/panel/project.js";
 import { detection, marketContext, similarityResult, vaultDraft, watchSource } from "./helpers/fixtures.js";
 

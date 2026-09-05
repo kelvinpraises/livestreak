@@ -9,7 +9,9 @@ import {
   bridgeControlsReadScope,
   createOptionsBridge
 } from "../src/bridge/index.js";
+import type { OptionsControlsView, OptionsFunctionView } from "../src/bridge/panel/types.js";
 import { asMarketId, asTokenId, asVaultId } from "../src/model/ids.js";
+import { priceOf } from "../src/model/index.js";
 import { createOptionsRuntime } from "../src/runtime/index.js";
 import {
   createFakeChainConfig,
@@ -70,14 +72,25 @@ describe("options bridge", () => {
     expect(board.revision).toBeGreaterThan(0);
   });
 
-  it("readControls projects action flags", async () => {
+  it("readControls returns a self-describing function registry", async () => {
     const rt = runtime();
     const bridge = createOptionsBridge({ runtime: rt });
     await rt.refreshUser(fixtureUser(), asMarketId("market_01"));
 
     const controls = await bridge.readControls(grantedCaller);
     expect(controls.account).toBe(fixtureUser());
-    expect(controls.actions.canFund).toBe(true);
+    expect(controls.revision).toBeGreaterThan(0);
+    expect(controls.functions.length).toBeGreaterThan(0);
+
+    for (const fn of controls.functions) {
+      expect(fn.name).toBeTypeOf("string");
+      expect(fn.scope).toBeTypeOf("string");
+      expect(fn.label).toBeTypeOf("string");
+      if (fn.disabled) {
+        expect(fn.disabledReason).toBeTypeOf("string");
+        expect(fn.disabledReason?.length).toBeGreaterThan(0);
+      }
+    }
   });
 
   it("callAction dispatches writer operations and returns TxId", async () => {
@@ -194,7 +207,7 @@ describe("options bridge", () => {
     expect(state.id).toBe("blob_01");
   });
 
-  it("readControls flags withdrawable winnings on a resolved winning lane", async () => {
+  it("readControls exposes withdraw on a resolved winning vault and not on open vaults", async () => {
     const user = fixtureUser();
     const tokenId = asTokenId(1n);
     const vaultId = asVaultId("vault_01");
@@ -253,10 +266,16 @@ describe("options bridge", () => {
     await rt.refreshUser(user, asMarketId("market_01"));
 
     const controls = await bridge.readControls(trustedCaller);
-    expect(controls.actions.canWithdraw).toBe(true);
-    expect(controls.actions.canClaimLoss).toBe(true);
-    expect(controls.actions.canTransferNft).toBe(true);
-    expect(controls.actions.canMint).toBe(false);
+    const withdraw = findFunction(controls, "withdraw", { vaultId: "vault_01" });
+    expect(withdraw?.disabled).toBe(false);
+    expect(withdraw?.target?.vaultId).toBe("vault_01");
+
+    const claimLoss = findFunction(controls, "claimLossLvst", { vaultId: "vault_01" });
+    expect(claimLoss?.disabled).toBe(false);
+
+    const mint = findFunction(controls, "mint", { marketId: "market_01" });
+    expect(mint?.disabled).toBe(true);
+    expect(mint?.disabledReason).toBe("Already entered this market");
   });
 
   it("callAction dispatches mint to the writer", async () => {
@@ -282,7 +301,76 @@ describe("options bridge", () => {
     expect(writer.requests[0]?.action).toBe("mint");
   });
 
-  it("readControls flags canMint for a market the user has not entered", async () => {
+  it("readControls enables fund on an unfunded open vault when the user holds the NFT", async () => {
+    const user = fixtureUser();
+    const rt = createOptionsRuntime({
+      config: {
+        runtimeId: "bridge_fund_unfunded",
+        user,
+        marketIds: [asMarketId("market_01")]
+      },
+      chainConfig: createFakeChainConfig(fixtureSeed()),
+      chain: {
+        reader: createFakeOptionsReader({
+          markets: [fixtureMarket()],
+          vaults: [fixtureVault()],
+          shareTotals: { vault_01: fixtureShareTotals() },
+          nfts: [
+            fixtureNft(user, {
+              laneCount: 0,
+              lanes: []
+            })
+          ],
+          lvstAccounts: [fixtureLvstAccount(user)]
+        }),
+        writer: createFakeChainWriter()
+      }
+    });
+    const bridge = createOptionsBridge({ runtime: rt });
+    await rt.refreshUser(user, asMarketId("market_01"));
+
+    const controls = await bridge.readControls(trustedCaller);
+    const fundYes = findFunction(controls, "fund", { vaultId: "vault_01", side: "yes" });
+    const fundNo = findFunction(controls, "fund", { vaultId: "vault_01", side: "no" });
+
+    expect(fundYes?.disabled).toBe(false);
+    expect(fundNo?.disabled).toBe(false);
+  });
+
+  it("readControls disables fund when the vault already holds a lane", async () => {
+    const user = fixtureUser();
+    const rt = runtime();
+    const bridge = createOptionsBridge({ runtime: rt });
+    await rt.refreshUser(user, asMarketId("market_01"));
+
+    const controls = await bridge.readControls(trustedCaller);
+    const fundYes = findFunction(controls, "fund", { vaultId: "vault_01", side: "yes" });
+    const fundNo = findFunction(controls, "fund", { vaultId: "vault_01", side: "no" });
+
+    expect(fundYes?.disabled).toBe(true);
+    expect(fundNo?.disabled).toBe(true);
+    expect(fundYes?.disabledReason).toBe(
+      "Vault already funded (one side per vault) — stop or adjust lanes to change"
+    );
+    expect(fundNo?.disabledReason).toBe(
+      "Vault already funded (one side per vault) — stop or adjust lanes to change"
+    );
+  });
+
+  it("readControls carries the active lane side on stopFunding", async () => {
+    const user = fixtureUser();
+    const rt = runtime();
+    const bridge = createOptionsBridge({ runtime: rt });
+    await rt.refreshUser(user, asMarketId("market_01"));
+
+    const controls = await bridge.readControls(trustedCaller);
+    const stopFunding = findFunction(controls, "stopFunding", { vaultId: "vault_01" });
+
+    expect(stopFunding?.disabled).toBe(false);
+    expect(stopFunding?.target?.side).toBe("yes");
+  });
+
+  it("readControls enables mint before market entry and disables withdraw on open vaults", async () => {
     const user = fixtureUser();
     const rt = createOptionsRuntime({
       config: {
@@ -296,7 +384,12 @@ describe("options bridge", () => {
           markets: [fixtureMarket()],
           vaults: [fixtureVault()],
           shareTotals: { vault_01: fixtureShareTotals() },
-          lvstAccounts: [fixtureLvstAccount(user)]
+          lvstAccounts: [
+            {
+              ...fixtureLvstAccount(user),
+              pendingDividends: 0n
+            }
+          ]
         }),
         writer: createFakeChainWriter()
       }
@@ -305,8 +398,16 @@ describe("options bridge", () => {
     await rt.refreshUser(user, asMarketId("market_01"));
 
     const controls = await bridge.readControls(trustedCaller);
-    expect(controls.actions.canMint).toBe(true);
-    expect(controls.actions.canFund).toBe(false);
+    const mint = findFunction(controls, "mint", { marketId: "market_01" });
+    expect(mint?.disabled).toBe(false);
+
+    const withdraw = findFunction(controls, "withdraw", { vaultId: "vault_01" });
+    expect(withdraw?.disabled).toBe(true);
+    expect(withdraw?.disabledReason).toBe("No winnings to claim");
+
+    const claimDividends = findFunction(controls, "claimDividends");
+    expect(claimDividends?.disabled).toBe(true);
+    expect(claimDividends?.disabledReason).toBe("No dividends pending");
   });
 
   it("readBoard surfaces the connected wallet USDC balance", async () => {
@@ -360,7 +461,246 @@ describe("options bridge", () => {
     const vaultPanel = board.panel.markets[0]?.vaults[0];
     expect(vaultPanel?.steward.severity).toBe(2);
   });
+
+  it("readBoard exposes per-side marginal share prices from pool projection", async () => {
+    const user = fixtureUser();
+    const rt = createOptionsRuntime({
+      config: {
+        runtimeId: "bridge_share_price",
+        user,
+        marketIds: [asMarketId("market_01")]
+      },
+      chainConfig: createFakeChainConfig(fixtureSeed()),
+      chain: {
+        reader: createFakeOptionsReader(fixtureSeed()),
+        writer: createFakeChainWriter()
+      }
+    });
+    const bridge = createOptionsBridge({ runtime: rt });
+    await rt.refreshUser(user, asMarketId("market_01"));
+
+    const board = await bridge.readBoard(trustedCaller);
+    const pools = board.panel.markets[0]?.vaults[0]?.pools;
+
+    expect(pools?.sharePriceYes).toBe(priceOf(94_000_000n).toString());
+    expect(pools?.sharePriceNo).toBe(priceOf(185_000_000n).toString());
+  });
+
+  it("previewAccrual projects hypothetical stream accrual", async () => {
+    const user = fixtureUser();
+    const vaultId = asVaultId("vault_01");
+    const nowMs = Date.now();
+    const rt = createOptionsRuntime({
+      config: {
+        runtimeId: "bridge_preview_accrual",
+        user,
+        marketIds: [asMarketId("market_01")]
+      },
+      chainConfig: createFakeChainConfig(fixtureSeed()),
+      chain: {
+        reader: createFakeOptionsReader({
+          ...fixtureSeed(),
+          boards: {
+            "vault_01:yes": {
+              pool: 20_000_000n,
+              sideRate: 1_000_000n,
+              g: 5_000_000_000_000_000_000n,
+              lastAdvanceMs: nowMs - 5_000
+            }
+          }
+        }),
+        writer: createFakeChainWriter()
+      }
+    });
+    const bridge = createOptionsBridge({ runtime: rt });
+    await rt.refreshUser(user, asMarketId("market_01"));
+
+    const preview = await bridge.previewAccrual(grantedCaller, {
+      vaultId,
+      side: "yes",
+      rate: 1_000_000_000_000_000_000n,
+      horizonSec: 60
+    });
+
+    expect(BigInt(preview.projectedShares)).toBeGreaterThan(0n);
+    expect(BigInt(preview.valueUSDC)).toBeGreaterThan(0n);
+    expect(BigInt(preview.sharesPerSec)).toBeGreaterThan(0n);
+    expect(preview.sharePriceUSDC).toBe(priceOf(20_000_000n).toString());
+  });
+
+  it("previewAccrual returns zero accrual when rate is zero", async () => {
+    const user = fixtureUser();
+    const rt = createOptionsRuntime({
+      config: {
+        runtimeId: "bridge_preview_zero_rate",
+        user,
+        marketIds: [asMarketId("market_01")]
+      },
+      chainConfig: createFakeChainConfig(fixtureSeed()),
+      chain: {
+        reader: createFakeOptionsReader({
+          ...fixtureSeed(),
+          boards: {
+            "vault_01:yes": {
+              pool: 20_000_000n,
+              sideRate: 1_000_000n,
+              g: 5_000_000_000_000_000_000n,
+              lastAdvanceMs: 1_700_000_000_000
+            }
+          }
+        }),
+        writer: createFakeChainWriter()
+      }
+    });
+    const bridge = createOptionsBridge({ runtime: rt });
+
+    const preview = await bridge.previewAccrual(grantedCaller, {
+      vaultId: asVaultId("vault_01"),
+      side: "yes",
+      rate: 0n
+    });
+
+    expect(preview.projectedShares).toBe("0");
+    expect(preview.valueUSDC).toBe("0");
+    expect(preview.sharesPerSec).toBe("0");
+  });
+
+  it("previewAccrual requires board read scope", async () => {
+    const bridge = createOptionsBridge({ runtime: runtime() });
+
+    await expect(
+      bridge.previewAccrual(deniedCaller, {
+        vaultId: asVaultId("vault_01"),
+        side: "yes",
+        rate: 1n
+      })
+    ).rejects.toBeInstanceOf(LiveStreakCapabilityError);
+  });
 });
+
+describe("autoAdvanceOverflow fund path", () => {
+  const fundArgs = {
+    tokenId: asTokenId(1n),
+    vaultId: asVaultId("vault_01"),
+    side: "yes" as const,
+    rate: 10_000n,
+    deposit: 1_000_000n
+  };
+
+  const overflowRuntime = (input: {
+    readonly autoAdvance?: boolean;
+    readonly pending?: bigint;
+  }) => {
+    const writer = createFakeChainWriter();
+    const rt = createOptionsRuntime({
+      config: {
+        runtimeId: "bridge_overflow",
+        user: fixtureUser(),
+        marketIds: [asMarketId("market_01")]
+      },
+      chainConfig: {
+        ...createFakeChainConfig(fixtureSeed()),
+        ...(input.autoAdvance === true ? { autoAdvanceOverflow: true } : {})
+      },
+      chain: {
+        reader: createFakeOptionsReader({
+          ...fixtureSeed(),
+          pendingBoundaries:
+            input.pending === undefined
+              ? {}
+              : { "vault_01:yes": input.pending }
+        }),
+        writer
+      }
+    });
+
+    return { rt, writer, bridge: createOptionsBridge({ runtime: rt }) };
+  };
+
+  it("issues one fund and zero advances when the flag is off", async () => {
+    const { bridge, writer } = overflowRuntime({ pending: 200n });
+
+    await bridge.callAction(grantedCaller, {
+      scope: bridgeActionScope,
+      action: "fund",
+      args: fundArgs
+    });
+
+    expect(writer.requests).toHaveLength(1);
+    expect(writer.requests[0]?.action).toBe("fund");
+  });
+
+  it("issues one fund and zero advances when pending is within one fund tx", async () => {
+    const { bridge, writer } = overflowRuntime({ autoAdvance: true, pending: 64n });
+
+    await bridge.callAction(grantedCaller, {
+      scope: bridgeActionScope,
+      action: "fund",
+      args: fundArgs
+    });
+
+    expect(writer.requests).toHaveLength(1);
+    expect(writer.requests[0]?.action).toBe("fund");
+  });
+
+  it("advances pre-fund rounds when pending exceeds one fund tx", async () => {
+    const { bridge, writer } = overflowRuntime({ autoAdvance: true, pending: 200n });
+
+    await bridge.callAction(grantedCaller, {
+      scope: bridgeActionScope,
+      action: "fund",
+      args: fundArgs
+    });
+
+    expect(writer.requests).toHaveLength(4);
+    expect(writer.requests.slice(0, 3).every((request) => request.action === "advance")).toBe(true);
+    expect(writer.requests[3]?.action).toBe("fund");
+  });
+
+  it("caps pre-fund advances at MAX_PRE", async () => {
+    const { bridge, writer } = overflowRuntime({ autoAdvance: true, pending: 10_000n });
+
+    await bridge.callAction(grantedCaller, {
+      scope: bridgeActionScope,
+      action: "fund",
+      args: fundArgs
+    });
+
+    expect(writer.requests).toHaveLength(65);
+    expect(writer.requests.slice(0, 64).every((request) => request.action === "advance")).toBe(true);
+    expect(writer.requests[64]?.action).toBe("fund");
+  });
+});
+
+function findFunction(
+  controls: OptionsControlsView,
+  name: string,
+  target?: { readonly vaultId?: string; readonly marketId?: string; readonly side?: string }
+): OptionsFunctionView | undefined {
+  return controls.functions.find((fn) => {
+    if (fn.name !== name) {
+      return false;
+    }
+
+    if (target === undefined) {
+      return true;
+    }
+
+    if (target.vaultId !== undefined && fn.target?.vaultId !== target.vaultId) {
+      return false;
+    }
+
+    if (target.marketId !== undefined && fn.target?.marketId !== target.marketId) {
+      return false;
+    }
+
+    if (target.side !== undefined && fn.target?.side !== target.side) {
+      return false;
+    }
+
+    return true;
+  });
+}
 
 function createCapabilityGrant(input: {
   id: string;

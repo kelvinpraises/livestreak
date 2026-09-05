@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   parseMarketIdArg,
   resolveTokenArg
-} from "../src/commands/cli-args.js";
-import { runFund } from "../src/commands/options.js";
+} from "../src/commands/args.js";
+import { runFund } from "../src/commands/vaults.js";
 
 describe("resolveTokenArg", () => {
   it("prefers explicit --token over run.tokenId", () => {

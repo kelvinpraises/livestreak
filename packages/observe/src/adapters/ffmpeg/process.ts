@@ -44,6 +44,7 @@ export interface NodeChildProcess {
   readonly on: {
     (event: "error", listener: (cause: NodeErrnoException) => void): void;
     (event: "close", listener: (code: number | null, signal: string | null) => void): void;
+    (event: "spawn", listener: () => void): void;
   };
 }
 
@@ -115,15 +116,30 @@ export const spawnChild = (
             : { stdio: ["ignore", "pipe", "pipe"] }
         );
 
-        child.on("error", (cause) => {
-          if (cause.code === "ENOENT") {
-            resume(Effect.fail(missingDependency(binary, cause)));
+        // O9: Node delivers spawn failures (ENOENT, EACCES) ASYNCHRONOUSLY on the
+        // "error" event AFTER spawn() returns. Resuming success synchronously here
+        // would hand callers a broken child and lose the real config error (the
+        // later error resume hits a dead continuation). Node guarantees exactly
+        // one of "spawn"/"error" fires — resume success on "spawn", failure on
+        // "error", both behind a settled guard.
+        let settled = false;
+        const settle = (effect: Effect.Effect<NodeChildProcess, LiveStreakError>) => {
+          if (settled) {
             return;
           }
-          resume(Effect.fail(runtimeFailure(`${binary} failed to start`, cause.message)));
+          settled = true;
+          resume(effect);
+        };
+
+        child.on("error", (cause) => {
+          if (cause.code === "ENOENT") {
+            settle(Effect.fail(missingDependency(binary, cause)));
+            return;
+          }
+          settle(Effect.fail(runtimeFailure(`${binary} failed to start`, cause.message)));
         });
 
-        resume(Effect.succeed(child));
+        child.on("spawn", () => settle(Effect.succeed(child)));
       })
   );
 
@@ -200,7 +216,15 @@ export const waitForProcessClose = (
   label: string
 ): Effect.Effect<void, LiveStreakError> =>
   Effect.async<void, LiveStreakError>((resume) => {
-    child.on("close", (code, signal) => {
+    // O3: mirror the `settled`-guard idiom used by runChild/writeStdinWithBackpressure.
+    let settled = false;
+
+    const settleClose = (code: number | null, signal: string | null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+
       if (code === 0) {
         resume(Effect.void);
         return;
@@ -215,7 +239,29 @@ export const waitForProcessClose = (
           )
         )
       );
+    };
+
+    // If ffmpeg already exited before we attached the listener (bad codec, disk
+    // full, killed during drain), the "close" event has already fired and would
+    // never call resume → the Effect (and thus the draining loop / finalize)
+    // hangs forever and the mp4 is truncated. Resolve immediately from the
+    // captured exit/signal code instead.
+    if (child.exitCode !== null || child.signalCode !== null) {
+      settleClose(child.exitCode, child.signalCode);
+      return;
+    }
+
+    // A spawn/runtime error can also arrive on the "error" channel; treat it as
+    // a failure rather than waiting for a "close" that may never come.
+    child.on("error", (cause) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resume(Effect.fail(runtimeFailure(`${label} failed`, cause.message)));
     });
+
+    child.on("close", (code, signal) => settleClose(code, signal));
   });
 
 // --- helpers ---

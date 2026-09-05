@@ -5,6 +5,7 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import { asUserAddress } from "../model/ids.js";
 import type { OptionsChainConfig } from "./types.js";
 import { validateOptionsContractAddresses } from "./evm/addresses.js";
+import { validateOptionsSuiObjectIds } from "./sui/addresses.js";
 
 export const validateOptionsChainConfig = (input: unknown): OptionsChainConfig => {
   if (!isPlainObject(input)) {
@@ -37,9 +38,12 @@ export const validateOptionsChainConfig = (input: unknown): OptionsChainConfig =
     });
   }
 
-  const addresses = validateOptionsContractAddresses(
-    input.addresses as OptionsChainConfig["addresses"]
-  );
+  const chain = (walletInit as { chain?: string }).chain;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const addresses =
+    chain === "sui"
+      ? validateOptionsSuiObjectIds(input.addresses as any)
+      : validateOptionsContractAddresses(input.addresses as any);
 
   const readRpcUrl =
     input.readRpcUrl === undefined

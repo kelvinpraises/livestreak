@@ -1,7 +1,7 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it } from "vitest";
 
-import { asTokenId, asUserAddress } from "../../src/model/ids.js";
+import { asMarketId, asTokenId, asUserAddress } from "../../src/model/ids.js";
 import { validateTokenIdForContracts, validateUserAddress } from "../../src/chains/evm/encode.js";
 import { createFakeChainWriter } from "../helpers/fake-chain.js";
 
@@ -9,8 +9,33 @@ const TOKEN_ID = asTokenId(42n);
 const FROM = asUserAddress("0x0000000000000000000000000000000000000001");
 const TO = asUserAddress("0x0000000000000000000000000000000000000002");
 const OPERATOR = asUserAddress("0x0000000000000000000000000000000000000003");
+const MARKET_ID = asMarketId(`0x${"ab".repeat(32)}`);
+const SALT = `0x${"cd".repeat(32)}`;
 
 describe("chain writer nft", () => {
+  it("mint returns both the txId and the newly-minted tokenId", async () => {
+    const writer = createFakeChainWriter();
+
+    const result = await writer.mint({ marketId: MARKET_ID, to: TO });
+
+    expect(result.txId).toBeTruthy();
+    expect(result.tokenId).toBe(asTokenId(1n));
+    expect(writer.requests[0]).toEqual({ action: "mint", args: { marketId: MARKET_ID, to: TO } });
+  });
+
+  it("mintWithSalt returns txId + tokenId and records the salt", async () => {
+    const writer = createFakeChainWriter();
+
+    const result = await writer.mintWithSalt({ marketId: MARKET_ID, salt: SALT, to: TO });
+
+    expect(result.txId).toBeTruthy();
+    expect(result.tokenId).toBe(asTokenId(1n));
+    expect(writer.requests[0]).toEqual({
+      action: "mintWithSalt",
+      args: { marketId: MARKET_ID, salt: SALT, to: TO }
+    });
+  });
+
   it("transferNft records from, to, and tokenId", async () => {
     const writer = createFakeChainWriter();
 

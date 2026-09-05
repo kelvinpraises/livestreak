@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { findSimilar } from "../../src/similarity/find.js";
-import { chooseVaultAction } from "../../src/decision/choose.js";
+import { findSimilar } from "../../src/pipeline/similarity/find.js";
+import { chooseVaultAction } from "../../src/pipeline/decision/choose.js";
 import { createFakeSimilarityClient, createRejectingSimilarityClient } from "../helpers/fake-similarity-client.js";
 import { detection, similarityResult, vaultDraft } from "../helpers/fixtures.js";
 

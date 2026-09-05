@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { chooseStewardDecisions } from "../src/decision/choose.js";
-import { planStewardActions } from "../src/action/plan.js";
+import { chooseStewardDecisions } from "../src/workflow/decision/choose.js";
+import { planStewardActions } from "../src/workflow/action/plan.js";
 import { STEWARD_OF_STEWARDS_ACTIONS } from "../src/validate/decision.js";
 
 const rogueFinding = {

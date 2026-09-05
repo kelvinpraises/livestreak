@@ -17,6 +17,7 @@
   "dependencies": {
     "@effect/cli": "0.69.2",
     "@effect/platform-node": "0.96.1",
+    "@livestreak/bookmaker": "file:../packages/bookmaker",
     "@livestreak/contracts": "file:../packages/contracts",
     "@livestreak/host": "file:../packages/host",
     "@livestreak/observe": "file:../packages/observe",

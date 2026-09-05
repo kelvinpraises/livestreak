@@ -1,11 +1,10 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
 import { buildControlCatalog } from "#run/control/index.js";
 import { createControlBus } from "#run/control/bus/index.js";
 import { createInitialBoard } from "#run/control/board/index.js";
 import {
   forkMarketRegistrationIfNeeded,
-  resetMarketRegistrationRunsForTests,
   runMarketRegistrationLifecycle
 } from "#market/registration.js";
 import { validateObserveRunMarketOptions } from "#market/validate.js";
@@ -19,10 +18,6 @@ import {
 import { minimalEvmMarketRegistrationConfig } from "#test/helpers/market-config.js";
 
 describe("market registration lifecycle", () => {
-  beforeEach(() => {
-    resetMarketRegistrationRunsForTests();
-  });
-
   it("fires exactly one registration per runId (idempotent double-start)", async () => {
     let registerCalls = 0;
     const registrar = createFakeMarketRegistrar({

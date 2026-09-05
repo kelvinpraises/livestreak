@@ -4,6 +4,7 @@ module livestreak::treasury;
 
 use livestreak::lvst::{Self, LVST, LvstTreasuryCap};
 use livestreak::side;
+use livestreak::vault::{Self, VaultRegistry};
 use sui::balance::{Self, Balance};
 use sui::coin::{Self, Coin};
 use sui::event;
@@ -169,19 +170,23 @@ public(package) fun deposit_skim<T>(registry: &mut TreasuryRegistry<T>, payment:
     balance::join(&mut registry.usdc, coin::into_balance(payment));
 }
 
+// EVM-parity trust boundary (Treasury._mintLoss): the Treasury reads the claimable loss from the
+// Vault itself rather than trusting a `lost_usdc` literal supplied by the caller. The driver can no
+// longer express an inflated basis — the param is gone, so it is a compile-time guarantee.
 public(package) fun mint_loss_lvst<T>(
     registry: &mut TreasuryRegistry<T>,
     lvst_cap: &mut LvstTreasuryCap,
+    vault_registry: &VaultRegistry<T>,
     account: u256,
     to: address,
     vault_id: vector<u8>,
     side: u8,
-    lost_usdc: u256,
     ctx: &mut TxContext,
 ): u256 {
     side::assert_valid(side);
     let key = LossClaimKey { account, vault_id, side };
     assert!(!table::contains(&registry.loss_claimed, key), E_ALREADY_CLAIMED);
+    let lost_usdc = vault::loss_claimable(vault_registry, account, &vault_id, side);
     assert!(lost_usdc > 0, E_NOTHING_LOST);
     table::add(&mut registry.loss_claimed, key, true);
     let minted = (lost_usdc * mint_rate(registry)) / USDC_ONE;
@@ -211,16 +216,17 @@ public fun set_mint_params_for_test<T>(
 #[test_only]
 public fun mint_loss_lvst_for_test<T>(
     registry: &mut TreasuryRegistry<T>,
+    vault_registry: &VaultRegistry<T>,
     account: u256,
     to: address,
     vault_id: vector<u8>,
     side: u8,
-    lost_usdc: u256,
     ctx: &mut TxContext,
 ): u256 {
     side::assert_valid(side);
     let key = LossClaimKey { account, vault_id, side };
     assert!(!table::contains(&registry.loss_claimed, key), E_ALREADY_CLAIMED);
+    let lost_usdc = vault::loss_claimable(vault_registry, account, &vault_id, side);
     assert!(lost_usdc > 0, E_NOTHING_LOST);
     table::add(&mut registry.loss_claimed, key, true);
     let minted = (lost_usdc * mint_rate(registry)) / USDC_ONE;

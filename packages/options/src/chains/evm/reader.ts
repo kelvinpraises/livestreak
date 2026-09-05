@@ -41,6 +41,7 @@ import {
   mapProtocolSummary,
   mapStreamState,
   mapStreamsStateBalance,
+  mapStreamsStateFull,
   mapVault,
   mapVaultIds,
   mapVaultShareTotals,
@@ -118,7 +119,7 @@ export const createEvmOptionsReader = (config: OptionsChainConfig): OptionsReade
   const publicClient = createPublicClient({ transport: http(rpcUrl) });
 
   return createEvmOptionsReaderFromCall(
-    config.addresses,
+    config.addresses as OptionsContractAddresses,
     async <T,>(
       address: `0x${string}`,
       abi: readonly unknown[],
@@ -158,6 +159,7 @@ const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readWinningSide: (vaultId) => readWinningSide(ctx, vaultId),
   readBoard: (vaultId, side) => readBoard(ctx, vaultId, side),
   readSharePrice: (vaultId, side) => readSharePrice(ctx, vaultId, side),
+  readPendingBoundaries: (vaultId, side) => readPendingBoundaries(ctx, vaultId, side),
   readPendingShares: (vaultId, side, tokenId) =>
     readPendingShares(ctx, vaultId, side, tokenId),
   readUsdcAddress: () => readUsdcAddress(ctx),
@@ -387,6 +389,23 @@ const readSharePrice = async (
   }
 };
 
+const readPendingBoundaries = async (
+  ctx: ReaderContext,
+  vaultId: VaultId,
+  side: OptionsVaultSide
+): Promise<bigint> => {
+  const vaultBytes = validateVaultIdForContracts(vaultId);
+
+  try {
+    return await call<bigint>(ctx, ctx.addresses.vault, ctx.abis.Vault, "pendingBoundaries", [
+      vaultBytes,
+      sideToSolidityValue(side)
+    ]);
+  } catch (error) {
+    throw contractsReadFailed("pending boundaries", error);
+  }
+};
+
 const readPendingShares = async (
   ctx: ReaderContext,
   vaultId: VaultId,
@@ -594,13 +613,32 @@ const readNft = async (
       lanes.push(enrichLane(mapped, claimable, lossClaimable, winningSide));
     }
 
+    const transferFlags = await readTransferFlags(ctx, id);
+
+    // Fetch the account-level Drips balance + runway in one call.
+    let nftAccount: { balance?: bigint; runwayEndMs?: number } | undefined;
+    try {
+      const usdc = await readUsdcAddress(ctx);
+      const streamsState = await call<RawStreamsState>(
+        ctx,
+        ctx.addresses.dripsStreaming,
+        ctx.abis.DripsStreaming,
+        "streamsState",
+        [id, usdc]
+      );
+      nftAccount = mapStreamsStateFull(streamsState);
+    } catch {
+      // Non-fatal: balance/runway stay undefined if Drips is unavailable.
+    }
+
     return mapNft(
       asTokenId(id),
       account,
       asMarketId(bytes32ToHex(marketIdRaw)),
       count,
       lanes,
-      await readTransferFlags(ctx, id)
+      transferFlags,
+      nftAccount
     );
   } catch (error) {
     if (error instanceof LiveStreakConfigError) {

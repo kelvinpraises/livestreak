@@ -4,6 +4,7 @@ export {
   type StewardRuntimeInput
 } from "./config.js";
 export { createStewardRuntime, type StewardRuntime } from "./runtime.js";
+export { assembleBoard, type StewardBoard } from "./board.js";
 export type {
   ContractFactSource,
   HostFactSource,

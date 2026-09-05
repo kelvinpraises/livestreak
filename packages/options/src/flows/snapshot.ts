@@ -29,7 +29,19 @@ export const readMarketSnapshot = async (
     vaultIds.map((vaultId) => readOrThrow(() => reader.readVault(vaultId), "vault", vaultId))
   );
 
-  return { market, vaults };
+  // Fetch the raw stream pointer. Non-fatal: a market may have no stream set yet.
+  let streamState: import("../model/stream.js").OptionsStreamState | undefined;
+  try {
+    streamState = await reader.readStreamState(marketId);
+  } catch {
+    // Leave streamState undefined — stream pointer may not exist on-chain yet.
+  }
+
+  return {
+    market,
+    vaults,
+    ...(streamState === undefined ? {} : { streamState })
+  };
 };
 
 export const readVaultSnapshot = async (

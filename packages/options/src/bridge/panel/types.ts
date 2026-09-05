@@ -2,6 +2,7 @@
 
 import type {
   OptionsMarketStatus,
+  OptionsStreamStatus,
   OptionsVaultOutcome,
   OptionsVaultSide,
   OptionsVaultStatus,
@@ -30,6 +31,10 @@ export interface OptionsNftPanel {
   readonly owner: string;
   readonly approved?: string;
   readonly isOperator?: boolean;
+  /** Shared Drips account balance in USDC raw units (string). EVM only; absent on Sui. */
+  readonly balanceUSDC?: string;
+  /** Account-level runway as ms-since-epoch when the balance runs out. EVM only; absent on Sui. */
+  readonly runwayEndMs?: number;
 }
 
 export interface OptionsVaultPanel {
@@ -44,6 +49,8 @@ export interface OptionsVaultPanel {
     readonly yesUSDC: string;
     readonly noUSDC: string;
     readonly totalUSDC: string;
+    readonly sharePriceYes: string;
+    readonly sharePriceNo: string;
   };
   readonly shareTotals: {
     readonly yes: string;
@@ -91,6 +98,14 @@ export interface OptionsMarketPanel {
     readonly resolvedAtMs?: number;
   };
   readonly vaults: readonly OptionsVaultPanel[];
+  /** Raw on-chain stream pointer. Absent when no stream has been set for this market. */
+  readonly stream?: {
+    readonly status: OptionsStreamStatus;
+    readonly scheme: string;
+    readonly id: string;
+    readonly updatedAtMs?: number;
+    readonly endedAtMs?: number;
+  };
 }
 
 export interface OptionsLvstPanel {
@@ -129,14 +144,26 @@ export interface OptionsPanel {
 
 export interface OptionsControlsView {
   readonly account: string;
-  readonly actions: {
-    readonly canMint: boolean;
-    readonly canFund: boolean;
-    readonly canWithdraw: boolean;
-    readonly canClaimLoss: boolean;
-    readonly canStakeLvst: boolean;
-    readonly canUnstakeLvst: boolean;
-    readonly canClaimDividends: boolean;
-    readonly canTransferNft: boolean;
-  };
+  readonly revision: number;
+  readonly functions: readonly OptionsFunctionView[];
+}
+
+export type OptionsFunctionTargetKind = "market" | "vault" | "nft" | "lvst" | "global";
+
+export interface OptionsFunctionTarget {
+  readonly kind: OptionsFunctionTargetKind;
+  readonly marketId?: string;
+  readonly vaultId?: string;
+  readonly side?: OptionsVaultSide;
+  readonly tokenId?: string;
+}
+
+export interface OptionsFunctionView {
+  readonly name: string;
+  readonly scope: string;
+  readonly label: string;
+  readonly input?: string;
+  readonly target?: OptionsFunctionTarget;
+  readonly disabled: boolean;
+  readonly disabledReason?: string;
 }

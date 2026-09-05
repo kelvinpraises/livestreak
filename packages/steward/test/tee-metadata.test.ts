@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { isTeeAttestationRef } from "../src/facts/tee.js";
-import { evaluateStewardRules } from "../src/rules/evaluate.js";
+import { isTeeAttestationRef } from "../src/workflow/facts/tee.js";
+import { evaluateStewardRules } from "../src/workflow/rules/evaluate.js";
 
 const subject = { kind: "vault" as const, id: "vault-1", marketId: "market-1" };
 

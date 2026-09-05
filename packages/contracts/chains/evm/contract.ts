@@ -1,7 +1,7 @@
 import type { Address } from "viem";
 
 import { evmAbis, type EvmContractAbi } from "./abis.js";
-import { addresses } from "./addresses.js";
+import { addresses } from "./addresses-static.js";
 import type { DeploymentName, EvmContract } from "./types.js";
 
 export const DEFAULT_DEPLOYMENT: DeploymentName = "localhost";

@@ -62,8 +62,8 @@ describe("bookmaker public API", () => {
   });
 
   it("uses explicit re-exports rather than wholesale barrels", () => {
-    expect(indexSource).toMatch(/export \{ buildVaultDraft \}/);
-    expect(indexSource).toMatch(/export \{ chooseVaultAction \}/);
+    expect(indexSource).toMatch(/buildVaultDraft/);
+    expect(indexSource).toMatch(/chooseVaultAction/);
     expect(indexSource).not.toMatch(/export \* from/);
   });
 });

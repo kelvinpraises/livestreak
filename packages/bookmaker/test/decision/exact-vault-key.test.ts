@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chooseVaultAction } from "../../src/decision/choose.js";
+import { chooseVaultAction } from "../../src/pipeline/decision/choose.js";
 import { idempotencyKeyFromDraft } from "../../src/model/idempotency.js";
 import { detection, similarityResult, vaultDraft } from "../helpers/fixtures.js";
 

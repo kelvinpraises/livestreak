@@ -26,13 +26,16 @@ export type BoardSegmentInput = {
 
 export type BoardSegmentResult = {
   readonly newPool: bigint;
-  readonly dG: number;
+  // WAD-scaled (×1e18), matching the on-chain `g` units. The contract's segMath uses lnWad (×1e18),
+  // so the streamed delta `dG` must live in the same WAD scale as `board.g` — returning a plain float
+  // ratio here made it ~1e18× too small and the live-accrual delta vanished to ~0 after `/WAD`.
+  readonly dG: bigint;
 };
 
 export const segMath = (input: BoardSegmentInput): BoardSegmentResult => {
   const { pool, sideRate, dtSeconds } = input;
   if (dtSeconds <= 0 || sideRate === 0n) {
-    return { newPool: pool, dG: 0 };
+    return { newPool: pool, dG: 0n };
   }
 
   const newPool = pool + sideRate * BigInt(dtSeconds);
@@ -40,12 +43,15 @@ export const segMath = (input: BoardSegmentInput): BoardSegmentResult => {
   const p1 = Number(priceOf(newPool));
 
   if (p1 <= p0) {
-    return { newPool, dG: 0 };
+    return { newPool, dG: 0n };
   }
 
   const lnv = Math.log(p1 / p0);
-  const dG =
+  const dGfloat =
     (Number(SHARE_SCALE) * Number(CURVE_K) * lnv) / (Number(BASE_PRICE) * Number(sideRate));
+
+  // Scale into WAD so `dG` is directly addable to the WAD-scaled `board.g` (see type comment).
+  const dG = BigInt(Math.floor(dGfloat * 1e18));
 
   return { newPool, dG };
 };
@@ -86,7 +92,7 @@ export const projectShares = (input: ProjectSharesInput): bigint => {
 
   const dtSeconds = Math.floor((freezeMs - board.lastAdvanceMs) / 1000);
   const { dG } = segMath({ pool: board.pool, sideRate: board.sideRate, dtSeconds });
-  const gNow = board.g + BigInt(Math.floor(dG));
+  const gNow = board.g + dG; // dG is already WAD-scaled — add directly to the WAD-scaled g
 
   return sharesFromG(position.rate, gNow, position.gPaid);
 };

@@ -1,6 +1,6 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import { isTeeAttestationRef } from "../facts/tee.js";
+import { isTeeAttestationRef } from "../workflow/facts/tee.js";
 import type {
   StewardFinding,
   StewardFindingKind,

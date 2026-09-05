@@ -1,5 +1,6 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import { marketDriverAbi, treasuryAbi } from "@livestreak/contracts/evm/abis";
+import type { Address } from "@livestreak/schema";
 
 import {
   asMarketId,
@@ -22,7 +23,7 @@ import {
 } from "../../src/model/index.js";
 import type { OptionsContractAddresses } from "../../src/chains/evm/addresses.js";
 import { validateOptionsContractAddresses } from "../../src/chains/evm/addresses.js";
-import type { OptionsChain, OptionsChainConfig, OptionsReader, OptionsWriter, TxId } from "../../src/chains/types.js";
+import type { MintResult, OptionsChain, OptionsChainConfig, OptionsReader, OptionsWriter, TxId } from "../../src/chains/types.js";
 import { asTxId } from "../../src/chains/types.js";
 
 export const DEFAULT_FAKE_ADDRESSES: OptionsContractAddresses = {
@@ -61,9 +62,9 @@ export const createFakeChainConfig = (
       bundlerUrl: "http://127.0.0.1:4337",
       isSponsored: false,
       useNativeCoins: false,
-      entryPointAddress: "0x0000000000000000000000000000000000000001",
-      safe4337ModuleAddress: "0x0000000000000000000000000000000000000002",
-      safeModulesSetupAddress: "0x0000000000000000000000000000000000000003",
+      entryPointAddress: "0x0000000000000000000000000000000000000001" as Address,
+      safe4337ModuleAddress: "0x0000000000000000000000000000000000000002" as Address,
+      safeModulesSetupAddress: "0x0000000000000000000000000000000000000003" as Address,
       safeModulesVersion: "0.3.0",
       contractNetworks: {}
     }
@@ -86,6 +87,7 @@ export interface FakeTransportSeed {
   readonly pot?: Readonly<Record<string, bigint>>;
   readonly collected?: Readonly<Record<string, boolean>>;
   readonly boards?: Readonly<Record<string, OptionsBoardState>>;
+  readonly pendingBoundaries?: Readonly<Record<string, bigint>>;
   readonly sharePrices?: Readonly<Record<string, bigint>>;
   readonly pendingShares?: Readonly<Record<string, bigint>>;
   readonly accountVaultIds?: Readonly<Record<string, readonly VaultId[]>>;
@@ -109,6 +111,7 @@ export class FakeReaderInMemory implements OptionsReader {
   private readonly pot = new Map<string, bigint>();
   private readonly collected = new Map<string, boolean>();
   private readonly boards = new Map<string, OptionsBoardState>();
+  private readonly pendingBoundaries = new Map<string, bigint>();
   private readonly sharePrices = new Map<string, bigint>();
   private readonly pendingShares = new Map<string, bigint>();
   private readonly accountVaultIds = new Map<string, readonly VaultId[]>();
@@ -168,6 +171,10 @@ export class FakeReaderInMemory implements OptionsReader {
 
     for (const [key, value] of Object.entries(seed.boards ?? {})) {
       this.boards.set(key, value);
+    }
+
+    for (const [key, value] of Object.entries(seed.pendingBoundaries ?? {})) {
+      this.pendingBoundaries.set(key, value);
     }
 
     for (const [key, value] of Object.entries(seed.sharePrices ?? {})) {
@@ -331,6 +338,10 @@ export class FakeReaderInMemory implements OptionsReader {
 
   async readSharePrice(vaultId: VaultId, side: OptionsVaultSide): Promise<bigint> {
     return this.sharePrices.get(boardKey(vaultId, side)) ?? 0n;
+  }
+
+  async readPendingBoundaries(vaultId: VaultId, side: OptionsVaultSide): Promise<bigint> {
+    return this.pendingBoundaries.get(boardKey(vaultId, side)) ?? 0n;
   }
 
   async readPendingShares(
@@ -565,6 +576,11 @@ export const createFakeChainWriter = (): FakeChainWriter => {
     return Promise.resolve(asTxId("0xfake_user_op_hash"));
   };
 
+  const recordMint = (action: string, args: unknown): Promise<MintResult> => {
+    requests.push({ action, args });
+    return Promise.resolve({ txId: asTxId("0xfake_user_op_hash"), tokenId: asTokenId(1n) });
+  };
+
   return {
     get requests() {
       return requests;
@@ -572,8 +588,10 @@ export const createFakeChainWriter = (): FakeChainWriter => {
     clear() {
       requests.length = 0;
     },
-    mint: (input) => record("mint", input),
+    mint: (input) => recordMint("mint", input),
+    mintWithSalt: (input) => recordMint("mintWithSalt", input),
     fund: (input) => record("fund", input),
+    advance: (input) => record("advance", input),
     setLanes: (input) => record("setLanes", input),
     stopFunding: (input) => record("stopFunding", input),
     stopAllFunding: (input) => record("stopAllFunding", input),

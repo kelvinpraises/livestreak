@@ -11,7 +11,7 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyDeploySnapshotEnv } from "./config/aa/deploy-env.js";
-import { bootstrapHostServer } from "./api/server.js";
+import { bootstrapHostServer } from "./server.js";
 
 const HOST_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..");
 const DEFAULT_DEPLOY_SNAPSHOT = resolve(

@@ -1,17 +1,23 @@
 import { useState, useEffect } from 'react'
-import { mockVaults } from '#/utils/mock'
 import type { OptionsVault } from '@livestreak/options'
 import { isOptionsModeEnabled } from '#/utils/env'
 import { useOptionsContext } from '#/providers/options-provider'
 import { panelToVaults } from '#/utils/options'
+import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
 
 export function useVaults(streamId?: string) {
+  const preferFixture = usePreferFixture()
+  const parsed = useParsedFixture()
+  const { board } = useOptionsContext()
   const optionsEnabled = isOptionsModeEnabled()
-  const { board, isConnected } = useOptionsContext()
-  const [vaults, setVaults] = useState<OptionsVault[]>(mockVaults)
+  const [vaults, setVaults] = useState<OptionsVault[]>(parsed.vaults)
 
   useEffect(() => {
-    if (optionsEnabled) return
+    setVaults(parsed.vaults)
+  }, [parsed])
+
+  useEffect(() => {
+    if (!preferFixture || optionsEnabled) return
 
     const interval = setInterval(() => {
       setVaults(prev => prev.map(v => {
@@ -26,15 +32,18 @@ export function useVaults(streamId?: string) {
       }))
     }, 2200)
     return () => clearInterval(interval)
-  }, [optionsEnabled])
+  }, [preferFixture, optionsEnabled])
 
-  if (optionsEnabled && isConnected && board) {
+  if (!preferFixture && board) {
     return panelToVaults(board.panel, streamId)
   }
 
-  if (optionsEnabled) {
+  if (!preferFixture) {
     return []
   }
 
-  return vaults
+  const list = streamId
+    ? vaults.filter(v => v.marketId === streamId)
+    : vaults
+  return list
 }

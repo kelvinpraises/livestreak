@@ -1,17 +1,23 @@
-import { mockPositions, type Position } from '#/utils/mock'
-import { isOptionsModeEnabled } from '#/utils/env'
+import type { Position } from '#/types/demo'
 import { useOptionsContext } from '#/providers/options-provider'
 import { panelToPositions } from '#/utils/options'
+import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
 
 export function usePositions(streamId?: string): Position[] {
-  const optionsEnabled = isOptionsModeEnabled()
-  const { board, isConnected } = useOptionsContext()
+  const preferFixture = usePreferFixture()
+  const parsed = useParsedFixture()
+  const { board } = useOptionsContext()
 
-  if (optionsEnabled && isConnected && board) {
+  if (!preferFixture && board) {
     return panelToPositions(board.panel, streamId)
   }
 
-  if (optionsEnabled) return []
+  if (!preferFixture) return []
 
-  return mockPositions
+  return streamId
+    ? parsed.positions.filter(p => {
+        const vault = parsed.vaults.find(v => v.vaultId === p.vaultId)
+        return vault?.marketId === streamId
+      })
+    : parsed.positions
 }

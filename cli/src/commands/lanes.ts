@@ -9,7 +9,6 @@ import {
   type StopFundingInput,
   type WithdrawManyInput
 } from "@livestreak/options";
-import { ensureErc20Approval } from "../adapters/onchain.js";
 import { resolveOperatorContext } from "../gateway/operator.js";
 import { createOptionsEdge, buildCallActionEnvelope } from "../adapters/options.js";
 import {
@@ -55,18 +54,7 @@ export const runSetLanes = async (input: {
   const addDeposit =
     input.addDeposit === undefined ? 0n : parseNonNegativeBigIntArg(input.addDeposit, "add-deposit");
 
-  let approveTx: string | undefined;
-  if (addDeposit > 0n) {
-    const usdc = await edge.chain.reader.readUsdcAddress();
-    approveTx = await ensureErc20Approval(
-      ctx.account,
-      ctx.publicClient,
-      usdc,
-      ctx.doc.options.marketDriver,
-      addDeposit
-    );
-  }
-
+  // options `setLanes` approves USDC internally now (G4) — the edge no longer pre-approves add-deposit.
   const args: SetLanesInput = {
     tokenId: parseTokenId(token),
     lanes,
@@ -74,7 +62,7 @@ export const runSetLanes = async (input: {
   };
 
   const tx = await edge.callAction("setLanes", args);
-  return renderTxResult("set-lanes", { ...(approveTx === undefined ? {} : { approveTx }), tx });
+  return renderTxResult("set-lanes", { tx });
 };
 
 export const runStopFunding = async (input: {

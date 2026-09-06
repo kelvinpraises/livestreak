@@ -16,5 +16,5 @@ export {
   bridgeBoardSubscribeScope,
   bridgeControlsReadScope
 } from "./types.js";
-export { projectBookmakerPanel } from "./panel/index.js";
+export { projectBookmakerPanel, projectBookmakerDescriptors } from "./panel/index.js";
 export type { BookmakerPanelSnapshot } from "./panel/index.js";

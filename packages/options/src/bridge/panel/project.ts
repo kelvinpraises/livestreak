@@ -90,6 +90,13 @@ const CATALOG = {
     input: "MintNftInput",
     targetKind: "market"
   },
+  mintWithSalt: {
+    name: "mintWithSalt",
+    scope: "options:market:mintWithSalt",
+    label: "Enter market (deterministic)",
+    input: "MintWithSaltInput",
+    targetKind: "market"
+  },
   fund: {
     name: "fund",
     scope: "options:vault:fund",
@@ -195,6 +202,12 @@ const projectMintFunctions = (panel: OptionsPanel, functions: OptionsFunctionVie
     hasNft
       ? disabledFunction(CATALOG.mint, target, "Already entered this market")
       : enabledFunction(CATALOG.mint, target)
+  );
+  // mintWithSalt (deterministic tokenId) shares mint's gating: same market, same "already entered".
+  functions.push(
+    hasNft
+      ? disabledFunction(CATALOG.mintWithSalt, target, "Already entered this market")
+      : enabledFunction(CATALOG.mintWithSalt, target)
   );
 };
 

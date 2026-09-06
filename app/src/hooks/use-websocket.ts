@@ -1,21 +1,30 @@
 import { useState, useEffect, useRef } from 'react'
-import { mockFrame, mockEvents, type WSFrame, type WSEvent } from '#/utils/mock'
+import type { WSFrame, WSEvent } from '#/types/demo'
+import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
 
 export function useWebSocket(url = 'ws://localhost:8765') {
-  const [frame, setFrame] = useState<WSFrame>(mockFrame)
-  const [events, setEvents] = useState<WSEvent[]>(mockEvents)
+  const preferFixture = usePreferFixture()
+  const parsed = useParsedFixture()
+  const [frame, setFrame] = useState<WSFrame>(parsed.frame)
+  const [events, setEvents] = useState<WSEvent[]>(parsed.events)
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
-    if (connected) return
+    setFrame(parsed.frame)
+    setEvents(parsed.events)
+  }, [parsed])
+
+  useEffect(() => {
+    if (!preferFixture || connected) return
     const interval = setInterval(() => {
       setFrame(prev => ({ ...prev, frame: prev.frame + 1, ts: Date.now() }))
     }, 800)
     return () => clearInterval(interval)
-  }, [connected])
+  }, [preferFixture, connected])
 
   useEffect(() => {
+    if (preferFixture) return
     try {
       const ws = new WebSocket(url)
       ws.onopen = () => setConnected(true)
@@ -31,7 +40,7 @@ export function useWebSocket(url = 'ws://localhost:8765') {
       wsRef.current = ws
     } catch { /* ws unavailable */ }
     return () => wsRef.current?.close()
-  }, [url])
+  }, [url, preferFixture])
 
   return { frame, events, connected }
 }

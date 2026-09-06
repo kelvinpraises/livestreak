@@ -6,7 +6,9 @@ import type { StewardStateSnapshot } from "./store.js";
 import type { StewardActionPlan } from "../model/action-plan.js";
 import type { StewardDecisionAction } from "../model/decision.js";
 import { planStewardActions } from "../workflow/action/plan.js";
+import { sameSubject, type StewardSubjectKind } from "../model/subject.js";
 import { isStewardDecisionAction } from "../validate/decision.js";
+import { isStewardSubjectKind } from "../validate/subject.js";
 import {
   validateStewardRuntimeConfig,
   type StewardRuntimeConfig,
@@ -127,7 +129,13 @@ class StewardRuntimeFacade implements StewardRuntime {
 
     const snapshot = this.readSnapshot();
     const bridgeArgs = readBridgeActionArgs(args);
-    const subject = snapshot.watchedSubjects.find((entry) => entry.id === bridgeArgs.subjectId);
+    // S5: match by (kind, id) when the caller supplies a subjectKind, so two subjects sharing an id
+    // (e.g. observer vs steward "alice") cannot be confused. Falls back to id-only for back-compat.
+    const subject = snapshot.watchedSubjects.find(
+      (entry) =>
+        entry.id === bridgeArgs.subjectId &&
+        (bridgeArgs.subjectKind === undefined || entry.kind === bridgeArgs.subjectKind)
+    );
 
     if (subject === undefined) {
       throw new LiveStreakConfigError({
@@ -139,7 +147,7 @@ class StewardRuntimeFacade implements StewardRuntime {
     const finding =
       snapshot.latestFindings.find(
         (entry) =>
-          entry.subject.id === subject.id &&
+          sameSubject(entry.subject, subject) &&
           (bridgeArgs.findingId === undefined || entry.id === bridgeArgs.findingId)
       ) ??
       ({
@@ -250,7 +258,12 @@ class StewardRuntimeFacade implements StewardRuntime {
 
 const readBridgeActionArgs = (
   args: unknown
-): { readonly subjectId: string; readonly reason?: string; readonly findingId?: string } => {
+): {
+  readonly subjectId: string;
+  readonly subjectKind?: StewardSubjectKind;
+  readonly reason?: string;
+  readonly findingId?: string;
+} => {
   if (args === null || typeof args !== "object" || Array.isArray(args)) {
     throw new LiveStreakConfigError({
       message: "Steward bridge action args must be an object",
@@ -268,6 +281,7 @@ const readBridgeActionArgs = (
 
   return {
     subjectId: record.subjectId.trim(),
+    ...(isStewardSubjectKind(record.subjectKind) ? { subjectKind: record.subjectKind } : {}),
     ...(typeof record.reason === "string" ? { reason: record.reason } : {}),
     ...(typeof record.findingId === "string" ? { findingId: record.findingId } : {})
   };

@@ -1,78 +1,93 @@
 # @livestreak/observe — TODO
 
-See [architecture.md](./architecture.md) for runtime model and phased delivery. See [repo TODO](../../../README.md) for global engineering rules.
+See [architecture.md](./architecture.md). See [repo TODO](../../../README.md).
 
-**Mode:** keep stable; integration edges first, new big internals later.
-
----
-
-## Stability
-
-- [ ] Do not start new big internals before dependent package boundaries are written and contracts/bookmaker/steward surfaces are clearer.
-  - Update (2026-06-17): dependent boundaries now EXIST in code — host `EndpointManifest`/`HostProviderDescriptor` (`packages/host/src/manifest.ts`, `descriptor.ts`) and contracts `MarketRegistry.registerMarket(title, streamId)` (`packages/contracts/src/market/MarketRegistry.sol`). Remaining blocker is contract *decisions* (field mapping/derivation), not missing surfaces — see Integration edges below.
-- [ ] Final observe audit only after CLI / host / contracts integration points are clearer.
+**Mode:** backbone (contracts + host + AA register) is LIVE; CLI producer-edge is built. observe's remaining v0 work = expose the `goLive`/`setEnded` lifecycle writes + the consumer read split. observe stays pure **outside** `market/chains/**`; all chain/wallet I/O lives under `market/chains/**`.
 
 ---
 
-## Integration edges (priority)
+## Status — backbone DONE
 
-None of these are wired in observe src yet (confirmed 2026-06-17: grep finds no `observeRunId`,
-`subjectRef`, `manifestUri`, watch/webrtc, `evidenceRef`, `marketId` anywhere in `src/`). Each
-exposes a NEW public read-model/contract, so per the hardening boundary it is flagged for a
-design decision, not silently shipped. Blocking inbox requests filed:
+**Done & verified:**
+- contracts `MarketRegistry`: `registerMarket`, `streamState`(`goLive`/`setEnded`/`isLocked`, creator-gated), `StorageScheme` enum — `forge test` 136/0, commit `9787abe`.
+- host content-store **LIVE**: `POST /content/blobs {bytesBase64, persistence}` → `StorePointer{scheme,id,url}`; `GET /content/blobs/:scheme/:id`. Proven on testnet. Types in `@livestreak/host` (`StorePointer`, `PointerScheme`, `ContentPersistence`) — import, never redefine.
+- host media-sessions: live endpoints host-synthesized + host-signed (dev-stub).
+- observe Slice 1 (market registration edge): AA register, local `marketId`, `market` board cell, idempotent, non-blocking.
+- CLI producer edge (R1, `livestreak produce`): loads `livestreak.json`, runs observe, uploads MP4 to host, reads `marketId` off the board cell + mp4 off the file sink.
 
-- [ ] **Market registration edge plan** — blocked-on **contracts**: `context/temp-convo/contracts/inbox/from-observe__streamid-derivation.md`. Need the canonical `runId (string) -> streamId (bytes32)` derivation and whether `streamId` must be collision-checked on-chain before observe can expose a matching stream identity for the edge `registerMarket` write. (CLI/gateway/contracts perform the write; bookmaker does not create markets.)
-- [ ] **Document read-model fields bookmaker + host need** — blocked-on **host**: `context/temp-convo/host/inbox/from-observe__endpoint-manifest-seam.md`. Field source/ownership map (each field is observe-owned, host-owned, or contracts-owned):
-
-  | Field bookmaker/host expects | Source / owner | Status |
-  | --- | --- | --- |
-  | `observeRunId` | observe `runId` (`run/config/parse.ts`) — already on Board `system:run.readonly.runId` | exists internally; not yet a published market read-model field |
-  | `streamId` (bytes32) | derived from `runId` — formula owned by **contracts** | blocked (contracts inbox) |
-  | manifest URI / endpoint manifest | **host** assembles + signs `EndpointManifest`; observe provides raw endpoint facts | blocked (host inbox: seam) |
-  | watch / WebRTC endpoint refs | observe originates raw URLs; host forwards/signs | blocked (host inbox: seam) |
-  | `subjectRef` / subject metadata | **observe** — no `subject` concept exists today | not built (needs design) |
-  | `observer` address | edge/gateway identity, not observe library | external (CLI/gateway) |
-  | cache / evidence refs | observe attests id-only refs; host indexes | blocked (host inbox: seam) |
-
-- [ ] **Host output transport plan** — blocked-on **host** CONFLICT: `context/temp-convo/host/inbox/from-observe__CONFLICT-output-mode.md`. observe/schema `OutputMode = file|local|simulcast` vs host `HostOutputMode = forwarder|local|file` (`simulcast` ≠ `forwarder`, not a shared enum). Must converge on one canonical remote-push literal before output uses the host descriptor instead of ad-hoc URLs.
+**Locked decisions:**
+- `streamId = keccak256(abi.encode(observer, runId))` — observe-owned, helper is single source of truth.
+- key by `marketId`; output mode `simulcast` (`forwarder` deleted). v0 = chain points **directly at the VOD blob**; a manifest is phase 2 (live).
+- `(scheme, id)` on-chain — `id` is a **`string`** held verbatim, 1..64 bytes (a `bytes32` can't hold an IPFS CID), **no encode/decode**. scheme order `0 walrus-testnet · 1 walrus-mainnet · 2 ipfs · 3 arweave` (cross-package, fixed; same order as host's `PointerScheme` literals).
+- the on-chain lifecycle writes (`goLive`/`setEnded`) belong to **observe**, not the CLI (CLI is a pure router). observe owns the market, so it owns the market's lifecycle. Accepted from cli `from-cli__expose-setended`.
 
 ---
 
-## Proposed implementation — end-to-end market edge
+## Stream lifecycle / media discovery (the e2e loop)
 
-Full map: [flow.md](./flow.md). Slice 1 is **implemented** (see Integration edges). Remaining slices:
+**Model (v0):** `marketId → current media` via ONE keyed on-chain read (`streamState(marketId)` → `status, scheme, id`). In v0 `(scheme,id)` points **directly at the VOD blob** — NO manifest, NO signature (the creator-gated tx IS the attestation; `id` is a content hash → tamper-proof). Chain = source of truth; observe = pure outside `market/chains/**`; CLI = orchestration; host = store/serve.
 
-- [x] **Slice 1: market registration edge (implemented).** Observe imports `@livestreak/wallet` under `src/market/chains/**` only; constructs AA account from injected `WalletInit` + seed; forks `registerMarket` at run start; computes `marketId` locally via `computeMarketId(observer, streamId)` (P3 caller-bound); confirms UserOp inclusion via receipt `success` only; projects `market` board cell (`none→pending→registered→failed`); idempotent per runId; non-blocking worker. Sui = typed not-supported stub. streamId derivation remains injected (`context/temp-convo/contracts/inbox/from-observe__streamid-derivation.md` still open). Slice 2 designed out slice-1 receipt decode + sender/streamId verify (P3 makes them redundant).
-- [ ] **Slice 2: live output endpoint (host sink).** No live watch/webrtc endpoint exists today (file export only) → nothing to register. Blocked-on host output-mode CONFLICT + session seam.
-- [ ] **Slice 3: host-session handoff fields.** Supply `contentId`/`observer`/`outputMode`; ingest signed `EndpointManifest` refs (id-only) into a `system:session` channel; handle manifest expiry/rotation. Blocked-on host seam inbox. Note: `ObserveRun.manifest` (`PublishManifest`) name-collides host `EndpointManifest` — pick distinct naming.
-- [ ] **Slice 4: stream-end → market-close signal.** Surface a trustworthy stream-end fact keyed to `marketId` for a resolver (steward/contracts) to settle. Cross-package; observe provides only the signal. (Contracts has no `closeMarket`/`settleMarket` today — likely a contracts ask.)
+### Init doc — CLI-owned (`livestreak.json`)
+The edge bootstrap file lives in the CLI working dir and the **CLI owns it** (loader + evolving `run` cache; the secret seed is injected at runtime, never serialized). Recorded here only because observe feeds it — observe surfaces `marketId` on the `market` board cell and the CLI caches it. `run` never overrides chain (`streamState(marketId)` is truth). Shape (FYI):
+```json
+{
+  "chain":  { "rpc": "..", "marketRegistry": "0x..", "chainId": 0 },
+  "host":   { "url": "https://..", "walrusNetwork": "testnet" },
+  "wallet": { "config": {}, "seedRef": ".." },     // producer only; seed at runtime
+  "run":    { "runId": "..", "streamId": "0x..", "marketId": "0x..", "status": "none|live|ended" }
+}
+```
+
+### Producer flow (v0 file→VOD)
+```
+CLI loads livestreak.json
+CLI → run observe { title, walletInit, seed, marketRegistryAddress, runId }
+        observe FORKS registerMarket (AA; creator = the Safe) + records MP4 (file sink)
+CLI reads marketId (market board cell) + mp4 (file-sink path)
+CLI → POST host /content/blobs {mp4,"locked"}   → vodPtr {scheme,id,url}
+CLI → observe.goLive(marketId, scheme, id)      observe write op (creator Safe)
+CLI → observe.setEnded(marketId, scheme, id)    observe write op (creator Safe)
+```
+No manifest / no buildManifest in v0. `id` = verbatim string. `goLive` before `setEnded` (contract `None→Live→Ended`). Both writes use the SAME creator Safe as `registerMarket` (creator-gated, else `"not creator"`).
+
+### Consumer flow (v0)
+```
+read streamState(marketId) → status, scheme, id   options: readStreamState (raw pointer)
+resolve gateway(scheme) + id → VOD url            app (v0 app-level; no manifest hop)
+GET VOD url → play
+integrity = content-addressed id + creator-written pointer (no sig)
+```
+
+### Build list
+- [x] `observeRunStreamId(observer, runId)` helper + neg-test — **DONE** (golden vector cast-verified; 433 tests)
+- [ ] **observe lifecycle writes** — `createMarketLifecycle(config) → { goLive, setEnded }`, wallet-direct under `market/chains/**`, same creator Safe as `registerMarket`, `scheme` as `uint8`. Accepted from cli (`from-cli__expose-setended`); prompt queued at `context/temp-convo/prompts/observe.md`; CLI then routes to it + deletes its TEMP write.
+- [ ] consumer: **options** = `readStreamState(marketId)` (raw pointer, contract I/O only); **app** resolves `scheme+id → gateway url` + plays (v0 app-level, no manifest). options confirmed this split.
+- [ ] (forward-thinking) brand `userOpHash` → opaque `TxId` on `MarketRegisterResult` **and** `MarketLifecycleWriteResult` (chain-agnostic for Sui; AA poll stays in `chains/evm`) — per options shared-patterns
+
+> init doc (`livestreak.json`) loader/cache is **CLI-owned** — nothing to build here; observe only surfaces `marketId` on the board cell.
 
 ---
 
-## Future pipeline slices (after integration)
+## Phase 2 — live
+- [ ] simulcast sink (live network output) under `pipeline/publish/sinks/simulcast/`
+- [ ] live manifest + `goLive` re-point — decide HLS vs WebRTC. Manifest is content-addressed, **no `sig`** (creator-gated `goLive`/`setEnded` = attestation; `id` = content hash; EIP-1271 / canonical-JSON signing killed). Shape: `{ streamId, status, title, thumbnail, startedAt, endedAt, vod:{ scheme, id, url, durationMs } }`. Live endpoints stay host-signed (host's concern).
 
-- [ ] IPTV capture under `pipeline/capture/iptv/`
-- [ ] Football process pack under `pipeline/process/football/`
-- [ ] Simulcast / host sink under `pipeline/publish/sinks/simulcast/`
-
----
-
-## Engineering (when touching observe)
-
-- [x] Keep `#index.js` public-edge contract tests green — green 2026-06-17 (58 files / 410 tests pass)
-- [x] Keep architecture guards: Effect purity, forbidden imports, no empty files — all guard suites green; no new public API added this run
-- [ ] Match `AGENTS.md` file shape and dependency order
+## Endgame — settle
+- [ ] stream-end → market-close signal keyed to `marketId`; contracts likely needs `closeMarket`/`settleMarket`
+- [ ] `subjectRef` / subject metadata (no `subject` concept today — needs design)
 
 ---
 
-## Hardening (every slice) — run 2026-06-17
+## Progress
+- Backbone (contracts + host + AA register) + CLI producer edge: **done**.
+- e2e VOD demo (the loop above): **~70%** — backend + producer edge done; observe lifecycle writes (prompt queued) + consumer read remain. No hard crypto.
+- Full product (incl. live + settle): **~45%**.
 
-Run after touching this package. Full checklist: [repo TODO § Hardening loop](../../../README.md#hardening-loop).
+---
 
-- [x] check / build / test / lint for `packages/observe` — `check` clean, `build` clean, **410 tests / 58 files pass**, `lint` exit 0
-- [x] Stale-term + forbidden-import + empty-file + no `Effect.run*` in `src/`:
-  - Fixed: 2 stale `packages-re2/bookmaker/...` paths in `docs/architecture.md` → `packages/bookmaker/...`
-  - Removed: stray empty `.python-version` + `requirements.txt` at package root (junk in a TS package; football CV is unimplemented and lives under `pipeline/process/football/cv/`)
-  - Clean: no `Effect.run*` in `src/`; pipeline imports only `#run/control/bus/{calls,types}.js`; panel pure (no Effect/node/worker imports); no secrets in src
-- [ ] Negative-path test for every new public API — n/a this run (no new public API; integration edges blocked, see above)
-- [x] Update this `docs/TODO.md` — done 2026-06-17
+## Future pipeline slices
+- [ ] IPTV capture `pipeline/capture/iptv/`
+- [ ] Football process pack `pipeline/process/football/`
+
+## Hardening (every slice)
+`check / build / test / lint` green; no `Effect.run*` in `src/`; wallet/viem/`@livestreak/contracts` only under `market/chains/**`; no baked secrets; no empty files.

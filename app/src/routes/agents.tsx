@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Robot, Eye, Shield, Crosshair, CaretDown, Pulse, TrendUp, Medal } from '@phosphor-icons/react'
-import { mockAgents, type Agent, type AgentRole } from '#/utils/mock'
+import { useParsedFixture } from '#/hooks/use-fixture-mode'
+import type { Agent, AgentRole } from '#/types/demo'
 import { formatUSDCFull } from '#/utils/format'
 
 export const Route = createFileRoute('/agents')({
@@ -19,7 +20,7 @@ const tabs: { key: FilterTab; label: string }[] = [
 ]
 
 function useAgents(): Agent[] {
-  return mockAgents
+  return useParsedFixture().agents
 }
 
 function AgentsPage() {

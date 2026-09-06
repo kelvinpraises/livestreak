@@ -19,8 +19,12 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@livestreak/contracts": "file:../contracts",
     "@livestreak/core": "file:../core",
-    "@livestreak/schema": "file:../schema"
+    "@livestreak/host": "file:../host",
+    "@livestreak/observe": "file:../observe",
+    "@livestreak/schema": "file:../schema",
+    "@livestreak/wallet": "file:../wallet"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

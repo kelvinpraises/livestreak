@@ -8,6 +8,7 @@ import { VideoPlayer } from '#/components/organisms/video-player.tsx'
 import { NikoNikoCard } from '#/components/molecules/niko-niko-card.tsx'
 import { VaultList } from '#/components/organisms/vault-list.tsx'
 import { WalletControls } from '#/components/molecules/wallet-controls.tsx'
+import { DemoEdgeToggle } from '#/components/molecules/demo-edge-toggle'
 import { useVaults } from '#/hooks/use-vaults.ts'
 import { usePositions } from '#/hooks/use-positions.ts'
 import { useWebSocket } from '#/hooks/use-websocket.ts'
@@ -114,7 +115,10 @@ export function StreamLayout({ streamTitle, category, totalPooled, streamId }: S
             fontFamily: 'var(--font-mono)',
           }}>{category}</span>
         </div>
-        <WalletControls />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <DemoEdgeToggle />
+          <WalletControls />
+        </div>
       </div>
 
       {/* Stream bar */}

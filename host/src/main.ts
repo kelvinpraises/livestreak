@@ -8,10 +8,12 @@
  *   npm run dev
  */
 
+import { createServer } from "node:http";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyDeploySnapshotEnv } from "./config/aa/deploy-env.js";
 import { bootstrapHostServer } from "./server.js";
+import { attachRemoteWss } from "./infrastructure/ws/server.js";
 
 const HOST_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..");
 const DEFAULT_DEPLOY_SNAPSHOT = resolve(
@@ -31,7 +33,12 @@ if (process.env.LIVESTREAK_AA_FROM_DEPLOY !== "0") {
 
 const { config, deps, app } = await bootstrapHostServer();
 
-app.listen(config.bindPort, config.bindHost, () => {
+// Explicit http.Server so the Remote Bridge Console WSS legs can share the port
+// (Express 5 has no built-in WebSocket support).
+const httpServer = createServer(app);
+attachRemoteWss(httpServer, deps);
+
+httpServer.listen(config.bindPort, config.bindHost, () => {
   console.log(`[host]: listening on http://${config.bindHost}:${config.bindPort}`);
   for (const chain of deps.aa.aa.chains) {
     console.log(

@@ -18,3 +18,4 @@ export type {
   StewardMemorySink
 } from "./sink.js";
 export type { StewardRuntimeLastError, StewardRuntimeStore } from "./store.js";
+export * from "./adapters/index.js";

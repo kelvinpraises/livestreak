@@ -20,6 +20,10 @@ export const AaChainDescriptor = Schema.Struct({
   entryPoint: Schema.NonEmptyString,
   safeModule: Schema.optional(Schema.NonEmptyString),
   bundlerPath: Schema.NonEmptyString,
+  // Per-chain paymaster path (H5), symmetric with `bundlerPath`. The route is
+  // `/aa/paymaster/:chain`, so the descriptor advertises one path per chain.
+  // Canonicalized here from the wave-1 host-local emit superset.
+  paymasterPath: Schema.NonEmptyString,
   rpcUrl: Schema.optional(Schema.NonEmptyString)
 });
 

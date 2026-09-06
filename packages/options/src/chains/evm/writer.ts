@@ -44,9 +44,9 @@ import { DEFAULT_ABIS } from "./abis.js";
 import { validateOptionsContractAddresses, type OptionsContractAddresses } from "./addresses.js";
 import {
   sideToSolidityValue,
-  validateBytes32Id,
   validateMarketIdForContracts,
   validateTokenIdForContracts,
+  validateUint64Salt,
   validateUserAddress,
   validateVaultIdForContracts
 } from "./encode.js";
@@ -219,7 +219,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
 
     mintWithSalt: async (input: MintWithSaltInput): Promise<MintResult> => {
       const marketBytes = validateMarketIdForContracts(input.marketId);
-      const salt = validateBytes32Id(input.salt, "salt");
+      const salt = validateUint64Salt(input.salt, "salt");
       const to = validateUserAddress(input.to, "to");
 
       const { txId, receipt } = await sendForReceipt(

@@ -89,7 +89,8 @@ export type {
 export {
   projectOptionsPanel,
   projectOptionsControls,
-  projectOptionsFunctions
+  projectOptionsFunctions,
+  projectOptionsDescriptors
 } from "./bridge/panel/index.js";
 export type {
   BridgeCaller,
@@ -125,6 +126,9 @@ export type {
   OptionsContractAddresses,
   OptionsSuiObjectIds,
   TxId,
+  MintNftInput,
+  MintResult,
+  MintWithSaltInput,
   FundStreamInput,
   AdvanceInput,
   SetLanesInput,

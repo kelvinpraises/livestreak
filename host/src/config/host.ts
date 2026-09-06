@@ -42,6 +42,15 @@ export interface HostServerConfig {
   readonly walrusContentLockedEpochs: number;
   readonly resolvedWalrus: ResolvedWalrus | null;
   readonly livekitApiKey: string | undefined;
+  // --- Remote Bridge Console (P4) ---
+  /** App origin the host 302-redirects `/remote/:session` to (UI lives there). */
+  readonly remoteAppOrigin: string | null;
+  /** Shared secret leg-A `register` must present so the host trusts the gateway. */
+  readonly remoteGatewayToken: string | null;
+  /** Optional stable 32-byte Ed25519 seed (hex) for the host grant key. */
+  readonly remoteGrantKeyHex: string | null;
+  /** Default session TTL (ms) if the gateway does not specify one. */
+  readonly remoteSessionTtlMs: number;
 }
 
 export const isWalrusEnabled = (config: HostServerConfig): boolean =>
@@ -62,7 +71,8 @@ const allModules: readonly HostModuleToken[] = [
   "media",
   "walrus_memory",
   "walrus_content",
-  "discovery"
+  "discovery",
+  "remote"
 ];
 
 export const defaultHostServerConfig = (): HostServerConfig => ({
@@ -92,7 +102,11 @@ export const defaultHostServerConfig = (): HostServerConfig => ({
   walrusContentEphemeralEpochs: readPositiveIntEnv("LIVESTREAK_WALRUS_CONTENT_EPHEMERAL_EPOCHS", 1),
   walrusContentLockedEpochs: readPositiveIntEnv("LIVESTREAK_WALRUS_CONTENT_LOCKED_EPOCHS", 5),
   resolvedWalrus: null,
-  livekitApiKey: process.env.LIVEKIT_API_KEY
+  livekitApiKey: process.env.LIVEKIT_API_KEY,
+  remoteAppOrigin: readOptionalEnv("LIVESTREAK_APP_ORIGIN"),
+  remoteGatewayToken: readOptionalEnv("LIVESTREAK_REMOTE_GATEWAY_TOKEN"),
+  remoteGrantKeyHex: readOptionalEnv("LIVESTREAK_REMOTE_GRANT_KEY"),
+  remoteSessionTtlMs: readPositiveIntEnv("LIVESTREAK_REMOTE_SESSION_TTL_MS", 60 * 60 * 1000)
 });
 
 export const toHostProviderDescriptor = (config: HostServerConfig): HostProviderDescriptor => {

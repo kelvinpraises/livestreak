@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StreamIdRouteImport } from './routes/stream/$id'
+import { Route as RemoteSessionRouteImport } from './routes/remote/$session'
 
 const AgentsRoute = AgentsRouteImport.update({
   id: '/agents',
@@ -28,34 +29,43 @@ const StreamIdRoute = StreamIdRouteImport.update({
   path: '/stream/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const RemoteSessionRoute = RemoteSessionRouteImport.update({
+  id: '/remote/$session',
+  path: '/remote/$session',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
+  '/remote/$session': typeof RemoteSessionRoute
   '/stream/$id': typeof StreamIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
+  '/remote/$session': typeof RemoteSessionRoute
   '/stream/$id': typeof StreamIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
+  '/remote/$session': typeof RemoteSessionRoute
   '/stream/$id': typeof StreamIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/agents' | '/stream/$id'
+  fullPaths: '/' | '/agents' | '/remote/$session' | '/stream/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/agents' | '/stream/$id'
-  id: '__root__' | '/' | '/agents' | '/stream/$id'
+  to: '/' | '/agents' | '/remote/$session' | '/stream/$id'
+  id: '__root__' | '/' | '/agents' | '/remote/$session' | '/stream/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRoute
+  RemoteSessionRoute: typeof RemoteSessionRoute
   StreamIdRoute: typeof StreamIdRoute
 }
 
@@ -82,12 +92,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StreamIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/remote/$session': {
+      id: '/remote/$session'
+      path: '/remote/$session'
+      fullPath: '/remote/$session'
+      preLoaderRoute: typeof RemoteSessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRoute,
+  RemoteSessionRoute: RemoteSessionRoute,
   StreamIdRoute: StreamIdRoute,
 }
 export const routeTree = rootRouteImport

@@ -134,8 +134,22 @@ const hostActionsForDecision = (
         }
       ];
     case "triggerHot":
-    case "challenge":
     case "resolve":
+      // S4: a triggerHot/resolve whose subject has no vaultId cannot emit a contract call. Instead of
+      // a SILENT empty plan, surface a visible annotate signal so the no-op is auditable on the board.
+      return subject.vaultId === undefined
+        ? [
+            {
+              kind: "annotate",
+              payload: {
+                subject,
+                message: `Cannot ${decision.action}: subject has no vaultId — ${decision.reason}`,
+                findingId: decision.finding.id
+              }
+            }
+          ]
+        : [];
+    case "challenge":
     case "proposePenalty":
     case "vetoSteward":
       return [];

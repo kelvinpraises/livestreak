@@ -72,4 +72,19 @@ export const validateTokenIdForContracts = (tokenId: TokenId): bigint => {
   return tokenId;
 };
 
+// MarketDriver.mintWithSalt(bytes32, uint64 salt, address). The salt is a uint64 — reject anything
+// outside [0, 2^64-1] before it reaches the ABI encoder.
+const MAX_UINT64 = (1n << 64n) - 1n;
+
+export const validateUint64Salt = (value: bigint, field = "salt"): bigint => {
+  if (typeof value !== "bigint" || value < 0n || value > MAX_UINT64) {
+    throw new LiveStreakConfigError({
+      message: `Invalid uint64 ${field} (must be 0 .. 2^64-1)`,
+      metadata: { details: String(value) }
+    });
+  }
+
+  return value;
+};
+
 export const coerceVaultSide = (side: OptionsVaultSide): ContractSide => side;

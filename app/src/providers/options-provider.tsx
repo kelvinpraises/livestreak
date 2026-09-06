@@ -418,13 +418,13 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   const callBridgeAction = useCallback(async (action: string, args: unknown): Promise<TxId> => {
     setClaiming(true)
     try {
-      const txId = await requireBridge().callAction(APP_CALLER, {
+      const result = await requireBridge().callAction(APP_CALLER, {
         scope: bridgeActionScope,
         action,
         args,
       })
       await afterWrite()
-      return txId
+      return typeof result === 'string' ? result : result.txId
     } finally {
       setClaiming(false)
     }

@@ -14,6 +14,7 @@ import { createDescriptorRouter } from "./api/routes/descriptor.js";
 import { createDiscoveryRouter } from "./api/routes/discovery.js";
 import { createMediaRouter } from "./api/routes/media.js";
 import { createMemoryRouter } from "./api/routes/memory.js";
+import { createRemoteRouter } from "./api/routes/remote.js";
 import {
   createCorsMiddleware,
   createModuleDisabledHandler,
@@ -58,6 +59,8 @@ export const createApp = (deps: HostRouteDeps): Express => {
   const moneyRateLimit = createRateLimit({ capacity: 120, windowMs: 60_000 });
   app.use("/aa", moneyRateLimit);
   app.use("/content", moneyRateLimit);
+  // `/remote/:session/join` is a password surface — rate-limit to bound brute force.
+  app.use("/remote", moneyRateLimit);
 
   // Each module either mounts its router (enabled) or a typed `503 module_disabled`
   // stub at its path prefix (disabled) so callers can tell "off" from "missing".
@@ -66,6 +69,7 @@ export const createApp = (deps: HostRouteDeps): Express => {
   mountModule(app, deps.config, "walrus_memory", "/memory", () => createMemoryRouter(deps));
   mountModule(app, deps.config, "walrus_content", "/content", () => createContentRouter(deps));
   mountModule(app, deps.config, "discovery", "/discovery", () => createDiscoveryRouter(deps));
+  mountModule(app, deps.config, "remote", "/remote", () => createRemoteRouter(deps));
 
   app.use(notFoundHandler);
   app.use(payloadTooLargeHandler);

@@ -4,18 +4,8 @@
 //   createVault     -> @livestreak/bookmaker (gap: context/temp-convo/bookmaker/inbox/from-cli__expose-createvault.md)
 //   mint            -> @livestreak/options   (gap: context/temp-convo/options/inbox/from-cli__expose-mint.md)
 
-import {
-  marketDriverAbi,
-  marketRegistryAbi
-} from "@livestreak/contracts/evm/abis";
+import { marketRegistryAbi } from "@livestreak/contracts/evm/abis";
 import type { PointerScheme, StorePointer } from "@livestreak/host";
-import {
-  asMarketId,
-  asTokenId,
-  asUserAddress,
-  type MarketId,
-  type TokenId
-} from "@livestreak/options";
 import type { EvmWalletInitConfig, WalletInit } from "@livestreak/schema";
 import {
   createWalletManager,
@@ -26,10 +16,7 @@ import {
 import {
   createPublicClient,
   encodeFunctionData,
-  erc20Abi,
   http,
-  parseEventLogs,
-  type Abi,
   type PublicClient
 } from "viem";
 
@@ -79,79 +66,12 @@ export const createCreatorWallet = async (
 // POLL: the local 2s poller is gone — chain writes use the shared, hex/number-safe
 // `pollUntilUserOperationIncluded` from @livestreak/wallet (60s budget + backoff).
 
-export const readUserOpTransactionHash = (receipt: unknown): `0x${string}` => {
-  if (typeof receipt !== "object" || receipt === null) {
-    throw new Error("UserOperation receipt payload is not an object");
-  }
+// sendContractCall / readUserOpTransactionHash removed (wave 5): the only writers that used the
+// generic contract-call helper were the mint TEMP (now via the options bridge) and the ERC20 approve
+// (now internal to options/bookmaker). goLive/setEnded use sendMarketCall directly.
 
-  const record = receipt as Record<string, unknown>;
-  const nested = record["receipt"];
-  const direct = record["transactionHash"];
-
-  if (typeof direct === "string" && direct.startsWith("0x")) {
-    return direct as `0x${string}`;
-  }
-
-  if (typeof nested === "object" && nested !== null) {
-    const txHash = (nested as Record<string, unknown>)["transactionHash"];
-    if (typeof txHash === "string" && txHash.startsWith("0x")) {
-      return txHash as `0x${string}`;
-    }
-  }
-
-  throw new Error("UserOperation receipt is missing transactionHash");
-};
-
-export const sendContractCall = async (
-  account: WalletAccountEvmErc4337,
-  to: `0x${string}`,
-  abi: Abi,
-  functionName: string,
-  args: readonly unknown[] = []
-): Promise<{ readonly userOpHash: string; readonly userOpReceipt: unknown }> => {
-  const data = encodeFunctionData({
-    abi,
-    functionName,
-    args: args as readonly unknown[] | undefined
-  });
-
-  const sendResult = await account.sendTransaction({
-    to,
-    data,
-    value: 0n
-  });
-
-  const readOnly = await account.toReadOnlyAccount();
-  const userOpReceipt = await pollUntilUserOperationIncluded(readOnly, sendResult.hash);
-  return { userOpHash: sendResult.hash, userOpReceipt };
-};
-
-export const ensureErc20Approval = async (
-  account: WalletAccountEvmErc4337,
-  publicClient: PublicClient,
-  token: `0x${string}`,
-  spender: `0x${string}`,
-  amount: bigint
-): Promise<string | undefined> => {
-  const owner = (await account.getAddress()) as `0x${string}`;
-  const allowance = await publicClient.readContract({
-    address: token,
-    abi: erc20Abi,
-    functionName: "allowance",
-    args: [owner, spender]
-  });
-
-  if (allowance >= amount) {
-    return undefined;
-  }
-
-  const { userOpHash } = await sendContractCall(account, token, erc20Abi, "approve", [
-    spender,
-    amount
-  ]);
-
-  return userOpHash;
-};
+// ensureErc20Approval removed (G4): options `fund`/`setLanes` and bookmaker `createVault` approve
+// USDC internally now, so the CLI no longer pre-approves at the edge.
 
 // ── goLive / setEnded (TEMP: migrates to @livestreak/observe) ───────────────
 
@@ -319,131 +239,3 @@ export const encodeGoLive = (
 
 // createVault migrated to @livestreak/bookmaker (createVaultOnce); see adapters/bookmaker.ts.
 
-// ── mint (TEMP: migrates to @livestreak/options) ─────────────────────────────
-
-export interface OperatorMintNftInput {
-  readonly account: WalletAccountEvmErc4337;
-  readonly publicClient: PublicClient;
-  readonly marketDriverAddress: `0x${string}`;
-  readonly marketId: MarketId;
-  readonly to?: `0x${string}`;
-  readonly salt?: string;
-}
-
-export interface OperatorMintNftResult {
-  readonly tokenId: TokenId;
-  readonly tx: string;
-}
-
-export const parseMintSalt = (value: string): bigint => {
-  let parsed: bigint;
-  try {
-    parsed = BigInt(value);
-  } catch {
-    throw new Error("salt must be a non-negative integer string");
-  }
-
-  if (parsed < 0n) {
-    throw new Error("salt must be >= 0");
-  }
-
-  const maxUint64 = 18446744073709551615n;
-  if (parsed > maxUint64) {
-    throw new Error("salt must fit uint64");
-  }
-
-  return parsed;
-};
-
-export const encodeMintCall = (marketId: MarketId, to: `0x${string}`): `0x${string}` =>
-  encodeFunctionData({
-    abi: marketDriverAbi,
-    functionName: "mint",
-    args: [marketId as `0x${string}`, to]
-  });
-
-export const encodeMintWithSaltCall = (
-  marketId: MarketId,
-  salt: bigint,
-  to: `0x${string}`
-): `0x${string}` =>
-  encodeFunctionData({
-    abi: marketDriverAbi,
-    functionName: "mintWithSalt",
-    args: [marketId as `0x${string}`, salt, to]
-  });
-
-export const parseMarketNftMintedTokenId = (
-  logs: readonly unknown[],
-  marketDriverAddress: `0x${string}`
-): bigint => {
-  const events = parseEventLogs({
-    abi: marketDriverAbi,
-    logs: logs as never,
-    eventName: "MarketNftMinted"
-  }).filter((event) => event.address.toLowerCase() === marketDriverAddress.toLowerCase());
-
-  if (events.length === 0) {
-    throw new Error("MarketNftMinted event not found in transaction receipt");
-  }
-
-  const tokenId = events[0]?.args.tokenId;
-  if (typeof tokenId !== "bigint") {
-    throw new Error("MarketNftMinted event is missing tokenId");
-  }
-
-  return tokenId;
-};
-
-export const operatorMintNft = async (
-  input: OperatorMintNftInput
-): Promise<OperatorMintNftResult> => {
-  const to = asUserAddress((input.to ?? (await input.account.getAddress())) as `0x${string}`);
-  const marketId = asMarketId(input.marketId);
-
-  if (input.salt !== undefined) {
-    const salt = parseMintSalt(input.salt);
-    const minter = (await input.account.getAddress()) as `0x${string}`;
-
-    const expectedTokenId = await input.publicClient.readContract({
-      address: input.marketDriverAddress,
-      abi: marketDriverAbi,
-      functionName: "calcTokenIdWithSalt",
-      args: [minter, salt]
-    });
-
-    const { userOpHash, userOpReceipt } = await sendContractCall(
-      input.account,
-      input.marketDriverAddress,
-      marketDriverAbi,
-      "mintWithSalt",
-      [marketId, salt, to]
-    );
-
-    const txHash = readUserOpTransactionHash(userOpReceipt);
-    const receipt = await input.publicClient.waitForTransactionReceipt({ hash: txHash });
-    const tokenId = parseMarketNftMintedTokenId(receipt.logs, input.marketDriverAddress);
-
-    if (tokenId !== expectedTokenId) {
-      throw new Error(
-        `mintWithSalt tokenId mismatch: event ${tokenId.toString()} vs calc ${expectedTokenId.toString()}`
-      );
-    }
-
-    return { tokenId: asTokenId(tokenId), tx: userOpHash };
-  }
-
-  const { userOpHash, userOpReceipt } = await sendContractCall(
-    input.account,
-    input.marketDriverAddress,
-    marketDriverAbi,
-    "mint",
-    [marketId, to]
-  );
-
-  const txHash = readUserOpTransactionHash(userOpReceipt);
-  const receipt = await input.publicClient.waitForTransactionReceipt({ hash: txHash });
-  const tokenId = parseMarketNftMintedTokenId(receipt.logs, input.marketDriverAddress);
-
-  return { tokenId: asTokenId(tokenId), tx: userOpHash };
-};

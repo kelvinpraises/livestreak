@@ -17,7 +17,10 @@ export { authorizeBridgeCaller, requireAnyScope } from "./scope.js";
 export {
   projectStewardControls,
   projectStewardFunctions,
-  projectStewardPanel
+  projectStewardPanel,
+  projectStewardDescriptors,
+  actionScopeFor,
+  STEWARD_ACTION_SCOPES
 } from "./panel/index.js";
 export type {
   StewardControlsView,

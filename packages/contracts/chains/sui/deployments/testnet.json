@@ -1,0 +1,22 @@
+{
+  "chain": "testnet",
+  "rpc": "https://fullnode.testnet.sui.io:443",
+  "deployedAt": "2026-06-21T23:10:39.409Z",
+  "deployer": "0x668cfc490bd30cf8d4666e3ff39cc7fded31deee89d105267011d01abea94e84",
+  "packageId": "0x405f99daf3690baf6211783e1492c86c4c600ed1d0a0e6aadcd7b992d149200e",
+  "objects": {
+    "packageId": "0x405f99daf3690baf6211783e1492c86c4c600ed1d0a0e6aadcd7b992d149200e",
+    "protocol": "0xe983e2108a3ab870399b1c08453eaaf750c495ef63854b216ae5288bb194be00",
+    "marketRegistry": "0x45d4acbfb9d0383f0e682c2636f7edf07367d7046585b1b53dc279a30131b66d",
+    "vaultRegistry": "0xab2432ade27f45a7970cc4168f15469fd27cbde6a142bdb3e3e755fd530e1a96",
+    "stewardRegistry": "0x415e43223f347f73bf6956d2427b619c1ac7758568c89380ce0a4f0841ecd598",
+    "treasuryRegistry": "0x3f510590fd5135324993dde628bf1f27a228fc2567d8e0acb7c5d782b4f7b83f",
+    "dripsRegistry": "0xab4a571838f64478adb6d239b1cdc53891eea118e8312e8c1c7615d7e50aac6c",
+    "streamsRegistry": "0x208fe9b51eee0d050eed13a31c87059c046028b501c62e5f0901e9a4140e73c7",
+    "vaultDriverRegistry": "0xa41e6ff9c70b77965b7ac9d66bfeef063b1c3623c4a741244e1773a442c212b3",
+    "marketDriverRegistry": "0xb3293e6b7ef15be9b7043e987ca255da257e573cfdf9e780f373df427079ac6c",
+    "driverRegistry": "0x83a627d1b93791133638ff7ec25e1246b994089fec452b2badd698603a55bf4b",
+    "lvstTreasuryCap": "0x3065ea9f9e57d54aad93616dd1d14a7c276c1726cb101f9ddbf5bb6a59557a3d",
+    "usdcMintCap": "0x7c7e8723edac3a6e71a6caba5d09bc0c433452b8b63552147dbb8a9b041831b4"
+  }
+}

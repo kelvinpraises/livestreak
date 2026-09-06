@@ -14,6 +14,7 @@ export {
   bridgeControlsReadScope
 } from "./types.js";
 export { projectOptionsPanel, projectOptionsControls, projectOptionsFunctions } from "./panel/index.js";
+export { projectOptionsDescriptors } from "./panel/index.js";
 export type {
   OptionsControlsView,
   OptionsFunctionTarget,

@@ -15,10 +15,13 @@ const navLinks = [
 export default function RootApp() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const isStreamPage = pathname.startsWith('/stream/')
+  // Remote Bridge Console (P5) is a standalone, full-screen surface — it brings its
+  // own RemoteProvider + layout and needs no global nav/wallet chrome.
+  const isBarePage = isStreamPage || pathname.startsWith('/remote/')
 
   return (
     <AppProviders>
-      {isStreamPage ? (
+      {isBarePage ? (
         <Outlet />
       ) : (
         <div style={{

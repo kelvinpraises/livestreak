@@ -30,7 +30,11 @@ const baseConfig = (): HostServerConfig => ({
   walrusContentEphemeralEpochs: 1,
   walrusContentLockedEpochs: 5,
   resolvedWalrus: null,
-  livekitApiKey: undefined
+  livekitApiKey: undefined,
+  remoteAppOrigin: null,
+  remoteGatewayToken: null,
+  remoteGrantKeyHex: null,
+  remoteSessionTtlMs: 3_600_000
 });
 
 const mockFetch = (network: "mainnet" | "testnet") =>

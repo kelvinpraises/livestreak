@@ -33,7 +33,7 @@ export type MintNftInput = {
 
 export type MintWithSaltInput = {
   readonly marketId: MarketId;
-  readonly salt: string; // bytes32 hex — deterministic tokenId salt (calcTokenIdWithSalt)
+  readonly salt: bigint; // uint64 — deterministic tokenId salt (MarketDriver.mintWithSalt / calcTokenIdWithSalt)
   readonly to: UserAddress;
 };
 

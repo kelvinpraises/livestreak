@@ -68,6 +68,9 @@ export {
   projectStewardControls,
   projectStewardFunctions,
   projectStewardPanel,
+  projectStewardDescriptors,
+  actionScopeFor,
+  STEWARD_ACTION_SCOPES,
   authorizeBridgeCaller,
   bridgeActionScope,
   bridgeBoardReadScope,
@@ -93,6 +96,7 @@ export {
   validateStewardRuntimeConfig,
   assembleBoard
 } from "./runtime/index.js";
+export * from "./runtime/adapters/index.js";
 export type {
   ContractFactSource,
   HostFactSource,

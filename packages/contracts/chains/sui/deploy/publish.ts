@@ -2,8 +2,10 @@
 /**
  * Publish LiveStreak Move package + bootstrap protocol wiring on Sui localnet.
  *
- * Prereqs: `sui start --with-faucet` and `sui client switch --env localnet`
- * Run:     npm run deploy:sui -- --name localnet
+ * Prereqs:
+ *   localnet — `sui start --with-faucet` and `sui client switch --env localnet`
+ *   testnet  — funded `sui client` active key (or `SUI_SECRET_KEY`) on testnet
+ * Run:     npm run deploy:sui -- --name localnet|testnet
  */
 
 import { parseArgs } from "node:util";
@@ -11,29 +13,32 @@ import { Transaction } from "@mysten/sui/transactions";
 import { MODULES, target } from "../package.js";
 import type { SuiDeployOutput, SuiDeploymentName, SuiObjectIds } from "../types.js";
 import {
-  DEFAULT_RPC,
-  cliTestPublish,
+  cliPublish,
+  faucetForRpc,
   findCreatedId,
   findPublishedPackageId,
   getKeypair,
   makeClient,
+  networkForDeployment,
   promoteDeployment,
   readState,
   requestGas,
   requireCreatedId,
+  rpcForDeployment,
   writeState,
 } from "./utils.js";
 
 const { values } = parseArgs({
   options: {
     name: { type: "string", default: "localnet" },
-    rpc: { type: "string", default: DEFAULT_RPC },
+    rpc: { type: "string" },
     force: { type: "boolean", default: false },
   },
 });
 
 const name = values.name as SuiDeploymentName;
-const rpc = values.rpc ?? DEFAULT_RPC;
+const rpc = values.rpc ?? rpcForDeployment(name);
+const network = networkForDeployment(name);
 const force = values.force ?? false;
 
 async function main(): Promise<void> {
@@ -44,12 +49,12 @@ async function main(): Promise<void> {
 
   console.log(`\n▶ Sui deploy (${name}) @ ${rpc}\n`);
 
-  const client = makeClient(rpc);
+  const client = makeClient(rpc, network);
   const keypair = getKeypair();
   const deployer = keypair.getPublicKey().toSuiAddress();
-  await requestGas(client, deployer);
+  await requestGas(client, deployer, faucetForRpc(rpc));
 
-  const { packageId, objectChanges: publishChanges } = cliTestPublish(force);
+  const { packageId, objectChanges: publishChanges } = cliPublish(network === "testnet" ? "testnet" : "localnet", force);
   const coinType = `${packageId}::mock_usdc::MOCK_USDC`;
 
   const driverRegistry = requireCreatedId(publishChanges, "driver_registry::DriverRegistry", packageId);

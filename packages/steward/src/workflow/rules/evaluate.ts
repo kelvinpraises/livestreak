@@ -1,6 +1,6 @@
 import type { StewardFact } from "../facts/fact.js";
 import type { StewardFinding } from "../../model/finding.js";
-import type { StewardSubject } from "../../model/subject.js";
+import { sameSubject, type StewardSubject } from "../../model/subject.js";
 import type { StewardRuleCondition, StewardRuleset } from "./types.js";
 
 // --- exports ---
@@ -10,7 +10,7 @@ export const evaluateStewardRules = (
   facts: readonly StewardFact[],
   ruleset: StewardRuleset
 ): StewardFinding[] => {
-  const subjectFacts = facts.filter((fact) => fact.subject.id === subject.id);
+  const subjectFacts = facts.filter((fact) => sameSubject(fact.subject, subject));
 
   return ruleset.rules.flatMap((rule) => {
     if (!matchesCondition(rule.condition, subjectFacts)) {
@@ -19,7 +19,7 @@ export const evaluateStewardRules = (
 
     return [
       {
-        id: `${ruleset.id}:${rule.id}:${subject.id}`,
+        id: `${ruleset.id}:${rule.id}:${subject.kind}:${subject.id}`,
         kind: rule.findingKind,
         subject,
         severity: rule.severity,

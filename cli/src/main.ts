@@ -10,6 +10,7 @@ import { vaultConsumerCommands } from "./commands/vaults.js";
 import { vaultCommand } from "./commands/vault.js";
 import { laneCommands } from "./commands/lanes.js";
 import { nftCommands } from "./commands/nft.js";
+import { remoteCommands } from "./commands/remote.js";
 
 const root = Command.make("livestreak", {}, () => Effect.void).pipe(
   Command.withSubcommands([
@@ -20,7 +21,8 @@ const root = Command.make("livestreak", {}, () => Effect.void).pipe(
     ...vaultConsumerCommands,
     vaultCommand,
     ...laneCommands,
-    ...nftCommands
+    ...nftCommands,
+    ...remoteCommands
   ])
 );
 

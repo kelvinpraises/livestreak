@@ -107,7 +107,8 @@ describe("aa descriptor shape", () => {
           chainId: 31_337,
           name: "local",
           entryPoint: "0xentrypoint",
-          bundlerPath: "/aa/bundler/local"
+          bundlerPath: "/aa/bundler/local",
+          paymasterPath: "/aa/paymaster/local"
         }
       ]
     };

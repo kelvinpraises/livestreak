@@ -21,6 +21,9 @@ export type HostSimilaritySuggestedAction = Schema.Schema.Type<typeof HostSimila
 export const HostSimilarVaultCandidate = Schema.Struct({
   kind: Schema.Literal("vault"),
   vaultId: Schema.NonEmptyString,
+  // Bookmaker dedup keys off `vaultKey` (choose.ts). Optional so older indexes
+  // still decode; the host echoes it when the index request carried it.
+  vaultKey: Schema.optional(Schema.NonEmptyString),
   marketId: Schema.NonEmptyString,
   score: Schema.Number,
   reason: Schema.NonEmptyString,
@@ -51,6 +54,7 @@ export type HostSimilarityResult = Schema.Schema.Type<typeof HostSimilarityResul
 
 export const HostSimilarityIndexRequest = Schema.Struct({
   vaultId: Schema.NonEmptyString,
+  vaultKey: Schema.optional(Schema.NonEmptyString),
   marketId: Schema.NonEmptyString,
   title: Schema.NonEmptyString,
   summary: Schema.NonEmptyString,

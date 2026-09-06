@@ -13,8 +13,32 @@ export const CONTRACTS_SUI_ROOT = dirname(SUI_ROOT);
 export const DEPLOYMENTS_DIR = join(CONTRACTS_SUI_ROOT, "deployments");
 export const OUTPUT_DIR = join(CONTRACTS_SUI_ROOT, "deploy", "output");
 
-export const DEFAULT_RPC = process.env.SUI_RPC ?? "http://127.0.0.1:9000";
-export const DEFAULT_FAUCET = process.env.SUI_FAUCET ?? "http://127.0.0.1:9123/gas";
+export const LOCALNET_RPC = "http://127.0.0.1:9000";
+export const TESTNET_RPC = "https://fullnode.testnet.sui.io:443";
+export const LOCALNET_FAUCET = "http://127.0.0.1:9123/gas";
+export const TESTNET_FAUCET = "https://faucet.testnet.sui.io/gas";
+
+export const DEFAULT_RPC = process.env.SUI_RPC ?? LOCALNET_RPC;
+export const DEFAULT_FAUCET = process.env.SUI_FAUCET ?? LOCALNET_FAUCET;
+
+export function rpcForDeployment(name: SuiDeploymentName): string {
+  if (process.env.SUI_RPC) return process.env.SUI_RPC;
+  if (name === "testnet") return TESTNET_RPC;
+  if (name === "mainnet") return "https://fullnode.mainnet.sui.io:443";
+  return LOCALNET_RPC;
+}
+
+export function faucetForRpc(rpc: string): string {
+  if (process.env.SUI_FAUCET) return process.env.SUI_FAUCET;
+  if (rpc.includes("testnet")) return TESTNET_FAUCET;
+  return LOCALNET_FAUCET;
+}
+
+export function networkForDeployment(name: SuiDeploymentName): "localnet" | "testnet" | "mainnet" {
+  if (name === "testnet") return "testnet";
+  if (name === "mainnet") return "mainnet";
+  return "localnet";
+}
 
 export function ensureDirs(): void {
   mkdirSync(DEPLOYMENTS_DIR, { recursive: true });
@@ -56,7 +80,11 @@ export function getKeypair(): Ed25519Keypair {
   }
   try {
     const active = execSync("sui client active-address", { encoding: "utf-8" }).trim();
-    const exported = execSync(`sui keytool export --key-identity ${active}`, { encoding: "utf-8" }).trim();
+    const raw = execSync(`sui keytool export --key-identity ${active} --json`, {
+      encoding: "utf-8",
+    }).trim();
+    const parsed = JSON.parse(raw) as { exportedPrivateKey?: string };
+    const exported = parsed.exportedPrivateKey ?? raw;
     const { secretKey } = decodeSuiPrivateKey(exported);
     return Ed25519Keypair.fromSecretKey(secretKey);
   } catch {
@@ -81,6 +109,17 @@ export function getKeypair(): Ed25519Keypair {
   }
 }
 
+function parsePublishJson(raw: string): { packageId: string; objectChanges: SuiObjectChange[] } {
+  const match = raw.match(/\{\s*"digest"/);
+  const start = match?.index ?? -1;
+  if (start < 0) throw new Error(`publish produced no JSON:\n${raw.slice(-2000)}`);
+  const parsed = JSON.parse(raw.slice(start)) as {
+    objectChanges?: SuiObjectChange[];
+  };
+  const packageId = findPublishedPackageId(parsed.objectChanges);
+  return { packageId, objectChanges: parsed.objectChanges ?? [] };
+}
+
 export function cliTestPublish(force = false): { packageId: string; objectChanges: SuiObjectChange[] } {
   const pubFile = join(CONTRACTS_SUI_ROOT, "Pub.localnet.toml");
   if (force && existsSync(pubFile)) rmSync(pubFile);
@@ -91,21 +130,35 @@ export function cliTestPublish(force = false): { packageId: string; objectChange
       "sui client test-publish --build-env testnet --publish-unpublished-deps --gas-budget 3000000000 --json 2>/dev/null",
       { cwd: CONTRACTS_SUI_ROOT, encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 },
     );
-    const match = raw.match(/\{\s*"digest"/);
-    const start = match?.index ?? -1;
-    if (start < 0) throw new Error(`test-publish produced no JSON:\n${raw.slice(-2000)}`);
-    const parsed = JSON.parse(raw.slice(start)) as {
-      objectChanges?: SuiObjectChange[];
-    };
-    const packageId = findPublishedPackageId(parsed.objectChanges);
-    return { packageId, objectChanges: parsed.objectChanges ?? [] };
+    return parsePublishJson(raw);
   } finally {
     if (prev !== "localnet") execSync(`sui client switch --env ${prev}`, { stdio: "ignore" });
   }
 }
 
-export function makeClient(rpc = DEFAULT_RPC): SuiJsonRpcClient {
-  return new SuiJsonRpcClient({ url: rpc, network: "localnet" });
+export function cliPublish(
+  network: "localnet" | "testnet",
+  force = false,
+): { packageId: string; objectChanges: SuiObjectChange[] } {
+  if (network === "localnet") return cliTestPublish(force);
+  const prev = execSync("sui client active-env", { encoding: "utf-8" }).trim();
+  try {
+    if (prev !== "testnet") execSync("sui client switch --env testnet", { stdio: "ignore" });
+    const raw = execSync(
+      "sui client publish --with-unpublished-dependencies --gas-budget 3000000000 --json 2>/dev/null",
+      { cwd: CONTRACTS_SUI_ROOT, encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 },
+    );
+    return parsePublishJson(raw);
+  } finally {
+    if (prev !== "testnet") execSync(`sui client switch --env ${prev}`, { stdio: "ignore" });
+  }
+}
+
+export function makeClient(
+  rpc = DEFAULT_RPC,
+  network: "localnet" | "testnet" | "mainnet" = "localnet",
+): SuiJsonRpcClient {
+  return new SuiJsonRpcClient({ url: rpc, network });
 }
 
 export function readState(name: SuiDeploymentName): SuiDeployOutput | null {
@@ -196,10 +249,14 @@ export function u64Arg(tx: Transaction, value: bigint | number): TransactionArgu
   return tx.pure.u64(value);
 }
 
-export async function requestGas(client: SuiJsonRpcClient, address: string): Promise<void> {
+export async function requestGas(
+  client: SuiJsonRpcClient,
+  address: string,
+  faucet = DEFAULT_FAUCET,
+): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(DEFAULT_FAUCET, {
+      const res = await fetch(faucet, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ FixedAmountRequest: { recipient: address } }),

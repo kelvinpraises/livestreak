@@ -15,7 +15,10 @@ export const HostModuleToken = Schema.Literal(
   "media",
   "walrus_memory",
   "walrus_content",
-  "discovery"
+  "discovery",
+  // Remote Bridge Console relay router (Objective 4, P4). Canonicalized here from
+  // the wave-1 local superset; mirrors `remoteModuleToken` in @livestreak/schema.
+  "remote"
 );
 
 export type HostModuleToken = Schema.Schema.Type<typeof HostModuleToken>;

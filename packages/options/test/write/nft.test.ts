@@ -2,7 +2,11 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it } from "vitest";
 
 import { asMarketId, asTokenId, asUserAddress } from "../../src/model/ids.js";
-import { validateTokenIdForContracts, validateUserAddress } from "../../src/chains/evm/encode.js";
+import {
+  validateTokenIdForContracts,
+  validateUint64Salt,
+  validateUserAddress
+} from "../../src/chains/evm/encode.js";
 import { createFakeChainWriter } from "../helpers/fake-chain.js";
 
 const TOKEN_ID = asTokenId(42n);
@@ -10,7 +14,7 @@ const FROM = asUserAddress("0x0000000000000000000000000000000000000001");
 const TO = asUserAddress("0x0000000000000000000000000000000000000002");
 const OPERATOR = asUserAddress("0x0000000000000000000000000000000000000003");
 const MARKET_ID = asMarketId(`0x${"ab".repeat(32)}`);
-const SALT = `0x${"cd".repeat(32)}`;
+const SALT = 1234567890123456789n; // uint64 deterministic salt
 
 describe("chain writer nft", () => {
   it("mint returns both the txId and the newly-minted tokenId", async () => {
@@ -67,6 +71,17 @@ describe("chain writer nft", () => {
       action: "setApprovalForAll",
       args: { operator: OPERATOR, approved: true }
     });
+  });
+
+  it("accepts a uint64 salt and rejects out-of-range / non-bigint salts", () => {
+    expect(validateUint64Salt(0n)).toBe(0n);
+    expect(validateUint64Salt((1n << 64n) - 1n)).toBe((1n << 64n) - 1n);
+    expect(() => validateUint64Salt(-1n)).toThrow(LiveStreakConfigError);
+    expect(() => validateUint64Salt(1n << 64n)).toThrow(LiveStreakConfigError);
+    // a bytes32-hex string (the old broken shape) is no longer a valid salt.
+    expect(() => validateUint64Salt(`0x${"cd".repeat(32)}` as unknown as bigint)).toThrow(
+      LiveStreakConfigError
+    );
   });
 
   it("rejects invalid tokenId at encode validation", () => {

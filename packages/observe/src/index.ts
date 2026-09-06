@@ -122,6 +122,8 @@ export {
   projectControlPanelControls
 } from "./bridge/panel/project.js";
 
+export { projectObserveDescriptors } from "./bridge/panel/descriptors.js";
+
 export type {
   ControlsView,
   ControlCellView,

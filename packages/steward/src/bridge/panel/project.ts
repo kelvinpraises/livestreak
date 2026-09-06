@@ -1,4 +1,5 @@
 import type { StewardDecisionAction } from "../../model/decision.js";
+import { actionScopeFor } from "../action-scope.js";
 import type { StewardFinding, StewardFindingKind } from "../../model/finding.js";
 import type { StewardPanelView } from "../../model/panel.js";
 import type { StewardSubject, StewardSubjectKind } from "../../model/subject.js";
@@ -228,7 +229,7 @@ const enabledFunction = (
   target: StewardFunctionTarget
 ): StewardFunctionView => ({
   name: entry.name,
-  scope: entry.scope,
+  scope: actionScopeFor(entry.name) ?? entry.scope,
   label: entry.label,
   ...(entry.input === undefined ? {} : { input: entry.input }),
   target,
@@ -241,7 +242,7 @@ const disabledFunction = (
   disabledReason: string
 ): StewardFunctionView => ({
   name: entry.name,
-  scope: entry.scope,
+  scope: actionScopeFor(entry.name) ?? entry.scope,
   label: entry.label,
   ...(entry.input === undefined ? {} : { input: entry.input }),
   target,

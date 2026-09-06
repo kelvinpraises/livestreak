@@ -9,6 +9,7 @@ import {
 } from "./services/aa/sui-gas-station.js";
 import { readSuiGasStationRuntimeConfig } from "./services/aa/sui-sponsor.js";
 import { createDiscoveryStore } from "./services/discovery.js";
+import { createRemoteService, type RemoteService } from "./services/remote/index.js";
 import { createEvidenceStore } from "./services/media/evidence.js";
 import { createManifestStore } from "./services/media/manifest.js";
 import { createSessionStore } from "./services/media/session.js";
@@ -83,7 +84,8 @@ export const bootstrapHostRouteDeps = async (
       store: createDiscoveryStore()
     },
     walrus,
-    aa
+    aa,
+    remote: buildRemoteService(config)
   };
 };
 
@@ -93,6 +95,7 @@ export interface HostRouteDeps {
   readonly discovery: DiscoveryRouteDeps;
   readonly walrus: WalrusRouteDeps;
   readonly aa: AaRouteDeps;
+  readonly remote: RemoteService;
 }
 
 export interface MediaRouteDeps {
@@ -142,11 +145,20 @@ export const createHostRouteDeps = (
       store: createDiscoveryStore()
     },
     walrus,
-    aa: createAaRouteDeps(config, options)
+    aa: createAaRouteDeps(config, options),
+    remote: buildRemoteService(config)
   };
 };
 
 // --- helpers ---
+
+const buildRemoteService = (config: HostServerConfig): RemoteService =>
+  createRemoteService({
+    gatewayToken: config.remoteGatewayToken,
+    remoteBaseUrl: config.remoteAppOrigin ?? config.baseUrl,
+    grantKeyHex: config.remoteGrantKeyHex,
+    grantKeyId: `${config.hostId}_grant`
+  });
 
 const buildSuiGasStation = async (
   config: HostServerConfig,

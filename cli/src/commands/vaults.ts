@@ -11,7 +11,6 @@ import {
   type UnstakeLvstInput,
   type WithdrawInput
 } from "@livestreak/options";
-import { ensureErc20Approval } from "../adapters/onchain.js";
 import { resolveOperatorContext } from "../gateway/operator.js";
 import { createOptionsEdge } from "../adapters/options.js";
 import {
@@ -78,17 +77,10 @@ export const runFund = async (input: {
     deposit: parseBigIntArg(input.deposit, "deposit")
   };
 
-  const usdc = await edge.chain.reader.readUsdcAddress();
-  const approveTx = await ensureErc20Approval(
-    ctx.account,
-    ctx.publicClient,
-    usdc,
-    ctx.doc.options.marketDriver,
-    fundArgs.deposit
-  );
-
+  // options `fund` approves USDC internally now (writer.ts ensureUsdcAllowance, G4) — the edge no
+  // longer pre-approves.
   const fundTx = await edge.callAction("fund", fundArgs);
-  return renderTxResult("fund", { ...(approveTx === undefined ? {} : { approveTx }), fundTx });
+  return renderTxResult("fund", { fundTx });
 };
 
 export const runClaim = async (input: {

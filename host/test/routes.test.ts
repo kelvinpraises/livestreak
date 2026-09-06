@@ -84,11 +84,14 @@ describe("host route handlers", () => {
       .post("/memory/access")
       .send({ marketId: "mkt_01", suiDelegate: "a".repeat(64) })
       .expect(503);
+    // Content blobs no longer hard-gate on Walrus: with Walrus unconfigured the host
+    // falls back to a local store, so requests are validated/served on their merits —
+    // an empty payload is a 400 and an unknown pointer is a 404 (not a blanket 503).
     await request(app)
       .post("/content/blobs")
       .send({ bytesBase64: "", persistence: "ephemeral" })
-      .expect(503);
-    await request(app).get("/content/blobs/walrus-testnet/blob_01").expect(503);
+      .expect(400);
+    await request(app).get("/content/blobs/walrus-testnet/blob_01").expect(404);
     await request(app)
       .post("/aa/bundler/local")
       .send({ jsonrpc: "2.0", method: "eth_chainId", params: [], id: 1 })

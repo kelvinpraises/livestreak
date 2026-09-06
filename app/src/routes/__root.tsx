@@ -1,5 +1,5 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { MotionConfig } from 'framer-motion'
 import appCss from '../styles.css?url'
 
@@ -50,6 +50,15 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 }
 
 function RootComponent() {
+  // Client-only. The prerender/SSR pass renders just the shell (above); RootApp —
+  // and with it the providers and wallet/chain SDKs (viem, ethers, @mysten/sui,
+  // Holepunch) — mounts only after hydration. This keeps that whole graph out of
+  // the server render, which a pure SPA never serves, and avoids prerendering the
+  // node-native deps (the sodium __filename error). Server and first client render
+  // both return null, so hydration matches.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
   return (
     <Suspense fallback={null}>
       <RootApp />

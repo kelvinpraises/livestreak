@@ -49,9 +49,56 @@ export const proxyBundlerRpc = async (
       body: JSON.stringify(request.body)
     });
     const data = await response.json();
-    return { status: response.status, body: data };
+    return {
+      status: response.status,
+      body: method === "eth_estimateUserOperationGas" ? bufferEstimateCallGasLimit(data) : data
+    };
   } catch {
     return jsonRpcEnvelope(503, request.id, -32000, "Bundler unavailable");
+  }
+};
+
+// The bundler's callGasLimit estimate is the gas the EntryPoint forwards to the Safe
+// account's executeUserOp. The Safe 4337 module then calls the target with gasleft()
+// minus its own overhead, and the EVM 63/64 gas-forwarding rule shaves a little more —
+// so a tight estimate can leave a gas-heavy inner call (e.g. Drips setStreams in
+// createVault/fund) a few thousand gas short, reverting as the module's masked
+// ExecutionFailed(). Inflate the estimate by 50% at the single point every party reads
+// it (estimate → paymaster sign → submit) so headroom stays consistent with the
+// paymaster signature. Verification/preVerification gas are left untouched.
+const CALL_GAS_LIMIT_BUFFER_NUM = 3n;
+const CALL_GAS_LIMIT_BUFFER_DEN = 2n;
+
+const bufferEstimateCallGasLimit = (data: unknown): unknown => {
+  if (data === null || typeof data !== "object") {
+    return data;
+  }
+
+  const envelope = data as { result?: unknown };
+  const result = envelope.result;
+  if (result === null || typeof result !== "object") {
+    return data;
+  }
+
+  const gas = result as { callGasLimit?: unknown };
+  const buffered = scaleHexQuantity(gas.callGasLimit, CALL_GAS_LIMIT_BUFFER_NUM, CALL_GAS_LIMIT_BUFFER_DEN);
+  if (buffered === undefined) {
+    return data;
+  }
+
+  return { ...envelope, result: { ...gas, callGasLimit: buffered } };
+};
+
+const scaleHexQuantity = (value: unknown, num: bigint, den: bigint): Hex | undefined => {
+  if (typeof value !== "string" || !value.startsWith("0x")) {
+    return undefined;
+  }
+
+  try {
+    const scaled = (BigInt(value) * num) / den;
+    return `0x${scaled.toString(16)}` as Hex;
+  } catch {
+    return undefined;
   }
 };
 

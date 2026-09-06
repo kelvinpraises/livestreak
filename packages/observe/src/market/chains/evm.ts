@@ -1,6 +1,9 @@
 import { Effect } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
-import { createWalletManager } from "@livestreak/wallet";
+import {
+  createWalletManager,
+  pollUntilUserOperationIncluded as pollUntilUserOperationIncludedShared
+} from "@livestreak/wallet";
 import { evm } from "@livestreak/contracts";
 import { encodeAbiParameters, encodeFunctionData, keccak256 } from "viem";
 import type {
@@ -205,29 +208,20 @@ export const assertUserOperationSucceeded = (
 
 // --- helpers ---
 
+// Delegate to the shared wallet poller (60s budget + exponential backoff, and the canonical
+// success reader that accepts boolean | number | hex). The previous local copy polled for only
+// maxAttempts=40 × 50ms = 2s, which always timed out against a real bundler on a 5s-block chain
+// since relay-kit returns the hash WITHOUT awaiting inclusion. The shared poller throws plain
+// Error on revert/timeout; wrap it back into the Effect failure channel here.
 const pollUntilUserOperationIncluded = (
   readOnly: { getUserOperationReceipt: (hash: string) => Promise<unknown> },
-  userOpHash: string,
-  maxAttempts = 40,
-  delayMs = 50
+  userOpHash: string
 ): Effect.Effect<void, LiveStreakRuntimeError> =>
-  Effect.gen(function* () {
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const receipt = yield* Effect.tryPromise({
-        try: () => readOnly.getUserOperationReceipt(userOpHash),
-        catch: (error) => toRuntimeError("getUserOperationReceipt failed", error)
-      });
-
-      if (receipt !== null && receipt !== undefined) {
-        return yield* assertUserOperationSucceeded(receipt);
-      }
-
-      yield* Effect.sleep(`${delayMs} millis`);
-    }
-
-    return yield* Effect.fail(
-      receiptFailure(`Timed out waiting for UserOperation receipt for ${userOpHash}`)
-    );
+  Effect.tryPromise({
+    try: async () => {
+      await pollUntilUserOperationIncludedShared(readOnly, userOpHash);
+    },
+    catch: (error) => toRuntimeError("UserOperation inclusion failed", error)
   });
 
 const readUserOperationSuccess = (receipt: Record<string, unknown>): boolean | undefined => {

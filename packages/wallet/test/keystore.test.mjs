@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createKeystore, unlockKeystore } from '@livestreak/wallet'
+import { createKeystore, unlockKeystore } from '@livestreak/wallet/keystore'
 
 // Small Argon2id params keep the test fast while exercising the real KDF + AEAD path.
 const FAST = { opsLimit: 1, memLimit: 8192 }

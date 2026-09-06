@@ -6,7 +6,6 @@ import {
   validationErrorMessage
 } from "@livestreak/host";
 import type { HostServerConfig } from "../../../config/host.js";
-import { isWalrusBootstrapped, isWalrusEnabled } from "../../../config/host.js";
 import type { ContentStore } from "./content.js";
 
 // --- exports ---
@@ -28,10 +27,9 @@ export const handleContentBlobStore = async (
   body: unknown,
   deps: ContentRouteDeps
 ): Promise<ContentBlobStoreRouteResponse> => {
-  if (!isWalrusEnabled(deps.config) || !isWalrusBootstrapped(deps.config)) {
-    return contentFailure(503, "walrus_not_configured");
-  }
-
+  // No Walrus gate: deps.store is always present — the Walrus-backed store when configured,
+  // or an in-process local store on a dev stack. A misconfigured backend surfaces as a
+  // store-side error (caught below) rather than a blanket "not configured" rejection.
   if (body === null || typeof body !== "object") {
     return contentFailure(400, "Request body must be a JSON object");
   }
@@ -62,10 +60,6 @@ export const handleContentBlobResolve = async (
   id: string,
   deps: ContentRouteDeps
 ): Promise<ContentBlobResolveRouteResponse> => {
-  if (!isWalrusEnabled(deps.config) || !isWalrusBootstrapped(deps.config)) {
-    return contentFailure(503, "walrus_not_configured");
-  }
-
   if (!isPointerScheme(scheme) || id.trim().length === 0) {
     return contentFailure(400, "Invalid content pointer");
   }

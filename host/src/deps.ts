@@ -13,6 +13,7 @@ import { createEvidenceStore } from "./services/media/evidence.js";
 import { createManifestStore } from "./services/media/manifest.js";
 import { createSessionStore } from "./services/media/session.js";
 import { createContentStore } from "./services/walrus/content/content.js";
+import { createLocalContentStore } from "./services/walrus/content/local-store.js";
 import { createMemoryBindingStore } from "./services/walrus/memory/binding.js";
 import { createMemWalAccountOperations } from "./services/walrus/memory/memwal-ops.js";
 import { resolveMemoryOwnerKey } from "./infrastructure/wallet/index.js";
@@ -210,11 +211,16 @@ const buildWalrusDeps = (
             })
     },
     content: {
-      store: createContentStore({
-        resolved: active,
-        ephemeralEpochs: config.walrusContentEphemeralEpochs,
-        lockedEpochs: config.walrusContentLockedEpochs
-      })
+      // When Walrus is not configured (local EVM dev stack), fall back to an in-process,
+      // content-addressed store served by this host so produce/publish/resolve still work.
+      store:
+        resolved === null
+          ? createLocalContentStore({ baseUrl: config.baseUrl })
+          : createContentStore({
+              resolved: active,
+              ephemeralEpochs: config.walrusContentEphemeralEpochs,
+              lockedEpochs: config.walrusContentLockedEpochs
+            })
     }
   };
 };

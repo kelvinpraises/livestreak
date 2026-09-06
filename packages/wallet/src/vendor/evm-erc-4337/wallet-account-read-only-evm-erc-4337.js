@@ -22,7 +22,7 @@ import { Safe4337Pack, GenericFeeEstimator, PimlicoFeeEstimator } from '@safe-gl
 
 import { predictSafeAddress as protocolKitPredictSafeAddress, SafeProvider } from '@safe-global/protocol-kit'
 import { getSafe4337ModuleDeployment, getSafeModuleSetupDeployment } from '@safe-global/safe-modules-deployments'
-import { encodeFunctionData } from 'viem'
+import { encodeFunctionData, getAddress } from 'viem'
 
 import { ConfigurationError } from './errors.js'
 
@@ -473,16 +473,21 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
         safeOptions.contractNetworks = config.contractNetworks
       }
 
+      // relay-kit maps the entrypoint to its required Safe-modules version with a
+      // CASE-SENSITIVE object lookup keyed by the EIP-55 canonical (mixed-case) address.
+      // Configs commonly carry lowercased addresses, which miss that lookup and surface as
+      // "entrypoint not compatible with version X of Safe modules". Checksum here so any
+      // caller's casing resolves correctly.
       const customContracts = {
-        entryPointAddress: config.entryPointAddress
+        entryPointAddress: getAddress(config.entryPointAddress)
       }
 
       if (config.safe4337ModuleAddress) {
-        customContracts.safe4337ModuleAddress = config.safe4337ModuleAddress
+        customContracts.safe4337ModuleAddress = getAddress(config.safe4337ModuleAddress)
       }
 
       if (config.safeModulesSetupAddress) {
-        customContracts.safeModulesSetupAddress = config.safeModulesSetupAddress
+        customContracts.safeModulesSetupAddress = getAddress(config.safeModulesSetupAddress)
       }
 
       const initOptions = {

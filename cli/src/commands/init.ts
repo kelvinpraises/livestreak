@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { Command, Options } from "@effect/cli";
 import { Console, Effect, Option } from "effect";
+import { Address } from "@livestreak/schema";
 import { createHostClient } from "../adapters/host.js";
 import {
   defaultInitDocPath,
@@ -254,20 +255,20 @@ export const runInit = async (input: RunInitInput): Promise<LivestreakInitDoc> =
         paymasterUrl,
         isSponsored: true,
         useNativeCoins: false,
-        entryPointAddress: aa.contracts.entryPoint,
-        safe4337ModuleAddress: aa.contracts.safe4337Module,
-        safeModulesSetupAddress: aa.contracts.safeModuleSetup,
+        entryPointAddress: Address.make(aa.contracts.entryPoint),
+        safe4337ModuleAddress: Address.make(aa.contracts.safe4337Module),
+        safeModulesSetupAddress: Address.make(aa.contracts.safeModuleSetup),
         safeModulesVersion: "0.3.0",
         contractNetworks: {
           [String(chainId)]: {
-            safeSingletonAddress: aa.contracts.safeSingleton,
-            safeProxyFactoryAddress: aa.contracts.safeProxyFactory,
-            multiSendAddress: aa.contracts.multiSend,
-            multiSendCallOnlyAddress: aa.contracts.multiSendCallOnly,
-            fallbackHandlerAddress: aa.contracts.fallbackHandler,
-            signMessageLibAddress: aa.contracts.signMessageLib,
-            createCallAddress: aa.contracts.createCall,
-            simulateTxAccessorAddress: aa.contracts.simulateTxAccessor
+            safeSingletonAddress: Address.make(aa.contracts.safeSingleton),
+            safeProxyFactoryAddress: Address.make(aa.contracts.safeProxyFactory),
+            multiSendAddress: Address.make(aa.contracts.multiSend),
+            multiSendCallOnlyAddress: Address.make(aa.contracts.multiSendCallOnly),
+            fallbackHandlerAddress: Address.make(aa.contracts.fallbackHandler),
+            signMessageLibAddress: Address.make(aa.contracts.signMessageLib),
+            createCallAddress: Address.make(aa.contracts.createCall),
+            simulateTxAccessorAddress: Address.make(aa.contracts.simulateTxAccessor)
           }
         }
       }

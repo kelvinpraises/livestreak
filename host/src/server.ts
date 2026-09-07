@@ -9,6 +9,8 @@ import {
   payloadTooLargeHandler
 } from "./api/middleware/errorHandler.js";
 import { createAaRouter } from "./api/routes/aa.js";
+import { createCatalogRouter } from "./api/routes/catalog.js";
+import { createWebrtcRouter } from "./api/routes/webrtc.js";
 import { createContentRouter } from "./api/routes/content.js";
 import { createDescriptorRouter } from "./api/routes/descriptor.js";
 import { createDiscoveryRouter } from "./api/routes/discovery.js";
@@ -53,6 +55,11 @@ export const createApp = (deps: HostRouteDeps): Express => {
   });
 
   app.use(createDescriptorRouter(deps));
+
+  // SEAM-CATALOG + SEAM-WEBRTC are always-on (no module token): the UI's live source and
+  // the local file->WebRTC signaling relay must work on the plain dev stack.
+  app.use(createCatalogRouter(deps));
+  app.use(createWebrtcRouter(deps));
 
   // Part C: per-IP rate limit on the money / auth surfaces (paymaster, bundler,
   // content uploads) to bound free-gas drain and brute force.

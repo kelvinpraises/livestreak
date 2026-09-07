@@ -1,8 +1,7 @@
 // --- exports ---
 
-import { bcs } from "@mysten/sui/bcs";
-import { SuiClient } from "@mysten/sui/client";
-import { Transaction } from "@mysten/sui/transactions";
+// Multichain-hygiene: read VIA @livestreak/wallet (the single @mysten/sui v2 owner).
+import { bcs, SuiJsonRpcClient, Transaction, createSuiReadClient } from "@livestreak/wallet";
 import { LiveStreakConfigError } from "@livestreak/core";
 import { MODULES, target } from "@livestreak/contracts/sui";
 
@@ -61,7 +60,7 @@ const bytesVecToHex = (bytes: readonly number[]): `0x${string}` =>
   `0x${bytes.map((b) => b.toString(16).padStart(2, "0")).join("")}` as `0x${string}`;
 
 type ReaderContext = {
-  readonly client: SuiClient;
+  readonly client: SuiJsonRpcClient;
   readonly ids: OptionsSuiObjectIds;
   readonly packageId: string;
   readonly coinType: string;
@@ -71,7 +70,7 @@ export const createSuiOptionsReader = (
   ids: OptionsSuiObjectIds,
   rpcUrl: string
 ): OptionsReader => {
-  const client = new SuiClient({ url: rpcUrl });
+  const client = createSuiReadClient(rpcUrl);
   const ctx: ReaderContext = {
     client,
     ids,

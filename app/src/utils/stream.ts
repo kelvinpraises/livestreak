@@ -55,3 +55,33 @@ export function resolveStreamMedia(
   // ended
   return { kind: 'vod', src: gatewayUrl }
 }
+
+/** Minimal host/fixture stream detail shape this resolver needs (subset of HostStreamDetail). */
+export interface StreamFeedDetail {
+  watchUrl?: string
+  isLive: boolean
+}
+
+/**
+ * Resolve the feed source for ONE stream from THAT stream's own data (C: per-stream feed, never a
+ * single global asset). Priority:
+ *  1. The on-chain stream pointer (market.stream) — its VOD blob in `ended`, its host-forwarded
+ *     live source (incl. the SEAM-WEBRTC leg surfaced as a watch URL) while `live`.
+ *  2. Otherwise the per-route host/fixture stream detail's watch URL — this is what powers demo mode
+ *     (each fixture stream carries its own `watchUrl`) and any live market that has a host watch URL
+ *     but no on-chain pointer yet.
+ *  3. Otherwise an honest offline placeholder.
+ */
+export function resolveStreamFeed(
+  pointer: StreamPointer | undefined,
+  host: StreamFeedDetail | null | undefined,
+): StreamMedia {
+  if (pointer && pointer.status !== 'none') {
+    const fromPointer = resolveStreamMedia(pointer, host?.watchUrl)
+    if (fromPointer.kind !== 'none' && fromPointer.src) return fromPointer
+  }
+  if (host?.watchUrl) {
+    return { kind: host.isLive ? 'live' : 'vod', src: host.watchUrl }
+  }
+  return { kind: 'none' }
+}

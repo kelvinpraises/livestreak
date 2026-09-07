@@ -24,7 +24,6 @@
     "@livestreak/host": "file:../host",
     "@livestreak/schema": "file:../schema",
     "@livestreak/wallet": "file:../wallet",
-    "@mysten/sui": "^1.21.1",
     "viem": "^2.23.0"
   },
   "devDependencies": {

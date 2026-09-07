@@ -9,20 +9,21 @@ const CHAINS: { id: OptionsChainKind; label: string }[] = [
 
 export function ChainSelector() {
   const optionsEnabled = isOptionsModeEnabled()
-  const { chain, setChain, isConnected, isLoading } = useOptionsContext()
+  const { chain, setChain, isLoading } = useOptionsContext()
 
   if (!optionsEnabled) return null
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div data-testid="chain-selector" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {CHAINS.map(item => {
         const active = chain === item.id
         return (
           <button
             key={item.id}
+            data-testid={`chain-select-${item.id}`}
             type="button"
-            disabled={isLoading || (isConnected && !active)}
-            title={isConnected && !active ? 'Disconnect to switch chain' : undefined}
+            disabled={isLoading || active}
+            title={active ? undefined : 'Switch chain — re-derives this chain’s wallet from your seed'}
             onClick={() => setChain(item.id)}
             style={{
               padding: '6px 10px',
@@ -34,8 +35,8 @@ export function ChainSelector() {
               fontWeight: 600,
               fontFamily: 'var(--font-mono)',
               letterSpacing: '0.06em',
-              cursor: isLoading || (isConnected && !active) ? 'not-allowed' : 'pointer',
-              opacity: isConnected && !active ? 0.45 : 1,
+              cursor: isLoading ? 'wait' : active ? 'default' : 'pointer',
+              opacity: isLoading && !active ? 0.6 : 1,
             }}
           >
             {item.label}

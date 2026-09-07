@@ -16,13 +16,13 @@
 
 import { WalletAccountReadOnly } from '@tetherto/wdk-wallet'
 import FailoverProvider from '@tetherto/wdk-failover-provider'
-import { SuiClient } from '@mysten/sui/client'
+import { SuiJsonRpcClient as SuiClient } from '@mysten/sui/jsonRpc'
 import { Transaction } from '@mysten/sui/transactions'
 import { verifyPersonalMessageSignature } from '@mysten/sui/verify'
 import { SUI_TYPE_ARG } from '@mysten/sui/utils'
 
-/** @typedef {import('@mysten/sui/client').SuiClient} SuiClientType */
-/** @typedef {import('@mysten/sui/client').SuiTransactionBlockResponse} SuiTransactionReceipt */
+/** @typedef {import('@mysten/sui/jsonRpc').SuiJsonRpcClient} SuiClientType */
+/** @typedef {import('@mysten/sui/jsonRpc').SuiTransactionBlockResponse} SuiTransactionReceipt */
 /** @typedef {import('@tetherto/wdk-wallet').TransactionResult} TransactionResult */
 /** @typedef {import('@tetherto/wdk-wallet').TransferOptions} TransferOptions */
 /** @typedef {import('@tetherto/wdk-wallet').TransferResult} TransferResult */

@@ -36,9 +36,14 @@ export function FocusedVault({ vault, onDismiss, onStream }: Props) {
     : streamSide === 'no'
       ? funding.fundNo
       : undefined
+  // D: a connected user can always START the single funding flow — when the market NFT doesn't exist
+  // yet, fundStream mints it then funds, so we don't require an already-enabled fund descriptor.
+  const needsMint = funding.useOptions && !funding.hasNft
   const canStream = !!streamSide
     && streamRate >= 0.01
-    && (!funding.useOptions || (selectedFundFn !== undefined && !selectedFundFn.disabled))
+    && (!funding.useOptions
+      || needsMint
+      || (selectedFundFn !== undefined && !selectedFundFn.disabled))
 
   const accrualPreview = useMemo(
     () => mapAccrualPreview(preview),
@@ -213,9 +218,11 @@ export function FocusedVault({ vault, onDismiss, onStream }: Props) {
           ? 'STOP STREAM TO CHANGE SIDE'
           : !streamSide
             ? 'DRAG TO CHOOSE A SIDE'
-            : hasPos
-              ? `UPDATE STREAM → ${streamSide.toUpperCase()}`
-              : `STREAM → ${streamSide.toUpperCase()}`}
+            : needsMint
+              ? `BACK VAULT → ${streamSide.toUpperCase()}`
+              : hasPos
+                ? `UPDATE STREAM → ${streamSide.toUpperCase()}`
+                : `STREAM → ${streamSide.toUpperCase()}`}
       </button>
     </motion.div>
   )

@@ -39,7 +39,7 @@
     "test": "node --test \"test/**/*.test.mjs\""
   },
   "dependencies": {
-    "@mysten/sui": "^1.21.1",
+    "@mysten/sui": "^2.19.0",
     "@safe-global/protocol-kit": "^6.1.2",
     "@safe-global/relay-kit": "^4.1.1",
     "@tetherto/wdk-failover-provider": "1.0.0-beta.2",

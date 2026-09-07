@@ -9,6 +9,14 @@ export const env = {
     const id = import.meta.env.VITE_OPTIONS_MARKET_ID as string | undefined
     return id?.trim() || undefined
   })(),
+  // Test-only deterministic wallet seed. When `VITE_OPTIONS_SEED` is set (e.g. "1234"),
+  // connect() derives the operator secret from this value instead of the typed password,
+  // yielding a REPRODUCIBLE Safe (EVM) + Sui address for E2E/CDP runs. Unset in normal
+  // builds → undefined → no behavior change. Not a secret: testnet convenience only.
+  optionsSeed: (() => {
+    const seed = import.meta.env.VITE_OPTIONS_SEED as string | undefined
+    return seed?.trim() || undefined
+  })(),
   localChainId: 31337,
 } as const
 
@@ -21,4 +29,9 @@ export function isOptionsModeEnabled(): boolean {
 
 export function defaultOptionsMarketId(): string | undefined {
   return env.marketId
+}
+
+/** Test-only deterministic seed (password) injected via `VITE_OPTIONS_SEED`; undefined in normal builds. */
+export function testOptionsSeed(): string | undefined {
+  return env.optionsSeed
 }

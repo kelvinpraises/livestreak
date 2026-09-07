@@ -16,12 +16,12 @@
 
 import WalletManager from '@tetherto/wdk-wallet'
 import FailoverProvider from '@tetherto/wdk-failover-provider'
-import { SuiClient } from '@mysten/sui/client'
+import { SuiJsonRpcClient as SuiClient } from '@mysten/sui/jsonRpc'
 import { getFaucetHost, requestSuiFromFaucetV2 } from '@mysten/sui/faucet'
 
 import WalletAccountSui from './wallet-account-sui.js'
 
-/** @typedef {import('@mysten/sui/client').SuiClient} SuiClientType */
+/** @typedef {import('@mysten/sui/jsonRpc').SuiJsonRpcClient} SuiClientType */
 /** @typedef {import('@tetherto/wdk-wallet').FeeRates} FeeRates */
 
 /**

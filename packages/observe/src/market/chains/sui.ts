@@ -1,9 +1,8 @@
 import { Effect } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
-import { createWalletManager, type SuiWalletConfig } from "@livestreak/wallet";
+// Multichain-hygiene: build PTBs VIA @livestreak/wallet (the single @mysten/sui v2 owner).
+import { createWalletManager, Transaction, bcs, type SuiWalletConfig } from "@livestreak/wallet";
 import { MODULES, target } from "@livestreak/contracts/sui";
-import { Transaction } from "@mysten/sui/transactions";
-import { bcs } from "@mysten/sui/bcs";
 import { keccak256 } from "viem";
 import type {
   MarketLifecycleInput,

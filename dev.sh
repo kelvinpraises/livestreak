@@ -6,6 +6,11 @@ RPC="http://127.0.0.1:8545"
 # Anvil account #0 — deployer + AA executor + paymaster signer (matches on-chain verifyingSigner on 31337)
 ANVIL_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
+# Multichain: boot the Sui localnet leg alongside anvil so the app flips EVM<->Sui
+# by config alone. Set WITH_SUI=0 for the EVM-only stack.
+WITH_SUI="${WITH_SUI:-1}"
+SUI_PID=""
+
 # Colors
 G='\033[0;32m' Y='\033[0;33m' R='\033[0;31m' N='\033[0m'
 log()  { echo -e "${G}→${N} $1"; }
@@ -17,9 +22,16 @@ cleanup() {
   pkill -f "anvil --block-time" 2>/dev/null || true
   [ -n "$HOST_PID" ] && kill "$HOST_PID" 2>/dev/null || true
   [ -n "$APP_PID" ]  && kill "$APP_PID"  2>/dev/null || true
+  [ -n "$SUI_PID" ]  && kill "$SUI_PID"  2>/dev/null || true
+  pkill -f "sui start" 2>/dev/null || true
+  pkill -f "sui-faucet" 2>/dev/null || true
   exit 0
 }
 trap cleanup SIGINT SIGTERM
+
+# Sui-localnet leg helpers (sui_leg_up / sui_leg_env). Sourcing does not start anything.
+# shellcheck source=dev-sui.sh
+source "$ROOT/dev-sui.sh"
 
 # ── 1. Kill stale processes ──
 log "Killing stale processes..."
@@ -55,7 +67,23 @@ log "Deploying contracts (force)..."
 ( cd "$ROOT/packages/contracts" && DEPLOYER_PRIVATE_KEY="$ANVIL_KEY" npm run deploy -- --name localhost --force ) 2>&1 | sed 's/^/  /'
 log "Contracts deployed → packages/contracts/chains/evm/deployments/localhost.json"
 
+# ── 4b. Boot the Sui-localnet leg (multichain) ──
+if [ "$WITH_SUI" = "1" ]; then
+  log "Bringing up Sui-localnet leg..."
+  if sui_leg_up; then
+    log "Sui leg ready — $SUI_RPC_LOCAL (host will target localnet Sui)"
+  else
+    warn "Sui leg failed to start (non-fatal — EVM stack continues). See /tmp/livestreak-sui.log"
+    WITH_SUI=0
+  fi
+else
+  log "Skipping Sui leg (WITH_SUI=0)"
+fi
+
 # ── 5. Start host server ──
+# When the Sui leg is up, sui_leg_up exported LIVESTREAK_SUI_RPC_URL / _NETWORK /
+# _SPONSOR_MNEMONIC so the host's Sui gas station targets localnet (the app can
+# then flip chain → 'sui' against the localnet deployment by config alone).
 # LIVESTREAK_AA_ALLOW_DEV_KEY=1 → host uses anvil acct #0 as executor + paymaster signer
 # (matches the deployed verifyingSigner); AA env auto-loads from the deploy snapshot.
 log "Starting host server..."
@@ -83,8 +111,15 @@ fi
 echo ""
 echo -e "${G}✓ Everything running${N}"
 echo "  Anvil → $RPC (block-time 5)"
+if [ "$WITH_SUI" = "1" ]; then
+  echo "  Sui   → $SUI_RPC_LOCAL (localnet, --with-faucet)"
+fi
 echo "  Host  → http://127.0.0.1:8787"
 echo "  App   → http://localhost:3000"
+if [ "$WITH_SUI" = "1" ]; then
+  echo ""
+  echo "  Multichain: app flips EVM<->Sui by config alone (set chain → 'sui')."
+fi
 echo ""
 echo "Press Ctrl+C to stop all services"
 echo ""

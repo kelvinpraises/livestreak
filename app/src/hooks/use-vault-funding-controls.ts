@@ -12,6 +12,9 @@ export function useVaultFundingControls(vaultId: string) {
   const activeFundedSide = stopFn && !stopFn.disabled && stopFn.target?.side
     ? stopFn.target.side
     : undefined
+  // D: whether the market's position NFT already exists. When it doesn't, the single funding flow
+  // mints it on first fund, so the UI must still let the user initiate (see FocusedVault gating).
+  const hasNft = useOptions ? options.hasNftForVault(vaultId) : true
 
   return {
     useOptions,
@@ -19,6 +22,7 @@ export function useVaultFundingControls(vaultId: string) {
     fundNo,
     stopFn,
     activeFundedSide,
+    hasNft,
     stopFunding: options.stopFunding,
   }
 }

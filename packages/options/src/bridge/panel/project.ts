@@ -540,10 +540,17 @@ const projectLvstPanel = (account: LvstAccount): OptionsLvstPanel => {
 };
 
 const computeOdds = (
-  yesPool: bigint,
-  noPool: bigint,
-  total: bigint
+  yesPoolIn: bigint | number | string,
+  noPoolIn: bigint | number | string,
+  totalIn: bigint | number | string
 ): OptionsVaultPanel["odds"] => {
+  // E2E pass-2 fix: pool/total values can arrive as JS numbers (e.g. catalog-sourced
+  // market snapshots serialize uint256 as numbers), and mixing BigInt with number throws
+  // "Cannot mix BigInt and other types". Coerce at the boundary so the panel projection
+  // never crashes the whole live board over one stray number.
+  const yesPool = BigInt(yesPoolIn);
+  const noPool = BigInt(noPoolIn);
+  const total = BigInt(totalIn);
   if (total === 0n) {
     return {
       yesMultiplier: 1,

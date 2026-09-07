@@ -77,7 +77,7 @@ export function AutoForm({ inputSchema, prefilled = {}, onSubmit, submitLabel, d
   )
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <form data-testid="auto-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {freeProps.map((prop) => (
         <Field
           key={prop.name}
@@ -88,6 +88,7 @@ export function AutoForm({ inputSchema, prefilled = {}, onSubmit, submitLabel, d
         />
       ))}
       <button
+        data-testid="auto-form-submit"
         type="submit"
         disabled={disabled || busy}
         style={{
@@ -127,7 +128,7 @@ function Field({ prop, value, error, onChange }: FieldProps) {
         {labelText}
         {schema.required ? <span style={{ color: '#ff2d78' }}> *</span> : null}
       </span>
-      <Control schema={schema} value={value} onChange={onChange} />
+      <Control schema={schema} value={value} onChange={onChange} name={name} />
       {error ? (
         <span style={{ fontSize: 10, color: '#ff2d78', fontFamily: 'var(--font-mono)' }}>{error}</span>
       ) : null}
@@ -139,15 +140,19 @@ function Control({
   schema,
   value,
   onChange,
+  name,
 }: {
   schema: JsonSchema
   value: unknown
   onChange: (value: unknown) => void
+  name: string
 }) {
+  const testId = `auto-form-field-${name}`
   switch (schema.type) {
     case 'boolean':
       return (
         <input
+          data-testid={testId}
           type="checkbox"
           checked={Boolean(value)}
           onChange={(e) => onChange(e.target.checked)}
@@ -157,6 +162,7 @@ function Control({
     case 'enum':
       return (
         <select
+          data-testid={testId}
           value={String(value ?? '')}
           onChange={(e) => onChange(e.target.value)}
           style={inputStyle}
@@ -173,6 +179,7 @@ function Control({
     case 'integer':
       return (
         <input
+          data-testid={testId}
           type="number"
           step={schema.type === 'integer' ? 1 : 'any'}
           value={value === undefined || value === null ? '' : String(value)}
@@ -187,6 +194,7 @@ function Control({
     case 'unknown':
       return (
         <textarea
+          data-testid={testId}
           rows={3}
           value={typeof value === 'string' ? value : value ? JSON.stringify(value, null, 2) : ''}
           placeholder="JSON"
@@ -198,6 +206,7 @@ function Control({
     default:
       return (
         <input
+          data-testid={testId}
           type="text"
           value={String(value ?? '')}
           placeholder={schema.description}

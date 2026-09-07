@@ -27,6 +27,9 @@ export interface HostSimilarityResultWithKeys
 export interface DiscoveryStore {
   readonly indexVault: (vault: IndexedVault) => void;
   readonly findSimilar: (query: HostSimilarityRequest) => HostSimilarityResultWithKeys;
+  // Distinct marketIds the host has seen indexed. The catalog seam reads these live so
+  // freshly-indexed markets surface without an explicit registration.
+  readonly listMarketIds: () => readonly string[];
 }
 
 export const createDiscoveryStore = (): DiscoveryStore => {
@@ -35,6 +38,9 @@ export const createDiscoveryStore = (): DiscoveryStore => {
   return {
     indexVault(vault) {
       vaults.push(vault);
+    },
+    listMarketIds() {
+      return [...new Set(vaults.map((vault) => vault.marketId))];
     },
     findSimilar(query) {
       const draftTokens = [

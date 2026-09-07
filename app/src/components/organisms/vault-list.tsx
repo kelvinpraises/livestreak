@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { FocusedVault } from '#/components/organisms/focused-vault'
+import { VaultCard } from '#/components/molecules/vault-card'
 import { ActivityFeed } from '#/components/organisms/activity-feed'
 import { MyPositions } from '#/components/organisms/my-positions'
 import { NftPanel } from '#/components/organisms/nft-panel'
@@ -10,7 +11,7 @@ import { isOptionsModeEnabled } from '#/utils/env'
 import type { WSEvent, Position } from '#/utils/mock'
 import type { OptionsVault } from '@livestreak/options'
 
-type Tab = 'feed' | 'mine'
+type Tab = 'feed' | 'mine' | 'vaults'
 
 interface Props {
   vaults: OptionsVault[]
@@ -30,6 +31,13 @@ export function VaultList({ vaults, events, positions, selectedVaultId, onDismis
     ? options.findFunction('mint', fn => fn.target?.kind === 'market')
     : undefined
 
+  // All ACTIVE vaults in the market — markets have MANY vaults. Active = anything not yet in a
+  // terminal/ended state. OptionsVaultStatus = 'open' | 'hot' | 'locked' | 'resolved' | 'disputed';
+  // we exclude only 'resolved' (ended). 'open'/'hot' are bettable; 'locked'/'disputed' are still
+  // in-lifecycle (awaiting resolution) so they belong in the active list. VaultCard renders each
+  // (YES/NO funding only shows for open/hot via its own `canBet`). fund-*/vault-card-* ids intact.
+  const activeVaults = vaults.filter(v => v.status !== 'resolved')
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Focused vault from NikoNiko click */}
@@ -42,6 +50,7 @@ export function VaultList({ vaults, events, positions, selectedVaultId, onDismis
       {/* Tabs */}
       <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.07)', padding: '0 16px', flexShrink: 0, gap: 4 }}>
         <TabBtn active={tab === 'mine'} onClick={() => setTab('mine')} count={positions.filter(p => !p.resolved).length}>STREAMS</TabBtn>
+        <TabBtn active={tab === 'vaults'} onClick={() => setTab('vaults')} count={activeVaults.length}>VAULTS</TabBtn>
         <TabBtn active={tab === 'feed'} onClick={() => setTab('feed')}>LIVE FEED</TabBtn>
       </div>
 
@@ -65,6 +74,21 @@ export function VaultList({ vaults, events, positions, selectedVaultId, onDismis
               )}
               <NftPanel />
               <MyPositions positions={positions} vaults={vaults} onSelectVault={() => { /* scroll up to focused vault handled by parent */ }} />
+            </motion.div>
+          )}
+          {tab === 'vaults' && (
+            <motion.div key="vaults" initial={{ opacity: 0, transform: 'translateX(8px)' }} animate={{ opacity: 1, transform: 'translateX(0px)' }} exit={{ opacity: 0, transform: 'translateX(-8px)', transition: { duration: 0.1 } }} transition={{ duration: 0.15 }} style={{ height: '100%', overflowY: 'auto' }}>
+              {activeVaults.length > 0 ? (
+                <div style={{ padding: '14px 10px 4px' }}>
+                  {activeVaults.map((v, i) => (
+                    <VaultCard key={v.vaultId} vault={v} index={i} onStream={onStream} />
+                  ))}
+                </div>
+              ) : (
+                <div style={{ padding: '40px 20px', textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+                  No active vaults in this market yet.
+                </div>
+              )}
             </motion.div>
           )}
           {tab === 'feed' && (

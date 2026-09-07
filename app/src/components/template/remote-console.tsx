@@ -76,8 +76,9 @@ function PasswordGate() {
       <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginBottom: 20, fontFamily: 'var(--font-mono)' }}>
         session: {session}
       </p>
-      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <form data-testid="remote-gate-form" onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <input
+          data-testid="remote-password"
           type="password"
           value={password}
           placeholder="Session password"
@@ -94,6 +95,7 @@ function PasswordGate() {
           }}
         />
         <button
+          data-testid="remote-unlock"
           type="submit"
           disabled={busy || status === 'redeeming' || status === 'connecting'}
           style={{
@@ -183,6 +185,7 @@ function FunctionCard({
 
   return (
     <div
+      data-testid={`remote-fn-${fn.name}`}
       style={{
         border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 10,

@@ -58,12 +58,18 @@ export const resolveMemoryOwnerKey = async (
   suiRpcUrl: string
 ): Promise<string> => {
   void suiRpcUrl;
-  const seed = resolveHostWalletSeed(config);
-  if (seed === null) {
-    throw new LiveStreakConfigError({
-      message: "memory_owner_not_configured",
-      metadata: { retryable: false }
-    });
+  // A directly-injected Sui owner private key (e.g. the testnet deployer key in
+  // LIVESTREAK_MEMORY_OWNER_KEY) is sufficient on its own — it does not require a
+  // wallet/owner seed. Only fall through to the seed-derivation guard when no
+  // direct key is present, matching isMemoryHostConfigured's semantics.
+  if (config.memorySuiOwnerPrivateKey === null) {
+    const seed = resolveHostWalletSeed(config);
+    if (seed === null) {
+      throw new LiveStreakConfigError({
+        message: "memory_owner_not_configured",
+        metadata: { retryable: false }
+      });
+    }
   }
 
   return resolveSuiOwnerPrivateKey({

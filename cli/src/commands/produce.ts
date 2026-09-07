@@ -3,8 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Command, Options } from "@effect/cli";
 import { Console, Effect, Option } from "effect";
-import { createCreatorWallet, publishVod } from "../adapters/onchain.js";
+import {
+  STREAM_STATUS,
+  createCreatorWallet,
+  publishVod,
+  readStreamState
+} from "../adapters/onchain.js";
 import type { OnChainStreamState } from "../adapters/onchain.js";
+import { describeChainError } from "../adapters/revert.js";
 import { createHostClient } from "../adapters/host.js";
 import { runProducerCapture } from "../adapters/observe.js";
 import { resolveOperator } from "../gateway/identity.js";
@@ -21,6 +27,8 @@ export interface ProduceOutcome {
   readonly goLiveTx: string;
   readonly setEndedTx: string;
   readonly streamState: OnChainStreamState;
+  /** True when a prior market for this run already existed on-chain and produce no-op'd. */
+  readonly idempotent?: boolean;
 }
 
 const assertReadableFile = async (path: string): Promise<void> => {
@@ -50,30 +58,66 @@ export const runProduce = async (input: {
     config: walletConfig
   });
 
+  // IDEMPOTENCY [e2e harness gap #4]: re-running `produce` re-registers the SAME deterministic market
+  // (observer+runId) and reverts opaquely ("MarketRegistry: market exists"). If a prior run already
+  // produced a market for this config, detect it on-chain and no-op instead of reverting.
+  const priorMarketId = doc.run?.marketId;
+  if (priorMarketId !== undefined) {
+    const existing = await readStreamState(publicClient, doc.chain.marketRegistry, priorMarketId).catch(
+      () => undefined
+    );
+    if (existing !== undefined && existing.status !== STREAM_STATUS.None) {
+      return {
+        title: input.title,
+        marketId: priorMarketId,
+        streamId: doc.run?.streamId ?? priorMarketId,
+        mp4Path: "",
+        vodUrl: "",
+        goLiveTx: "",
+        setEndedTx: "",
+        streamState: existing,
+        idempotent: true
+      };
+    }
+  }
+
   const runId = doc.run?.runId ?? `produce-${Date.now()}`;
   const sinkPath = join(tmpdir(), `livestreak-${runId}.mp4`);
 
-  const capture = await runProducerCapture({
-    title: input.title,
-    videoPath: input.videoPath,
-    sinkPath,
-    walletInit,
-    seed,
-    marketRegistryAddress: doc.chain.marketRegistry,
-    runId
-  });
+  // Surface the INNER revert reason (not just the wrapped AA selector) for any chain write here.
+  const withRevertContext = async <T>(label: string, run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } catch (error) {
+      throw new Error(`${label}: ${describeChainError(error)}`);
+    }
+  };
+
+  const capture = await withRevertContext("market registration", () =>
+    runProducerCapture({
+      title: input.title,
+      videoPath: input.videoPath,
+      sinkPath,
+      walletInit,
+      seed,
+      marketRegistryAddress: doc.chain.marketRegistry,
+      runId
+    })
+  );
 
   const host = createHostClient(doc.host.url);
   const bytes = new Uint8Array(await readFile(capture.mp4Path));
   const pointer = await host.uploadBlob(bytes, "video/mp4", "locked");
 
-  const published = await publishVod({
-    account,
-    publicClient,
-    marketRegistryAddress: doc.chain.marketRegistry,
-    marketId: capture.marketId,
-    pointer
-  });
+  const published = await withRevertContext("publishVod (goLive/setEnded)", () =>
+    publishVod({
+      account,
+      publicClient,
+      marketRegistryAddress: doc.chain.marketRegistry,
+      marketId: capture.marketId,
+      pointer
+    })
+  );
 
   await saveInitDoc(configPath, {
     ...doc,

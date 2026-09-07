@@ -93,7 +93,10 @@ export const resolveSuiOwnerPrivateKey = async (
     });
   }
 
-  return Buffer.from(privateKey).toString("hex");
+  // MemWal account ops expect a bech32-encoded Sui private key (suiprivkey1...),
+  // not raw hex. Encode the seed-derived secret accordingly so the seed path and
+  // the directly-injected-key path both yield a key MemWal can sign with.
+  return Ed25519Keypair.fromSecretKey(privateKey).getSecretKey();
 };
 
 // --- helpers ---

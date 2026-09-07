@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { Wallet, CaretDown, SignOut, Copy, Check, X, SpinnerGap, Warning } from '@phosphor-icons/react'
 import { useWalletContext } from '#/providers/wallet-provider.tsx'
 import { formatUSDCFull } from '#/utils/format.ts'
+import { testOptionsSeed } from '#/utils/env'
 
 const iconSwap = {
   initial: { opacity: 0, scale: 0.8, filter: 'blur(4px)' },
@@ -25,7 +26,9 @@ export function ConnectButton() {
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
-  const [password, setPassword] = useState('')
+  // Test-only: pre-fill from `VITE_OPTIONS_SEED` so the deterministic E2E wallet derives without
+  // typing. Empty string in normal builds → unchanged manual-password flow.
+  const [password, setPassword] = useState(testOptionsSeed() ?? '')
   const [copied, setCopied] = useState(false)
 
   function copyAddress() {
@@ -37,13 +40,13 @@ export function ConnectButton() {
   }
 
   function openModal() {
-    setPassword('')
+    setPassword(testOptionsSeed() ?? '')
     setModalOpen(true)
   }
 
   function closeModal() {
     setModalOpen(false)
-    setPassword('')
+    setPassword(testOptionsSeed() ?? '')
   }
 
   async function handleConnect() {
@@ -66,6 +69,7 @@ export function ConnectButton() {
       <Dialog.Root open={modalOpen} onOpenChange={setModalOpen}>
         <Dialog.Trigger asChild>
           <button
+            data-testid="connect-wallet"
             onClick={openModal}
             disabled={isLoading}
             style={{
@@ -160,6 +164,7 @@ export function ConnectButton() {
             )}
 
             <input
+              data-testid="connect-password"
               type="password"
               placeholder="Password"
               value={password}
@@ -181,6 +186,7 @@ export function ConnectButton() {
             />
 
             <button
+              data-testid="connect-submit"
               onClick={handleConnect}
               disabled={isLoading || !password.trim()}
               className="btn-primary"
@@ -220,6 +226,7 @@ export function ConnectButton() {
   return (
     <div style={{ position: 'relative' }}>
       <button
+        data-testid="wallet-menu"
         onClick={() => setMenuOpen(o => !o)}
         style={{
           display: 'flex', alignItems: 'center', gap: 8,

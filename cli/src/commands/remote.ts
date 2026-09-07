@@ -21,15 +21,20 @@ import { connectGateway } from "../gateway/wss-client.js";
 import { configOpt, passwordOpt, readCommandConfig } from "./args.js";
 
 // Derive the leg-A WSS url from the configured host http(s) url unless overridden.
-const deriveHostWss = (hostUrl: string, override?: string): string => {
-  if (override !== undefined) {
-    return override;
+// The host serves leg A at `ws://<host>/remote/<session>/gateway` (see
+// host/src/infrastructure/ws/server.ts `parseRemotePath`) — the canonical merged-console path. We
+// build a per-session url here; an explicit override / LIVESTREAK_HOST_WSS may either be a full
+// session url (used as-is) or a base origin we append the remote path to.
+const deriveHostWss = (hostUrl: string, sessionId: string, override?: string): string => {
+  const base =
+    override ??
+    process.env["LIVESTREAK_HOST_WSS"] ??
+    `${hostUrl.replace(/^http/, "ws").replace(/\/$/, "")}`;
+  // If the caller already pointed us at a concrete remote leg-A path, respect it verbatim.
+  if (/\/remote\/[^/]+\/gateway\/?$/.test(base)) {
+    return base;
   }
-  const env = process.env["LIVESTREAK_HOST_WSS"];
-  if (env !== undefined) {
-    return env;
-  }
-  return `${hostUrl.replace(/^http/, "ws").replace(/\/$/, "")}/control`;
+  return `${base.replace(/\/$/, "")}/remote/${encodeURIComponent(sessionId)}/gateway`;
 };
 
 // `remote open` — mint a scoped, expiring session, dial the host, and run the relay loop until SIGINT.
@@ -114,7 +119,7 @@ export const runRemoteOpen = async (input: {
   }
 
   const relay = createRelay({ registry, dispatch });
-  const hostWss = deriveHostWss(ctx.doc.host.url, input.hostWss);
+  const hostWss = deriveHostWss(ctx.doc.host.url, record.sessionId, input.hostWss);
   const wss = connectGateway({
     hostWssUrl: hostWss,
     seed: unlocked.seed,

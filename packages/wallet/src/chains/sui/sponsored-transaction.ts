@@ -1,4 +1,4 @@
-import { SuiClient } from '@mysten/sui/client'
+import { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 import { Ed25519Keypair } from '@mysten/sui/keypairs/ed25519'
 import { Transaction, TransactionDataBuilder } from '@mysten/sui/transactions'
 import { normalizeSuiAddress } from '@mysten/sui/utils'
@@ -33,14 +33,14 @@ export type AssembleSponsoredTxBytesInput = {
   gasCoins: SuiGasCoinRef[]
   gasBudget: bigint
   gasPrice: bigint
-  client: SuiClient
+  client: SuiJsonRpcClient
 }
 
 export type ExecuteSponsoredTransactionInput = {
   account: VendorWalletAccountSui
   transaction: SuiTransaction
   gasStation: SuiGasStation
-  client: SuiClient
+  client: SuiJsonRpcClient
   transferMaxFee?: number | bigint
 }
 
@@ -83,14 +83,31 @@ export function assertGasStationReturnedTxMatchesKind(
   }
 }
 
-export function resolveSuiClient(config: LiveStreakSuiWalletConfig): SuiClient {
+export function resolveSuiClient(config: LiveStreakSuiWalletConfig): SuiJsonRpcClient {
   if (config.provider) {
-    return config.provider
+    return config.provider as SuiJsonRpcClient
   }
   if (typeof config.rpcUrl === 'string') {
-    return new SuiClient({ url: config.rpcUrl })
+    return new SuiJsonRpcClient({ url: config.rpcUrl, network: resolveSuiNetwork() })
   }
   throw new Error('The wallet must be connected to a provider to send transactions.')
+}
+
+// Build a read/RPC client from a bare rpcUrl, applying the required v2 `network`. Sui executors
+// (options reader/writer) read VIA this instead of constructing @mysten/sui clients directly.
+export function createSuiReadClient(rpcUrl: string): SuiJsonRpcClient {
+  return new SuiJsonRpcClient({ url: rpcUrl, network: resolveSuiNetwork() })
+}
+
+// v2 SuiJsonRpcClient requires an explicit `network`. Mirror host's resolution (env-driven,
+// localnet default) so the hackathon Sui loop keeps working unchanged. Browser-safe: guards process.
+function resolveSuiNetwork(): 'mainnet' | 'testnet' | 'devnet' | 'localnet' {
+  const env = typeof process !== 'undefined' ? process.env : undefined
+  const value = env?.LIVESTREAK_SUI_NETWORK ?? env?.SUI_NETWORK ?? 'localnet'
+  if (value === 'mainnet' || value === 'testnet' || value === 'devnet' || value === 'localnet') {
+    return value
+  }
+  return 'localnet'
 }
 
 export async function normalizeSuiTransaction(
@@ -130,7 +147,7 @@ export function createLocalGasStation(options: {
   gasCoins: SuiGasCoinRef[]
   gasBudget: bigint
   gasPrice: bigint
-  client: SuiClient
+  client: SuiJsonRpcClient
 }): SuiGasStation {
   return {
     sponsor: ({ txKindBytes, sender }) =>

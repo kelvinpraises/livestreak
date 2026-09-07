@@ -121,3 +121,71 @@ into the treasury (LVST balance drops by the staked amount).
 - **Reverted userOp diagnosis:** the Safe 4337 module masks inner reverts as
   `ExecutionFailed()` (`0xacfdb444`). Get the real reason with
   `cast run <txHash>` (full call trace) — that's how the createVault OutOfGas was found.
+
+## 5. Multichain: add the Sui-localnet leg
+
+The local stack can run **both** chains at once so the app flips EVM↔Sui by config
+alone (the app imports `localnetDeployment` from `@livestreak/contracts/sui` and selects
+it via `setChain('sui')` — no rebuild, no code change). `./dev.sh` boots the Sui leg by
+default; set `WITH_SUI=0` for the EVM-only stack.
+
+### Toolchain (extra)
+
+- `sui` CLI on `PATH` (`brew install sui`; verified on 1.73.0).
+- A `sui client` env named `localnet` → `http://127.0.0.1:9000`, with an active address.
+  `dev-sui.sh` creates/switches it automatically (`sui client new-env --alias localnet …`).
+
+### One command — `./dev.sh`
+
+With `WITH_SUI=1` (default) `dev.sh` runs the EVM bring-up, then sources `dev-sui.sh`
+and brings the Sui leg up, in order: kill stale `sui` → `sui start --with-faucet
+--force-regenesis` (RPC `:9000`, faucet `:9123`) → faucet-fund the deployer + wait for a
+gas coin → `npm run deploy:sui -- --name localnet --force` → faucet-fund the host gas
+sponsor. It then starts the host with the Sui env exported so the host targets localnet:
+
+- `LIVESTREAK_SUI_RPC_URL` / `SUI_RPC` = `http://127.0.0.1:9000`
+- `LIVESTREAK_SUI_NETWORK` / `SUI_NETWORK` = `localnet`
+- `LIVESTREAK_SUI_SPONSOR_MNEMONIC` = the localnet dev mnemonic (sponsor account is
+  faucet-funded each run; localnet only, never a real network).
+
+Logs: `/tmp/livestreak-sui.log`. The deploy rewrites
+`packages/contracts/chains/sui/deployments/localnet.{json,ts}` — these are **ephemeral**
+(regenerated every run from a fresh genesis); don't commit run-to-run churn.
+
+### Sui leg on its own — `./dev-sui.sh`
+
+`./dev-sui.sh` boots just the Sui localnet + faucet, deploys, funds the sponsor, and
+blocks (Ctrl+C to stop). Useful for iterating on the Sui path without anvil/host/app.
+
+### Flip the app to Sui
+
+With the stack up, set the app's chain to `sui` (the chain toggle persists in
+`sessionStorage` under `livestreak_chain`). The app then builds its chain config from
+`localnetDeployment` via `createOptionsSuiConfig` — reads + sponsored writes go to
+`:9000`. No env or rebuild needed on the app side.
+
+### Verify (manual)
+
+```sh
+# Sui RPC alive:
+curl -s -X POST http://127.0.0.1:9000 -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"sui_getChainIdentifier","params":[]}'
+
+# Deployed Protocol object resolves on-chain (proves the snapshot the app imports is live):
+PKG=$(node -e "console.log(require('./packages/contracts/chains/sui/deployments/localnet.json').objects.protocol)")
+curl -s -X POST http://127.0.0.1:9000 -H 'content-type: application/json' \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"sui_getObject\",\"params\":[\"$PKG\",{\"showType\":true}]}"
+
+# Host gas sponsor is funded:
+sui client gas 0x184692a4d95ec8c54940b58b501356d903c2c0bef8a5c215c3b4dd1551c325f6
+```
+
+### Gotchas (Sui)
+
+- **`Cannot find gas coin for signer …`:** `--force-regenesis` wipes balances; the deploy
+  tool's own faucet poke is racy. `dev-sui.sh` pre-funds the active deployer and blocks on
+  `sui client gas` before deploying — if you deploy by hand, faucet the active address first.
+- **Deployer keypair:** `deploy:sui` uses the `sui client` active address' key when one is
+  exportable, else falls back to the localnet dev mnemonic (localnet only — it refuses to
+  sign on testnet/mainnet). The host sponsor uses that same dev mnemonic, derived at
+  `m/44'/784'/0'/0'/0'` → `0x1846…25f6`.

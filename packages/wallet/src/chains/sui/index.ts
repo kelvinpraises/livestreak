@@ -24,6 +24,7 @@ export {
   assertGasStationReturnedTxMatchesKind,
   assembleSponsoredTxBytes,
   createLocalGasStation,
+  createSuiReadClient,
   executeSponsoredTransaction,
   normalizeSuiTransaction,
   resolveSuiClient,

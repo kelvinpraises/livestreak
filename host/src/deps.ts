@@ -9,6 +9,16 @@ import {
 } from "./services/aa/sui-gas-station.js";
 import { readSuiGasStationRuntimeConfig } from "./services/aa/sui-sponsor.js";
 import { createDiscoveryStore } from "./services/discovery.js";
+import {
+  createCatalogService,
+  type CatalogReaderProvider,
+  type CatalogService
+} from "./services/catalog/catalog.js";
+import {
+  createEnvReaderProvider,
+  parseSeedMarkets
+} from "./services/catalog/readers.js";
+import { createSignalingStore, type SignalingStore } from "./services/webrtc/signal.js";
 import { createRemoteService, type RemoteService } from "./services/remote/index.js";
 import { createEvidenceStore } from "./services/media/evidence.js";
 import { createManifestStore } from "./services/media/manifest.js";
@@ -72,6 +82,7 @@ export const bootstrapHostRouteDeps = async (
   const resolved = options.walrusResolved ?? config.resolvedWalrus;
   const ops = options.memoryOps ?? createMemWalAccountOperations();
   const walrus = buildWalrusDeps(config, resolved, ops);
+  const discoveryStore = createDiscoveryStore();
 
   return {
     config,
@@ -81,11 +92,13 @@ export const bootstrapHostRouteDeps = async (
       evidence: createEvidenceStore(config.cacheQuotaBytes)
     },
     discovery: {
-      store: createDiscoveryStore()
+      store: discoveryStore
     },
     walrus,
     aa,
-    remote: buildRemoteService(config)
+    remote: buildRemoteService(config),
+    catalog: buildCatalogService(config, discoveryStore, options),
+    signaling: createSignalingStore()
   };
 };
 
@@ -96,6 +109,8 @@ export interface HostRouteDeps {
   readonly walrus: WalrusRouteDeps;
   readonly aa: AaRouteDeps;
   readonly remote: RemoteService;
+  readonly catalog: CatalogService;
+  readonly signaling: SignalingStore;
 }
 
 export interface MediaRouteDeps {
@@ -124,7 +139,23 @@ export interface ContentRouteDeps {
 export interface CreateHostRouteDepsOptions extends CreateAaRouteDepsOptions {
   readonly walrusResolved?: ResolvedWalrus;
   readonly memoryOps?: ReturnType<typeof createMemWalAccountOperations>;
+  // Inject a reader provider in tests; defaults to the env/deploy-snapshot provider.
+  readonly catalogReaders?: CatalogReaderProvider;
 }
+
+const buildCatalogService = (
+  config: HostServerConfig,
+  store: ReturnType<typeof createDiscoveryStore>,
+  options: CreateHostRouteDepsOptions
+): CatalogService =>
+  createCatalogService({
+    readers: options.catalogReaders ?? createEnvReaderProvider(),
+    baseUrl: config.baseUrl,
+    defaultChain:
+      (process.env.LIVESTREAK_CATALOG_DEFAULT_CHAIN as "evm" | "sui" | undefined) ?? "evm",
+    listDiscoveryMarketIds: () => store.listMarketIds(),
+    seedMarkets: parseSeedMarkets(process.env.LIVESTREAK_CATALOG_MARKETS)
+  });
 
 export const createHostRouteDeps = (
   config: HostServerConfig = defaultHostServerConfig(),
@@ -133,6 +164,7 @@ export const createHostRouteDeps = (
   const resolved = options.walrusResolved ?? config.resolvedWalrus;
   const ops = options.memoryOps ?? createMemWalAccountOperations();
   const walrus = buildWalrusDeps(config, resolved, ops);
+  const discoveryStore = createDiscoveryStore();
 
   return {
     config,
@@ -142,11 +174,13 @@ export const createHostRouteDeps = (
       evidence: createEvidenceStore(config.cacheQuotaBytes)
     },
     discovery: {
-      store: createDiscoveryStore()
+      store: discoveryStore
     },
     walrus,
     aa: createAaRouteDeps(config, options),
-    remote: buildRemoteService(config)
+    remote: buildRemoteService(config),
+    catalog: buildCatalogService(config, discoveryStore, options),
+    signaling: createSignalingStore()
   };
 };
 

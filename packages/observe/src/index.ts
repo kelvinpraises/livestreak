@@ -187,16 +187,71 @@ export * from "./pipeline/publish/index.js";
 export * from "./pipeline/registry.js";
 export * from "./pipeline/shared.js";
 
+// --- Local WebRTC preview sink + file→WebRTC streaming (SEAM-WEBRTC) ---
+export {
+  createLocalSinkDriver,
+  localSinkDescriptor,
+  validateLocalSinkConfig,
+  type LocalSinkConfig,
+  type LocalSinkDriverOptions
+} from "./pipeline/publish/sinks/local/driver.js";
+
+export {
+  streamFileToWebRtc,
+  type StreamFileToWebRtcInput,
+  type StreamFileToWebRtcResult
+} from "./pipeline/publish/sinks/local/file-stream.js";
+
+export {
+  createHostMediatedSinkSignaling,
+  type HostMediatedSinkSignalingInput,
+  type SignalingFetch,
+  type SignalingResponse
+} from "./pipeline/publish/sinks/local/host-signaling.js";
+
+export {
+  createLocalSignalingHub,
+  createLoopbackNetwork,
+  LocalSignalingHub,
+  type ConsumerSignalingChannel,
+  type SinkSignalingChannel,
+  type LoopbackNetwork,
+  type RtcDataChannelLike,
+  type RtcPeerConnectionLike,
+  type RtcPeerConnectionFactory,
+  type RtcSessionDescription,
+  type RtcSdpType,
+  type RtcDataChannelEvent,
+  type RtcMessageEvent
+} from "./pipeline/publish/sinks/local/signaling.js";
+
+// --- Per-stream feed resolution (issue 7) ---
+export {
+  resolveStreamFeed,
+  streamFeedSignalPath,
+  type StreamFeed,
+  type LiveStreamFeed,
+  type VodStreamFeed,
+  type VodPointer,
+  type ResolveStreamFeedInput
+} from "./market/feed.js";
+
 export type {
   MarketFailurePhase,
   MarketLifecycleState,
   MarketLifecycleStatus,
+  MarketLifecycleTxResult,
+  MarketStorageScheme,
   MarketRegistrar,
   MarketRegisterInput,
   MarketRegisterResult,
   ObserveRunMarketConfig,
   ObserveRunMarketOptions,
-  StreamId
+  StreamId,
+  SuiMarketRegistryConfig,
+  EvmAddress,
+  MarketLifecycleWriteInput,
+  MarketLifecycleWriteResult
 } from "./market/index.js";
 
-export { observeRunStreamId } from "./market/index.js";
+export { observeRunStreamId, writeMarketLifecycle } from "./market/index.js";

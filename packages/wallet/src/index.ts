@@ -15,6 +15,7 @@ export {
   assertGasStationReturnedTxMatchesKind,
   assembleSponsoredTxBytes,
   createLocalGasStation,
+  createSuiReadClient,
   executeSponsoredTransaction,
   isSponsoredSuiConfig,
   signSenderForSponsoredTransaction,
@@ -42,6 +43,14 @@ export type {
   SuiGasStation,
   SuiGasCoinRef,
 } from '#chains/sui/index.js'
+
+// Multichain-hygiene: @livestreak/wallet is the SINGLE @mysten/sui (v2) owner. Sui executors
+// (options writer/reader, observe registrar) build PTBs + read VIA these re-exports instead of
+// declaring their own direct @mysten/sui dependency.
+export { Transaction } from '@mysten/sui/transactions'
+export { bcs } from '@mysten/sui/bcs'
+export { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
+export type { SuiTransactionBlockResponse } from '@mysten/sui/jsonRpc'
 
 export type { IWalletAccount } from '@tetherto/wdk-wallet'
 export type {

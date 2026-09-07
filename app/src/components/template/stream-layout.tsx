@@ -18,7 +18,7 @@ import { useOptionsContext } from '#/providers/options-provider.tsx'
 import { useHostStream } from '#/hooks/use-host-stream.ts'
 import { isOptionsModeEnabled } from '#/utils/env.ts'
 import { DEFAULT_FUND_DURATION_MIN, panelToStream } from '#/utils/options'
-import { resolveStreamMedia } from '#/utils/stream'
+import { resolveStreamFeed } from '#/utils/stream'
 
 interface StreamLayoutProps {
   streamTitle: string
@@ -38,12 +38,14 @@ export function StreamLayout({ streamTitle, category, totalPooled, streamId }: S
   const { notifications, push, dismiss } = useWinNotifications()
   const [selectedVaultId, setSelectedVaultId] = useState<string | null>(null)
 
-  // A4: drive the player off the on-chain stream pointer (status + scheme/id) and the host watch URL.
+  // A4 + C: each stream resolves ITS OWN feed — the on-chain stream pointer (status + scheme/id) in
+  // live mode, falling back to this route's host/fixture stream detail (its own watch URL). No global
+  // hardcoded video: demo streams play their per-route fixture feed, live streams their market feed.
   const hostStream = useHostStream(streamId)
   const streamPointer = optionsEnabled && optionsConnected && board
     ? panelToStream(board.panel, streamId)
     : undefined
-  const streamMedia = resolveStreamMedia(streamPointer, hostStream.stream?.watchUrl)
+  const streamMedia = resolveStreamFeed(streamPointer, hostStream.stream)
 
   const floatingVaults = vaults.filter(v => v.status === 'open' || v.status === 'hot')
 

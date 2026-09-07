@@ -22,6 +22,7 @@ export interface ProduceRenderInput {
   readonly setEndedTx: string;
   readonly streamState: OnChainStreamState;
   readonly mp4Path: string;
+  readonly idempotent?: boolean;
 }
 
 export const formatMarketId = (marketId: string): string => marketId;
@@ -41,7 +42,9 @@ export const formatStreamState = (state: OnChainStreamState): string =>
 
 export const renderProduceResult = (input: ProduceRenderInput): string => {
   const lines = [
-    "livestreak produce — complete",
+    input.idempotent === true
+      ? "livestreak produce — already produced (idempotent no-op)"
+      : "livestreak produce — complete",
     "",
     `title:      ${input.title}`,
     `marketId:   ${formatMarketId(input.marketId)}`,

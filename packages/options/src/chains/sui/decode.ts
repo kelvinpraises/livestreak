@@ -1,6 +1,6 @@
 // --- exports ---
 
-import { bcs } from "@mysten/sui/bcs";
+import { bcs } from "@livestreak/wallet";
 import type { PointerScheme } from "@livestreak/host";
 
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";

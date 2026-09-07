@@ -7,12 +7,16 @@ export type {
   MarketLifecycleRegistered,
   MarketLifecycleState,
   MarketLifecycleStatus,
+  MarketLifecycleInput,
+  MarketLifecycleTxResult,
+  MarketStorageScheme,
   MarketRegisterInput,
   MarketRegisterResult,
   MarketRegistrar,
   ObserveRunMarketConfig,
   ObserveRunMarketOptions,
-  StreamId
+  StreamId,
+  SuiMarketRegistryConfig
 } from "./types.js";
 
 export { observeRunStreamId } from "./chains/evm.js";
@@ -29,3 +33,8 @@ export {
   validateObserveRunMarketOptions
 } from "./validate.js";
 export { createMarketRegistrar } from "./chains/index.js";
+export { writeMarketLifecycle } from "./lifecycle.js";
+export type {
+  MarketLifecycleWriteInput,
+  MarketLifecycleWriteResult
+} from "./lifecycle.js";

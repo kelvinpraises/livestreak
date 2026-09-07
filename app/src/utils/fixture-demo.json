@@ -18,7 +18,7 @@
         "category": "Esports",
         "isLive": true,
         "elapsed": "32m",
-        "activeVaults": 4,
+        "activeVaults": 3,
         "totalPooled": 2100
       },
       {
@@ -38,7 +38,7 @@
         "category": "Entertainment",
         "isLive": true,
         "elapsed": "25m",
-        "activeVaults": 2,
+        "activeVaults": 3,
         "totalPooled": 890
       }
     ]
@@ -51,7 +51,8 @@
       "category": "Tech",
       "isLive": true,
       "activeVaults": 5,
-      "totalPooled": 3820.3
+      "totalPooled": 3820.3,
+      "watchUrl": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
     },
     "esports-1": {
       "routeId": "esports-1",
@@ -59,8 +60,9 @@
       "title": "LCS Finals — Game 3",
       "category": "Esports",
       "isLive": true,
-      "activeVaults": 4,
-      "totalPooled": 2100
+      "activeVaults": 3,
+      "totalPooled": 2100,
+      "watchUrl": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
     },
     "politics-1": {
       "routeId": "politics-1",
@@ -69,7 +71,8 @@
       "category": "Politics",
       "isLive": true,
       "activeVaults": 3,
-      "totalPooled": 1500
+      "totalPooled": 1500,
+      "watchUrl": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
     },
     "entertainment-1": {
       "routeId": "entertainment-1",
@@ -77,8 +80,9 @@
       "title": "MasterChef Live Semi-Finals",
       "category": "Entertainment",
       "isLive": true,
-      "activeVaults": 2,
-      "totalPooled": 890
+      "activeVaults": 3,
+      "totalPooled": 890,
+      "watchUrl": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4"
     }
   },
   "agents": [
@@ -298,6 +302,189 @@
         "steward": {
           "hot": false
         }
+      },
+      {
+        "vaultId": "0xe1a1",
+        "marketId": "esports-1",
+        "question": "Blue team takes first objective",
+        "type": "momentum",
+        "creator": "0xsteward",
+        "status": "open",
+        "outcome": "pending",
+        "pools": {
+          "yes": 120,
+          "no": 140
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": false
+        }
+      },
+      {
+        "vaultId": "0xe2b2",
+        "marketId": "esports-1",
+        "question": "Match goes past 30 minutes",
+        "type": "outcome",
+        "creator": "0xsteward",
+        "status": "hot",
+        "outcome": "pending",
+        "pools": {
+          "yes": 210,
+          "no": 90
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": true,
+          "hotUntilFromNowMs": 90000
+        }
+      },
+      {
+        "vaultId": "0xe3c3",
+        "marketId": "esports-1",
+        "question": "Red team wins this round",
+        "type": "momentum",
+        "creator": "0xsteward",
+        "status": "open",
+        "outcome": "pending",
+        "pools": {
+          "yes": 150,
+          "no": 160
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": false
+        }
+      },
+      {
+        "vaultId": "0xp1a1",
+        "marketId": "politics-1",
+        "question": "Candidate mentions inflation next",
+        "type": "momentum",
+        "creator": "0xsteward",
+        "status": "open",
+        "outcome": "pending",
+        "pools": {
+          "yes": 130,
+          "no": 110
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": false
+        }
+      },
+      {
+        "vaultId": "0xp2b2",
+        "marketId": "politics-1",
+        "question": "Moderator cuts in within 5 min",
+        "type": "outcome",
+        "creator": "0xsteward",
+        "status": "hot",
+        "outcome": "pending",
+        "pools": {
+          "yes": 95,
+          "no": 200
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": true,
+          "hotUntilFromNowMs": 90000
+        }
+      },
+      {
+        "vaultId": "0xp3c3",
+        "marketId": "politics-1",
+        "question": "Polls tighten after this segment",
+        "type": "momentum",
+        "creator": "0xsteward",
+        "status": "open",
+        "outcome": "pending",
+        "pools": {
+          "yes": 240,
+          "no": 70
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": false
+        }
+      },
+      {
+        "vaultId": "0xn1a1",
+        "marketId": "entertainment-1",
+        "question": "Host brings out surprise guest",
+        "type": "outcome",
+        "creator": "0xsteward",
+        "status": "hot",
+        "outcome": "pending",
+        "pools": {
+          "yes": 250,
+          "no": 60
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": true,
+          "hotUntilFromNowMs": 90000
+        }
+      },
+      {
+        "vaultId": "0xn2b2",
+        "marketId": "entertainment-1",
+        "question": "Live performance in next segment",
+        "type": "momentum",
+        "creator": "0xsteward",
+        "status": "open",
+        "outcome": "pending",
+        "pools": {
+          "yes": 140,
+          "no": 150
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": false
+        }
+      },
+      {
+        "vaultId": "0xn3c3",
+        "marketId": "entertainment-1",
+        "question": "Audience vote flips the result",
+        "type": "outcome",
+        "creator": "0xsteward",
+        "status": "open",
+        "outcome": "pending",
+        "pools": {
+          "yes": 180,
+          "no": 100
+        },
+        "timing": {
+          "createdAtAgoMs": 300000,
+          "expiresAtFromNowMs": 240000
+        },
+        "steward": {
+          "hot": false
+        }
       }
     ],
     "vaultViews": {
@@ -342,6 +529,42 @@
       "0x9c0d": {
         "multiplier": 2.67,
         "createdMinute": 43
+      },
+      "0xe1a1": {
+        "multiplier": 1.92,
+        "createdMinute": 12
+      },
+      "0xe2b2": {
+        "multiplier": 2.45,
+        "createdMinute": 19
+      },
+      "0xe3c3": {
+        "multiplier": 1.74,
+        "createdMinute": 26
+      },
+      "0xp1a1": {
+        "multiplier": 2.1,
+        "createdMinute": 12
+      },
+      "0xp2b2": {
+        "multiplier": 1.66,
+        "createdMinute": 19
+      },
+      "0xp3c3": {
+        "multiplier": 2.88,
+        "createdMinute": 26
+      },
+      "0xn1a1": {
+        "multiplier": 3.1,
+        "createdMinute": 12
+      },
+      "0xn2b2": {
+        "multiplier": 1.85,
+        "createdMinute": 19
+      },
+      "0xn3c3": {
+        "multiplier": 2.3,
+        "createdMinute": 26
       }
     },
     "events": [

@@ -33,7 +33,7 @@ import {
   type UserAddress,
 } from '@livestreak/options'
 
-import { HOST_BASE_URL, LOCAL_CHAIN_ID, defaultOptionsMarketId, isOptionsModeEnabled } from '#/utils/env'
+import { HOST_BASE_URL, LOCAL_CHAIN_ID, defaultOptionsMarketId, isOptionsModeEnabled, testOptionsSeed } from '#/utils/env'
 import {
   buildOptionsContractAddresses,
   LOCALHOST_AA_CONTRACTS,
@@ -110,6 +110,7 @@ interface OptionsContextValue {
     horizonSec?: number,
   ) => Promise<OptionsAccrualPreview>
   claimWin: (vaultId: string) => Promise<TxId>
+  hasNftForVault: (vaultId: string) => boolean
   mint: (marketId: string) => Promise<TxId>
   claimLoss: (vaultId: string, side: 'yes' | 'no') => Promise<TxId>
   stake: (amountLvst: number) => Promise<TxId>
@@ -266,7 +267,14 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
 
     boardUnsubRef.current = bridge.subscribeBoard(APP_CALLER, (nextBoard) => {
       applyBoard(nextBoard)
-      void bridge.readControls(APP_CALLER).then(next => setControls(next.functions)).catch(() => {})
+      // A: never swallow live-data errors — the e2e reads console, and the UI must surface a
+      // "live data unavailable" state instead of silently masquerading fixture data as live.
+      void bridge.readControls(APP_CALLER)
+        .then(next => setControls(next.functions))
+        .catch(err => {
+          console.error('[options] readControls failed', err)
+          setError(err instanceof Error ? err.message : String(err))
+        })
     })
     pollingStopRef.current = runtime.startPolling().stop
 
@@ -310,6 +318,11 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     if (!enabled || !ready || typeof window === 'undefined') return
     const cached = sessionStorage.getItem(SESSION_SECRET_KEY)
     if (!cached) return
+    // B: during an EVM⇄Sui switch the EVM wallet config can briefly be unloaded (a `ready`/`chain`
+    // commit can fire before `loadEvmDescriptor` repopulates `walletInitRef`). Skip — do NOT treat
+    // this as a derive failure, which would wipe SESSION_SECRET_KEY and drop the wallet. The chain
+    // effect re-toggles `ready` once the descriptor loads, re-running this effect cleanly.
+    if (chainRef.current === 'evm' && !walletInitRef.current) return
 
     setIsLoading(true)
     void (async () => {
@@ -322,6 +335,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
         await bootRuntime(secret, user)
       } catch (err) {
         sessionStorage.removeItem(SESSION_SECRET_KEY)
+        console.error('[options] session reconnect failed', err)
         setError(err instanceof Error ? err.message : String(err))
       } finally {
         setIsLoading(false)
@@ -343,13 +357,33 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   const setChain = useCallback((next: OptionsChainKind) => {
     if (next === chainRef.current) return
     sessionStorage.setItem(SESSION_CHAIN_KEY, next)
-    disconnect()
+    // B: switching chains KEEPS the derived secret and re-derives the new chain's address from the
+    // SAME seed (EVM Safe ⇄ Sui address) with no re-login. We tear down the active chain's runtime
+    // and clear chain-specific display state, but leave SESSION_SECRET_KEY intact; the reconnect
+    // effect (keyed on `chain`) then re-derives + reboots from the cached secret. Only a genuinely
+    // disconnected session (no secret) reverts to the disconnected state.
+    const wasConnected =
+      typeof window !== 'undefined' && !!sessionStorage.getItem(SESSION_SECRET_KEY)
+    teardownRuntime()
+    setAddress(null)
+    setUsdcBalance(0)
+    setError(null)
+    if (wasConnected) {
+      setIsLoading(true)
+    } else {
+      setIsConnected(false)
+    }
     setChainState(next)
-  }, [disconnect])
+  }, [teardownRuntime])
 
   const connect = useCallback(async (password: string) => {
     if (!enabled) return
-    if (!password.trim()) {
+    // Test-only override: a configured `VITE_OPTIONS_SEED` makes connect derive from a fixed
+    // seed (e.g. "1234") so the operator wallet is reproducible across E2E runs. Derivation is
+    // byte-identical to the CLI's deriveSeedFromPassword (sha256(STEALTH_DOMAIN + seed)). When the
+    // env var is unset this is undefined and the typed password is used exactly as before.
+    const effectiveSeed = testOptionsSeed() ?? password
+    if (!effectiveSeed.trim()) {
       setError('Password required')
       return
     }
@@ -361,7 +395,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     setIsLoading(true)
     setError(null)
     try {
-      const secret = toBytes(sha256(toBytes(STEALTH_DOMAIN + password)))
+      const secret = toBytes(sha256(toBytes(STEALTH_DOMAIN + effectiveSeed)))
       sessionStorage.setItem(SESSION_SECRET_KEY, bytesToHex(secret))
 
       const chainConfig = buildChainConfig(chainRef.current, secret, walletInitRef.current)
@@ -370,6 +404,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       setIsConnected(true)
       await bootRuntime(secret, user)
     } catch (err) {
+      console.error('[options] connect failed', err)
       setError(err instanceof Error ? err.message : String(err))
       setIsConnected(false)
       setAddress(null)
@@ -409,6 +444,37 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     if (!tokenId) throw new Error('No NFT for this market')
     return BigInt(tokenId)
   }, [requirePanel])
+
+  /** True when the connected user already holds a position NFT covering this vault's market (D). */
+  const hasNftForVault = useCallback((vaultId: string): boolean => {
+    if (!board) return false
+    return findTokenIdForVault(board.panel, vaultId) !== undefined
+  }, [board])
+
+  // D: ONE coherent "back this vault" path — ensure the market's position NFT exists (mint it if the
+  // user hasn't entered the market yet), then return its tokenId. Reads the board straight from the
+  // bridge after minting so we don't depend on async React state to settle first. This is the root
+  // fix that lets fundStream below work without a pre-existing board panel / manual mint step.
+  const ensureTokenId = useCallback(async (vaultId: string): Promise<bigint> => {
+    const panel = requirePanel()
+    const existing = findTokenIdForVault(panel, vaultId)
+    if (existing) return BigInt(existing)
+
+    const market = panel.markets.find(m => m.vaults.some(v => v.vaultId === vaultId))
+    if (!market) throw new Error('No market for this vault')
+
+    const bridge = requireBridge()
+    await bridge.callAction(APP_CALLER, {
+      scope: bridgeActionScope,
+      action: 'mint',
+      args: { marketId: asMarketId(market.marketId), to: requireUser() },
+    })
+    const fresh = await bridge.readBoard(APP_CALLER)
+    applyBoard(fresh)
+    const minted = findTokenIdForVault(fresh.panel, vaultId)
+    if (!minted) throw new Error('Mint did not produce an NFT for this market')
+    return BigInt(minted)
+  }, [requirePanel, requireBridge, requireUser, applyBoard])
 
   const afterWrite = useCallback(async () => {
     const user = address as UserAddress | null
@@ -451,14 +517,16 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     durationMinutes = DEFAULT_FUND_DURATION_MIN,
   ): Promise<TxId> => {
     const chainRate = usdPerMinToChainRate(rateUsdPerMin)
+    // D: mint the position NFT first if the user hasn't entered this market yet, then fund — one call.
+    const tokenId = await ensureTokenId(vaultId)
     return callBridgeAction('fund', {
-      tokenId: asTokenId(resolveTokenId(vaultId)),
+      tokenId: asTokenId(tokenId),
       vaultId: asVaultId(vaultId),
       side,
       rate: chainRate,
       deposit: fundDepositForDuration(chainRate, durationMinutes),
     })
-  }, [callBridgeAction, resolveTokenId])
+  }, [callBridgeAction, ensureTokenId])
 
   const stopFunding = useCallback(async (vaultId: string, side: 'yes' | 'no'): Promise<TxId> => {
     return callBridgeAction('stopFunding', {
@@ -578,6 +646,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     stopFunding,
     previewAccrual,
     claimWin,
+    hasNftForVault,
     mint,
     claimLoss,
     stake,
@@ -589,7 +658,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   }), [
     enabled, ready, chain, setChain, isConnected, isLoading, claiming, error, address, usdcBalance, board, controls,
     connect, disconnect, setActiveMarketId, findFunction, findFundFunctionForVault,
-    findStopFundingFunctionForVault, fundStream, stopFunding, previewAccrual, claimWin, mint, claimLoss,
+    findStopFundingFunctionForVault, fundStream, stopFunding, previewAccrual, claimWin, hasNftForVault, mint, claimLoss,
     stake, unstake, claimDividends, transferNft, approveNft, setApprovalForAll,
   ])
 

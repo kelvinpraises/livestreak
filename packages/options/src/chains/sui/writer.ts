@@ -1,10 +1,16 @@
 // --- exports ---
 
-import { Transaction } from "@mysten/sui/transactions";
-import { SuiClient } from "@mysten/sui/client";
-import { bcs } from "@mysten/sui/bcs";
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
-import { createWalletManager, type SuiWalletConfig } from "@livestreak/wallet";
+// Multichain-hygiene: build PTBs + read VIA @livestreak/wallet (the single @mysten/sui v2 owner),
+// not a direct @mysten/sui dependency.
+import {
+  Transaction,
+  SuiJsonRpcClient,
+  bcs,
+  createSuiReadClient,
+  createWalletManager,
+  type SuiWalletConfig
+} from "@livestreak/wallet";
 import { MODULES, target } from "@livestreak/contracts/sui";
 
 import { validateOptionsVaultSide } from "../../model/vault.js";
@@ -66,7 +72,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
   type SuiContext = {
     account: { sendTransaction(tx: Transaction): Promise<{ hash: string }>; getAddress(): Promise<string> };
     owner: string;
-    client: SuiClient;
+    client: SuiJsonRpcClient;
   };
   let suiPromise: Promise<SuiContext> | undefined;
   const getSui = (): Promise<SuiContext> => {
@@ -78,7 +84,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         const rpcUrl = Array.isArray(suiConfig.rpcUrl)
           ? suiConfig.rpcUrl[0]
           : (suiConfig.rpcUrl ?? "");
-        const client = new SuiClient({ url: rpcUrl as string });
+        const client = createSuiReadClient(rpcUrl as string);
         return { account, owner, client };
       })();
     }

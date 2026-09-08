@@ -18,6 +18,25 @@ import {
   createEnvReaderProvider,
   parseSeedMarkets
 } from "./services/catalog/readers.js";
+import {
+  createCatalogReadModel,
+  parseAgentsSeed,
+  type CatalogReadModel
+} from "./services/catalog/read-model.js";
+import {
+  createDatabase,
+  type DatabaseHandle
+} from "./infrastructure/database/connection.js";
+import { migrateSync, migrateToLatest } from "./infrastructure/database/migrations/index.js";
+import {
+  createCatalogRepository,
+  type CatalogRepository
+} from "./infrastructure/database/repository.js";
+import {
+  createCatalogIndexer,
+  type CatalogIndexer
+} from "./infrastructure/cron/catalog-sync.js";
+import { registerCronJobs, type CronHandle } from "./infrastructure/cron/index.js";
 import { createSignalingStore, type SignalingStore } from "./services/webrtc/signal.js";
 import { createRemoteService, type RemoteService } from "./services/remote/index.js";
 import { createEvidenceStore } from "./services/media/evidence.js";
@@ -83,6 +102,10 @@ export const bootstrapHostRouteDeps = async (
   const ops = options.memoryOps ?? createMemWalAccountOperations();
   const walrus = buildWalrusDeps(config, resolved, ops);
   const discoveryStore = createDiscoveryStore();
+  const catalogStack = buildCatalogStack(config, discoveryStore, options);
+  // Boot path: also run the formal migrator (records the migration as applied on top of the
+  // idempotent sync DDL) so the bookkeeping table reflects reality.
+  await migrateToLatest(catalogStack.db.db);
 
   return {
     config,
@@ -97,7 +120,7 @@ export const bootstrapHostRouteDeps = async (
     walrus,
     aa,
     remote: buildRemoteService(config),
-    catalog: buildCatalogService(config, discoveryStore, options),
+    ...stackToDeps(catalogStack),
     signaling: createSignalingStore()
   };
 };
@@ -110,7 +133,22 @@ export interface HostRouteDeps {
   readonly aa: AaRouteDeps;
   readonly remote: RemoteService;
   readonly catalog: CatalogService;
+  // Discovery read-model (DB projection + lazy/cron indexer) powering the page endpoints.
+  readonly catalogDb: DatabaseHandle;
+  readonly catalogRepo: CatalogRepository;
+  readonly catalogReadModel: CatalogReadModel;
+  readonly catalogIndexer: CatalogIndexer;
+  readonly catalogCron: CronHandle;
   readonly signaling: SignalingStore;
+}
+
+export interface CatalogStack {
+  readonly service: CatalogService;
+  readonly db: DatabaseHandle;
+  readonly repo: CatalogRepository;
+  readonly readModel: CatalogReadModel;
+  readonly indexer: CatalogIndexer;
+  readonly cron: CronHandle;
 }
 
 export interface MediaRouteDeps {
@@ -141,21 +179,77 @@ export interface CreateHostRouteDepsOptions extends CreateAaRouteDepsOptions {
   readonly memoryOps?: ReturnType<typeof createMemWalAccountOperations>;
   // Inject a reader provider in tests; defaults to the env/deploy-snapshot provider.
   readonly catalogReaders?: CatalogReaderProvider;
+  // Inject a DB handle in tests (e.g. createDatabase(":memory:")); defaults to the
+  // DATABASE_URL/named-file handle.
+  readonly catalogDb?: DatabaseHandle;
+  // Force-enable/disable the cron loop; defaults to env-guarded (off in tests/CI).
+  readonly cronEnabled?: boolean;
+  // Seed agents for /agents; defaults to LIVESTREAK_AGENTS_JSON.
+  readonly agents?: readonly import("./services/catalog/types.js").Agent[];
 }
 
-const buildCatalogService = (
+// Build the whole discovery read-model stack: the live `CatalogService` (registrations +
+// known-market set), the DB handle (schema applied synchronously), the repository, the
+// read-model the page endpoints serve from, the indexer (cron body + lazy path), and the
+// registered cron handle. The reader provider + known-market set are SHARED between the
+// live service and the indexer so a `POST /catalog/markets` registration feeds both.
+const buildCatalogStack = (
   config: HostServerConfig,
   store: ReturnType<typeof createDiscoveryStore>,
   options: CreateHostRouteDepsOptions
-): CatalogService =>
-  createCatalogService({
-    readers: options.catalogReaders ?? createEnvReaderProvider(),
+): CatalogStack => {
+  const readers = options.catalogReaders ?? createEnvReaderProvider();
+  const service = createCatalogService({
+    readers,
     baseUrl: config.baseUrl,
     defaultChain:
       (process.env.LIVESTREAK_CATALOG_DEFAULT_CHAIN as "evm" | "sui" | undefined) ?? "evm",
     listDiscoveryMarketIds: () => store.listMarketIds(),
     seedMarkets: parseSeedMarkets(process.env.LIVESTREAK_CATALOG_MARKETS)
   });
+
+  // Under vitest/CI default to an isolated in-memory db (no file artifacts, no cross-test
+  // bleed) unless a handle is explicitly injected.
+  const inTest =
+    process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
+  const db = options.catalogDb ?? createDatabase(inTest ? ":memory:" : undefined);
+  migrateSync(db.sqlite);
+
+  const repo = createCatalogRepository(db.db);
+  const indexer = createCatalogIndexer({
+    repo,
+    readers,
+    baseUrl: config.baseUrl,
+    knownMarkets: () => service.knownMarkets()
+  });
+  const readModel = createCatalogReadModel({
+    repo,
+    agents: options.agents ?? parseAgentsSeed(process.env.LIVESTREAK_AGENTS_JSON)
+  });
+  const cron = registerCronJobs({
+    indexer,
+    ...(options.cronEnabled === undefined ? {} : { enabled: options.cronEnabled })
+  });
+
+  return { service, db, repo, readModel, indexer, cron };
+};
+
+const stackToDeps = (stack: CatalogStack): Pick<
+  HostRouteDeps,
+  | "catalog"
+  | "catalogDb"
+  | "catalogRepo"
+  | "catalogReadModel"
+  | "catalogIndexer"
+  | "catalogCron"
+> => ({
+  catalog: stack.service,
+  catalogDb: stack.db,
+  catalogRepo: stack.repo,
+  catalogReadModel: stack.readModel,
+  catalogIndexer: stack.indexer,
+  catalogCron: stack.cron
+});
 
 export const createHostRouteDeps = (
   config: HostServerConfig = defaultHostServerConfig(),
@@ -179,7 +273,7 @@ export const createHostRouteDeps = (
     walrus,
     aa: createAaRouteDeps(config, options),
     remote: buildRemoteService(config),
-    catalog: buildCatalogService(config, discoveryStore, options),
+    ...stackToDeps(buildCatalogStack(config, discoveryStore, options)),
     signaling: createSignalingStore()
   };
 };

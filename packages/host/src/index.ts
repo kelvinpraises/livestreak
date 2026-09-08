@@ -1,3 +1,4 @@
+export * from "./catalog.js";
 export * from "./descriptor.js";
 export {
   WalrusNetwork,

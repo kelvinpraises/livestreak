@@ -45,6 +45,7 @@ import {
   mapVault,
   mapVaultIds,
   mapVaultShareTotals,
+  tupleToObject,
   type RawBoard,
   type RawDisputeState,
   type RawHotState,
@@ -229,13 +230,20 @@ const readStreamState = async (
   const marketBytes = validateMarketIdForContracts(marketId);
 
   try {
-    const state = await call<RawStreamState>(
+    const stateRaw = await call<unknown>(
       ctx,
       ctx.addresses.marketRegistry,
       ctx.abis.MarketRegistry,
       "streamState",
       [marketBytes]
     );
+    const state = tupleToObject<RawStreamState>(stateRaw, [
+      "status",
+      "scheme",
+      "id",
+      "updatedAt",
+      "endedAt"
+    ]);
 
     return mapStreamState(state);
   } catch (error) {
@@ -304,29 +312,46 @@ const readVault = async (ctx: ReaderContext, vaultId: VaultId): Promise<OptionsV
       throw contractsReadNotFound("vault", vaultId);
     }
 
-    const pools = await call<RawVaultPools>(
+    const poolsRaw = await call<unknown>(
       ctx,
       ctx.addresses.vault,
       ctx.abis.Vault,
       "getVaultPools",
       [vaultBytes]
     );
+    const pools = tupleToObject<RawVaultPools>(poolsRaw, [
+      "yesTotal",
+      "noTotal",
+      "yesShareTotal",
+      "noShareTotal"
+    ]);
 
-    const hot = await call<RawHotState>(
+    const hotRaw = await call<unknown>(
       ctx,
       ctx.addresses.stewardRegistry,
       ctx.abis.StewardRegistry,
       "vaultHotState",
       [vaultBytes]
     );
+    const hot = tupleToObject<RawHotState>(hotRaw, [
+      "active",
+      "until",
+      "severity",
+      "reasonHash"
+    ]);
 
-    const dispute = await call<RawDisputeState>(
+    const disputeRaw = await call<unknown>(
       ctx,
       ctx.addresses.stewardRegistry,
       ctx.abis.StewardRegistry,
       "disputeState",
       [vaultBytes]
     );
+    const dispute = tupleToObject<RawDisputeState>(disputeRaw, [
+      "active",
+      "challengeUntil",
+      "proofRef"
+    ]);
 
     return mapVault(data, pools, hot, dispute);
   } catch (error) {
@@ -340,8 +365,14 @@ const readVault = async (ctx: ReaderContext, vaultId: VaultId): Promise<OptionsV
 
 const readVaultPools = async (ctx: ReaderContext, vaultId: VaultId): Promise<RawVaultPools> => {
   const vaultBytes = validateVaultIdForContracts(vaultId);
-  return call<RawVaultPools>(ctx, ctx.addresses.vault, ctx.abis.Vault, "getVaultPools", [
+  const poolsRaw = await call<unknown>(ctx, ctx.addresses.vault, ctx.abis.Vault, "getVaultPools", [
     vaultBytes
+  ]);
+  return tupleToObject<RawVaultPools>(poolsRaw, [
+    "yesTotal",
+    "noTotal",
+    "yesShareTotal",
+    "noShareTotal"
   ]);
 };
 
@@ -361,9 +392,15 @@ const readBoard = async (
   const vaultBytes = validateVaultIdForContracts(vaultId);
 
   try {
-    const board = await call<RawBoard>(ctx, ctx.addresses.vault, ctx.abis.Vault, "getBoard", [
+    const boardRaw = await call<unknown>(ctx, ctx.addresses.vault, ctx.abis.Vault, "getBoard", [
       vaultBytes,
       sideToSolidityValue(side)
+    ]);
+    const board = tupleToObject<RawBoard>(boardRaw, [
+      "pool",
+      "sideRate",
+      "g",
+      "lastAdvance"
     ]);
 
     return mapBoard(board);
@@ -581,23 +618,31 @@ const readNft = async (
     const winningSideByVault = new Map<string, OptionsVaultSide | undefined>();
 
     for (let index = 0; index < count; index += 1) {
-      const lane = await call<RawLane>(
+      const laneRaw = await call<unknown>(
         ctx,
         ctx.addresses.marketDriver,
         ctx.abis.MarketDriver,
         "laneAt",
         [id, BigInt(index)]
       );
+      const lane = tupleToObject<RawLane>(laneRaw, ["vaultId", "side", "rate"]);
 
       const vaultBytes = lane.vaultId;
       const vaultId = asVaultId(bytes32ToHex(vaultBytes));
-      const position = await call<RawPosition>(
+      const positionRaw = await call<unknown>(
         ctx,
         ctx.addresses.vault,
         ctx.abis.Vault,
         "getPosition",
         [vaultBytes, lane.side, id]
       );
+      const position = tupleToObject<RawPosition>(positionRaw, [
+        "rate",
+        "gPaid",
+        "sharesAccrued",
+        "maxEnd",
+        "depleted"
+      ]);
 
       const mapped = mapLane(asTokenId(id), lane, position);
       let winningSide = winningSideByVault.get(vaultId);
@@ -619,13 +664,20 @@ const readNft = async (
     let nftAccount: { balance?: bigint; runwayEndMs?: number } | undefined;
     try {
       const usdc = await readUsdcAddress(ctx);
-      const streamsState = await call<RawStreamsState>(
+      const streamsStateRaw = await call<unknown>(
         ctx,
         ctx.addresses.dripsStreaming,
         ctx.abis.DripsStreaming,
         "streamsState",
         [id, usdc]
       );
+      const streamsState = tupleToObject<RawStreamsState>(streamsStateRaw, [
+        "streamsHash",
+        "streamsHistoryHash",
+        "updateTime",
+        "balance",
+        "maxEnd"
+      ]);
       nftAccount = mapStreamsStateFull(streamsState);
     } catch {
       // Non-fatal: balance/runway stay undefined if Drips is unavailable.
@@ -654,13 +706,20 @@ const readNftBalance = async (ctx: ReaderContext, tokenId: TokenId): Promise<big
 
   try {
     const usdc = await readUsdcAddress(ctx);
-    const state = await call<RawStreamsState>(
+    const stateRaw = await call<unknown>(
       ctx,
       ctx.addresses.dripsStreaming,
       ctx.abis.DripsStreaming,
       "streamsState",
       [id, usdc]
     );
+    const state = tupleToObject<RawStreamsState>(stateRaw, [
+      "streamsHash",
+      "streamsHistoryHash",
+      "updateTime",
+      "balance",
+      "maxEnd"
+    ]);
 
     return mapStreamsStateBalance(state);
   } catch (error) {

@@ -17,6 +17,9 @@
     "@livestreak/host": "file:../packages/host",
     "@livestreak/schema": "file:../packages/schema",
     "@livestreak/wallet": "file:../packages/wallet",
+    "better-sqlite3": "^11.8.1",
+    "kysely": "^0.27.5",
+    "node-cron": "^3.0.3",
     "@mysten-incubation/memwal": "^0.0.7",
     "@mysten/seal": "^1.2.1",
     "@mysten/sui": "^2.19.0",
@@ -31,7 +34,9 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.15.30",
+    "@types/node-cron": "^3.0.11",
     "@types/ws": "^8.5.12",
     "tsx": "^4.19.0",
     "typescript": "6.0.3",

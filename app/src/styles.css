@@ -1,4 +1,13 @@
 @import "tailwindcss";
+/* tw-animate-css powers the canonical atoms' enter/exit utilities
+   (animate-in / fade-* / zoom-* / slide-in-from-*). Required by the ported
+   shadcn/Radix atoms in #/components/atoms. */
+@import "tw-animate-css";
+
+/* Canonical atoms are authored against shadcn's `dark` variant. Our app is
+   dark-only, so .dark is applied globally on <html> (see __root.tsx) and these
+   token values are also mirrored onto :root below as a safety net. */
+@custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
   --font-mono: "JetBrains Mono", "Fira Code", monospace;
@@ -32,6 +41,88 @@
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* ─── shadcn token SYSTEM (from agentix) · VALUES are OURS (dark glass) ───
+     The token *names* + the @theme inline mapping below come from agentix's
+     globals.css; every value is overridden to LiveStreak's dark-glass palette
+     so the canonical atoms render in our look, not agentix's light/orange one. */
+  --background: var(--color-bg);              /* #07070f */
+  --foreground: var(--color-text);            /* rgba(255,255,255,.92) */
+  --card: var(--color-bg-card);               /* #0d0d1c */
+  --card-foreground: var(--color-text);
+  --popover: var(--color-bg-elevated);        /* #12122a — matches the old hand-rolled menu bg */
+  --popover-foreground: rgba(255, 255, 255, 0.7); /* old MenuItem default text */
+  --primary: var(--color-green);              /* #00ff87 */
+  --primary-foreground: #000;                 /* btn-primary text */
+  --secondary: rgba(255, 255, 255, 0.05);
+  --secondary-foreground: var(--color-text);
+  --muted: rgba(255, 255, 255, 0.04);
+  --muted-foreground: var(--color-text-muted); /* rgba(255,255,255,.45) */
+  --accent: rgba(255, 255, 255, 0.06);        /* old MenuItem hover bg */
+  --accent-foreground: #fff;
+  --destructive: var(--color-pink);           /* #ff2d78 — disconnect */
+  --destructive-foreground: #fff;
+  --border: var(--color-border-mid);          /* rgba(255,255,255,.1) */
+  --input: var(--color-border-mid);
+  --ring: rgba(0, 255, 135, 0.4);
+  --radius: 0.625rem;                         /* 10px — old menu radius */
+}
+
+/* dark-only app: keep .dark in sync with :root so the `dark:` variant utilities
+   in the canonical atoms resolve to the same dark-glass values. */
+.dark {
+  --background: var(--color-bg);
+  --foreground: var(--color-text);
+  --card: var(--color-bg-card);
+  --card-foreground: var(--color-text);
+  --popover: var(--color-bg-elevated);
+  --popover-foreground: rgba(255, 255, 255, 0.7);
+  --primary: var(--color-green);
+  --primary-foreground: #000;
+  --secondary: rgba(255, 255, 255, 0.05);
+  --secondary-foreground: var(--color-text);
+  --muted: rgba(255, 255, 255, 0.04);
+  --muted-foreground: var(--color-text-muted);
+  --accent: rgba(255, 255, 255, 0.06);
+  --accent-foreground: #fff;
+  --destructive: var(--color-pink);
+  --destructive-foreground: #fff;
+  --border: var(--color-border-mid);
+  --input: var(--color-border-mid);
+  --ring: rgba(0, 255, 135, 0.4);
+  --radius: 0.625rem;
+}
+
+/* Maps the runtime tokens above onto Tailwind v4 color/radius utilities so the
+   atoms' `bg-popover`, `text-popover-foreground`, `bg-accent`, `border`,
+   `bg-primary`, `text-destructive`, `rounded-md`, … all resolve. (System from
+   agentix's `@theme inline`; trimmed to what our ported atoms actually use.) */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-xs: calc(var(--radius) - 4px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -358,10 +449,19 @@ body {
   to   { opacity: 0; transform: translate(-50%, -50%) scale(0.98); filter: blur(2px); }
 }
 
+/* The connect modal now uses the canonical Dialog atom, whose overlay carries
+   data-slot="dialog-overlay" (default bg-black/50). Re-dim it to our previous
+   look (darker + blur). */
+[data-slot="dialog-overlay"] {
+  background: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(4px);
+}
 .wallet-dialog-overlay[data-state="open"]   { animation: fadeIn 0.15s ease-out; }
 .wallet-dialog-overlay[data-state="closed"] { animation: fadeOut 0.12s ease-in; }
-.wallet-dialog-content[data-state="open"]   { animation: dialogIn 0.2s cubic-bezier(0.23, 1, 0.32, 1); }
-.wallet-dialog-content[data-state="closed"] { animation: dialogOut 0.15s cubic-bezier(0.23, 1, 0.32, 1); }
+/* !important so our scale+blur entry wins over the atom's baked-in
+   tw-animate-css `animate-in zoom-in-95` on the same element. */
+.wallet-dialog-content[data-state="open"]   { animation: dialogIn 0.2s cubic-bezier(0.23, 1, 0.32, 1) !important; }
+.wallet-dialog-content[data-state="closed"] { animation: dialogOut 0.15s cubic-bezier(0.23, 1, 0.32, 1) !important; }
 
 /* Ambient gradient mesh */
 @keyframes meshDrift {

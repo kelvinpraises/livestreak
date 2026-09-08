@@ -2,9 +2,12 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  asMarketId,
   createOptionsChain,
   createOptionsSuiConfig,
+  readMarketSnapshot,
   type OptionsContractAddresses,
+  type OptionsMarketSnapshot,
   type OptionsReader
 } from "@livestreak/options";
 import type { WalletInit } from "@livestreak/schema";
@@ -153,6 +156,16 @@ export const createEnvReaderProvider = (): CatalogReaderProvider => {
     }
   };
 };
+
+// Enumerate a market's full on-chain graph for the indexer: the market shell PLUS every
+// vault (via `reader.listMarketVaults` -> per-vault snapshot) PLUS the stream pointer.
+// `readMarketSnapshot` already does this fan-out, so the indexer reads one market's whole
+// projection in a single call; this thin export names the seam the cron depends on.
+export const readMarketGraph = async (
+  reader: OptionsReader,
+  marketId: string
+): Promise<OptionsMarketSnapshot> =>
+  readMarketSnapshot(reader, asMarketId(marketId));
 
 // Parse LIVESTREAK_CATALOG_MARKETS="evm:0x..,sui:0x.." into seed refs.
 export const parseSeedMarkets = (

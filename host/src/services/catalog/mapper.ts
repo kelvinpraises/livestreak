@@ -157,3 +157,187 @@ export const mapMarket = (
     totalVolume
   };
 };
+
+
+// =====================================================================================
+// DB read-model mapping — snapshot -> rows (indexer) and rows -> @livestreak/host shapes
+// (page endpoints). The chain is source of truth; rows are a projection, so every
+// conversion is pure + nowMs-injected for deterministic tests.
+// =====================================================================================
+
+import type {
+  Market,
+  NewMarket,
+  NewResolution,
+  NewVault,
+  Resolution,
+  Vault
+} from "../../infrastructure/database/models.js";
+
+const poolUsdc = (text: string): number => {
+  try {
+    return Number(BigInt(text)) / USDC_SCALE;
+  } catch {
+    return 0;
+  }
+};
+
+// Pool-based implied multiplier (USDC floats or base-unit numbers — ratio is unit-free).
+const multiplierFromPools = (yes: number, no: number): number => {
+  const total = yes + no;
+  if (total <= 0) return 2;
+  const yesMult = yes > 0 ? total / yes : 1;
+  const noMult = no > 0 ? total / no : 1;
+  return Math.round(Math.max(yesMult, noMult) * 100) / 100;
+};
+
+export interface MarketRows {
+  readonly market: NewMarket;
+  readonly vaults: readonly NewVault[];
+  readonly resolutions: readonly NewResolution[];
+}
+
+// Project an on-chain market snapshot into the DB rows the indexer upserts.
+export const snapshotToRows = (
+  chain: CatalogChain,
+  snap: OptionsMarketSnapshot,
+  nowMs: number,
+  baseUrl: string
+): MarketRows => {
+  const marketId = String(snap.market.marketId);
+  const title = snap.market.title;
+  const category = snap.market.category ?? "Live";
+  const isLive = snap.streamState?.status === "live";
+  const fromMs =
+    snap.streamState?.updatedAtMs ?? snap.market.timing?.createdAtMs ?? nowMs;
+  const watchUrl = watchUrlFor(snap, baseUrl);
+
+  let totalPooled = 0;
+  let activeVaults = 0;
+  const vaults: NewVault[] = [];
+  const resolutions: NewResolution[] = [];
+
+  for (const vault of snap.vaults) {
+    const yesPool = vault.pools.yes;
+    const noPool = vault.pools.no;
+    totalPooled += usdc(yesPool + noPool);
+    const resolved =
+      vault.status === "resolved" && (vault.outcome === "yes" || vault.outcome === "no");
+    if (vault.status === "open" || vault.status === "hot") activeVaults += 1;
+    const resolvedAtMs = vault.timing.resolvedAtMs ?? null;
+
+    vaults.push({
+      id: String(vault.vaultId),
+      market_id: marketId,
+      chain,
+      question: vault.question,
+      side: null,
+      status: vault.status,
+      resolved_outcome: resolved ? vault.outcome : null,
+      yes_pool: yesPool.toString(),
+      no_pool: noPool.toString(),
+      expires_at_ms: vault.timing.expiresAtMs,
+      resolved_at_ms: resolvedAtMs,
+      updated_at: nowMs
+    });
+
+    if (resolved) {
+      resolutions.push({
+        vault_id: String(vault.vaultId),
+        market_id: marketId,
+        chain,
+        outcome: vault.outcome as string,
+        yes_total: yesPool.toString(),
+        no_total: noPool.toString(),
+        resolved_at: vault.timing.resolvedAtMs ?? vault.timing.expiresAtMs
+      });
+    }
+  }
+
+  const market: NewMarket = {
+    id: marketId,
+    chain,
+    route_id: marketId,
+    title,
+    category,
+    stream_id: snap.streamState?.id ?? "",
+    status: snap.streamState?.status ?? "none",
+    is_live: isLive ? 1 : 0,
+    watch_url: watchUrl ?? null,
+    active_vaults: activeVaults,
+    total_pooled: Math.round(totalPooled * 100) / 100,
+    from_ms: fromMs,
+    updated_at: nowMs
+  };
+
+  return { market, vaults, resolutions };
+};
+
+// --- rows -> @livestreak/host contract shapes ---
+
+export const marketRowToSummary = (m: Market, nowMs: number): HostStreamSummary => ({
+  routeId: m.route_id,
+  marketId: m.id,
+  title: m.title,
+  category: m.category,
+  isLive: m.is_live === 1,
+  elapsed: formatElapsed(m.from_ms, nowMs),
+  activeVaults: m.active_vaults,
+  totalPooled: m.total_pooled,
+  chain: m.chain
+});
+
+export const marketRowToDetail = (m: Market): HostStreamDetail => ({
+  routeId: m.route_id,
+  marketId: m.id,
+  title: m.title,
+  category: m.category,
+  isLive: m.is_live === 1,
+  activeVaults: m.active_vaults,
+  totalPooled: m.total_pooled,
+  chain: m.chain,
+  ...(m.watch_url === null ? {} : { watchUrl: m.watch_url })
+});
+
+// A live (open|hot) vault row + its market title -> the homepage live rail item.
+export const vaultRowToLiveRaw = (
+  v: Vault,
+  streamTitle: string,
+  nowMs: number
+): HomepageLiveVaultRaw => {
+  const yes = poolUsdc(v.yes_pool);
+  const no = poolUsdc(v.no_pool);
+  return {
+    id: v.id,
+    streamId: v.market_id,
+    streamTitle,
+    option: v.question,
+    multiplier: multiplierFromPools(yes, no),
+    totalPool: Math.round((yes + no) * 100) / 100,
+    status: v.status === "hot" ? "hot" : "open",
+    expiresIn: Math.max(0, Math.floor((v.expires_at_ms - nowMs) / 1000)),
+    chain: v.chain
+  };
+};
+
+// A resolution row (+ vault question / market title) -> the homepage lifetime rail item.
+export const resolutionRowToLifetime = (
+  r: Resolution,
+  question: string,
+  streamTitle: string,
+  nowMs: number
+): HomepageLifetimeVaultRaw => {
+  const yes = poolUsdc(r.yes_total);
+  const no = poolUsdc(r.no_total);
+  return {
+    id: r.vault_id,
+    option: question,
+    streamTitle,
+    outcome: r.outcome === "no" ? "no" : "yes",
+    totalPool: Math.round((yes + no) * 100) / 100,
+    resolvedAgoMs: Math.max(0, nowMs - r.resolved_at),
+    yesTotal: yes,
+    noTotal: no,
+    chain: r.chain
+  };
+};

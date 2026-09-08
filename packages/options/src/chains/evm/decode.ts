@@ -97,6 +97,24 @@ const STORAGE_SCHEMES = [
   "arweave"
 ] as const satisfies readonly PointerScheme[];
 
+// viem's `readContract` returns the value DIRECTLY for a single output (a named object for a single
+// `tuple` with components), but a POSITIONAL ARRAY for functions with MULTIPLE top-level outputs —
+// names are dropped. Solidity getters like getVaultPools/streamState/getBoard/laneAt/getPosition/
+// streamsState/vaultHotState/disputeState all have multiple outputs, so the raw result arrives as
+// `[v0, v1, ...]` and reading `.yesTotal` / `.vaultId` yields `undefined` (→ NaN/`bytes32ToHex`
+// crash, which previously took down the entire user-snapshot read). Normalize array→named-object so
+// the existing Raw* decoders work; pass objects through untouched (future-proof if viem changes).
+export const tupleToObject = <T>(raw: unknown, keys: readonly string[]): T => {
+  if (Array.isArray(raw)) {
+    const out: Record<string, unknown> = {};
+    keys.forEach((key, index) => {
+      out[key] = raw[index];
+    });
+    return out as T;
+  }
+  return raw as T;
+};
+
 export const bytes32ToHex = (value: `0x${string}` | string): string => {
   const normalized = value.toLowerCase();
   return normalized.startsWith("0x") ? normalized : `0x${normalized}`;

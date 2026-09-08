@@ -1,3 +1,9 @@
 aa.chains.json
 aa.chains.*.json
 !aa.chains.example.json
+
+
+# Discovery read-model sqlite projection (materialized from chain; never committed)
+*.db
+*.db-shm
+*.db-wal

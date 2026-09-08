@@ -10,6 +10,7 @@ import {
 } from "./api/middleware/errorHandler.js";
 import { createAaRouter } from "./api/routes/aa.js";
 import { createCatalogRouter } from "./api/routes/catalog.js";
+import { createPagesRouter } from "./api/routes/pages.js";
 import { createWebrtcRouter } from "./api/routes/webrtc.js";
 import { createContentRouter } from "./api/routes/content.js";
 import { createDescriptorRouter } from "./api/routes/descriptor.js";
@@ -59,6 +60,9 @@ export const createApp = (deps: HostRouteDeps): Express => {
   // SEAM-CATALOG + SEAM-WEBRTC are always-on (no module token): the UI's live source and
   // the local file->WebRTC signaling relay must work on the plain dev stack.
   app.use(createCatalogRouter(deps));
+  // Page-shaped discovery endpoints (/homepage, /agents, /stream/:id) served from the DB
+  // read-model — always-on, one fetch per page.
+  app.use(createPagesRouter(deps));
   app.use(createWebrtcRouter(deps));
 
   // Part C: per-IP rate limit on the money / auth surfaces (paymaster, bundler,

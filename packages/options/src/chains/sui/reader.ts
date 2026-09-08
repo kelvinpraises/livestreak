@@ -877,38 +877,63 @@ const readLvstAccount = async (
   ctx: ReaderContext,
   user: UserAddress
 ): Promise<LvstAccount> => {
+  // The user address MUST be normalized to a full 32-byte Sui address before it hits `pure.address`
+  // or `getBalance` — a short/unpadded id is the classic "can't resolve the user/LVST objects against
+  // the localnet deployment" failure. normalizeSuiAddress is idempotent for already-valid ids.
+  const account = normalizeSuiUserAddress(user);
+
+  // LVST wallet balance is the PRIMARY field the board needs to resolve. getBalance returns
+  // {totalBalance:"0"} when the user holds no LVST coins, so a 0 here is a real 0 — not an error.
+  let balance = 0n;
   try {
-    // LVST balance via getBalance on the LVST coin type.
     const lvstCoinType = `${ctx.packageId}::lvst::LVST`;
-    const balanceRes = await ctx.client.getBalance({ owner: user, coinType: lvstCoinType });
-    const balance = BigInt(balanceRes.totalBalance);
-
-    // Staked LVST.
-    const stakedTx = new Transaction();
-    stakedTx.moveCall({
-      target: target(ctx.packageId, MODULES.treasury, "lvst_staked"),
-      typeArguments: [ctx.coinType],
-      arguments: [stakedTx.object(ctx.ids.treasuryRegistry), stakedTx.pure.address(user)]
-    });
-    const stakedResults = await inspect(ctx, stakedTx);
-    const stakedVal = stakedResults[0]?.[0];
-    const staked = stakedVal !== undefined ? readU128(stakedVal) : 0n;
-
-    // Pending dividends.
-    const divTx = new Transaction();
-    divTx.moveCall({
-      target: target(ctx.packageId, MODULES.treasury, "pending_dividends"),
-      typeArguments: [ctx.coinType],
-      arguments: [divTx.object(ctx.ids.treasuryRegistry), divTx.pure.address(user)]
-    });
-    const divResults = await inspect(ctx, divTx);
-    const divVal = divResults[0]?.[0];
-    const pendingDividends = divVal !== undefined ? readU128(divVal) : 0n;
-
-    return mapSuiLvstAccount(user, balance, staked, pendingDividends);
+    const balanceRes = await ctx.client.getBalance({ owner: account, coinType: lvstCoinType });
+    balance = BigInt(balanceRes.totalBalance);
   } catch (error) {
     if (error instanceof LiveStreakConfigError) throw error;
     throw suiReadFailed("LVST account", error);
+  }
+
+  // Staked + pending-dividends are treasury devInspect reads. RESILIENCE: a treasury read that
+  // reverts (e.g. the user has never interacted with the treasury, so no per-user entry exists yet)
+  // must NOT block Sui connect/board — default to 0 and keep the resolved wallet balance. Without
+  // this, the FIRST read in readUserOptionsSnapshot threw and the entire Sui connect failed
+  // ("Failed to read LVST account").
+  const staked = await readTreasuryU128(ctx, account, "lvst_staked");
+  const pendingDividends = await readTreasuryU128(ctx, account, "pending_dividends");
+
+  return mapSuiLvstAccount(user, balance, staked, pendingDividends);
+};
+
+// Normalize a user address to Sui's canonical 0x + 64-hex form. Sui Move calls and getBalance reject
+// short/unpadded ids; left-pad the hex body to 32 bytes so a derived address always resolves.
+const normalizeSuiUserAddress = (user: UserAddress): string => {
+  const hex = (user.startsWith("0x") ? user.slice(2) : user).toLowerCase();
+  if (hex.length === 0 || hex.length > 64 || /[^0-9a-f]/.test(hex)) {
+    return user;
+  }
+  return `0x${hex.padStart(64, "0")}`;
+};
+
+// Read a single-u128 treasury accessor by name; treat a per-user revert as a non-fatal 0 so one
+// missing treasury entry can't fail the whole Sui user snapshot (board resolve).
+const readTreasuryU128 = async (
+  ctx: ReaderContext,
+  account: string,
+  fn: "lvst_staked" | "pending_dividends"
+): Promise<bigint> => {
+  try {
+    const tx = new Transaction();
+    tx.moveCall({
+      target: target(ctx.packageId, MODULES.treasury, fn),
+      typeArguments: [ctx.coinType],
+      arguments: [tx.object(ctx.ids.treasuryRegistry), tx.pure.address(account)]
+    });
+    const results = await inspect(ctx, tx);
+    const val = results[0]?.[0];
+    return val !== undefined ? readU128(val) : 0n;
+  } catch {
+    return 0n;
   }
 };
 

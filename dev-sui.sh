@@ -32,6 +32,31 @@ slog()  { echo -e "${G}→${N} $1"; }
 swarn() { echo -e "${Y}!${N} $1"; }
 serr()  { echo -e "${R}✗${N} $1"; }
 
+# ── Ensure node/npm are on PATH (S8) ──
+# When this script runs from a non-login shell (cron, a parent harness, CI) nvm is not sourced, so
+# `npm` is "command not found" — and that previously killed `deploy:sui` AFTER --force-regenesis had
+# already wiped chain state, leaving a running-but-contractless localnet. Source nvm (or accept an
+# already-resolvable npm) here, and HARD-FAIL before we touch chain state if npm still isn't found.
+sui_ensure_node() {
+  if command -v npm >/dev/null 2>&1; then
+    return 0
+  fi
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [ -s "$NVM_DIR/nvm.sh" ]; then
+    slog "npm not on PATH — sourcing nvm from $NVM_DIR"
+    # shellcheck disable=SC1090
+    \. "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true
+    nvm use --lts >/dev/null 2>&1 || nvm use default >/dev/null 2>&1 || true
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    serr "npm not found (and nvm could not provide it). Aborting BEFORE touching chain state so we"
+    serr "never leave a running localnet with a stale/contractless deployment snapshot."
+    serr "Fix: install Node/npm or set NVM_DIR so \`source \$NVM_DIR/nvm.sh\` resolves npm."
+    return 1
+  fi
+  slog "npm resolved → $(command -v npm)"
+}
+
 # ── Kill stale Sui processes + free ports ──
 sui_kill_stale() {
   slog "Killing stale Sui processes..."
@@ -129,6 +154,9 @@ sui_leg_env() {
 
 # ── Bring the whole Sui leg up (used by dev.sh and standalone) ──
 sui_leg_up() {
+  # Resolve node/npm BEFORE we boot/regenesis, so a missing toolchain fails fast (S8) rather than
+  # after --force-regenesis has wiped state.
+  sui_ensure_node || return 1
   sui_kill_stale
   sui_ensure_env
   sui_start || return 1

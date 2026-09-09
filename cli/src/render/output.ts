@@ -43,8 +43,16 @@ export const formatStreamState = (state: OnChainStreamState): string =>
 export const renderProduceResult = (input: ProduceRenderInput): string => {
   const lines = [
     input.idempotent === true
-      ? "livestreak produce — already produced (idempotent no-op)"
+      ? "livestreak produce — market already exists for this operator (idempotent no-op)"
       : "livestreak produce — complete",
+    ...(input.idempotent === true
+      ? [
+          "",
+          "note: produce is idempotent per operator — one operator identity owns exactly one",
+          "      market (the marketId is deterministic). To add a fresh bettable surface, create",
+          "      a vault on this market instead: livestreak vault create --market <marketId> ..."
+        ]
+      : []),
     "",
     `title:      ${input.title}`,
     `marketId:   ${formatMarketId(input.marketId)}`,

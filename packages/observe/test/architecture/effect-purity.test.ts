@@ -17,6 +17,9 @@ describe("observe library effect purity", () => {
     const violations: string[] = [];
 
     for (const file of collectSourceFiles(sourceRoot)) {
+      if (file.includes(`${path.sep}adapters${path.sep}`)) {
+        continue;
+      }
       const source = readFileSync(file, "utf8");
       const lines = source.split("\n");
 

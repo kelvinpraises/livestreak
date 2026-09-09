@@ -21,7 +21,10 @@ export interface FileWebRtcSignaling {
 }
 
 const HOST_SIGNAL_PATH = "/webrtc/signal";
-const HOST_METADATA_PATH = "/content/metadata";
+// The host serves VOD/stream metadata at POST /content/vod (see host content routes +
+// services/walrus/content/vod.ts). It expects { title, category, feed: { kind, pointer } } and
+// returns 201 with a StorePointer. (The earlier /content/metadata path was never served — S4.)
+const HOST_METADATA_PATH = "/content/vod";
 
 export const createHostSignaling = (
   hostBaseUrl: string,
@@ -78,10 +81,12 @@ export const triggerStreamMetadata = async (
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      marketId: input.marketId,
       title: input.title,
       category: input.category,
-      feed: { kind: "webrtc", marketId: input.marketId }
+      // The host's VOD schema describes the feed as { kind, pointer }; the webrtc stream key is
+      // the marketId. (marketId kept at top-level too as a harmless hint for any indexer.)
+      marketId: input.marketId,
+      feed: { kind: "webrtc", pointer: input.marketId }
     })
   });
   if (!res.ok) {

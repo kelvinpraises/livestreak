@@ -7,7 +7,8 @@ import type {
   OptionsUserOptionsSnapshot,
   OptionsVaultSnapshot
 } from "../../model/index.js";
-import { totalVaultPool, priceOf } from "../../model/index.js";
+import { totalVaultPool, priceOf, projectVaultLivePools } from "../../model/index.js";
+import type { FunderBoundary } from "../../model/math/live-pool.js";
 import type { OptionsVaultSide } from "../../model/vault.js";
 import type {
   OptionsControlsView,
@@ -24,7 +25,7 @@ import type {
 export const projectOptionsPanel = (snapshot: OptionsUserOptionsSnapshot): OptionsPanel => ({
   account: snapshot.account,
   markets: snapshot.markets.map((marketSnapshot) =>
-    projectMarketPanel(marketSnapshot, snapshot.vaults)
+    projectMarketPanel(marketSnapshot, snapshot.vaults, snapshot.nfts)
   ),
   nfts: snapshot.nfts.map((entry) => projectNftPanel(entry)),
   lvst: projectLvstPanel(snapshot.lvstAccount),
@@ -378,17 +379,53 @@ const lanesForVault = (panel: OptionsPanel, vaultId: string): readonly OptionsLa
 const isActiveLane = (lane: OptionsLanePanel): boolean =>
   BigInt(lane.rate) > 0n && lane.depleted === false;
 
+const collectFunderBoundaries = (
+  vaultId: string,
+  nftSnapshots: readonly OptionsNftSnapshot[]
+): { readonly yes: readonly FunderBoundary[]; readonly no: readonly FunderBoundary[] } => {
+  const yes: FunderBoundary[] = [];
+  const no: FunderBoundary[] = [];
+
+  for (const entry of nftSnapshots) {
+    for (const lane of entry.nft.lanes) {
+      if (
+        lane.vaultId !== vaultId ||
+        lane.depleted ||
+        lane.rate === 0n ||
+        lane.maxEndMs === undefined
+      ) {
+        continue;
+      }
+
+      const boundary: FunderBoundary = { maxEndMs: lane.maxEndMs, rate: lane.rate };
+      if (lane.side === "yes") {
+        yes.push(boundary);
+      } else {
+        no.push(boundary);
+      }
+    }
+  }
+
+  return { yes, no };
+};
+
 const projectMarketPanel = (
   marketSnapshot: OptionsMarketSnapshot,
-  vaultSnapshots: readonly OptionsVaultSnapshot[]
+  vaultSnapshots: readonly OptionsVaultSnapshot[],
+  nftSnapshots: readonly OptionsNftSnapshot[]
 ): OptionsMarketPanel => {
   const vaultPanels = marketSnapshot.vaults.map((vault) => {
     const enriched = vaultSnapshots.find((entry) => entry.vault.vaultId === vault.vaultId);
-    return projectVaultPanel(vault, enriched);
+    const funderBoundaries = collectFunderBoundaries(vault.vaultId, nftSnapshots);
+    return projectVaultPanel(vault, enriched, funderBoundaries);
   });
 
   const totalPooled = marketSnapshot.vaults.reduce(
     (sum, vault) => sum + totalVaultPool(vault.pools),
+    0n
+  );
+  const livePooled = vaultPanels.reduce(
+    (sum, vault) => sum + BigInt(vault.pools.livePoolUSDC),
     0n
   );
 
@@ -414,6 +451,7 @@ const projectMarketPanel = (
     totals: {
       pooledUSDC: totalPooled.toString(),
       totalPooledUSDC: totalPooled.toString(),
+      livePooledUSDC: livePooled.toString(),
       activeVaults,
       resolvedVaults
     },
@@ -441,11 +479,22 @@ const projectMarketPanel = (
 
 const projectVaultPanel = (
   vault: OptionsMarketSnapshot["vaults"][number],
-  snapshot?: OptionsVaultSnapshot
+  snapshot?: OptionsVaultSnapshot,
+  funderBoundaries?: { readonly yes: readonly FunderBoundary[]; readonly no: readonly FunderBoundary[] }
 ): OptionsVaultPanel => {
   const pools = snapshot?.pools ?? vault.pools;
-  const total = totalVaultPool(pools);
-  const odds = computeOdds(pools.yes, pools.no, total);
+  const settledTotal = totalVaultPool(pools);
+  const livePools =
+    snapshot?.boards === undefined
+      ? pools
+      : projectVaultLivePools({
+          boards: snapshot.boards,
+          pendingBoundaries: snapshot.pendingBoundaries,
+          funderBoundaries,
+          resolvedAtMs: vault.timing.resolvedAtMs
+        });
+  const liveTotal = totalVaultPool(livePools);
+  const odds = computeOdds(pools.yes, pools.no, settledTotal);
 
   return {
     vaultId: vault.vaultId,
@@ -458,7 +507,9 @@ const projectVaultPanel = (
     pools: {
       yesUSDC: pools.yes.toString(),
       noUSDC: pools.no.toString(),
-      totalUSDC: total.toString(),
+      totalUSDC: settledTotal.toString(),
+      settledPoolUSDC: settledTotal.toString(),
+      livePoolUSDC: liveTotal.toString(),
       sharePriceYes: priceOf(pools.yes).toString(),
       sharePriceNo: priceOf(pools.no).toString()
     },

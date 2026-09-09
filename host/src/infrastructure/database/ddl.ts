@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS vaults (
   resolved_outcome TEXT,
   yes_pool         TEXT NOT NULL DEFAULT '0',
   no_pool          TEXT NOT NULL DEFAULT '0',
+  live_yes_pool    TEXT NOT NULL DEFAULT '0',
+  live_no_pool     TEXT NOT NULL DEFAULT '0',
   expires_at_ms    INTEGER NOT NULL DEFAULT 0,
   resolved_at_ms   INTEGER,
   updated_at       INTEGER NOT NULL DEFAULT 0

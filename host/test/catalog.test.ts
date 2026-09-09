@@ -59,13 +59,26 @@ const snapshot = (marketId: string): OptionsMarketSnapshot =>
     ]
   }) as unknown as OptionsMarketSnapshot;
 
-// Minimal reader: readMarketSnapshot only touches readMarket/listMarketVaults/readVault/readStreamState.
+// Minimal reader: readMarketGraph touches readVaultSnapshot board reads.
 const fakeReader = (snap: OptionsMarketSnapshot): OptionsReader =>
   ({
     readMarket: async () => snap.market,
     listMarketVaults: async () => snap.market.vaultIds,
     readVault: async (id: string) => snap.vaults.find((v) => String(v.vaultId) === String(id))!,
-    readStreamState: async () => snap.streamState!
+    readStreamState: async () => snap.streamState!,
+    readVaultShareTotals: async () => ({ yes: 0n, no: 0n }),
+    readBoard: async (id, side) => {
+      const vault = snap.vaults.find((v) => String(v.vaultId) === String(id));
+      const yes = vault?.pools.yes ?? 0n;
+      const no = vault?.pools.no ?? 0n;
+      return {
+        pool: side === "yes" ? yes : no,
+        sideRate: 0n,
+        g: 0n,
+        lastAdvanceMs: NOW
+      };
+    },
+    readPendingBoundaries: async () => 0n
   }) as unknown as OptionsReader;
 
 describe("catalog mapper", () => {

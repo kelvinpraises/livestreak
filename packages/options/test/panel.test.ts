@@ -26,6 +26,41 @@ describe("projectOptionsPanel", () => {
     expect(panel.markets[0]?.totals.pooledUSDC).toBe("279000000");
   });
 
+  it("exposes live pool above settled when board sideRate is accruing", async () => {
+    const user = fixtureUser();
+    const nowMs = Date.now();
+    const transport = createFakeOptionsReader({
+      ...fixtureSeed(user),
+      vaults: [
+        {
+          ...fixtureSeed(user).vaults![0]!,
+          pools: { yes: 0n, no: 0n }
+        }
+      ],
+      boards: {
+        "vault_01:yes": {
+          pool: 0n,
+          sideRate: 1_000_000n,
+          g: 0n,
+          lastAdvanceMs: nowMs - 30_000
+        },
+        "vault_01:no": {
+          pool: 0n,
+          sideRate: 0n,
+          g: 0n,
+          lastAdvanceMs: nowMs - 30_000
+        }
+      }
+    });
+    const snapshot = await readUserOptionsSnapshot(transport, user, asMarketId("market_01"));
+    const panel = projectOptionsPanel(snapshot);
+    const vault = panel.markets[0]?.vaults[0];
+
+    expect(vault?.pools.settledPoolUSDC).toBe("0");
+    expect(BigInt(vault?.pools.livePoolUSDC ?? "0")).toBeGreaterThan(0n);
+    expect(BigInt(panel.markets[0]?.totals.livePooledUSDC ?? "0")).toBeGreaterThan(0n);
+  });
+
   it("projects NFT lane rates and accrued shares", async () => {
     const user = fixtureUser();
     const transport = createFakeOptionsReader(fixtureSeed(user));

@@ -41,7 +41,7 @@ export function ConnectButton() {
     connect,
     disconnect,
   } = useWalletContext()
-  const { chain } = useOptionsContext()
+  const { chain, derivationStep } = useOptionsContext()
 
   const [modalOpen, setModalOpen] = useState(false)
   // Test-only: pre-fill from `VITE_OPTIONS_SEED` so the deterministic E2E wallet derives without
@@ -215,12 +215,19 @@ export function ConnectButton() {
                 <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}>
                   <SpinnerGap size={14} />
                 </motion.div>
-                Deriving...
+                <span data-testid="connect-progress">{derivationStep ?? 'Deriving…'}</span>
               </>
             ) : (
               'Continue'
             )}
           </button>
+          {isLoading && derivationStep && (
+            <p data-testid="connect-progress-detail" style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', textAlign: 'center', marginTop: 12, lineHeight: 1.5 }}>
+              {derivationStep}
+              <br />
+              <span style={{ color: 'rgba(255,255,255,0.25)' }}>First connect derives your smart-account address — later reconnects are instant.</span>
+            </p>
+          )}
 
           <p style={{
             fontSize: 11, color: 'rgba(255,255,255,0.2)',

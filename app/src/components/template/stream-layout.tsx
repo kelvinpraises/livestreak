@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Link } from '@tanstack/react-router'
 import { AnimatePresence } from 'framer-motion'
 import { StreamBar } from '#/components/molecules/stream-bar.tsx'
@@ -81,6 +81,27 @@ export function StreamLayout({ streamTitle, category, totalPooled, streamId }: S
     setSelectedVaultId(null)
   }, [vaults, push, optionsEnabled, optionsConnected, fundStream])
 
+  // S3/A2 — a thin, programmatic commit seam so accessibility tooling and headless E2E can fund a
+  // vault WITHOUT synthesizing a sub-pixel OS mouse drag on the slider. Takes a total USDC amount
+  // (what a human reads) and converts it to the stream rate the funding flow expects. Goes through
+  // the exact same `handleStream` path as the slider/buttons (mint-if-needed → fund → notify).
+  useEffect(() => {
+    const seam = (
+      vaultId: string,
+      side: 'yes' | 'no',
+      amountUsdc: number,
+      durationMinutes = DEFAULT_FUND_DURATION_MIN,
+    ) => {
+      const minutes = durationMinutes > 0 ? durationMinutes : DEFAULT_FUND_DURATION_MIN
+      const rate = amountUsdc / minutes
+      return handleStream(vaultId, side, rate, minutes)
+    }
+    ;(window as unknown as { livestreakFund?: typeof seam }).livestreakFund = seam
+    return () => {
+      delete (window as unknown as { livestreakFund?: typeof seam }).livestreakFund
+    }
+  }, [handleStream])
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100vh',
@@ -144,7 +165,7 @@ export function StreamLayout({ streamTitle, category, totalPooled, streamId }: S
 
         {/* RIGHT — Predictions (40%) */}
         <div className="stream-predictions-pane" style={{ flex: '2 1 40%', minWidth: 0, display: 'flex', flexDirection: 'column', background: 'rgba(7,7,15,0.98)', overflow: 'hidden' }}>
-          <VaultList vaults={vaults} events={events} positions={positions} selectedVaultId={selectedVaultId} onDismissVault={() => setSelectedVaultId(null)} onStream={handleStream} />
+          <VaultList vaults={vaults} events={events} positions={positions} selectedVaultId={selectedVaultId} streamId={streamId} onDismissVault={() => setSelectedVaultId(null)} onStream={handleStream} />
         </div>
       </div>
 

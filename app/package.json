@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@livestreak/contracts": "file:../packages/contracts",
+    "@livestreak/host": "file:../packages/host",
     "@livestreak/options": "file:../packages/options",
     "@livestreak/schema": "file:../packages/schema",
     "@phosphor-icons/react": "^2.1.10",

@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Robot, Eye, Shield, Crosshair, CaretDown, Pulse, TrendUp, Medal } from '@phosphor-icons/react'
-import { useParsedFixture } from '#/hooks/use-fixture-mode'
+import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
 import type { Agent, AgentRole } from '#/types/demo'
+import { env } from '#/utils/env'
+import { fetchAgentRows } from '#/utils/host'
 import { formatUSDCFull } from '#/utils/format'
 
 export const Route = createFileRoute('/agents')({
@@ -19,8 +21,30 @@ const tabs: { key: FilterTab; label: string }[] = [
   { key: 'observer', label: 'Observers' },
 ]
 
+/**
+ * Agents directory.
+ *  - DEMO mode -> the fixture's agents.
+ *  - LIVE mode -> the HOST's `GET /agents` aggregate (NOT the single-market board). Honest
+ *                 empty state while loading / on error — no silent fixture fallback.
+ */
 function useAgents(): Agent[] {
-  return useParsedFixture().agents
+  const preferFixture = usePreferFixture()
+  const fixtureAgents = useParsedFixture().agents
+  const [live, setLive] = useState<Agent[]>([])
+
+  useEffect(() => {
+    if (preferFixture) return
+    let cancelled = false
+    setLive([])
+
+    void fetchAgentRows(env.hostBaseUrl)
+      .then(rows => { if (!cancelled) setLive(rows) })
+      .catch(() => { if (!cancelled) setLive([]) })
+
+    return () => { cancelled = true }
+  }, [preferFixture])
+
+  return preferFixture ? fixtureAgents : live
 }
 
 function AgentsPage() {

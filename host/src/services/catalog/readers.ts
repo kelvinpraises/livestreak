@@ -3,12 +3,15 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   asMarketId,
+  asVaultId,
   createOptionsChain,
   createOptionsSuiConfig,
   readMarketSnapshot,
+  readVaultSnapshot,
   type OptionsContractAddresses,
   type OptionsMarketSnapshot,
-  type OptionsReader
+  type OptionsReader,
+  type OptionsVaultSnapshot
 } from "@livestreak/options";
 import type { WalletInit } from "@livestreak/schema";
 import type { CatalogChain } from "./types.js";
@@ -157,15 +160,33 @@ export const createEnvReaderProvider = (): CatalogReaderProvider => {
   };
 };
 
-// Enumerate a market's full on-chain graph for the indexer: the market shell PLUS every
-// vault (via `reader.listMarketVaults` -> per-vault snapshot) PLUS the stream pointer.
-// `readMarketSnapshot` already does this fan-out, so the indexer reads one market's whole
-// projection in a single call; this thin export names the seam the cron depends on.
+// Market shell + per-vault board snapshots for live pool projection (agent-3 pass-4).
+export interface CatalogMarketGraph {
+  readonly snap: OptionsMarketSnapshot;
+  readonly vaultSnapshots: ReadonlyMap<string, OptionsVaultSnapshot>;
+}
+
+// Enumerate a market's full on-chain graph for the indexer: market shell, every vault's
+// settled state, AND per-vault board snapshots so `projectVaultLivePools` can derive
+// `livePoolUSDC` without duplicating accrual math in the host.
 export const readMarketGraph = async (
   reader: OptionsReader,
   marketId: string
-): Promise<OptionsMarketSnapshot> =>
-  readMarketSnapshot(reader, asMarketId(marketId));
+): Promise<CatalogMarketGraph> => {
+  const snap = await readMarketSnapshot(reader, asMarketId(marketId));
+  const vaultSnapshots = new Map<string, OptionsVaultSnapshot>();
+  await Promise.all(
+    snap.vaults.map(async (vault) => {
+      try {
+        const vs = await readVaultSnapshot(reader, asVaultId(vault.vaultId));
+        vaultSnapshots.set(String(vault.vaultId), vs);
+      } catch {
+        // Non-fatal: indexer falls back to settled pools for this vault.
+      }
+    })
+  );
+  return { snap, vaultSnapshots };
+};
 
 // Parse LIVESTREAK_CATALOG_MARKETS="evm:0x..,sui:0x.." into seed refs.
 export const parseSeedMarkets = (

@@ -53,6 +53,8 @@ export {
   projectShares,
   projectStreamAccrual,
   projectAccrualPreview,
+  projectLivePoolSide,
+  projectVaultLivePools,
   segMath,
   SHARE_SCALE,
   sharesPerUsdc,

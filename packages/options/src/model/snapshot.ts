@@ -5,6 +5,7 @@ import type { MarketId, UserAddress } from "./ids.js";
 import type { OptionsNft } from "./nft.js";
 import type { OptionsMarket } from "./market.js";
 import type { OptionsStreamState } from "./stream.js";
+import type { OptionsBoardState } from "./math/accrual.js";
 import type {
   OptionsVault,
   OptionsVaultPools,
@@ -29,6 +30,14 @@ export interface OptionsVaultSnapshot {
   readonly vault: OptionsVault;
   readonly pools: OptionsVaultPools;
   readonly shareTotals: OptionsVaultShareTotals;
+  readonly boards: {
+    readonly yes: OptionsBoardState;
+    readonly no: OptionsBoardState;
+  };
+  readonly pendingBoundaries: {
+    readonly yes: bigint;
+    readonly no: bigint;
+  };
   readonly hot: OptionsVaultStewardState;
   readonly dispute: Pick<OptionsVaultStewardState, "disputeId"> & { readonly active: boolean };
   readonly winningSide?: OptionsVaultSide;

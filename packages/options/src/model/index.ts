@@ -27,11 +27,14 @@ export {
   CURVE_K,
   priceOf,
   projectShares,
+  projectLivePoolSide,
+  projectVaultLivePools,
   segMath,
   SHARE_SCALE,
   sharesPerUsdc,
   WAD
 } from "./math/index.js";
+export type { FunderBoundary, ProjectLivePoolSideInput, ProjectVaultLivePoolsInput } from "./math/index.js";
 export type { LvstAccount } from "./lvst.js";
 export type { OptionsNft } from "./nft.js";
 export type {

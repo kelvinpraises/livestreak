@@ -67,16 +67,20 @@ export const readVaultSnapshot = async (
   vaultId: VaultId
 ): Promise<OptionsVaultSnapshot> => {
   const vault = await readOrThrow(() => reader.readVault(vaultId), "vault", vaultId);
-  const shareTotals = await readOrThrow(
-    () => reader.readVaultShareTotals(vaultId),
-    "vault share totals",
-    vaultId
-  );
+  const [shareTotals, boardYes, boardNo, pendingYes, pendingNo] = await Promise.all([
+    readOrThrow(() => reader.readVaultShareTotals(vaultId), "vault share totals", vaultId),
+    readOrThrow(() => reader.readBoard(vaultId, "yes"), "vault board yes", vaultId),
+    readOrThrow(() => reader.readBoard(vaultId, "no"), "vault board no", vaultId),
+    readOrThrow(() => reader.readPendingBoundaries(vaultId, "yes"), "pending boundaries yes", vaultId),
+    readOrThrow(() => reader.readPendingBoundaries(vaultId, "no"), "pending boundaries no", vaultId)
+  ]);
 
   return {
     vault,
     pools: vault.pools,
     shareTotals,
+    boards: { yes: boardYes, no: boardNo },
+    pendingBoundaries: { yes: pendingYes, no: pendingNo },
     hot: vault.steward,
     dispute: {
       active: vault.steward.disputeId !== undefined,

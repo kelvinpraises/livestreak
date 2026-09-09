@@ -38,8 +38,10 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
     const reader = config.readers.reader(ref.chain);
     if (reader === null) return false;
     try {
-      const snap = await readMarketGraph(reader, ref.marketId);
-      await config.repo.syncMarket(snapshotToRows(ref.chain, snap, now(), config.baseUrl));
+      const graph = await readMarketGraph(reader, ref.marketId);
+      await config.repo.syncMarket(
+        snapshotToRows(ref.chain, graph.snap, now(), config.baseUrl, graph.vaultSnapshots)
+      );
       return true;
     } catch (error) {
       console.warn(`[catalog-sync]: skip ${ref.chain}:${ref.marketId} — ${String(error)}`);

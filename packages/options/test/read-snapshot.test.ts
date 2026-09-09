@@ -42,6 +42,9 @@ describe("options read snapshots", () => {
     expect(snapshot.vault.pools.yes).toBe(94_000_000n);
     expect(snapshot.shareTotals.yes).toBe(34_000_000n);
     expect(snapshot.shareTotals.no).toBe(6_000_000n);
+    expect(snapshot.boards.yes.pool).toBe(94_000_000n);
+    expect(snapshot.boards.no.pool).toBe(185_000_000n);
+    expect(snapshot.pendingBoundaries.yes).toBe(0n);
     expect(snapshot.hot.hot).toBe(false);
   });
 

@@ -5,8 +5,12 @@ import { asMarketId, validateOptionsVaultSide } from "@livestreak/options";
 import { buildBookmakerChain, createVaultViaBookmaker } from "../adapters/bookmaker.js";
 import { resolveOperatorContext } from "../gateway/operator.js";
 import { createOptionsEdge } from "../adapters/options.js";
+import { describeChainError } from "../adapters/revert.js";
+import { isLocalRpc, mintMockUsdc, USDC_DECIMALS } from "../adapters/faucet.js";
 import { configOpt, parseBigIntArg, passwordOpt, readCommandConfig } from "./args.js";
 import { renderVaultCreateResult } from "../render/output.js";
+
+const fmtUsdc = (raw: bigint): string => (Number(raw) / 10 ** USDC_DECIMALS).toString();
 
 // Default vault resolution window when the operator does not pass one (7 days out).
 const DEFAULT_RESOLUTION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
@@ -26,15 +30,39 @@ export const runVaultCreate = async (input: {
   const ctx = await resolveOperatorContext(input);
   const side = validateOptionsVaultSide(input.side);
 
+  const deposit = parseBigIntArg(input.deposit, "deposit");
+
   // USDC address is read on-chain (the deploy file does not carry it); bookmaker
   // approves USDC internally, so the CLI no longer issues its own approve here.
-  const usdc = await createOptionsEdge({
+  const edge = createOptionsEdge({
     doc: ctx.doc,
     walletInit: ctx.walletInit,
     seed: ctx.seed,
     userAddress: ctx.userAddress,
     marketId: asMarketId(input.marketId)
-  }).chain.reader.readUsdcAddress();
+  });
+  const usdc = await edge.chain.reader.readUsdcAddress();
+
+  // S9 — operator funding ergonomics. A fresh operator AA wallet holds 0 USDC, so the createVault
+  // userOp would revert with a bare ExecutionFailed selector. Pre-flight the balance: auto-mint on a
+  // local stack (frictionless first run), or fail with a human hint pointing at `livestreak faucet`.
+  const balance = await edge.chain.reader.readUsdcBalance(ctx.userAddress);
+  if (balance < deposit) {
+    if (isLocalRpc(ctx.doc.chain.rpc)) {
+      // Mint enough headroom to cover the deposit in one shot.
+      await mintMockUsdc({
+        account: ctx.account,
+        usdc,
+        to: ctx.userAddress as `0x${string}`,
+        amount: deposit
+      });
+    } else {
+      throw new Error(
+        `insufficient USDC: need ${fmtUsdc(deposit)}, have ${fmtUsdc(balance)} (operator ${ctx.userAddress}). ` +
+          "Fund the operator wallet, or on a local stack run `livestreak faucet --token usdc --amount N`."
+      );
+    }
+  }
 
   const chain = buildBookmakerChain({
     walletInit: ctx.walletInit,
@@ -53,14 +81,28 @@ export const runVaultCreate = async (input: {
     marketId: input.marketId,
     question: input.question,
     creatorSide: side,
-    creatorStake: parseBigIntArg(input.deposit, "deposit"),
+    creatorStake: deposit,
     seedRate: parseBigIntArg(input.rate, "rate"),
     resolutionSource: input.resolutionSource ?? DEFAULT_RESOLUTION_SOURCE,
     resolutionWindowExpiresAtMs:
       input.resolutionWindowMs ?? Date.now() + DEFAULT_RESOLUTION_WINDOW_MS
   };
 
-  const { result, idempotent } = await createVaultViaBookmaker({ chain, intent });
+  let result: Awaited<ReturnType<typeof createVaultViaBookmaker>>["result"];
+  let idempotent: boolean;
+  try {
+    ({ result, idempotent } = await createVaultViaBookmaker({ chain, intent }));
+  } catch (error) {
+    // Decode the inner revert reason; if it's still an opaque ExecutionFailed and the wallet is now
+    // short on USDC, attach the actionable balance hint (S9).
+    const reason = describeChainError(error);
+    const live = await edge.chain.reader.readUsdcBalance(ctx.userAddress).catch(() => undefined);
+    const hint =
+      live !== undefined && live < deposit
+        ? ` — insufficient USDC: need ${fmtUsdc(deposit)}, have ${fmtUsdc(live)}; run \`livestreak faucet --token usdc --amount N\``
+        : "";
+    throw new Error(`vault create failed: ${reason}${hint}`);
+  }
 
   return renderVaultCreateResult({
     vaultId: result.vaultId,

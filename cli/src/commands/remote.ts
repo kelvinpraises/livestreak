@@ -37,6 +37,15 @@ const deriveHostWss = (hostUrl: string, sessionId: string, override?: string): s
   return `${base.replace(/\/$/, "")}/remote/${encodeURIComponent(sessionId)}/gateway`;
 };
 
+// S11: the remote operator must land on the APP origin's gate (`/remote/<code>`), NOT the host
+// stub. The host's leg-A ack returns a host-side URL; we instead derive + print the app-origin URL
+// the user should actually open. Defaults to the local app origin; override with LIVESTREAK_APP_ORIGIN.
+const resolveAppOrigin = (override?: string): string =>
+  (override ?? process.env["LIVESTREAK_APP_ORIGIN"] ?? "http://localhost:3000").replace(/\/$/, "");
+
+const appRemoteUrl = (origin: string, sessionId: string): string =>
+  `${origin}/remote/${encodeURIComponent(sessionId)}`;
+
 // `remote open` — mint a scoped, expiring session, dial the host, and run the relay loop until SIGINT.
 export const runRemoteOpen = async (input: {
   readonly configPath?: string;
@@ -46,7 +55,9 @@ export const runRemoteOpen = async (input: {
   readonly spendCap?: string;
   readonly hostWss?: string;
   readonly pairPassword?: string;
+  readonly appOrigin?: string;
 }): Promise<string> => {
+  const appOrigin = resolveAppOrigin(input.appOrigin);
   const scopes = parseScopes(input.scopes);
   const ttlMs = parseTtlMs(input.ttl);
   const spendCapUSDC = input.spendCap === undefined ? undefined : BigInt(input.spendCap);
@@ -132,8 +143,9 @@ export const runRemoteOpen = async (input: {
       if (sessionId === record.sessionId && remoteUrl !== undefined) {
         record.remoteUrl = remoteUrl;
         void persist(remoteUrl);
+        // Print the APP-origin gate the user should open — not the host stub URL (S11).
         // eslint-disable-next-line no-console
-        console.log(`remote console URL: ${remoteUrl}`);
+        console.log(`remote console URL: ${appRemoteUrl(appOrigin, record.sessionId)}`);
       }
     },
     log: (line) => {
@@ -192,6 +204,7 @@ export const runRemoteOpen = async (input: {
         "",
         `pairing code: ${record.sessionId}`,
         `pairing pass: ${pairingPassword}`,
+        `console URL:  ${appRemoteUrl(appOrigin, record.sessionId)}`,
         `scopes:       ${record.scopes.join(", ")}`,
         `expires in:   ${ttlSecs}s`,
         spendCapUSDC === undefined ? "spend cap:    none" : `spend cap:    ${spendCapUSDC.toString()} (atomic USDC)`,
@@ -230,6 +243,10 @@ const scopesOpt = Options.text("scopes").pipe(
 const ttlOpt = Options.text("ttl").pipe(Options.withDescription("Session lifetime, e.g. 30m, 1h, 90s"));
 const spendCapOpt = Options.text("spend-cap").pipe(Options.optional);
 const hostWssOpt = Options.text("host-wss").pipe(Options.optional);
+const appOriginOpt = Options.text("app-origin").pipe(
+  Options.withDescription("App origin for the printed remote console URL (default http://localhost:3000)"),
+  Options.optional
+);
 const pairPasswordOpt = Options.text("pair-password").pipe(
   Options.withDescription("Pairing password shared with the remote user (generated if omitted)"),
   Options.optional
@@ -243,10 +260,11 @@ const remoteOpenCommand = Command.make(
     spendCap: spendCapOpt,
     hostWss: hostWssOpt,
     pairPassword: pairPasswordOpt,
+    appOrigin: appOriginOpt,
     config: configOpt,
     password: passwordOpt
   },
-  ({ scopes, ttl, spendCap, hostWss, pairPassword, config, password }) =>
+  ({ scopes, ttl, spendCap, hostWss, pairPassword, appOrigin, config, password }) =>
     Effect.tryPromise({
       try: () =>
         runRemoteOpen({
@@ -255,6 +273,7 @@ const remoteOpenCommand = Command.make(
           ...(Option.isSome(spendCap) ? { spendCap: spendCap.value } : {}),
           ...(Option.isSome(hostWss) ? { hostWss: hostWss.value } : {}),
           ...(Option.isSome(pairPassword) ? { pairPassword: pairPassword.value } : {}),
+          ...(Option.isSome(appOrigin) ? { appOrigin: appOrigin.value } : {}),
           ...readCommandConfig(config, password)
         }),
       catch: (error) => (error instanceof Error ? error : new Error(String(error)))

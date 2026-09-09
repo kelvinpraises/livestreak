@@ -1,49 +1,49 @@
 /**
- * Host edge + full app demo fixture shape.
- * Injectable via DEMO EDGE toggle; host `GET /catalog` will match `catalog` + `streams`.
+ * App DEMO-EDGE fixture shape + thin re-exports of the host discovery contract.
+ *
+ * The discovery CONTRACT types (HostStreamSummary / HostStreamDetail / HostCatalog + the
+ * `Homepage*Raw` item shapes + `Agent`) now live in `@livestreak/host` as the SINGLE
+ * SOURCE OF TRUTH (agent-2 moved them there). We re-export them here so existing
+ * `#/types/host-edge` importers keep compiling, but there is no local duplicate anymore.
+ * The host shapes are a non-breaking superset (each item carries a `chain` tag) — the app
+ * reads them and ignores unknown fields.
  */
 
+export type {
+  HostStreamSummary,
+  HostStreamDetail,
+  HostCatalog,
+  HomepageData as HostHomepageData,
+  AgentsData as HostAgentsData,
+  HomepageLiveVaultRaw,
+  HomepageLifetimeVaultRaw,
+  HomepageProtocolStatsRaw,
+  CatalogChain,
+} from '@livestreak/host'
+
+import type {
+  HostStreamDetail,
+  HostStreamSummary,
+  HomepageLifetimeVaultRaw,
+  HomepageLiveVaultRaw,
+  HomepageProtocolStatsRaw,
+} from '@livestreak/host'
 import type {
   Agent,
   FlowState,
   FixtureVaultRaw,
-  HomepageLifetimeVaultRaw,
-  HomepageLiveVaultRaw,
-  HomepageProtocolStatsRaw,
   Position,
   VaultView,
   WalletState,
   WSEvent,
 } from '#/types/demo'
 
-export interface HostStreamSummary {
-  routeId: string
-  marketId: string
-  title: string
-  category: string
-  isLive: boolean
-  elapsed?: string
-  activeVaults?: number
-  totalPooled?: number
-}
-
-export interface HostCatalog {
-  streams: HostStreamSummary[]
-}
-
-export interface HostStreamDetail {
-  routeId: string
-  marketId: string
-  title: string
-  category: string
-  watchUrl?: string
-  isLive: boolean
-  activeVaults?: number
-  totalPooled?: number
-}
-
+/**
+ * The full app demo fixture (injectable via the DEMO EDGE toggle). Its discovery sub-shapes
+ * (`catalog` / `streams` / `homepage` items) reuse the `@livestreak/host` contract types.
+ */
 export interface AppFixture {
-  catalog: HostCatalog
+  catalog: { streams: HostStreamSummary[] }
   streams: Record<string, HostStreamDetail>
   agents: Agent[]
   options: {

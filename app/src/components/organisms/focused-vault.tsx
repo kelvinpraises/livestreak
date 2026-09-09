@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, type CSSProperties } from 'react'
 import { motion } from 'framer-motion'
 import { Clock, Fire, X } from '@phosphor-icons/react'
 import { StreamSlider, mapAccrualPreview } from '#/components/molecules/stream-slider'
@@ -13,6 +13,17 @@ interface Props {
   vault: OptionsVault
   onDismiss: () => void
   onStream?: (vaultId: string, side: 'yes' | 'no', rate: number, durationMinutes?: number) => void
+}
+
+function focusedSideStyle(active: boolean, accent: string): CSSProperties {
+  return {
+    padding: '8px 14px', borderRadius: 7, cursor: 'pointer',
+    border: `1px solid ${active ? accent : 'rgba(255,255,255,0.12)'}`,
+    background: active ? `${accent}22` : 'rgba(255,255,255,0.04)',
+    color: active ? accent : 'rgba(255,255,255,0.5)',
+    fontSize: 12, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '0.06em',
+    transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+  }
 }
 
 export function FocusedVault({ vault, onDismiss, onStream }: Props) {
@@ -176,6 +187,51 @@ export function FocusedVault({ vault, onDismiss, onStream }: Props) {
         onStream={(side, rate) => { setStreamSide(side); setStreamRate(rate) }}
       />
 
+      {/* S3/A2: keyboard- and test-accessible side + rate, no drag required. */}
+      <div role="group" aria-label="Choose side and stream rate" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 12 }}>
+        <button
+          type="button"
+          data-testid={`fund-side-no-${vault.vaultId}`}
+          aria-pressed={streamSide === 'no'}
+          disabled={funding.useOptions && funding.fundNo?.disabled}
+          onClick={() => setStreamSide('no')}
+          style={focusedSideStyle(streamSide === 'no', '#ff2d78')}
+        >
+          NO
+        </button>
+        <button
+          type="button"
+          data-testid={`fund-side-yes-${vault.vaultId}`}
+          aria-pressed={streamSide === 'yes'}
+          disabled={funding.useOptions && funding.fundYes?.disabled}
+          onClick={() => setStreamSide('yes')}
+          style={focusedSideStyle(streamSide === 'yes', '#00ff87')}
+        >
+          YES
+        </button>
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          max={10}
+          step={0.1}
+          data-testid={`fund-amount-input-${vault.vaultId}`}
+          aria-label="Stream rate in USDC per minute"
+          value={streamRate > 0 ? Number(streamRate.toFixed(2)) : ''}
+          placeholder="0.00"
+          onChange={e => {
+            const parsed = parseFloat(e.target.value)
+            setStreamRate(Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, 10)) : 0)
+          }}
+          style={{
+            width: 90, padding: '8px 8px', borderRadius: 7,
+            border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)',
+            color: 'rgba(255,255,255,0.85)', fontSize: 12, fontFamily: 'var(--font-mono)', textAlign: 'right',
+          }}
+        />
+        <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>/min</span>
+      </div>
+
       {streamSide && streamRate > 0.01 && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
@@ -217,7 +273,7 @@ export function FocusedVault({ vault, onDismiss, onStream }: Props) {
         {funding.activeFundedSide
           ? 'STOP STREAM TO CHANGE SIDE'
           : !streamSide
-            ? 'DRAG TO CHOOSE A SIDE'
+            ? 'CHOOSE A SIDE'
             : needsMint
               ? `BACK VAULT → ${streamSide.toUpperCase()}`
               : hasPos

@@ -17,6 +17,7 @@ import {
   configOpt,
   marketOpt,
   parseBigIntArg,
+  parseHumanLvstAmount,
   parseTokenId,
   passwordOpt,
   readCommandConfig,
@@ -137,7 +138,10 @@ export const runStake = async (input: {
     userAddress: ctx.userAddress
   });
 
-  const args: StakeLvstInput = { amount: parseBigIntArg(input.amount, "amount") };
+  const lvstChain = ctx.walletInit.chain === "sui" ? "sui" : "evm";
+  const args: StakeLvstInput = {
+    amount: parseHumanLvstAmount(input.amount, lvstChain)
+  };
   const tx = await edge.callAction("stakeLvst", args);
   return renderTxResult("stakeLvst", { tx });
 };
@@ -155,7 +159,10 @@ export const runUnstake = async (input: {
     userAddress: ctx.userAddress
   });
 
-  const args: UnstakeLvstInput = { amount: parseBigIntArg(input.amount, "amount") };
+  const lvstChain = ctx.walletInit.chain === "sui" ? "sui" : "evm";
+  const args: UnstakeLvstInput = {
+    amount: parseHumanLvstAmount(input.amount, lvstChain)
+  };
   const tx = await edge.callAction("unstakeLvst", args);
   return renderTxResult("unstakeLvst", { tx });
 };

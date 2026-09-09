@@ -81,7 +81,7 @@ const makeChunkItem = (
   }
 });
 
-export const streamFileToWebRtc = (
+export const streamFileToWebRtcEffect = (
   input: StreamFileToWebRtcInput
 ): Effect.Effect<StreamFileToWebRtcResult, LiveStreakError> =>
   Effect.scoped(

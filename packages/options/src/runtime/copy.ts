@@ -34,6 +34,11 @@ export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultS
   },
   pools: { ...snapshot.pools },
   shareTotals: { ...snapshot.shareTotals },
+  boards: {
+    yes: { ...snapshot.boards.yes },
+    no: { ...snapshot.boards.no }
+  },
+  pendingBoundaries: { ...snapshot.pendingBoundaries },
   hot: { ...snapshot.hot },
   dispute: { ...snapshot.dispute }
 });

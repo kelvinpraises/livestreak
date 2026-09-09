@@ -59,7 +59,27 @@ export type { OptionsChainKind }
 
 const STEALTH_DOMAIN = 'livestreak-stealth-v1'
 const SESSION_SECRET_KEY = 'livestreak_stealth_secret'
+const SAFE_ADDR_CACHE_PREFIX = 'livestreak_safe_addr_'
 const APP_CALLER = { id: 'app', trusted: true } satisfies BridgeCaller
+
+// S12/A8 — the AA Safe address is a deterministic (counterfactual) function of the seed + chain, but
+// deriving it on connect takes ~60–120s. Cache it in localStorage keyed by a hash of the secret +
+// chain (never the raw secret) so a reconnect after reload is INSTANT instead of re-deriving. The
+// key is non-reversible; the address is public.
+function safeAddrCacheKey(secret: Uint8Array, chain: OptionsChainKind): string {
+  const tag = sha256(toBytes(`${STEALTH_DOMAIN}:${chain}:${bytesToHex(secret)}`))
+  return `${SAFE_ADDR_CACHE_PREFIX}${chain}_${tag.slice(2, 18)}`
+}
+
+function readCachedSafeAddress(secret: Uint8Array, chain: OptionsChainKind): string | null {
+  if (typeof window === 'undefined') return null
+  try { return localStorage.getItem(safeAddrCacheKey(secret, chain)) } catch { return null }
+}
+
+function writeCachedSafeAddress(secret: Uint8Array, chain: OptionsChainKind, address: string): void {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem(safeAddrCacheKey(secret, chain), address) } catch { /* quota — non-fatal */ }
+}
 
 interface AaChainDescriptor {
   chainId: number
@@ -83,6 +103,9 @@ interface OptionsContextValue {
   setChain: (chain: OptionsChainKind) => void
   isConnected: boolean
   isLoading: boolean
+  /** S12/A8: human-readable progress while the wallet derives (e.g. "Deriving your Safe address…").
+   *  null when idle. Surfaced by the connect UI so the ~1-min first derive doesn't look like a hang. */
+  derivationStep: string | null
   claiming: boolean
   error: string | null
   address: Address | null
@@ -192,6 +215,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(!enabled || readStoredChain() === 'sui')
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const [derivationStep, setDerivationStep] = useState<string | null>(null)
   const [claiming, setClaiming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [address, setAddress] = useState<Address | null>(null)
@@ -281,6 +305,24 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     await refreshConnected(user, marketId)
   }, [applyBoard, refreshConnected, teardownRuntime])
 
+  // S12/A8: derive the Safe address with visible progress, hitting the localStorage cache first so a
+  // reconnect after reload is instant instead of a silent ~1-min "Deriving…" that looks like a hang.
+  const deriveUserAddress = useCallback(async (
+    secret: Uint8Array,
+    chainKind: OptionsChainKind,
+    chainConfig: OptionsChainConfig,
+  ): Promise<UserAddress> => {
+    const cachedAddr = readCachedSafeAddress(secret, chainKind)
+    if (cachedAddr) {
+      setDerivationStep('Restoring your Safe address…')
+      return cachedAddr as UserAddress
+    }
+    setDerivationStep('Deriving your Safe address (first time, ~1 min)…')
+    const user = await resolveOptionsAccountAddress(chainConfig)
+    writeCachedSafeAddress(secret, chainKind, user)
+    return user
+  }, [])
+
   const loadEvmDescriptor = useCallback(async (cancelled: () => boolean) => {
     try {
       const res = await fetch(`${HOST_BASE_URL}/aa/descriptor`)
@@ -329,9 +371,10 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       try {
         const secret = hexToBytes(cached as `0x${string}`)
         const chainConfig = buildChainConfig(chainRef.current, secret, walletInitRef.current)
-        const user = await resolveOptionsAccountAddress(chainConfig)
+        const user = await deriveUserAddress(secret, chainRef.current, chainConfig)
         setAddress(user as Address)
         setIsConnected(true)
+        setDerivationStep('Loading market board…')
         await bootRuntime(secret, user)
       } catch (err) {
         sessionStorage.removeItem(SESSION_SECRET_KEY)
@@ -339,11 +382,12 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
         setError(err instanceof Error ? err.message : String(err))
       } finally {
         setIsLoading(false)
+        setDerivationStep(null)
       }
     })()
 
     return () => teardownRuntime()
-  }, [enabled, ready, chain, bootRuntime, teardownRuntime])
+  }, [enabled, ready, chain, bootRuntime, teardownRuntime, deriveUserAddress])
 
   const disconnect = useCallback(() => {
     sessionStorage.removeItem(SESSION_SECRET_KEY)
@@ -398,10 +442,12 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       const secret = toBytes(sha256(toBytes(STEALTH_DOMAIN + effectiveSeed)))
       sessionStorage.setItem(SESSION_SECRET_KEY, bytesToHex(secret))
 
+      setDerivationStep('Preparing wallet…')
       const chainConfig = buildChainConfig(chainRef.current, secret, walletInitRef.current)
-      const user = await resolveOptionsAccountAddress(chainConfig)
+      const user = await deriveUserAddress(secret, chainRef.current, chainConfig)
       setAddress(user as Address)
       setIsConnected(true)
+      setDerivationStep('Loading market board…')
       await bootRuntime(secret, user)
     } catch (err) {
       console.error('[options] connect failed', err)
@@ -411,8 +457,9 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       teardownRuntime()
     } finally {
       setIsLoading(false)
+      setDerivationStep(null)
     }
-  }, [enabled, bootRuntime, teardownRuntime])
+  }, [enabled, bootRuntime, teardownRuntime, deriveUserAddress])
 
   const setActiveMarketId = useCallback((marketId: string | undefined) => {
     activeMarketIdRef.current = marketId
@@ -629,6 +676,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     setChain,
     isConnected,
     isLoading,
+    derivationStep,
     claiming,
     error,
     address,
@@ -656,7 +704,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     approveNft,
     setApprovalForAll,
   }), [
-    enabled, ready, chain, setChain, isConnected, isLoading, claiming, error, address, usdcBalance, board, controls,
+    enabled, ready, chain, setChain, isConnected, isLoading, derivationStep, claiming, error, address, usdcBalance, board, controls,
     connect, disconnect, setActiveMarketId, findFunction, findFundFunctionForVault,
     findStopFundingFunctionForVault, fundStream, stopFunding, previewAccrual, claimWin, hasNftForVault, mint, claimLoss,
     stake, unstake, claimDividends, transferNft, approveNft, setApprovalForAll,

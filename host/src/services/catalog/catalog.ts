@@ -1,5 +1,6 @@
-import { asMarketId, readMarketSnapshot, type OptionsReader } from "@livestreak/options";
+import { type OptionsReader } from "@livestreak/options";
 import { mapMarket, type MappedMarket } from "./mapper.js";
+import { readMarketGraph } from "./readers.js";
 import type {
   CatalogChain,
   HomepageAggregate,
@@ -86,8 +87,10 @@ export const createCatalogService = (config: CatalogServiceConfig): CatalogServi
         const reader = config.readers.reader(ref.chain);
         if (reader === null) return;
         try {
-          const snap = await readMarketSnapshot(reader, asMarketId(ref.marketId));
-          mapped.push(mapMarket(ref.chain, snap, nowMs, config.baseUrl));
+          const graph = await readMarketGraph(reader, ref.marketId);
+          mapped.push(
+            mapMarket(ref.chain, graph.snap, nowMs, config.baseUrl, graph.vaultSnapshots)
+          );
         } catch (error) {
           console.warn(
             `[catalog]: skip ${ref.chain}:${ref.marketId} — ${String(error)}`

@@ -94,51 +94,13 @@ export interface FixtureVaultRaw {
   steward: { hot: boolean; hotUntilFromNowMs?: number }
 }
 
-export type AgentRole = 'bookmaker' | 'steward' | 'observer'
-
-export interface Agent {
-  id: string
-  name: string
-  address: string
-  role: AgentRole
-  accuracy: number
-  winRate: number
-  vaultsCreated: number
-  vaultsMonitored: number
-  totalVolume: number
-  batchesSubmitted?: number
-  resolutionsConfirmed?: number
-  proposals?: number
-  vetosUsed?: number
-  uptime?: number
-  reputation: number
-  successRate?: number
-}
-
-export interface HomepageLiveVaultRaw {
-  id: string
-  streamId: string
-  streamTitle: string
-  option: string
-  multiplier: number
-  totalPool: number
-  status: 'open' | 'hot'
-  expiresIn: number
-}
-
-export interface HomepageLifetimeVaultRaw {
-  id: string
-  option: string
-  streamTitle: string
-  outcome: 'yes' | 'no'
-  totalPool: number
-  resolvedAgoMs: number
-  yesTotal: number
-  noTotal: number
-}
-
-export interface HomepageProtocolStatsRaw {
-  totalVaults: number
-  totalVolume: number
-  activeStreams: number
-}
+// The agents-directory row (`Agent`/`AgentRole`) + the homepage `*Raw` item shapes are the
+// host discovery CONTRACT — they live in `@livestreak/host` now (single source of truth).
+// Re-exported here so existing `#/types/demo` importers keep compiling unchanged.
+export type {
+  Agent,
+  AgentRole,
+  HomepageLiveVaultRaw,
+  HomepageLifetimeVaultRaw,
+  HomepageProtocolStatsRaw,
+} from '@livestreak/host'

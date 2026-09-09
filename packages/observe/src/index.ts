@@ -196,11 +196,32 @@ export {
   type LocalSinkDriverOptions
 } from "./pipeline/publish/sinks/local/driver.js";
 
+export { streamFileToWebRtc } from "./adapters/webrtc/stream-bridge.js";
 export {
-  streamFileToWebRtc,
   type StreamFileToWebRtcInput,
   type StreamFileToWebRtcResult
 } from "./pipeline/publish/sinks/local/file-stream.js";
+
+export {
+  createFileWebRtcStream,
+  type CliStreamFileInput,
+  type CliStreamFileHandle,
+  type CliFileWebRtcSignaling
+} from "./adapters/webrtc/cli-stream-entry.js";
+
+export {
+  createHostMediatedConsumerSignaling,
+  type HostMediatedConsumerSignalingInput
+} from "./pipeline/publish/sinks/local/host-consumer-signaling.js";
+
+export {
+  startBrowserWebRtcFeed,
+  type BrowserWebRtcFeedInput,
+  type BrowserWebRtcFeedHandle,
+  type BrowserWebRtcFeedState
+} from "./adapters/webrtc/browser-feed.js";
+
+export { resolveNodePeerConnectionFactory } from "./pipeline/publish/sinks/local/node-peer.js";
 
 export {
   createHostMediatedSinkSignaling,

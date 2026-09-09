@@ -52,7 +52,7 @@
       "isLive": true,
       "activeVaults": 5,
       "totalPooled": 3820.3,
-      "watchUrl": "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+      "watchUrl": "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4"
     },
     "esports-1": {
       "routeId": "esports-1",
@@ -62,7 +62,7 @@
       "isLive": true,
       "activeVaults": 3,
       "totalPooled": 2100,
-      "watchUrl": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
+      "watchUrl": "https://test-videos.co.uk/vids/sintel/mp4/h264/720/Sintel_720_10s_1MB.mp4"
     },
     "politics-1": {
       "routeId": "politics-1",
@@ -72,7 +72,7 @@
       "isLive": true,
       "activeVaults": 3,
       "totalPooled": 1500,
-      "watchUrl": "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
+      "watchUrl": "https://test-videos.co.uk/vids/jellyfish/mp4/h264/720/Jellyfish_720_10s_1MB.mp4"
     },
     "entertainment-1": {
       "routeId": "entertainment-1",
@@ -82,7 +82,7 @@
       "isLive": true,
       "activeVaults": 3,
       "totalPooled": 890,
-      "watchUrl": "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4"
+      "watchUrl": "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
     }
   },
   "agents": [

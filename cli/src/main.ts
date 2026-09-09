@@ -14,6 +14,7 @@ import { remoteCommands } from "./commands/remote.js";
 import { stewardCommands } from "./commands/steward.js";
 import { settleCommands } from "./commands/settle.js";
 import { streamCommands } from "./commands/stream.js";
+import { faucetCommands } from "./commands/faucet.js";
 
 const root = Command.make("livestreak", {}, () => Effect.void).pipe(
   Command.withSubcommands([
@@ -28,7 +29,8 @@ const root = Command.make("livestreak", {}, () => Effect.void).pipe(
     ...remoteCommands,
     ...stewardCommands,
     ...settleCommands,
-    ...streamCommands
+    ...streamCommands,
+    ...faucetCommands
   ])
 );
 

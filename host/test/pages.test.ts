@@ -70,7 +70,37 @@ const fakeReader = (snap: OptionsMarketSnapshot): OptionsReader =>
     listMarketVaults: async () => snap.market.vaultIds,
     readVault: async (id: string) =>
       snap.vaults.find((v) => String(v.vaultId) === String(id))!,
-    readStreamState: async () => snap.streamState!
+    readStreamState: async () => snap.streamState!,
+    readVaultShareTotals: async () => ({ yes: 0n, no: 0n }),
+    readBoard: async (_id, side) => {
+      const vault = snap.vaults[0];
+      const yes = vault?.pools.yes ?? 0n;
+      const no = vault?.pools.no ?? 0n;
+      return {
+        pool: side === "yes" ? yes : no,
+        sideRate: 0n,
+        g: 0n,
+        lastAdvanceMs: NOW
+      };
+    },
+    readPendingBoundaries: async () => 0n
+  }) as unknown as OptionsReader;
+
+const fakeReaderWithAccrual = (snap: OptionsMarketSnapshot): OptionsReader =>
+  ({
+    readMarket: async () => snap.market,
+    listMarketVaults: async () => snap.market.vaultIds,
+    readVault: async (id: string) =>
+      snap.vaults.find((v) => String(v.vaultId) === String(id))!,
+    readStreamState: async () => snap.streamState!,
+    readVaultShareTotals: async () => ({ yes: 0n, no: 0n }),
+    readBoard: async (_id, side) => ({
+      pool: 0n,
+      sideRate: side === "yes" ? 1_000_000n : 0n,
+      g: 0n,
+      lastAdvanceMs: Date.now() - 30_000
+    }),
+    readPendingBoundaries: async () => 0n
   }) as unknown as OptionsReader;
 
 const providerFor = (snap: OptionsMarketSnapshot): CatalogReaderProvider => ({
@@ -182,5 +212,133 @@ describe("discovery read-model: page endpoints", () => {
     expect(agents.body.agents[0]).toMatchObject({ id: "a1", role: "bookmaker" });
 
     await request(app).get("/stream/missing").expect(404);
+  });
+});
+
+// pass-3 S2/A7: the homepage live-rail vault pool and the per-stream pool must be the SAME
+// number for a funded vault — they read the same on-chain getVaultPools through one shared
+// `vaultPoolUsdc`, so they can't drift. A single funded OPEN vault (no resolved-vault
+// confound) makes the three reads numerically identical, including a fractional (cent) pool.
+describe("discovery read-model: funded vault pool parity (S2/A7)", () => {
+  const fundedOpenSnapshot = (marketId: string): OptionsMarketSnapshot =>
+    ({
+      market: {
+        marketId,
+        title: "Funded Live",
+        creator: "0xcreator",
+        category: "Tech",
+        status: "open",
+        vaultIds: ["v-funded"],
+        timing: { createdAtMs: NOW - 60_000 }
+      },
+      streamState: {
+        status: "live",
+        scheme: "ipfs",
+        id: "feedblob",
+        updatedAtMs: NOW - 120_000,
+        endedAtMs: 0
+      },
+      vaults: [
+        {
+          vaultId: "v-funded",
+          marketId,
+          question: "Lands?",
+          type: "momentum",
+          creator: "0xc",
+          status: "open",
+          outcome: "pending",
+          // 8.14 USDC funded onto YES (matches the pass-3 UI fund magnitude).
+          pools: { yes: 8_140_000n, no: 0n },
+          timing: { createdAtMs: NOW - 60_000, expiresAtMs: NOW + 180_000 },
+          steward: { hot: false }
+        }
+      ]
+    }) as unknown as OptionsMarketSnapshot;
+
+  it("homepage liveVaults[].totalPool === stream.totalPooled === protocolStats.totalVolume", async () => {
+    const deps = createHostRouteDeps(defaultHostServerConfig(), {
+      catalogReaders: providerFor(fundedOpenSnapshot("m-fund"))
+    });
+    const app = createApp(deps);
+
+    await request(app)
+      .post("/catalog/markets")
+      .send({ chain: "evm", marketId: "m-fund" })
+      .expect(201);
+
+    const home = await request(app).get("/homepage").expect(200);
+    const stream = await request(app).get("/stream/m-fund").expect(200);
+
+    expect(home.body.liveVaults).toHaveLength(1);
+    const cardPool = home.body.liveVaults[0].totalPool;
+    expect(cardPool).toBe(8.14);
+    // The user funded this vault — its card pool must equal the per-stream pool and the
+    // protocol total, not stay $0 while the stream shows the funded amount.
+    expect(stream.body.totalPooled).toBe(cardPool);
+    expect(home.body.protocolStats.totalVolume).toBe(cardPool);
+  });
+});
+
+// pass-4: board-replayed effective pool — settled getVaultPools may be 0 while livePoolUSDC > 0.
+describe("discovery read-model: in-flight drip effective pool (pass-4)", () => {
+  const accruingOpenSnapshot = (marketId: string): OptionsMarketSnapshot =>
+    ({
+      market: {
+        marketId,
+        title: "Accruing Live",
+        creator: "0xcreator",
+        category: "Tech",
+        status: "open",
+        vaultIds: ["v-drip"],
+        timing: { createdAtMs: NOW - 60_000 }
+      },
+      streamState: {
+        status: "live",
+        scheme: "ipfs",
+        id: "feedblob",
+        updatedAtMs: NOW - 120_000,
+        endedAtMs: 0
+      },
+      vaults: [
+        {
+          vaultId: "v-drip",
+          marketId,
+          question: "Drip lands?",
+          type: "momentum",
+          creator: "0xc",
+          status: "open",
+          outcome: "pending",
+          pools: { yes: 0n, no: 0n },
+          timing: { createdAtMs: NOW - 60_000, expiresAtMs: NOW + 180_000 },
+          steward: { hot: false }
+        }
+      ]
+    }) as unknown as OptionsMarketSnapshot;
+
+  it("liveVaults[].totalPool reflects effective pool while settled is 0", async () => {
+    const snap = accruingOpenSnapshot("m-drip");
+    const deps = createHostRouteDeps(defaultHostServerConfig(), {
+      catalogReaders: {
+        reader: (chain) =>
+          chain === "evm" ? fakeReaderWithAccrual(snap) : null,
+        availableChains: ["evm"]
+      }
+    });
+    const app = createApp(deps);
+
+    await request(app)
+      .post("/catalog/markets")
+      .send({ chain: "evm", marketId: "m-drip" })
+      .expect(201);
+
+    const home = await request(app).get("/homepage").expect(200);
+    const stream = await request(app).get("/stream/m-drip").expect(200);
+
+    expect(home.body.liveVaults).toHaveLength(1);
+    const cardPool = home.body.liveVaults[0].totalPool;
+    expect(cardPool).toBeGreaterThan(0);
+    expect(home.body.liveVaults[0].settledPool).toBe(0);
+    expect(stream.body.totalPooled).toBe(cardPool);
+    expect(home.body.protocolStats.totalVolume).toBe(cardPool);
   });
 });

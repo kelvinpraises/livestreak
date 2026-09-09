@@ -3,11 +3,13 @@ import type Database from "better-sqlite3";
 import type { DB } from "../schema.js";
 import { SCHEMA_DDL } from "../ddl.js";
 import * as init20260622 from "./20260622T000000_init.js";
+import * as vaultLivePools20260623 from "./20260623T000000_vault_live_pools.js";
 
 // Static in-process migration provider (the agentix runner pattern, minus filesystem
 // scanning so it works after bundling). Add new migrations here in timestamp order.
 const MIGRATIONS: Record<string, Migration> = {
-  "20260622T000000_init": init20260622
+  "20260622T000000_init": init20260622,
+  "20260623T000000_vault_live_pools": vaultLivePools20260623
 };
 
 class StaticMigrationProvider implements MigrationProvider {

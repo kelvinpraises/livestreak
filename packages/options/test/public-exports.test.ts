@@ -13,6 +13,8 @@ describe("options public exports", () => {
     expect(publicExport("projectShares")).toBeTypeOf("function");
     expect(publicExport("projectStreamAccrual")).toBeTypeOf("function");
     expect(publicExport("segMath")).toBeTypeOf("function");
+    expect(publicExport("projectVaultLivePools")).toBeTypeOf("function");
+    expect(publicExport("projectLivePoolSide")).toBeTypeOf("function");
     expect(publicExport("asMarketId")).toBeTypeOf("function");
     expect(publicExport("asTokenId")).toBeTypeOf("function");
     expect(publicExport("asTxId")).toBeTypeOf("function");

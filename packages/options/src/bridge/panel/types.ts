@@ -49,6 +49,10 @@ export interface OptionsVaultPanel {
     readonly yesUSDC: string;
     readonly noUSDC: string;
     readonly totalUSDC: string;
+    /** Settled on-chain pool (getVaultPools) — unchanged until advance. */
+    readonly settledPoolUSDC: string;
+    /** Board-replayed pool at read time (pool + sideRate × Δt). */
+    readonly livePoolUSDC: string;
     readonly sharePriceYes: string;
     readonly sharePriceNo: string;
   };
@@ -89,6 +93,8 @@ export interface OptionsMarketPanel {
   readonly totals: {
     readonly pooledUSDC: string;
     readonly totalPooledUSDC: string;
+    /** Sum of vault livePoolUSDC (board-replayed). */
+    readonly livePooledUSDC: string;
     readonly activeVaults: number;
     readonly resolvedVaults: number;
   };

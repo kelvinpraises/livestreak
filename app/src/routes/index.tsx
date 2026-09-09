@@ -3,14 +3,47 @@ import { motion } from 'framer-motion'
 import { Play, Stack, Fire, ArrowRight, Eye, CurrencyDollar, Trophy, Clock, CheckCircle, XCircle } from '@phosphor-icons/react'
 import type { HomepageLiveVaultCard, HomepageStreamCard } from '#/types/homepage'
 import { useHomepageData } from '#/hooks/use-homepage-data'
+import { usePreferFixture } from '#/hooks/use-fixture-mode'
+import { useOptionsContext } from '#/providers/options-provider'
+import { ChainSelector } from '#/components/molecules/chain-selector'
+import { isOptionsModeEnabled } from '#/utils/env'
 import { formatUSDCFull } from '#/utils/format'
 
 export const Route = createFileRoute('/')({
   component: HomePage,
 })
 
+const CHAIN_LABEL: Record<'evm' | 'sui', string> = { evm: 'EVM', sui: 'Sui' }
+
+/** Permutation #4: headline = effective pool; muted settled subline when host splits them. */
+function showsSettledSubline(effective: number, settled?: number): settled is number {
+  return settled !== undefined && effective > settled
+}
+
+function SettledPoolSubline({ effective, settled }: { effective: number; settled?: number }) {
+  if (!showsSettledSubline(effective, settled)) return null
+  return (
+    <span className="mono" style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', letterSpacing: '0.02em' }}>
+      Settled {formatUSDCFull(settled)}
+    </span>
+  )
+}
+
 function HomePage() {
   const { streams, liveVaults, lifetimeVaults, protocolStats } = useHomepageData()
+  const preferFixture = usePreferFixture()
+  const { chain, setChain } = useOptionsContext()
+
+  // Live discovery is an aggregate across ALL chains (each card carries a `chain` tag). Scope the
+  // rails to the ACTIVE chain so the homepage matches the wallet/board the user is on, and so the
+  // empty state can honestly say WHICH chain is empty (A6/S1). The demo fixture predates the tag and
+  // is never filtered — that would blank the demo.
+  const chainFilterActive = isOptionsModeEnabled() && !preferFixture
+  const otherChain = chain === 'evm' ? 'sui' : 'evm'
+  const visibleStreams = chainFilterActive ? streams.filter(s => s.chain === chain) : streams
+  const visibleLiveVaults = chainFilterActive ? liveVaults.filter(v => v.chain === chain) : liveVaults
+  const visibleLifetime = chainFilterActive ? lifetimeVaults.filter(v => v.chain === chain) : lifetimeVaults
+  const otherChainHasVaults = chainFilterActive && liveVaults.some(v => v.chain === otherChain)
 
   return (
     <div style={{ overflowY: 'auto', height: 'calc(100vh - 56px)' }}>
@@ -83,7 +116,7 @@ function HomePage() {
           <h2 className="display" style={{ fontSize: 22, fontWeight: 700, color: '#fff', letterSpacing: '0.02em' }}>Live Now</h2>
         </motion.div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 14 }}>
-          {streams.map((stream, i) => <StreamCard key={stream.id} stream={stream} index={i} />)}
+          {visibleStreams.map((stream, i) => <StreamCard key={stream.id} stream={stream} index={i} />)}
         </div>
       </section>
 
@@ -92,11 +125,41 @@ function HomePage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
           <Stack size={18} color="#00ff87" />
           <h2 className="display" style={{ fontSize: 22, fontWeight: 700, color: '#fff', letterSpacing: '0.02em' }}>Live Vaults</h2>
-          <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginLeft: 4 }}>{liveVaults.length} active</span>
+          <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', marginLeft: 4 }}>{visibleLiveVaults.length} active</span>
+          {chainFilterActive && (
+            <div data-testid="homepage-active-chain" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em' }}>
+                CHAIN: <span style={{ color: '#00ff87' }}>{CHAIN_LABEL[chain]}</span>
+              </span>
+              <ChainSelector />
+            </div>
+          )}
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
-          {liveVaults.map((vault, i) => <LiveVaultCard key={vault.vaultId} vault={vault} index={i} />)}
-        </div>
+        {chainFilterActive && visibleLiveVaults.length === 0 ? (
+          <div
+            data-testid="homepage-empty-vaults"
+            style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '28px 20px', textAlign: 'center' }}
+          >
+            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginBottom: otherChainHasVaults ? 14 : 0 }}>
+              No live vaults on <strong style={{ color: '#00ff87' }}>{CHAIN_LABEL[chain]}</strong> right now.
+              {otherChainHasVaults && <> There are open vaults on {CHAIN_LABEL[otherChain]}.</>}
+            </p>
+            {otherChainHasVaults && (
+              <button
+                type="button"
+                data-testid="homepage-switch-chain"
+                onClick={() => setChain(otherChain)}
+                style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(0,255,135,0.35)', background: 'rgba(0,255,135,0.12)', color: '#00ff87', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', cursor: 'pointer' }}
+              >
+                Switch to {CHAIN_LABEL[otherChain]}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
+            {visibleLiveVaults.map((vault, i) => <LiveVaultCard key={vault.vaultId} vault={vault} index={i} />)}
+          </div>
+        )}
       </section>
 
       {/* Lifetime / Resolved Vaults */}
@@ -128,7 +191,7 @@ function HomePage() {
         {/* Recent resolutions */}
         <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', fontWeight: 600, letterSpacing: '0.1em', color: 'rgba(255,255,255,0.25)', padding: '4px 0 10px' }}>RECENT RESOLUTIONS</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {lifetimeVaults.map(vault => (
+          {visibleLifetime.map(vault => (
             <div key={vault.vaultId} style={{
               display: 'flex', alignItems: 'center', gap: 12,
               background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)',
@@ -212,7 +275,13 @@ function StreamCard({ stream, index }: { stream: HomepageStreamCard; index: numb
           <p style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.85)', marginBottom: 8, lineHeight: 1.35, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{stream.title}</p>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Stack size={11} color="rgba(255,255,255,0.3)" /><span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>{stream.activeVaults} vaults</span></div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><CurrencyDollar size={11} color="#00c8ff" /><span className="mono" style={{ fontSize: 11, color: '#00c8ff' }}>{formatUSDCFull(stream.totalPooled)}</span></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <CurrencyDollar size={11} color="#00c8ff" />
+                <span className="mono" style={{ fontSize: 11, color: '#00c8ff', fontWeight: 600 }}>{formatUSDCFull(stream.totalPooled)}</span>
+              </div>
+              <SettledPoolSubline effective={stream.totalPooled} settled={stream.settledPooled} />
+            </div>
           </div>
           {stream.elapsed && (
             <div style={{ marginTop: 8 }}><span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)' }}>{stream.elapsed}</span></div>
@@ -247,10 +316,13 @@ function LiveVaultCard({ vault, index }: { vault: HomepageLiveVaultCard; index: 
             {vault.multiplier.toFixed(2)}x
           </span>
         </div>
-        <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>Pool</span>
-            <span className="mono" style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>{formatUSDCFull(vault.totalPool)}</span>
+        <div style={{ marginTop: 6, display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>Pool</span>
+              <span className="mono" style={{ fontSize: 11, fontWeight: 600, color: 'rgba(255,255,255,0.55)' }}>{formatUSDCFull(vault.totalPool)}</span>
+            </div>
+            <SettledPoolSubline effective={vault.totalPool} settled={vault.settledPool} />
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <Clock size={10} color="rgba(255,255,255,0.2)" />

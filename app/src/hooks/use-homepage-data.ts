@@ -1,11 +1,11 @@
-import { useMemo } from 'react'
+import { useEffect, useState } from 'react'
 
-import { panelToHomepage } from '#/utils/options'
+import { env } from '#/utils/env'
+import { fetchHomepage, hostHomepageToCards } from '#/utils/host'
 import type { HomepageData } from '#/types/homepage'
-import { useOptionsContext } from '#/providers/options-provider'
 import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
 
-/** Honest empty state for live mode before/without a board — never the fixture (A). */
+/** Honest empty state for live mode before/without host data — never the fixture (A). */
 const EMPTY_HOMEPAGE: HomepageData = {
   streams: [],
   liveVaults: [],
@@ -19,17 +19,29 @@ const EMPTY_HOMEPAGE: HomepageData = {
   },
 }
 
+/**
+ * Homepage discovery data.
+ *  - DEMO mode  -> the bundled/injected fixture (the demo-edge toggle is the switch).
+ *  - LIVE mode  -> the HOST's `GET /homepage` aggregate across ALL markets/chains (NOT the
+ *                  single-market options board). While the fetch is in flight or fails we render
+ *                  an honest empty state — never a silent fixture fallback.
+ */
 export function useHomepageData(): HomepageData {
   const preferFixture = usePreferFixture()
   const fixture = useParsedFixture()
-  const { board } = useOptionsContext()
+  const [live, setLive] = useState<HomepageData>(EMPTY_HOMEPAGE)
 
-  return useMemo(() => {
-    if (!preferFixture) {
-      // Live mode: project the on-chain board, or show an honest empty catalog while it loads /
-      // when there is no live data. We deliberately do NOT fall back to the fixture here.
-      return board ? panelToHomepage(board.panel) : EMPTY_HOMEPAGE
-    }
-    return fixture.homepage
-  }, [preferFixture, board, fixture])
+  useEffect(() => {
+    if (preferFixture) return
+    let cancelled = false
+    setLive(EMPTY_HOMEPAGE)
+
+    void fetchHomepage(env.hostBaseUrl)
+      .then(data => { if (!cancelled) setLive(hostHomepageToCards(data)) })
+      .catch(() => { if (!cancelled) setLive(EMPTY_HOMEPAGE) })
+
+    return () => { cancelled = true }
+  }, [preferFixture])
+
+  return preferFixture ? fixture.homepage : live
 }

@@ -1,6 +1,7 @@
 import type { OptionsVault } from '@livestreak/options'
 import { asMarketId, asVaultId } from '@livestreak/options'
 
+import { hostHomepageToCards } from '#/utils/host'
 import type { AppFixture } from '#/types/host-edge'
 import type {
   Agent,
@@ -52,9 +53,6 @@ export function parseFixture(f: AppFixture): ParsedFixture {
     },
   }))
 
-  const resolved = f.homepage.lifetimeVaults.length
-  const yesWins = f.homepage.lifetimeVaults.filter(v => v.outcome === 'yes').length
-
   return {
     vaults,
     vaultViews: { ...f.options.vaultViews },
@@ -76,42 +74,13 @@ export function parseFixture(f: AppFixture): ParsedFixture {
       isLive: s.isLive,
     })),
     agents: f.agents,
-    homepage: {
-      streams: f.catalog.streams.map(s => ({
-        id: s.routeId,
-        marketId: s.marketId,
-        title: s.title,
-        category: s.category,
-        activeVaults: s.activeVaults ?? 0,
-        totalPooled: s.totalPooled ?? 0,
-        elapsed: s.elapsed ?? '',
-        isLive: s.isLive,
-      })),
-      liveVaults: f.homepage.liveVaults.map(v => ({
-        vaultId: v.id,
-        streamId: v.streamId,
-        streamTitle: v.streamTitle,
-        option: v.option,
-        multiplier: v.multiplier,
-        totalPool: v.totalPool,
-        status: v.status,
-        expiresInSec: v.expiresIn,
-      })),
-      lifetimeVaults: f.homepage.lifetimeVaults.map(({ resolvedAgoMs, ...v }) => ({
-        vaultId: v.id,
-        option: v.option,
-        streamTitle: v.streamTitle,
-        outcome: v.outcome,
-        totalPool: v.totalPool,
-        resolvedAtMs: Date.now() - resolvedAgoMs,
-      })),
-      protocolStats: {
-        totalVaults: f.homepage.protocolStats.totalVaults,
-        totalVolume: f.homepage.protocolStats.totalVolume,
-        activeStreams: f.homepage.protocolStats.activeStreams,
-        resolvedVaults: resolved,
-        yesWinRatePct: resolved > 0 ? Math.round((yesWins / resolved) * 100) : null,
-      },
-    },
+    // Same raw->card projection the LIVE host path uses (utils/host.ts). The streams rail comes
+    // from the fixture catalog; the vault rails + stats from the fixture homepage payload.
+    homepage: hostHomepageToCards({
+      streams: f.catalog.streams,
+      liveVaults: f.homepage.liveVaults,
+      lifetimeVaults: f.homepage.lifetimeVaults,
+      protocolStats: f.homepage.protocolStats,
+    }),
   }
 }

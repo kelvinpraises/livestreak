@@ -1,7 +1,9 @@
 import raw from './fixture-demo.json'
 import type { AppFixture } from '#/types/host-edge'
 
-export const defaultHostEdgeFixture = raw as AppFixture
+// The bundled fixture predates the host contract's `chain` tag on discovery items; the app
+// reads these shapes and ignores the (absent) tag, so cast through `unknown`.
+export const defaultHostEdgeFixture = raw as unknown as AppFixture
 
 export const DEMO_EDGE_KEY = 'livestreak_demo_edge'
 export const DEMO_FIXTURE_KEY = 'livestreak_edge_fixture'

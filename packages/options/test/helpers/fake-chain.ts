@@ -329,11 +329,21 @@ export class FakeReaderInMemory implements OptionsReader {
 
   async readBoard(vaultId: VaultId, side: OptionsVaultSide): Promise<OptionsBoardState> {
     const board = this.boards.get(boardKey(vaultId, side));
-    if (board === undefined) {
+    if (board !== undefined) {
+      return board;
+    }
+
+    const vault = this.vaults.get(vaultId);
+    if (vault === undefined) {
       throw notFound("board", boardKey(vaultId, side));
     }
 
-    return board;
+    return {
+      pool: side === "yes" ? vault.pools.yes : vault.pools.no,
+      sideRate: 0n,
+      g: 0n,
+      lastAdvanceMs: vault.timing.createdAtMs
+    };
   }
 
   async readSharePrice(vaultId: VaultId, side: OptionsVaultSide): Promise<bigint> {
@@ -532,31 +542,58 @@ export const fixtureLvstAccount = (user: UserAddress = fixtureUser()): LvstAccou
   totalEarned: 3_000_000_000_000_000_000n
 });
 
-export const fixtureSeed = (user: UserAddress = fixtureUser()): FakeTransportSeed => ({
-  markets: [fixtureMarket()],
-  vaults: [fixtureVault()],
-  shareTotals: {
-    vault_01: fixtureShareTotals()
+export const fixtureBoardsForVault = (
+  vault: OptionsVault
+): Readonly<Record<string, OptionsBoardState>> => ({
+  [`${vault.vaultId}:yes`]: {
+    pool: vault.pools.yes,
+    sideRate: 0n,
+    g: 0n,
+    lastAdvanceMs: vault.timing.createdAtMs
   },
-  nfts: [fixtureNft(user)],
-  lvstAccounts: [fixtureLvstAccount(user)],
-  protocol: {
-    marketCount: 1,
-    vaultCount: 1
+  [`${vault.vaultId}:no`]: {
+    pool: vault.pools.no,
+    sideRate: 0n,
+    g: 0n,
+    lastAdvanceMs: vault.timing.createdAtMs
   }
 });
 
+export const fixtureSeed = (user: UserAddress = fixtureUser()): FakeTransportSeed => {
+  const vault = fixtureVault();
+
+  return {
+    markets: [fixtureMarket()],
+    vaults: [vault],
+    shareTotals: {
+      vault_01: fixtureShareTotals()
+    },
+    boards: fixtureBoardsForVault(vault),
+    nfts: [fixtureNft(user)],
+    lvstAccounts: [fixtureLvstAccount(user)],
+    protocol: {
+      marketCount: 1,
+      vaultCount: 1
+    }
+  };
+};
+
 export const fixtureSeedWithoutProtocol = (
   user: UserAddress = fixtureUser()
-): FakeTransportSeed => ({
-  markets: [fixtureMarket()],
-  vaults: [fixtureVault()],
-  shareTotals: {
-    vault_01: fixtureShareTotals()
-  },
-  nfts: [fixtureNft(user)],
-  lvstAccounts: [fixtureLvstAccount(user)]
-});
+): FakeTransportSeed => {
+  const vault = fixtureVault();
+
+  return {
+    markets: [fixtureMarket()],
+    vaults: [vault],
+    shareTotals: {
+      vault_01: fixtureShareTotals()
+    },
+    boards: fixtureBoardsForVault(vault),
+    nfts: [fixtureNft(user)],
+    lvstAccounts: [fixtureLvstAccount(user)]
+  };
+};
 
 export type RecordedWrite = {
   readonly action: string;

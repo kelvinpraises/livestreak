@@ -458,10 +458,15 @@ body {
 }
 .wallet-dialog-overlay[data-state="open"]   { animation: fadeIn 0.15s ease-out; }
 .wallet-dialog-overlay[data-state="closed"] { animation: fadeOut 0.12s ease-in; }
-/* !important so our scale+blur entry wins over the atom's baked-in
-   tw-animate-css `animate-in zoom-in-95` on the same element. */
-.wallet-dialog-content[data-state="open"]   { animation: dialogIn 0.2s cubic-bezier(0.23, 1, 0.32, 1) !important; }
-.wallet-dialog-content[data-state="closed"] { animation: dialogOut 0.15s cubic-bezier(0.23, 1, 0.32, 1) !important; }
+/* Centering-correct enter/exit for EVERY Dialog. The dialogIn/dialogOut
+   keyframes preserve translate(-50%,-50%), so the content fades+scales from
+   its true center. Keyed on the atom's data-slot so plain <Dialog> instances
+   (no wallet-dialog-content class) are centered too. The transform-animating
+   tw-animate-css classes have been removed from DialogContent, so no
+   !important / per-instance override is needed. */
+[data-slot="dialog-content"] { transform-origin: center; }
+[data-slot="dialog-content"][data-state="open"]   { animation: dialogIn 0.2s cubic-bezier(0.23, 1, 0.32, 1); }
+[data-slot="dialog-content"][data-state="closed"] { animation: dialogOut 0.15s cubic-bezier(0.23, 1, 0.32, 1); }
 
 /* Ambient gradient mesh */
 @keyframes meshDrift {

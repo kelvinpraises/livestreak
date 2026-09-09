@@ -25,3 +25,9 @@ export {
   WAD
 } from "./curve.js";
 export type { BoardSegmentInput, BoardSegmentResult, ProjectSharesInput } from "./curve.js";
+export type {
+  FunderBoundary,
+  ProjectLivePoolSideInput,
+  ProjectVaultLivePoolsInput
+} from "./live-pool.js";
+export { projectLivePoolSide, projectVaultLivePools } from "./live-pool.js";

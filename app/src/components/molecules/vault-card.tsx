@@ -12,6 +12,7 @@ import { OptionsActionButton } from '#/components/atoms/options-action-button'
 import { useVaultFundingControls } from '#/hooks/use-vault-funding-controls'
 import { useVaultView } from '#/hooks/use-vault-views'
 import { useAccrualPreview } from '#/hooks/use-accrual-preview'
+import { useVaultCardUi } from '#/hooks/use-board-ui-state'
 
 export function VaultCard({ vault, index = 0, onStream }: {
   vault: OptionsVault
@@ -30,9 +31,13 @@ export function VaultCard({ vault, index = 0, onStream }: {
   const useOptions = optionsEnabled && options.isConnected
   const funding = useVaultFundingControls(vault.vaultId)
   const side = view.userPosition?.side
-  const [expanded, setExpanded] = useState(false)
-  const [streamSide, setStreamSide] = useState<'yes' | 'no' | null>(null)
-  const [streamRate, setStreamRate] = useState(0)
+  // A1/S5: expanded + selected side + amount persist across the board's periodic refresh so a
+  // mid-fund user is never collapsed back to step 0.
+  const {
+    expanded, setExpanded,
+    side: streamSide, setSide: setStreamSide,
+    rate: streamRate, setRate: setStreamRate,
+  } = useVaultCardUi(vault.vaultId)
   const [fundDurationMin] = useState(DEFAULT_FUND_DURATION_MIN)
   const [fundBusy, setFundBusy] = useState(false)
   const [fundError, setFundError] = useState<string | null>(null)
@@ -226,8 +231,8 @@ export function VaultCard({ vault, index = 0, onStream }: {
                 <div data-testid={`fund-amount-${vault.vaultId}`} style={{ marginBottom: 14 }}>
                   <StreamSlider
                     vaultId={vault.vaultId}
-                    initialSide={funding.activeFundedSide ?? view.userPosition?.side ?? null}
-                    initialRate={view.userPosition ? 0.8 : 0}
+                    initialSide={funding.activeFundedSide ?? streamSide ?? view.userPosition?.side ?? null}
+                    initialRate={streamRate > 0 ? streamRate : (view.userPosition ? 0.8 : 0)}
                     compact
                     fundYes={funding.fundYes}
                     fundNo={funding.fundNo}
@@ -243,6 +248,56 @@ export function VaultCard({ vault, index = 0, onStream }: {
                     showPreview={funding.useOptions}
                     onStream={(nextSide, nextRate) => { setStreamSide(nextSide); setStreamRate(nextRate) }}
                   />
+                  {/* S3/A2: keyboard- and test-accessible alternative to the drag slider. Pick a side
+                      and type a rate — no sub-pixel dragging, no synthetic OS mouse events needed. */}
+                  <div
+                    role="group"
+                    aria-label="Choose side and stream rate"
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}
+                  >
+                    <button
+                      type="button"
+                      data-testid={`fund-side-no-${vault.vaultId}`}
+                      aria-pressed={streamSide === 'no'}
+                      disabled={funding.useOptions && funding.fundNo?.disabled}
+                      onClick={() => setStreamSide('no')}
+                      style={sideToggleStyle(streamSide === 'no', '#ff2d78')}
+                    >
+                      NO
+                    </button>
+                    <button
+                      type="button"
+                      data-testid={`fund-side-yes-${vault.vaultId}`}
+                      aria-pressed={streamSide === 'yes'}
+                      disabled={funding.useOptions && funding.fundYes?.disabled}
+                      onClick={() => setStreamSide('yes')}
+                      style={sideToggleStyle(streamSide === 'yes', '#00ff87')}
+                    >
+                      YES
+                    </button>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      max={10}
+                      step={0.1}
+                      data-testid={`fund-amount-input-${vault.vaultId}`}
+                      aria-label="Stream rate in USDC per minute"
+                      value={streamRate > 0 ? Number(streamRate.toFixed(2)) : ''}
+                      placeholder="0.00"
+                      onChange={e => {
+                        const parsed = parseFloat(e.target.value)
+                        setStreamRate(Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, 10)) : 0)
+                      }}
+                      style={{
+                        width: 84, padding: '7px 8px', borderRadius: 7,
+                        border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)',
+                        color: 'rgba(255,255,255,0.85)', fontSize: 12, fontFamily: 'var(--font-mono)',
+                        textAlign: 'right',
+                      }}
+                    />
+                    <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>/min</span>
+                  </div>
                   {streamSide && streamRate > 0.01 && (
                     <p className="mono" style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', margin: '8px 0 0' }}>
                       Funding ${fundCommitmentUsd(streamRate, fundDurationMin).toFixed(2)} over {fundDurationMin} min
@@ -277,7 +332,7 @@ export function VaultCard({ vault, index = 0, onStream }: {
                     {fundBusy
                       ? '...'
                       : !streamSide
-                        ? 'DRAG TO CHOOSE A SIDE'
+                        ? 'CHOOSE A SIDE'
                         : needsMint
                           ? `BACK VAULT → ${streamSide.toUpperCase()}`
                           : `STREAM → ${streamSide.toUpperCase()}`}
@@ -447,6 +502,17 @@ function ExpandedDetails({ vault, poolPct, view }: { vault: OptionsVault; poolPc
       </div>
     </div>
   )
+}
+
+function sideToggleStyle(active: boolean, accent: string): CSSProperties {
+  return {
+    padding: '7px 12px', borderRadius: 7, cursor: 'pointer',
+    border: `1px solid ${active ? accent : 'rgba(255,255,255,0.12)'}`,
+    background: active ? `${accent}22` : 'rgba(255,255,255,0.04)',
+    color: active ? accent : 'rgba(255,255,255,0.5)',
+    fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '0.06em',
+    transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+  }
 }
 
 function severityLabel(severity?: number): string {

@@ -1,6 +1,7 @@
 import type {
   OptionsMarketSnapshot,
-  OptionsVault
+  OptionsVault,
+  OptionsVaultSnapshot
 } from "@livestreak/options";
 import type {
   CatalogChain,
@@ -9,9 +10,9 @@ import type {
   HostStreamDetail,
   HostStreamSummary
 } from "./types.js";
+import { projectVaultPools, usdcFromBase, vaultPoolUsdc } from "./pools.js";
 
-// USDC base unit scale (6 decimals) — vault pools are bigint USDC base units.
-const USDC_SCALE = 1_000_000;
+export { vaultPoolUsdc } from "./pools.js";
 
 // Pure projection of an on-chain market snapshot into the catalog/homepage shapes the
 // app consumes. No I/O — fully unit-testable. `nowMs` is injected so elapsed/expiry are
@@ -25,22 +26,49 @@ export interface MappedMarket {
   readonly totalVolume: number;
 }
 
-const usdc = (value: bigint): number => Number(value) / USDC_SCALE;
+const usdc = usdcFromBase;
+
+// SINGLE source of truth for "a vault's pooled USDC". Both the live path (`mapMarket`,
+// served at /catalog/full) and the DB read-model path (`snapshotToRows` -> `vaultRowToLiveRaw`,
+// served at /homepage + /stream) derive a vault's **effective** pool through THIS function,
+// consuming agent-3's board-replayed `livePoolUSDC` when vault snapshots are available.
+// Settled on-chain totals remain on `yes_pool`/`no_pool` for optional `settledPool` sublines.
+// Routing every effective pool read through one cent-rounded formula means the homepage vault
+// card and the per-stream pool can never drift. (pass-4 pool UX.)
+
+// Parse a base-unit USDC string (DB row column) back to bigint; malformed text -> 0n so one
+// bad row never NaNs the whole rail.
+const toBaseUnits = (text: string): bigint => {
+  try {
+    return BigInt(text);
+  } catch {
+    return 0n;
+  }
+};
 
 const isOpen = (vault: OptionsVault): boolean =>
   vault.status === "open" || vault.status === "hot";
 
 // Implied payout multiplier for the favoured side: total pool / winning-side stake.
-// Empty/one-sided pools fall back to a sane default so the UI never shows 0/Infinity.
-const impliedMultiplier = (vault: OptionsVault): number => {
-  const yes = Number(vault.pools.yes);
-  const no = Number(vault.pools.no);
-  const total = yes + no;
+// Uses effective (live) pool legs when provided so a just-funded vault shows sane odds.
+const impliedMultiplierFromPools = (yes: bigint, no: bigint): number => {
+  const yesN = Number(yes);
+  const noN = Number(no);
+  const total = yesN + noN;
   if (total <= 0) return 2;
-  const yesMult = yes > 0 ? total / yes : 1;
-  const noMult = no > 0 ? total / no : 1;
+  const yesMult = yesN > 0 ? total / yesN : 1;
+  const noMult = noN > 0 ? total / noN : 1;
   const best = Math.max(yesMult, noMult);
   return Math.round(best * 100) / 100;
+};
+
+const impliedMultiplier = (
+  vault: OptionsVault,
+  snapshot?: OptionsVaultSnapshot,
+  atMs?: number
+): number => {
+  const pools = projectVaultPools(vault, snapshot, atMs ?? Date.now());
+  return impliedMultiplierFromPools(pools.liveYes, pools.liveNo);
 };
 
 const formatElapsed = (fromMs: number, nowMs: number): string => {
@@ -67,7 +95,8 @@ export const mapMarket = (
   chain: CatalogChain,
   snap: OptionsMarketSnapshot,
   nowMs: number,
-  baseUrl: string
+  baseUrl: string,
+  vaultSnapshots?: ReadonlyMap<string, OptionsVaultSnapshot>
 ): MappedMarket => {
   const marketId = String(snap.market.marketId);
   const title = snap.market.title;
@@ -83,8 +112,11 @@ export const mapMarket = (
   const lifetimeVaults: HomepageLifetimeVaultRaw[] = [];
 
   for (const vault of snap.vaults) {
-    const pool = usdc(vault.pools.yes + vault.pools.no);
-    totalVolume += pool;
+    const snapshot = vaultSnapshots?.get(String(vault.vaultId));
+    const pools = projectVaultPools(vault, snapshot, nowMs);
+    const effectivePool = vaultPoolUsdc(pools.liveYes, pools.liveNo);
+    const settledPool = vaultPoolUsdc(pools.settledYes, pools.settledNo);
+    totalVolume += effectivePool;
 
     if (isOpen(vault)) {
       activeVaults += 1;
@@ -93,8 +125,9 @@ export const mapMarket = (
         streamId: marketId,
         streamTitle: title,
         option: vault.question,
-        multiplier: impliedMultiplier(vault),
-        totalPool: pool,
+        multiplier: impliedMultiplier(vault, snapshot, nowMs),
+        totalPool: effectivePool,
+        ...(settledPool === effectivePool ? {} : { settledPool }),
         status: vault.status === "hot" ? "hot" : "open",
         expiresIn: Math.max(
           0,
@@ -111,10 +144,10 @@ export const mapMarket = (
         option: vault.question,
         streamTitle: title,
         outcome: vault.outcome,
-        totalPool: pool,
+        totalPool: settledPool,
         resolvedAgoMs: Math.max(0, nowMs - resolvedAtMs),
-        yesTotal: usdc(vault.pools.yes),
-        noTotal: usdc(vault.pools.no),
+        yesTotal: usdc(pools.settledYes),
+        noTotal: usdc(pools.settledNo),
         chain
       });
     }
@@ -176,7 +209,7 @@ import type {
 
 const poolUsdc = (text: string): number => {
   try {
-    return Number(BigInt(text)) / USDC_SCALE;
+    return usdcFromBase(BigInt(text));
   } catch {
     return 0;
   }
@@ -202,7 +235,8 @@ export const snapshotToRows = (
   chain: CatalogChain,
   snap: OptionsMarketSnapshot,
   nowMs: number,
-  baseUrl: string
+  baseUrl: string,
+  vaultSnapshots?: ReadonlyMap<string, OptionsVaultSnapshot>
 ): MarketRows => {
   const marketId = String(snap.market.marketId);
   const title = snap.market.title;
@@ -218,11 +252,16 @@ export const snapshotToRows = (
   const resolutions: NewResolution[] = [];
 
   for (const vault of snap.vaults) {
-    const yesPool = vault.pools.yes;
-    const noPool = vault.pools.no;
-    totalPooled += usdc(yesPool + noPool);
+    const snapshot = vaultSnapshots?.get(String(vault.vaultId));
+    const pools = projectVaultPools(vault, snapshot, nowMs);
+    const effectivePool = vaultPoolUsdc(pools.liveYes, pools.liveNo);
+    const settledPool = vaultPoolUsdc(pools.settledYes, pools.settledNo);
     const resolved =
       vault.status === "resolved" && (vault.outcome === "yes" || vault.outcome === "no");
+    // Market total is the sum of the SAME per-vault effective pool the homepage rail shows
+    // (board-replayed `livePoolUSDC` for open vaults; settled for resolved). Keeps
+    // `/stream.totalPooled`, `protocolStats.totalVolume`, and `liveVaults[].totalPool` aligned.
+    totalPooled += resolved ? settledPool : effectivePool;
     if (vault.status === "open" || vault.status === "hot") activeVaults += 1;
     const resolvedAtMs = vault.timing.resolvedAtMs ?? null;
 
@@ -234,8 +273,10 @@ export const snapshotToRows = (
       side: null,
       status: vault.status,
       resolved_outcome: resolved ? vault.outcome : null,
-      yes_pool: yesPool.toString(),
-      no_pool: noPool.toString(),
+      yes_pool: pools.settledYes.toString(),
+      no_pool: pools.settledNo.toString(),
+      live_yes_pool: pools.liveYes.toString(),
+      live_no_pool: pools.liveNo.toString(),
       expires_at_ms: vault.timing.expiresAtMs,
       resolved_at_ms: resolvedAtMs,
       updated_at: nowMs
@@ -247,8 +288,8 @@ export const snapshotToRows = (
         market_id: marketId,
         chain,
         outcome: vault.outcome as string,
-        yes_total: yesPool.toString(),
-        no_total: noPool.toString(),
+        yes_total: pools.settledYes.toString(),
+        no_total: pools.settledNo.toString(),
         resolved_at: vault.timing.resolvedAtMs ?? vault.timing.expiresAtMs
       });
     }
@@ -304,16 +345,24 @@ export const vaultRowToLiveRaw = (
   v: Vault,
   streamTitle: string,
   nowMs: number
-): HomepageLiveVaultRaw => {
-  const yes = poolUsdc(v.yes_pool);
-  const no = poolUsdc(v.no_pool);
+): HomepageLiveVaultRaw & { readonly settledPool?: number } => {
+  const liveYes = toBaseUnits(v.live_yes_pool);
+  const liveNo = toBaseUnits(v.live_no_pool);
+  const settledYes = toBaseUnits(v.yes_pool);
+  const settledNo = toBaseUnits(v.no_pool);
+  const useLive = liveYes + liveNo > 0n;
+  const effectiveYes = useLive ? liveYes : settledYes;
+  const effectiveNo = useLive ? liveNo : settledNo;
+  const effectivePool = vaultPoolUsdc(effectiveYes, effectiveNo);
+  const settledPool = vaultPoolUsdc(settledYes, settledNo);
   return {
     id: v.id,
     streamId: v.market_id,
     streamTitle,
     option: v.question,
-    multiplier: multiplierFromPools(yes, no),
-    totalPool: Math.round((yes + no) * 100) / 100,
+    multiplier: multiplierFromPools(Number(effectiveYes), Number(effectiveNo)),
+    totalPool: effectivePool,
+    ...(settledPool === effectivePool ? {} : { settledPool }),
     status: v.status === "hot" ? "hot" : "open",
     expiresIn: Math.max(0, Math.floor((v.expires_at_ms - nowMs) / 1000)),
     chain: v.chain
@@ -334,7 +383,7 @@ export const resolutionRowToLifetime = (
     option: question,
     streamTitle,
     outcome: r.outcome === "no" ? "no" : "yes",
-    totalPool: Math.round((yes + no) * 100) / 100,
+    totalPool: vaultPoolUsdc(toBaseUnits(r.yes_total), toBaseUnits(r.no_total)),
     resolvedAgoMs: Math.max(0, nowMs - r.resolved_at),
     yesTotal: yes,
     noTotal: no,

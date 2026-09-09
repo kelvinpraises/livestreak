@@ -38,8 +38,10 @@ export interface VaultsTable {
   side: ColumnType<string | null, string | null, string | null>; // funded side hint, if any
   status: string; // open|hot|locked|resolved|...
   resolved_outcome: ColumnType<string | null, string | null, string | null>; // yes|no|null
-  yes_pool: string; // uint256 base units as TEXT
-  no_pool: string; // uint256 base units as TEXT
+  yes_pool: string; // uint256 base units as TEXT (settled / getVaultPools)
+  no_pool: string; // uint256 base units as TEXT (settled)
+  live_yes_pool: string; // board-replayed yes pool at index time (livePoolUSDC leg)
+  live_no_pool: string; // board-replayed no pool at index time
   expires_at_ms: number;
   resolved_at_ms: ColumnType<number | null, number | null, number | null>;
   updated_at: number;

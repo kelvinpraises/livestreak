@@ -87,6 +87,21 @@ class OptionsRuntimeStoreInMemory implements OptionsRuntimeStore {
         vault,
         pools: vault.pools,
         shareTotals: { yes: 0n, no: 0n },
+        boards: {
+          yes: {
+            pool: vault.pools.yes,
+            sideRate: 0n,
+            g: 0n,
+            lastAdvanceMs: vault.timing.createdAtMs
+          },
+          no: {
+            pool: vault.pools.no,
+            sideRate: 0n,
+            g: 0n,
+            lastAdvanceMs: vault.timing.createdAtMs
+          }
+        },
+        pendingBoundaries: { yes: 0n, no: 0n },
         hot: vault.steward,
         dispute: {
           active: vault.steward.disputeId !== undefined,

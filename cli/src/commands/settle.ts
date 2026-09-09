@@ -8,17 +8,64 @@ import {
   type WithdrawInput
 } from "@livestreak/options";
 import { resolveOperatorContext } from "../gateway/operator.js";
-import { buildCallActionEnvelope, createOptionsEdge } from "../adapters/options.js";
+import { buildCallActionEnvelope, createOptionsEdge, type OptionsEdge } from "../adapters/options.js";
 import {
   configOpt,
   parseTokenId,
   parseVaultId,
   passwordOpt,
   readCommandConfig,
-  resolveTokenArg,
   tokenOpt
 } from "./args.js";
 import { renderTxResult } from "../render/output.js";
+
+// S7 — CLI ↔ UI position parity. A position minted in the UI is NOT persisted to
+// `livestreak.json.run.tokenId`, so `settle withdraw`/`claim-loss` couldn't settle it without the
+// user copying a 78-digit token id between surfaces. When `--token` is omitted (and no run.tokenId
+// is cached), discover the caller's position NFT for the vault on-chain by reading the options board
+// (scoped to the caller's address + market) and matching the NFT whose lanes include this vault.
+export const discoverTokenForVault = async (
+  edge: OptionsEdge,
+  vaultId: string,
+  userAddress: string
+): Promise<string> => {
+  const target = vaultId.trim().toLowerCase();
+  const owner = userAddress.toLowerCase();
+  const board = await edge.readBoard();
+  const matches = board.panel.nfts.filter(
+    (nft) =>
+      nft.owner.toLowerCase() === owner &&
+      nft.lanes.some((lane) => lane.vaultId.toLowerCase() === target)
+  );
+  if (matches.length === 1) {
+    return matches[0]!.tokenId;
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `multiple position NFTs found for vault ${vaultId} (tokens: ${matches
+        .map((m) => m.tokenId)
+        .join(", ")}); pass --token to choose one`
+    );
+  }
+  throw new Error(
+    `no position NFT found on-chain for vault ${vaultId} owned by ${userAddress}. ` +
+      "Pass --token <positionNFT>, or place a position on this vault first."
+  );
+};
+
+// Prefer explicit --token, then the cached run.tokenId, then on-chain discovery.
+const resolveSettleToken = async (
+  edge: OptionsEdge,
+  input: { readonly token?: string; readonly vault: string; readonly runTokenId?: string; readonly userAddress: string }
+): Promise<string> => {
+  if (input.token !== undefined && input.token.trim().length > 0) {
+    return input.token.trim();
+  }
+  if (input.runTokenId !== undefined && input.runTokenId.trim().length > 0) {
+    return input.runTokenId.trim();
+  }
+  return discoverTokenForVault(edge, input.vault, input.userAddress);
+};
 
 // Post-resolution settlement, the last leg of the keynote loop. Both paths reuse the options
 // bridge (no re-encoded chain writes): `withdraw` pulls a winning position's payout, `claim-loss`
@@ -33,11 +80,16 @@ export const runWithdraw = async (input: {
   readonly to?: string;
 }): Promise<string> => {
   const ctx = await resolveOperatorContext(input);
-  const token = resolveTokenArg(input.token, ctx.doc.run?.tokenId);
   const edge = createOptionsEdge({
     doc: ctx.doc,
     walletInit: ctx.walletInit,
     seed: ctx.seed,
+    userAddress: ctx.userAddress
+  });
+  const token = await resolveSettleToken(edge, {
+    ...(input.token === undefined ? {} : { token: input.token }),
+    vault: input.vault,
+    ...(ctx.doc.run?.tokenId === undefined ? {} : { runTokenId: ctx.doc.run.tokenId }),
     userAddress: ctx.userAddress
   });
 
@@ -60,11 +112,16 @@ export const runClaimLoss = async (input: {
   readonly to?: string;
 }): Promise<string> => {
   const ctx = await resolveOperatorContext(input);
-  const token = resolveTokenArg(input.token, ctx.doc.run?.tokenId);
   const edge = createOptionsEdge({
     doc: ctx.doc,
     walletInit: ctx.walletInit,
     seed: ctx.seed,
+    userAddress: ctx.userAddress
+  });
+  const token = await resolveSettleToken(edge, {
+    ...(input.token === undefined ? {} : { token: input.token }),
+    vault: input.vault,
+    ...(ctx.doc.run?.tokenId === undefined ? {} : { runTokenId: ctx.doc.run.tokenId }),
     userAddress: ctx.userAddress
   });
 

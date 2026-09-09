@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { useStreamTab } from '#/hooks/use-board-ui-state'
 import { FocusedVault } from '#/components/organisms/focused-vault'
 import { VaultCard } from '#/components/molecules/vault-card'
 import { ActivityFeed } from '#/components/organisms/activity-feed'
@@ -11,19 +12,19 @@ import { isOptionsModeEnabled } from '#/utils/env'
 import type { WSEvent, Position } from '#/utils/mock'
 import type { OptionsVault } from '@livestreak/options'
 
-type Tab = 'feed' | 'mine' | 'vaults'
-
 interface Props {
   vaults: OptionsVault[]
   events: WSEvent[]
   positions: Position[]
   selectedVaultId: string | null
+  streamId: string
   onDismissVault: () => void
   onStream?: (vaultId: string, side: 'yes' | 'no', rate: number, durationMinutes?: number) => void
 }
 
-export function VaultList({ vaults, events, positions, selectedVaultId, onDismissVault, onStream }: Props) {
-  const [tab, setTab] = useState<Tab>('mine')
+export function VaultList({ vaults, events, positions, selectedVaultId, streamId, onDismissVault, onStream }: Props) {
+  // A1/S5: tab persists across the board's periodic refresh (was local useState → reset to STREAMS).
+  const [tab, setTab] = useStreamTab(streamId, 'mine')
   const selectedVault = selectedVaultId ? vaults.find(v => v.vaultId === selectedVaultId) : null
 
   const options = useOptionsContext()
@@ -54,50 +55,64 @@ export function VaultList({ vaults, events, positions, selectedVaultId, onDismis
         <TabBtn active={tab === 'feed'} onClick={() => setTab('feed')}>LIVE FEED</TabBtn>
       </div>
 
-      {/* Tab content */}
+      {/* Tab content — S6: every panel stays MOUNTED and is toggled by visibility. Switching tabs is
+          instant (no unmount/remount), so the VAULTS panel never flashes a ~1.5s blank while its cards
+          re-mount and replay their entry animations. */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-        <AnimatePresence mode="wait">
-          {tab === 'mine' && (
-            <motion.div key="mine" initial={{ opacity: 0, transform: 'translateX(8px)' }} animate={{ opacity: 1, transform: 'translateX(0px)' }} exit={{ opacity: 0, transform: 'translateX(-8px)', transition: { duration: 0.1 } }} transition={{ duration: 0.15 }} style={{ height: '100%', overflowY: 'auto' }}>
-              {mintFn && !mintFn.disabled && mintFn.target?.marketId && (
-                <div style={{ padding: '14px 10px' }}>
-                  <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', margin: '0 0 10px' }}>
-                    Enter this market to open positions — mints your position NFT (your account for this market).
-                  </p>
-                  <OptionsActionButton
-                    label="Enter market — mint position NFT"
-                    fn={mintFn}
-                    onAction={() => options.mint(mintFn.target!.marketId!)}
-                    variant="green"
-                  />
-                </div>
-              )}
-              <NftPanel />
-              <MyPositions positions={positions} vaults={vaults} onSelectVault={() => { /* scroll up to focused vault handled by parent */ }} />
-            </motion.div>
+        <TabPanel active={tab === 'mine'}>
+          {mintFn && !mintFn.disabled && mintFn.target?.marketId && (
+            <div style={{ padding: '14px 10px' }}>
+              <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', margin: '0 0 10px' }}>
+                Enter this market to open positions — mints your position NFT (your account for this market).
+              </p>
+              <OptionsActionButton
+                label="Enter market — mint position NFT"
+                fn={mintFn}
+                onAction={() => options.mint(mintFn.target!.marketId!)}
+                variant="green"
+              />
+            </div>
           )}
-          {tab === 'vaults' && (
-            <motion.div key="vaults" initial={{ opacity: 0, transform: 'translateX(8px)' }} animate={{ opacity: 1, transform: 'translateX(0px)' }} exit={{ opacity: 0, transform: 'translateX(-8px)', transition: { duration: 0.1 } }} transition={{ duration: 0.15 }} style={{ height: '100%', overflowY: 'auto' }}>
-              {activeVaults.length > 0 ? (
-                <div style={{ padding: '14px 10px 4px' }}>
-                  {activeVaults.map((v, i) => (
-                    <VaultCard key={v.vaultId} vault={v} index={i} onStream={onStream} />
-                  ))}
-                </div>
-              ) : (
-                <div style={{ padding: '40px 20px', textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
-                  No active vaults in this market yet.
-                </div>
-              )}
-            </motion.div>
+          <NftPanel />
+          <MyPositions positions={positions} vaults={vaults} onSelectVault={() => { /* scroll up to focused vault handled by parent */ }} />
+        </TabPanel>
+        <TabPanel active={tab === 'vaults'}>
+          {activeVaults.length > 0 ? (
+            <div style={{ padding: '14px 10px 4px' }}>
+              {activeVaults.map((v, i) => (
+                <VaultCard key={v.vaultId} vault={v} index={i} onStream={onStream} />
+              ))}
+            </div>
+          ) : (
+            <div style={{ padding: '40px 20px', textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
+              No active vaults in this market yet.
+            </div>
           )}
-          {tab === 'feed' && (
-            <motion.div key="feed" initial={{ opacity: 0, transform: 'translateX(8px)' }} animate={{ opacity: 1, transform: 'translateX(0px)' }} exit={{ opacity: 0, transform: 'translateX(-8px)', transition: { duration: 0.1 } }} transition={{ duration: 0.15 }} style={{ height: '100%', overflow: 'hidden' }}>
-              <ActivityFeed events={events} />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        </TabPanel>
+        <TabPanel active={tab === 'feed'} overflow="hidden">
+          <ActivityFeed events={events} />
+        </TabPanel>
       </div>
+    </div>
+  )
+}
+
+function TabPanel({ active, overflow = 'auto', children }: { active: boolean; overflow?: 'auto' | 'hidden'; children: ReactNode }) {
+  return (
+    <div
+      aria-hidden={!active}
+      style={{
+        position: 'absolute', inset: 0,
+        overflowY: overflow === 'auto' ? 'auto' : 'hidden',
+        overflowX: 'hidden',
+        opacity: active ? 1 : 0,
+        transform: active ? 'translateX(0px)' : 'translateX(8px)',
+        pointerEvents: active ? 'auto' : 'none',
+        visibility: active ? 'visible' : 'hidden',
+        transition: 'opacity 0.15s ease, transform 0.15s ease',
+      }}
+    >
+      {children}
     </div>
   )
 }

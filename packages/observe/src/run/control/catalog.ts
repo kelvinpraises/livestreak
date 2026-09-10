@@ -2,6 +2,9 @@ import type { DescriptorValueSchema } from "#pipeline/shared.js";
 import type { ObserveRegistry } from "#pipeline/registry.js";
 import { builtInObserveRegistry } from "#builtins.js";
 import { pausePresentationValues } from "#pipeline/capture/index.js";
+import { marketCatalogFunctions } from "#market/control.js";
+import { systemConfigCatalogFunctions } from "./system/config.js";
+import { systemRunCatalogFunctions } from "./system/run.js";
 
 export type JsonSchema = DescriptorValueSchema;
 
@@ -78,28 +81,17 @@ const buildRegistryCatalogCells = (
 };
 
 const systemCatalogCells = (): Record<string, CatalogCell> => ({
+  "system:config": {
+    label: "Config",
+    registryKind: "system",
+    registryId: "config",
+    functions: systemConfigCatalogFunctions() as Record<string, CatalogFunction>
+  },
   "system:run": {
     label: "Run",
     registryKind: "system",
     registryId: "run",
-    functions: {
-      stop: {
-        scope: "system:run:stop",
-        label: "Stop",
-        description: "Request a clean worker stop and sink finalize.",
-        result: "patch",
-        input: {
-          type: "object",
-          properties: [
-            {
-              name: "reason",
-              value: { type: "string", description: "Optional stop reason." },
-              help: "Human-readable reason recorded on the run cell."
-            }
-          ]
-        }
-      }
-    }
+    functions: systemRunCatalogFunctions() as Record<string, CatalogFunction>
   },
   "system:pause": {
     label: "Pause",
@@ -156,6 +148,12 @@ const systemCatalogCells = (): Record<string, CatalogCell> => ({
     registryKind: "system",
     registryId: "tick",
     functions: {}
+  },
+  market: {
+    label: "Market",
+    registryKind: "system",
+    registryId: "market",
+    functions: marketCatalogFunctions() as Record<string, CatalogFunction>
   }
 });
 

@@ -5,7 +5,7 @@ import {
   pollUntilUserOperationIncluded as pollUntilUserOperationIncludedShared
 } from "@livestreak/wallet";
 import { evm } from "@livestreak/contracts";
-import { encodeAbiParameters, encodeFunctionData, keccak256 } from "viem";
+import { encodeAbiParameters, encodeFunctionData, http, keccak256, createPublicClient } from "viem";
 import type {
   EvmAddress,
   MarketLifecycleInput,
@@ -154,6 +154,31 @@ export const createEvmMarketRegistrar = (
 
       const streamId = observeRunStreamId(observer as EvmAddress, runId);
       const marketId = computeMarketId(observer as EvmAddress, streamId);
+
+      const evmConfig = config.walletInit.config as import("@livestreak/wallet").EvmErc4337WalletConfig;
+      const rpcUrl = typeof evmConfig.provider === "string" ? evmConfig.provider : undefined;
+      if (rpcUrl !== undefined) {
+        const publicClient = createPublicClient({ transport: http(rpcUrl) });
+        const alreadyRegistered = yield* Effect.tryPromise({
+          try: () =>
+            publicClient.readContract({
+              address: config.marketRegistryAddress,
+              abi: marketRegistryAbi,
+              functionName: "marketExists",
+              args: [marketId]
+            }),
+          catch: (error) => toRuntimeError("Failed to read marketExists", error)
+        });
+
+        if (alreadyRegistered) {
+          return {
+            userOpHash: `0x${"0".repeat(64)}`,
+            marketId,
+            streamId,
+            title: input.title
+          } satisfies MarketRegisterResult;
+        }
+      }
 
       const data = encodeFunctionData({
         abi: marketRegistryAbi,

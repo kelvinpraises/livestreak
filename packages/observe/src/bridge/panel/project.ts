@@ -2,10 +2,12 @@ import type { Board } from "#run/control/board/index.js";
 import type { CatalogFunction, ControlCatalog } from "#run/control/index.js";
 import type { ControlPanel } from "#run/control/bus/index.js";
 import type { ControlCellView, ControlFunctionView, ControlsView } from "./types.js";
+import { readLiveConfigurators } from "#run/control/board/visibility.js";
 
 export type { ControlCellView, ControlFunctionView, ControlsView } from "./types.js";
 
 const SYSTEM_CELL_ORDER = [
+  "system:config",
   "system:run",
   "system:pause",
   "system:memory",
@@ -39,15 +41,46 @@ const projectReferences = (
 
 const projectControls = (board: Board, catalog?: ControlCatalog): ControlsView => {
   const runState = readRunState(board);
-  const sortedCellIds = sortCellIds(Object.keys(board.cells));
+  const liveConfigurators = readLiveConfigurators(board);
+  const sortedCellIds = sortCellIds(Object.keys(board.cells)).filter((cellId) =>
+    isCellVisibleOnBoard(cellId, liveConfigurators)
+  );
 
   return {
     runId: readBoardRunId(board),
     revision: board.revision,
     cells: sortedCellIds.map((id, order) =>
-      projectCellView(id, board.cells[id], order, catalog, runState)
+      projectCellView(id, board.cells[id], order, catalog, runState, liveConfigurators)
     )
   };
+};
+
+const isCellVisibleOnBoard = (cellId: string, liveConfigurators: readonly string[]): boolean => {
+  if (cellId === "system:config") {
+    return liveConfigurators.includes("observe.system.config");
+  }
+
+  if (cellId === "system:run") {
+    return liveConfigurators.includes("observe.system.run");
+  }
+
+  if (cellId === "market") {
+    return liveConfigurators.includes("observe.market");
+  }
+
+  if (cellId.startsWith("capture:")) {
+    return liveConfigurators.includes(`observe.capture.${cellId.slice("capture:".length)}`);
+  }
+
+  if (cellId.startsWith("sink:")) {
+    return liveConfigurators.includes(`observe.sink.${cellId.slice("sink:".length)}`);
+  }
+
+  if (cellId.startsWith("system:")) {
+    return liveConfigurators.length > 1;
+  }
+
+  return true;
 };
 
 const projectCellView = (
@@ -55,7 +88,8 @@ const projectCellView = (
   cell: Board["cells"][string],
   order: number,
   catalog: ControlCatalog | undefined,
-  runState: string | undefined
+  runState: string | undefined,
+  liveConfigurators: readonly string[]
 ): ControlCellView => {
   const [state, message, updatedAtMs] = cell.status;
 
@@ -72,14 +106,24 @@ const projectCellView = (
     settings: cloneJsonRecord(cell.settings),
     readonly: cloneJsonRecord(cell.readonly),
     refs: projectReferences(cell.refs),
-    functions: cell.functions.map((name) =>
-      applyDisabledState(
-        projectFunctionView(id, cell.catalog, name, catalog),
-        state,
-        runState
+    functions: cell.functions
+      .filter((name) => isFunctionVisibleOnCell(id, name, liveConfigurators))
+      .map((name) =>
+        applyDisabledState(projectFunctionView(id, cell.catalog, name, catalog), state, runState)
       )
-    )
   };
+};
+
+const isFunctionVisibleOnCell = (
+  cellId: string,
+  fnName: string,
+  liveConfigurators: readonly string[]
+): boolean => {
+  if (cellId === "system:config" && (fnName === "configure" || fnName === "close")) {
+    return liveConfigurators.includes("observe.system.config");
+  }
+
+  return true;
 };
 
 const projectFunctionView = (
@@ -162,8 +206,13 @@ const isMutatingResultKind = (resultKind: string | undefined): boolean =>
   resultKind !== undefined && MUTATING_RESULT_KINDS.has(resultKind);
 
 const readBoardRunId = (board: Board): string => {
-  const runId = board.cells["system:run"]?.readonly?.runId;
-  return typeof runId === "string" ? runId : "";
+  const fromRun = board.cells["system:run"]?.readonly?.runId;
+  if (typeof fromRun === "string" && fromRun.length > 0) {
+    return fromRun;
+  }
+
+  const fromConfig = board.cells["system:config"]?.readonly?.runId;
+  return typeof fromConfig === "string" ? fromConfig : "";
 };
 
 const readRunState = (board: Board): string | undefined => {
@@ -185,6 +234,10 @@ const cellGroupOrder = (cellId: string): number => {
   }
   if (cellId.startsWith("sink:") || cellId.startsWith("publish:")) {
     return 3;
+  }
+
+  if (cellId === "market") {
+    return 5;
   }
 
   return 4;

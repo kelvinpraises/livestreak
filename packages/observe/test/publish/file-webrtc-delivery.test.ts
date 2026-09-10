@@ -138,14 +138,12 @@ describe("file → WebRTC delivery (host-mediated seam)", () => {
         pollIntervalMs: 5
       });
 
-      const result = await Effect.runPromise(
-        streamFileToWebRtc({
-          filePath,
-          streamId,
-          signaling: sinkSignaling,
-          peerConnectionFactory: network.factory
-        })
-      );
+      const result = await streamFileToWebRtc({
+        filePath,
+        streamId,
+        signaling: sinkSignaling,
+        peerConnectionFactory: network.factory
+      });
 
       await consumer;
       await allReceived;

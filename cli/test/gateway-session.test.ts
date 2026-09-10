@@ -6,7 +6,7 @@ import {
   parseTtlMs,
   requiredScopeForAction,
   spendAmountOfEnvelope
-} from "../src/gateway/session.js";
+} from "../src/gateway/session/registry.js";
 
 const envelope = (action: string, args: unknown = {}): CallActionEnvelope => ({
   scope: bridgeActionScope,

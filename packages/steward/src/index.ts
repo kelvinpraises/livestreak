@@ -75,7 +75,12 @@ export {
   bridgeActionScope,
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
-  bridgeControlsReadScope
+  bridgeControlsReadScope,
+  stewardConfigScope,
+  stewardConfigCloseScope,
+  createStewardRuntimeBootstrap,
+  stewardRuntimeConfigFromPackageInit,
+  stewardSubjectsFromPackageInit
 } from "./bridge/index.js";
 export type {
   BridgeCaller,

@@ -46,6 +46,10 @@ export const validateBoardSettings = (
     yield* validateCaptureBrowserSettings(board);
     yield* validateSinkCellSettings(board);
 
+    if (board.cells["system:config"] !== undefined && Object.keys(board.cells).length === 1) {
+      return board;
+    }
+
     if (view.sinks.length === 0) {
       return yield* Effect.fail(
         new LiveStreakConfigError({

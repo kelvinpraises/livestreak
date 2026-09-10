@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import type { FunctionDescriptor, JsonSchema } from "@livestreak/schema";
+
 import { projectBookmakerPanel } from "../../src/bridge/panel/project.js";
 import { projectBookmakerDescriptors } from "../../src/bridge/panel/descriptors.js";
 import { marketContext, watchSource } from "../helpers/fixtures.js";
@@ -12,19 +14,80 @@ const panelWith = (marketId: string) =>
     updatedAtMs: 1
   });
 
+const byName = (
+  descriptors: readonly FunctionDescriptor[],
+  name: string
+): FunctionDescriptor | undefined => descriptors.find((descriptor) => descriptor.name === name);
+
 describe("projectBookmakerDescriptors — canonical FunctionDescriptors", () => {
-  it("emits a createVault descriptor that round-trips as JSON (WSS leg B)", () => {
+  it("round-trips as JSON (wire-safe for WSS leg B)", () => {
     const descriptors = projectBookmakerDescriptors(panelWith("market-1"));
 
-    expect(descriptors).toHaveLength(1);
-    expect(descriptors[0]?.name).toBe("createVault");
+    expect(descriptors.length).toBeGreaterThan(0);
     expect(JSON.parse(JSON.stringify(descriptors))).toEqual(descriptors);
   });
 
+  it("emits the bookmaker:config configure root with tree identity fields", () => {
+    const configure = byName(projectBookmakerDescriptors(panelWith("market-1")), "configure");
+
+    expect(configure).toMatchObject({
+      id: "bookmaker.config.configure",
+      package: "bookmaker",
+      scope: "bookmaker:config",
+      nodeKind: "action",
+      visible: true
+    });
+    expect(configure?.inputSchema?.properties?.map((entry) => entry.name)).toEqual([
+      "marketId",
+      "runId"
+    ]);
+  });
+
+  it("emits configure + close configurator roots", () => {
+    const descriptors = projectBookmakerDescriptors(panelWith("market-1"));
+    const close = byName(descriptors, "close");
+
+    expect(close).toMatchObject({
+      id: "bookmaker.config.close",
+      package: "bookmaker",
+      scope: "bookmaker:config:close",
+      nodeKind: "action",
+      visible: true
+    });
+  });
+
+  it("emits entity groups with parentId and visible:false", () => {
+    const descriptors = projectBookmakerDescriptors(panelWith("market-1"));
+    const groups = descriptors.filter((descriptor) => descriptor.nodeKind === "group");
+    const global = groups.find((group) => group.id === "bookmaker.global");
+
+    expect(global?.parentId).toBe("bookmaker.config.configure");
+    for (const group of groups) {
+      expect(group.package).toBe("bookmaker");
+      expect(group.visible).toBe(false);
+    }
+  });
+
+  it("emits createVault as an action child with id, package, parentId, and granular scope", () => {
+    const createVault = byName(projectBookmakerDescriptors(panelWith("market-1")), "createVault");
+
+    expect(createVault).toMatchObject({
+      id: "bookmaker.global.action.createVault",
+      package: "bookmaker",
+      parentId: "bookmaker.global",
+      scope: "bridge:action:createVault",
+      nodeKind: "action",
+      visible: false,
+      disabled: false
+    });
+    expect(createVault?.target).toEqual({ kind: "vault", marketId: "market-1" });
+  });
+
   it("inputSchema mirrors CreateVaultInput (side enum + bigint-as-string stake/rate)", () => {
-    const [descriptor] = projectBookmakerDescriptors(panelWith("market-1"));
-    const props = descriptor?.inputSchema?.properties ?? [];
-    const prop = (name: string) => props.find((entry) => entry.name === name)?.value;
+    const createVault = byName(projectBookmakerDescriptors(panelWith("market-1")), "createVault");
+    const props = createVault?.inputSchema?.properties ?? [];
+    const prop = (name: string): JsonSchema | undefined =>
+      props.find((entry) => entry.name === name)?.value;
 
     expect(props.map((entry) => entry.name)).toEqual([
       "marketId",
@@ -39,19 +102,11 @@ describe("projectBookmakerDescriptors — canonical FunctionDescriptors", () => 
     expect(prop("seedRate")?.type).toBe("string");
   });
 
-  it("targets the active market and uses the granular bridge:action:createVault scope", () => {
-    const [descriptor] = projectBookmakerDescriptors(panelWith("market-1"));
-
-    expect(descriptor?.scope).toBe("bridge:action:createVault");
-    expect(descriptor?.target).toEqual({ kind: "vault", marketId: "market-1" });
-    expect(descriptor?.disabled).toBe(false);
-  });
-
   it("disables createVault when there is no market context", () => {
-    const [descriptor] = projectBookmakerDescriptors(panelWith(""));
+    const createVault = byName(projectBookmakerDescriptors(panelWith("")), "createVault");
 
-    expect(descriptor?.disabled).toBe(true);
-    expect(descriptor?.disabledReason).toBe("No market context");
-    expect(descriptor?.target).toEqual({ kind: "vault" });
+    expect(createVault?.disabled).toBe(true);
+    expect(createVault?.disabledReason).toBe("No market context");
+    expect(createVault?.target).toEqual({ kind: "vault" });
   });
 });

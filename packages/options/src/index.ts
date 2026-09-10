@@ -108,8 +108,12 @@ export {
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
   bridgeControlsReadScope,
+  optionsConfigScope,
   authorizeBridgeCaller,
-  requireAnyScope
+  requireAnyScope,
+  createOptionsRuntimeBootstrap,
+  optionsChainConfigFromPackageInit,
+  optionsRuntimeConfigFromPackageInit
 } from "./bridge/index.js";
 export type {
   OptionsRuntime,

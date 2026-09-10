@@ -83,6 +83,10 @@ const projectSinkPolicies = (board: Board): readonly WorkerControlSinkPolicy[] =
       continue;
     }
 
+    if (cell.readonly?.configured === false) {
+      continue;
+    }
+
     policies.push({
       sinkId: cellId.slice("sink:".length),
       kind: catalogKindToSinkKind(cell.catalog),
@@ -97,6 +101,9 @@ const projectSinkPolicies = (board: Board): readonly WorkerControlSinkPolicy[] =
 const catalogKindToSinkKind = (catalog: string | undefined): string => {
   if (catalog === "sink:file") {
     return "file";
+  }
+  if (catalog === "sink:local") {
+    return "local";
   }
   return "unknown";
 };

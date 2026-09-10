@@ -58,6 +58,11 @@ export interface LocalSinkDriverOptions {
   readonly connectTimeoutMs?: number;
 }
 
+import {
+  localSinkCloseCommand,
+  localSinkConfigureCommand
+} from "./commands.js";
+
 const attachmentId = "local-preview";
 const defaultChannelLabel = "livestreak-video";
 const defaultConnectTimeoutMs = 5000;
@@ -104,7 +109,7 @@ export const localSinkDescriptor: SinkDriverDescriptor = {
       "Override the data channel label used for local WebRTC delivery."
     )
   ],
-  commands: [],
+  commands: [localSinkConfigureCommand, localSinkCloseCommand],
   mode: "local",
   requiresHost: false,
   debugOnly: false

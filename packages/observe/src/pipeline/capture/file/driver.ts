@@ -20,6 +20,11 @@ export interface FileCaptureDriverOptions {
   readonly binaries?: FfmpegBinaries;
 }
 
+import {
+  fileCaptureCloseCommand,
+  fileCaptureConfigureCommand
+} from "./commands.js";
+
 const sourceId = "capture:file";
 
 interface NodeFsPromises {
@@ -65,7 +70,7 @@ export const fileCaptureDescriptor: CaptureDriverDescriptor = {
   flags: [
     flag("path", stringValue("Path to the media file to replay.", true), "Read frames from a local file.")
   ],
-  commands: [],
+  commands: [fileCaptureConfigureCommand, fileCaptureCloseCommand],
   sourceType: "file",
   sourceMode: "file"
 };
@@ -171,7 +176,7 @@ const describeFileCaptureCell = (
         sourceType: "file",
         sourceMode: "file"
       },
-      functions: []
+      functions: ["configure", "close"]
     }
   };
 };

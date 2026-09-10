@@ -14,7 +14,7 @@ const browserBoardSettings = {
 const buildDescriptors = () => {
   const board = createBrowserBoardFixture("run_descriptors", browserBoardSettings);
   const catalog = buildControlCatalog();
-  return projectObserveDescriptors(projectControlPanelControls({ board, catalog }));
+  return projectObserveDescriptors(projectControlPanelControls({ board, catalog }), board);
 };
 
 describe("projectObserveDescriptors — canonical FunctionDescriptors", () => {
@@ -44,6 +44,8 @@ describe("projectObserveDescriptors — canonical FunctionDescriptors", () => {
     const descriptors = buildDescriptors();
 
     for (const descriptor of descriptors) {
+      expect(typeof descriptor.id).toBe("string");
+      expect(descriptor.package).toBe("observe");
       expect(typeof descriptor.target?.kind).toBe("string");
       expect(typeof descriptor.disabled).toBe("boolean");
       expect(descriptor.label.length).toBeGreaterThan(0);

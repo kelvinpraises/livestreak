@@ -101,7 +101,7 @@ export {
   validateBookmakerRuntimeConfig
 } from "./runtime/index.js";
 export type { BookmakerPanelSnapshot, BookmakerPanelView } from "./bridge/panel/index.js";
-export { projectBookmakerPanel } from "./bridge/panel/index.js";
+export { projectBookmakerPanel, projectBookmakerDescriptors } from "./bridge/panel/index.js";
 export type {
   BookmakerBridge,
   BridgeCaller,
@@ -117,5 +117,10 @@ export {
   bridgeActionScope,
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
-  bridgeControlsReadScope
+  bridgeControlsReadScope,
+  bookmakerConfigScope,
+  bookmakerConfigCloseScope,
+  createBookmakerRuntimeBootstrap,
+  bookmakerChainConfigFromPackageInit,
+  bookmakerRuntimeConfigFromPackageInit
 } from "./bridge/index.js";

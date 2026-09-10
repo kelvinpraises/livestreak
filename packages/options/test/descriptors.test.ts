@@ -27,10 +27,66 @@ describe("projectOptionsDescriptors — canonical FunctionDescriptors", () => {
     expect(JSON.parse(JSON.stringify(descriptors))).toEqual(descriptors);
   });
 
+  it("emits the options:config configure root with tree identity fields", async () => {
+    const descriptors = await buildDescriptors();
+    const configure = descriptors.find((descriptor) => descriptor.name === "configure");
+
+    expect(configure).toMatchObject({
+      id: "options.config.configure",
+      package: "options",
+      scope: "options:config",
+      nodeKind: "action",
+      visible: true
+    });
+    expect(configure?.inputSchema?.properties?.map((entry) => entry.name)).toEqual(["marketId"]);
+  });
+
+  it("emits entity groups (market → vault → nft → lvst) with parentId and visible:false", async () => {
+    const descriptors = await buildDescriptors();
+    const groups = descriptors.filter((descriptor) => descriptor.nodeKind === "group");
+
+    expect(groups.length).toBeGreaterThan(0);
+    const lvst = groups.find((group) => group.id === "options.lvst");
+    const market = groups.find((group) => group.id === "options.market.market_01");
+    const vault = groups.find((group) => group.id?.startsWith("options.vault."));
+    const nft = groups.find((group) => group.id?.startsWith("options.nft."));
+
+    expect(lvst?.parentId).toBe("options.config.configure");
+    expect(market?.parentId).toBe("options.config.configure");
+    if (vault !== undefined) {
+      expect(vault.parentId).toBe(market?.id);
+    }
+    if (nft !== undefined) {
+      expect(nft.parentId).toBe(market?.id);
+    }
+
+    for (const group of groups) {
+      expect(group.package).toBe("options");
+      expect(group.visible).toBe(false);
+    }
+  });
+
+  it("emits action children with id, package, parentId, and bridge:action:<name> scope", async () => {
+    const descriptors = await buildDescriptors();
+    const actions = descriptors.filter((descriptor) => descriptor.nodeKind === "action" && descriptor.name !== "configure");
+
+    expect(actions.length).toBeGreaterThan(0);
+    for (const action of actions) {
+      expect(action.id.length).toBeGreaterThan(0);
+      expect(action.package).toBe("options");
+      expect(action.parentId).toBeDefined();
+      expect(action.visible).toBe(false);
+      expect(action.scope.startsWith("bridge:action:")).toBe(true);
+    }
+  });
+
   it("emits a real inputSchema (not a type-name string) for every arg-bearing function", async () => {
     const descriptors = await buildDescriptors();
+    const actions = descriptors.filter(
+      (descriptor) => descriptor.nodeKind === "action" && descriptor.name !== "configure"
+    );
 
-    for (const descriptor of descriptors) {
+    for (const descriptor of actions) {
       if (descriptor.name === "claimDividends") {
         expect(descriptor.inputSchema).toBeUndefined();
         continue;
@@ -78,11 +134,14 @@ describe("projectOptionsDescriptors — canonical FunctionDescriptors", () => {
     const descriptors = await buildDescriptors();
     const setApprovalForAll = byName(descriptors, "setApprovalForAll");
 
-    // Scope-unification (wave 5): the console scope is uniform + granular, not options:<kind>:<name>.
     expect(setApprovalForAll?.scope).toBe("bridge:action:setApprovalForAll");
     expect(byName(descriptors, "fund")?.scope).toBe("bridge:action:fund");
     expect(byName(descriptors, "mintWithSalt")?.scope).toBe("bridge:action:mintWithSalt");
-    for (const descriptor of descriptors) {
+
+    const actions = descriptors.filter(
+      (descriptor) => descriptor.nodeKind === "action" && descriptor.name !== "configure"
+    );
+    for (const descriptor of actions) {
       expect(typeof descriptor.disabled).toBe("boolean");
       expect(descriptor.scope.startsWith("bridge:action:")).toBe(true);
     }

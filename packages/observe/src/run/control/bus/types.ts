@@ -20,10 +20,17 @@ export interface BoardSectionPatch {
 }
 
 export interface BoardCellPatch {
+  /** When true, remove this cell from the board (configurator close). */
+  readonly remove?: boolean;
+  /** When the cell id is absent, supply a full cell to mount (board-first configure). */
+  readonly create?: BoardCell;
   readonly settings?: BoardSectionPatch;
   readonly readonly?: BoardSectionPatch;
   readonly status?: BoardCellStatus;
   readonly refs?: BoardSectionPatch;
+  readonly label?: string;
+  readonly catalog?: string;
+  readonly functions?: readonly string[];
 }
 
 export interface BoardPatch {

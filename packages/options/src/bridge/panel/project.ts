@@ -191,25 +191,21 @@ const CATALOG = {
 } as const satisfies Record<string, CatalogEntry>;
 
 const projectMintFunctions = (panel: OptionsPanel, functions: OptionsFunctionView[]): void => {
-  const activeMarketId = panel.user.marketId;
-  if (activeMarketId === undefined) {
-    return;
+  for (const market of panel.markets) {
+    const target: OptionsFunctionTarget = { kind: "market", marketId: market.marketId };
+    const hasNft = panel.nfts.some((nft) => nft.marketId === market.marketId);
+
+    functions.push(
+      hasNft
+        ? disabledFunction(CATALOG.mint, target, "Already entered this market")
+        : enabledFunction(CATALOG.mint, target)
+    );
+    functions.push(
+      hasNft
+        ? disabledFunction(CATALOG.mintWithSalt, target, "Already entered this market")
+        : enabledFunction(CATALOG.mintWithSalt, target)
+    );
   }
-
-  const target: OptionsFunctionTarget = { kind: "market", marketId: activeMarketId };
-  const hasNft = panel.nfts.some((nft) => nft.marketId === activeMarketId);
-
-  functions.push(
-    hasNft
-      ? disabledFunction(CATALOG.mint, target, "Already entered this market")
-      : enabledFunction(CATALOG.mint, target)
-  );
-  // mintWithSalt (deterministic tokenId) shares mint's gating: same market, same "already entered".
-  functions.push(
-    hasNft
-      ? disabledFunction(CATALOG.mintWithSalt, target, "Already entered this market")
-      : enabledFunction(CATALOG.mintWithSalt, target)
-  );
 };
 
 const projectLvstFunctions = (panel: OptionsPanel, functions: OptionsFunctionView[]): void => {

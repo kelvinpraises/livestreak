@@ -67,3 +67,52 @@ require leg-A gateway auth.
 
 The only manual step is flipping a **real browser** at `/remote/<code>` — the keynote moment, not
 automatable here.
+
+---
+
+## E2E success criteria (go-live keynote)
+
+**Canonical scope:** `docs/GO-LIVE-SCOPE.md`. This section is the host-facing summary.
+
+### Product path (board-first — no `produce`)
+
+```
+settings init → auth login → remote open
+→ browser /remote/<code> unlock
+→ Observe: configure → market.register → copy marketId from board
+→ Options: configure(marketId) → setApprovalForAll → fund
+→ Steward: resolve
+→ Options: withdraw / claim
+```
+
+The CLI gateway relays `call` / `board_patch` per package (`target=observe|options|steward|bookmaker`).
+The seed never leaves the gateway process.
+
+### Agent-5 hard gates
+
+| Check | Pass |
+|-------|------|
+| Pairing unlock + WSS `open` | Remote session live |
+| Observe T0 board | Only `system:config` until `configure` |
+| After configure | Pipeline cells + `market.register` available |
+| `market.register` | Board shows `marketId` |
+| Options fund | On-chain userOp after manual `marketId` paste |
+| Steward resolve + Options settle | Completes lifecycle |
+
+### Preflight (not remote UI)
+
+- Regenerate `settings.json` after `./dev.sh` force deploy (addresses change)
+- Mint test USDC to operator Safe via `cast` (see `host/docs/dev-stack.md`)
+- On `ExecutionFailed 0xacfdb444`: `cast run <userOpHash>` for inner revert
+
+### Soft / deferred
+
+- **S4 live WebRTC** — host `/webrtc/signal` exists; app consumer is agent-1; watchUrl/VOD OK for agent-5
+- **Bookmaker tab** — optional; not required for minimal keynote
+- **Headless automation** — agent-3 remote driver uses same WSS relay as browser
+
+### Do not
+
+- Restore `produce` as canonical path
+- Auto-inject `marketId` across app tabs
+- Use `LocalMockTransport` for remote proof

@@ -28,11 +28,11 @@ describe("projectBoardControls", () => {
     const shuffledBoard = {
       ...board,
       cells: {
+        ...board.cells,
         "sink:file-export": board.cells["sink:file-export"],
         "process:football": {
           label: "Football",
           catalog: "process:football",
-           
           status: ["idle", null, Date.now()] as const,
           functions: ["analyze"]
         },
@@ -43,7 +43,6 @@ describe("projectBoardControls", () => {
         "system:run": board.cells["system:run"],
         "future:widget": {
           label: "Widget",
-           
           status: ["idle", null, Date.now()] as const,
           functions: []
         }

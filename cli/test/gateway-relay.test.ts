@@ -1,7 +1,7 @@
 import { bridgeActionScope, type HostCallFrame } from "@livestreak/schema";
 import { describe, expect, it, vi } from "vitest";
-import { assertNoSeedInFrame, createRelay, type DispatchFn } from "../src/gateway/relay.js";
-import { SessionRegistry } from "../src/gateway/session.js";
+import { assertNoSeedInFrame, createRelay, type DispatchFn } from "../src/gateway/remote/relay.js";
+import { SessionRegistry } from "../src/gateway/session/registry.js";
 
 const callFrame = (sessionId: string, action: string, args: unknown = {}): HostCallFrame => ({
   type: "call",

@@ -3,8 +3,16 @@ export {
   bridgeActionScope,
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
-  bridgeControlsReadScope
+  bridgeControlsReadScope,
+  stewardConfigScope,
+  stewardConfigCloseScope
 } from "./types.js";
+export {
+  createStewardRuntimeBootstrap,
+  stewardRuntimeConfigFromPackageInit,
+  stewardSubjectsFromPackageInit
+} from "./runtime/init.js";
+export type { PackageRuntimeInit, SessionWallet } from "./runtime/init.js";
 export type {
   BridgeCaller,
   CallActionEnvelope,

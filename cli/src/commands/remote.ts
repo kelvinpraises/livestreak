@@ -1,14 +1,21 @@
 import { Command, Options } from "@effect/cli";
 import { Console, Effect, Option } from "effect";
 import type { BridgeCaller, CallActionEnvelope } from "@livestreak/schema";
-import { createOptionsEdge } from "../adapters/options.js";
-import { resolveOperatorContext } from "../gateway/operator.js";
-import { resolvePassword } from "../gateway/password.js";
-import { defaultKeystorePath, ensureAndUnlock } from "../gateway/keystore.js";
-import { createRelay, type DispatchFn } from "../gateway/relay.js";
-import { SessionRegistry, parseScopes, parseTtlMs } from "../gateway/session.js";
-import { generatePairingPassword, makePasswordVerifier } from "../gateway/pairing.js";
-import { projectConsoleFunctions } from "../gateway/console-functions.js";
+import { createConsoleEdges } from "../gateway/console/edges.js";
+import {
+  buildConsoleRoutes,
+  createMergedDispatch,
+  mergeConsoleDescriptors,
+  type ConsoleEdge
+} from "../gateway/console/edge.js";
+import { resolvePassword } from "../gateway/auth/password.js";
+import { resolveOperator } from "../gateway/auth/identity.js";
+import { defaultKeystorePath, ensureAndUnlock } from "../gateway/auth/keystore.js";
+import { createRelay } from "../gateway/remote/relay.js";
+import { SessionRegistry, parseScopes, parseTtlMs } from "../gateway/session/registry.js";
+import { generatePairingPassword, makePasswordVerifier } from "../gateway/session/pairing.js";
+import { projectConsoleFunctions } from "../gateway/console/functions.js";
+import { buildSessionWallet } from "../gateway/auth/session-wallet.js";
 import {
   activeSessions,
   defaultSessionStorePath,
@@ -16,39 +23,35 @@ import {
   markRevoked,
   upsertSession,
   type StoredSession
-} from "../gateway/session-store.js";
-import { connectGateway } from "../gateway/wss-client.js";
-import { configOpt, passwordOpt, readCommandConfig } from "./args.js";
+} from "../gateway/session/store.js";
+import { connectGateway } from "../gateway/remote/wss-client.js";
+import { ensureSettings, defaultSettingsPath } from "../prefs/settings.js";
+import { passwordOpt } from "./args.js";
 
-// Derive the leg-A WSS url from the configured host http(s) url unless overridden.
-// The host serves leg A at `ws://<host>/remote/<session>/gateway` (see
-// host/src/infrastructure/ws/server.ts `parseRemotePath`) — the canonical merged-console path. We
-// build a per-session url here; an explicit override / LIVESTREAK_HOST_WSS may either be a full
-// session url (used as-is) or a base origin we append the remote path to.
 const deriveHostWss = (hostUrl: string, sessionId: string, override?: string): string => {
   const base =
     override ??
     process.env["LIVESTREAK_HOST_WSS"] ??
     `${hostUrl.replace(/^http/, "ws").replace(/\/$/, "")}`;
-  // If the caller already pointed us at a concrete remote leg-A path, respect it verbatim.
   if (/\/remote\/[^/]+\/gateway\/?$/.test(base)) {
     return base;
   }
   return `${base.replace(/\/$/, "")}/remote/${encodeURIComponent(sessionId)}/gateway`;
 };
 
-// S11: the remote operator must land on the APP origin's gate (`/remote/<code>`), NOT the host
-// stub. The host's leg-A ack returns a host-side URL; we instead derive + print the app-origin URL
-// the user should actually open. Defaults to the local app origin; override with LIVESTREAK_APP_ORIGIN.
 const resolveAppOrigin = (override?: string): string =>
   (override ?? process.env["LIVESTREAK_APP_ORIGIN"] ?? "http://localhost:3000").replace(/\/$/, "");
 
 const appRemoteUrl = (origin: string, sessionId: string): string =>
   `${origin}/remote/${encodeURIComponent(sessionId)}`;
 
-// `remote open` — mint a scoped, expiring session, dial the host, and run the relay loop until SIGINT.
+const serializeRemoteBoard = (board: unknown): unknown =>
+  JSON.parse(
+    JSON.stringify(board, (_key, value) => (typeof value === "bigint" ? value.toString() : value))
+  );
+
 export const runRemoteOpen = async (input: {
-  readonly configPath?: string;
+  readonly settingsPath?: string;
   readonly password?: string;
   readonly scopes: string;
   readonly ttl: string;
@@ -62,17 +65,17 @@ export const runRemoteOpen = async (input: {
   const ttlMs = parseTtlMs(input.ttl);
   const spendCapUSDC = input.spendCap === undefined ? undefined : BigInt(input.spendCap);
 
-  // The PAIRING password is shared with the remote user and is SEPARATE from the keystore password.
-  // Only its scrypt verifier crosses the wire; the host never sees the plaintext.
   const pairingPassword = input.pairPassword ?? generatePairingPassword();
   const passwordVerifier = makePasswordVerifier(pairingPassword);
 
+  const settingsPath = input.settingsPath ?? defaultSettingsPath();
+  const settings = await ensureSettings(settingsPath);
   const password = await resolvePassword(input.password);
-  const ctx = await resolveOperatorContext({ ...input, password });
+  const { seed } = resolveOperator(password);
+  const sessionWallet = await buildSessionWallet(settings, seed);
 
-  // Unlock (creating on first run) the encrypted-at-rest keystore; the seed lives in memory only.
   const keystorePath = defaultKeystorePath();
-  const unlocked = await ensureAndUnlock(keystorePath, ctx.seed, password);
+  const unlocked = await ensureAndUnlock(keystorePath, seed, password);
 
   const storePath = defaultSessionStorePath();
   const registry = new SessionRegistry();
@@ -97,40 +100,44 @@ export const runRemoteOpen = async (input: {
   };
   await persist();
 
-  // Seed-bound options bridge; dispatch hands the package the unlocked seed (the package builds its
-  // own wallet — deterministic). The seed NEVER leaves this closure.
-  const edge = createOptionsEdge({
-    doc: ctx.doc,
-    walletInit: ctx.walletInit,
-    seed: unlocked.seed,
-    userAddress: ctx.userAddress
+  const runId = `remote-${record.sessionId}`;
+  const consoleEdges: ConsoleEdge[] = createConsoleEdges({
+    settings,
+    sessionWallet,
+    runId
   });
-  const dispatch: DispatchFn = async (caller: BridgeCaller, envelope: CallActionEnvelope) => {
-    const result = await edge.bridge.callAction(
-      caller as Parameters<typeof edge.bridge.callAction>[0],
-      envelope as Parameters<typeof edge.bridge.callAction>[1]
-    );
-    if (typeof result === "object" && result !== null) {
-      const r = result as { txId?: unknown; tokenId?: unknown };
-      return {
-        ...(r.txId === undefined ? {} : { txId: String(r.txId) }),
-        ...(r.tokenId === undefined ? {} : { tokenId: String(r.tokenId) })
-      };
-    }
-    return { txId: String(result) };
+
+  const log = (line: string): void => {
+    // eslint-disable-next-line no-console
+    console.error(`[gateway] ${line}`);
   };
 
-  // Project the in-scope console function catalog (best-effort: a chain-read failure must not stop the
-  // daemon — the host can still relay; the UI just renders no auto-forms until functions arrive).
+  const routes = await buildConsoleRoutes(consoleEdges);
+  const dispatch = createMergedDispatch(routes);
+
   let consoleFunctions: readonly import("@livestreak/schema").FunctionDescriptor[] = [];
   try {
-    consoleFunctions = projectConsoleFunctions(await edge.describeFunctions(), scopes);
+    const raw = await mergeConsoleDescriptors(consoleEdges);
+    consoleFunctions = projectConsoleFunctions(raw, scopes);
+    log(`function catalog: ${raw.length} total, ${consoleFunctions.length} in scope`);
   } catch (error) {
-    console.error(`[gateway] function projection skipped: ${error instanceof Error ? error.message : String(error)}`);
+    log(`function projection skipped: ${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const relay = createRelay({ registry, dispatch });
-  const hostWss = deriveHostWss(ctx.doc.host.url, record.sessionId, input.hostWss);
+  const relay = createRelay({
+    registry,
+    dispatch: (caller: BridgeCaller, envelope: CallActionEnvelope, target?: string) =>
+      dispatch(caller, envelope, target)
+  });
+  const hostWss = deriveHostWss(settings.host.url, record.sessionId, input.hostWss);
+  const boardUnsubs: Array<() => void> = [];
+  const pushBoard = (target: string, board: unknown): void => {
+    try {
+      wss.sendBoardPatch(record.sessionId, serializeRemoteBoard(board), target);
+    } catch (error) {
+      log(`board patch skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   const wss = connectGateway({
     hostWssUrl: hostWss,
     seed: unlocked.seed,
@@ -143,30 +150,54 @@ export const runRemoteOpen = async (input: {
       if (sessionId === record.sessionId && remoteUrl !== undefined) {
         record.remoteUrl = remoteUrl;
         void persist(remoteUrl);
-        // Print the APP-origin gate the user should open — not the host stub URL (S11).
         // eslint-disable-next-line no-console
         console.log(`remote console URL: ${appRemoteUrl(appOrigin, record.sessionId)}`);
       }
     },
-    log: (line) => {
-      // eslint-disable-next-line no-console
-      console.error(`[gateway] ${line}`);
-    }
+    log
   });
+  for (const edge of consoleEdges) {
+    if (edge.subscribeBoard === undefined) {
+      continue;
+    }
+    boardUnsubs.push(
+      edge.subscribeBoard((board) => {
+        pushBoard(edge.package, board);
+      })
+    );
+  }
+  void (async () => {
+    for (const edge of consoleEdges) {
+      try {
+        await edge.refresh?.();
+      } catch (error) {
+        log(`${edge.package} board refresh skipped: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (edge.readBoard === undefined) {
+        continue;
+      }
+      try {
+        pushBoard(edge.package, await edge.readBoard());
+      } catch (error) {
+        log(`${edge.package} board snapshot skipped: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  })();
   wss.register({
     record,
     passwordVerifier,
     ...(consoleFunctions.length === 0 ? {} : { functions: consoleFunctions })
   });
 
-  // Cross-process revoke + TTL expiry watcher: sync store revocations into the live registry; lock &
-  // exit when the session ends.
   const shutdown = (reason: string): void => {
+    for (const unsub of boardUnsubs) {
+      unsub();
+    }
     registry.revoke(record.sessionId);
     wss.revoke(record.sessionId);
     void markRevoked(storePath, record.sessionId);
     wss.close();
-    unlocked.lock(); // zeroize the seed — never hold it without a supervisor
+    unlocked.lock();
     // eslint-disable-next-line no-console
     console.error(`[gateway] session ${record.sessionId} closed (${reason})`);
   };
@@ -251,6 +282,10 @@ const pairPasswordOpt = Options.text("pair-password").pipe(
   Options.withDescription("Pairing password shared with the remote user (generated if omitted)"),
   Options.optional
 );
+const settingsPathOpt = Options.text("settings").pipe(
+  Options.withDescription("Path to settings.json"),
+  Options.optional
+);
 
 const remoteOpenCommand = Command.make(
   "open",
@@ -261,10 +296,10 @@ const remoteOpenCommand = Command.make(
     hostWss: hostWssOpt,
     pairPassword: pairPasswordOpt,
     appOrigin: appOriginOpt,
-    config: configOpt,
+    settings: settingsPathOpt,
     password: passwordOpt
   },
-  ({ scopes, ttl, spendCap, hostWss, pairPassword, appOrigin, config, password }) =>
+  ({ scopes, ttl, spendCap, hostWss, pairPassword, appOrigin, settings, password }) =>
     Effect.tryPromise({
       try: () =>
         runRemoteOpen({
@@ -274,7 +309,8 @@ const remoteOpenCommand = Command.make(
           ...(Option.isSome(hostWss) ? { hostWss: hostWss.value } : {}),
           ...(Option.isSome(pairPassword) ? { pairPassword: pairPassword.value } : {}),
           ...(Option.isSome(appOrigin) ? { appOrigin: appOrigin.value } : {}),
-          ...readCommandConfig(config, password)
+          ...(Option.isSome(settings) ? { settingsPath: settings.value } : {}),
+          ...(Option.isSome(password) ? { password: password.value } : {})
         }),
       catch: (error) => (error instanceof Error ? error : new Error(String(error)))
     }).pipe(Effect.flatMap((output) => Console.log(output)))

@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { createInitialBoard } from "#run/control/board/index.js";
+import { extendBoardForMarketTests } from "#test/helpers/board.js";
 import { applyMarketLifecycleToBoard } from "#market/board.js";
 
 describe("market board reducer", () => {
   it("projects none -> pending -> registered lifecycle transitions", () => {
-    const initial = createInitialBoard({ runId: "run_board", nowMs: 1_000 });
+    const initial = extendBoardForMarketTests(
+      createInitialBoard({ runId: "run_board", nowMs: 1_000 }),
+      "run_board"
+    );
     expect(initial.cells["market"]?.status[0]).toBe("none");
 
     const pending = applyMarketLifecycleToBoard(
@@ -43,7 +47,10 @@ describe("market board reducer", () => {
   });
 
   it("projects failed lifecycle with reason and phase", () => {
-    const initial = createInitialBoard({ runId: "run_board_fail", nowMs: 1_000 });
+    const initial = extendBoardForMarketTests(
+      createInitialBoard({ runId: "run_board_fail", nowMs: 1_000 }),
+      "run_board_fail"
+    );
     const failed = applyMarketLifecycleToBoard(initial, {
       status: "failed",
       reason: "paymaster refused sponsorship",

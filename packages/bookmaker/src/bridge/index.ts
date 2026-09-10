@@ -14,7 +14,16 @@ export {
   bridgeActionScope,
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
-  bridgeControlsReadScope
+  bridgeControlsReadScope,
+  bookmakerConfigScope,
+  bookmakerConfigCloseScope
 } from "./types.js";
+export {
+  createBookmakerRuntimeBootstrap,
+  bookmakerChainConfigFromPackageInit,
+  bookmakerContractAddressesFromInit,
+  bookmakerRuntimeConfigFromPackageInit
+} from "./runtime/init.js";
+export type { PackageRuntimeInit, SessionWallet } from "./runtime/init.js";
 export { projectBookmakerPanel, projectBookmakerDescriptors } from "./panel/index.js";
 export type { BookmakerPanelSnapshot } from "./panel/index.js";

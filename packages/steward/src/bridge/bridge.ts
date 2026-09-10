@@ -1,14 +1,15 @@
 // --- exports ---
 
-import { LiveStreakConfigError } from "@livestreak/core";
+import { LiveStreakConfigError, LiveStreakCapabilityError } from "@livestreak/core";
 
 import { actionScopeFor } from "./action-scope.js";
 import { projectStewardControls } from "./panel/project.js";
 import type { StewardControlsView } from "./panel/types.js";
-import { authorizeBridgeCaller, requireAnyScope } from "./scope.js";
+import { authorizeBridgeCaller, hasAnyScope, requireAnyScope } from "./scope.js";
 import type {
   BridgeCaller,
   CallActionEnvelope,
+  CapabilityScope,
   CreateStewardBridgeInput,
   StewardBridge
 } from "./types.js";
@@ -68,10 +69,21 @@ export const createStewardBridge = (input: CreateStewardBridgeInput): StewardBri
 
       // S2: a non-trusted caller must ALSO hold the GRANULAR per-action scope the bridge advertises —
       // holding only the broad `bridge:action` permission is no longer enough to veto/penalise/resolve.
+      // Remote console grants use the unified `bridge:action:<name>` scope; accept either that or the
+      // steward-native granular scope.
       if (caller.trusted !== true) {
         const granular = actionScopeFor(envelope.action);
         if (granular !== undefined) {
-          requireAnyScope(caller.grants ?? [], granular);
+          const consoleScope = `${bridgeActionScope}:${envelope.action}` as CapabilityScope;
+          const authorized =
+            hasAnyScope(caller.grants ?? [], granular) ||
+            hasAnyScope(caller.grants ?? [], consoleScope);
+          if (!authorized) {
+            throw new LiveStreakCapabilityError({
+              message: `No capability grant authorizes ${granular} or ${consoleScope}`,
+              requiredScope: granular
+            });
+          }
         }
       }
 

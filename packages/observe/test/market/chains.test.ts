@@ -49,6 +49,20 @@ const evmWalletMocks = vi.hoisted(() => {
   return { observer, readOnly, account };
 });
 
+const viemMocks = vi.hoisted(() => ({
+  readContract: vi.fn(async () => false)
+}));
+
+vi.mock("viem", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("viem")>();
+  return {
+    ...actual,
+    createPublicClient: () => ({
+      readContract: viemMocks.readContract
+    })
+  };
+});
+
 vi.mock("@livestreak/wallet", () => ({
   createWalletManager: () => ({
     getAccount: async () => evmWalletMocks.account

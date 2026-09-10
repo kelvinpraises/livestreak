@@ -18,6 +18,9 @@ export const bridgeBoardReadScope = "bridge:board:read" as const;
 export const bridgeControlsReadScope = "bridge:controls:read" as const;
 export const bridgeActionScope = "bridge:action" as const;
 export const bridgeBoardSubscribeScope = "bridge:board:subscribe" as const;
+/** Configurator scope — operator supplies market/run context before the action tree becomes visible. */
+export const bookmakerConfigScope = "bookmaker:config" as const;
+export const bookmakerConfigCloseScope = "bookmaker:config:close" as const;
 
 export interface BridgeCaller {
   readonly id: string;

@@ -1,27 +1,151 @@
-import type {
-  CapabilityScope,
-  FunctionDescriptor,
-  FunctionDescriptorTarget,
-  JsonSchema
-} from "@livestreak/schema";
+// Canonical FunctionDescriptor projection for the Remote Bridge Console auto-UI (Objective 4, P1).
+//
+// Track D: emit a configurator root (`steward:config`) with configure + close, plus per-subject
+// groups with steward actions as children. Every node carries id/parentId/package/visible via
+// withDescriptorIdentity.
 
+import type { CapabilityScope, FunctionDescriptor, JsonSchema } from "@livestreak/schema";
+import { withDescriptorIdentity } from "@livestreak/schema";
+
+import {
+  stewardConfigCloseScope,
+  stewardConfigScope,
+  bridgeControlsReadScope
+} from "../types.js";
 import { projectStewardFunctions } from "./project.js";
 import type { StewardFunctionView, StewardPanelInput, StewardStateSnapshot } from "./types.js";
 
-// --- Canonical FunctionDescriptor projection (Objective 4, P1 — WAVE 5) ---
-//
-// Like options/observe/bookmaker in wave 4, the steward bridge emits its functions as the canonical
-// `@livestreak/schema` `FunctionDescriptor` (real `inputSchema`, granular `scope`) so the Remote Bridge
-// Console can auto-render forms. The per-action `scope` is the SAME single-source granular scope the
-// bridge enforces (S2), so the UI never shows a control the relay would deny.
+const PACKAGE = "steward" as const;
+const CONFIG_ID = "steward.config.configure";
+const CLOSE_ID = "steward.config.close";
+
+// --- exports ---
 
 export const projectStewardDescriptors = (
   snapshot: StewardStateSnapshot | StewardPanelInput
-): readonly FunctionDescriptor[] =>
-  projectStewardFunctions(snapshot as StewardStateSnapshot).map(toDescriptor);
+): readonly FunctionDescriptor[] => {
+  const descriptors: FunctionDescriptor[] = [];
+  const views = projectStewardFunctions(snapshot as StewardStateSnapshot);
 
-// Every steward bridge action is invoked with the same arg shape (see runtime `readBridgeActionArgs`):
-// `subjectId` (required) + optional `subjectKind`, `reason`, `findingId`. We model exactly that.
+  pushConfigurator(descriptors);
+  pushSubjectGroups(descriptors, snapshot);
+  for (const view of views) {
+    descriptors.push(toActionDescriptor(view));
+  }
+
+  return descriptors;
+};
+
+// --- tree nodes ---
+
+const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
+  descriptors.push(
+    withDescriptorIdentity(
+      {
+        id: CONFIG_ID,
+        name: "configure",
+        label: "Configure steward",
+        scope: stewardConfigScope,
+        nodeKind: "action",
+        order: 0,
+        disabled: false,
+        visible: true,
+        inputSchema: CONFIGURE_INPUT_SCHEMA
+      },
+      { package: PACKAGE, idPrefix: "config" }
+    )
+  );
+
+  descriptors.push(
+    withDescriptorIdentity(
+      {
+        id: CLOSE_ID,
+        name: "close",
+        label: "Close",
+        scope: stewardConfigCloseScope,
+        nodeKind: "action",
+        order: 1,
+        disabled: false,
+        visible: true
+      },
+      { package: PACKAGE, idPrefix: "config" }
+    )
+  );
+};
+
+const pushSubjectGroups = (
+  descriptors: FunctionDescriptor[],
+  snapshot: StewardStateSnapshot | StewardPanelInput
+): void => {
+  const seen = new Set<string>();
+  for (const subject of snapshot.watchedSubjects) {
+    if (seen.has(subject.id)) {
+      continue;
+    }
+    seen.add(subject.id);
+    const groupId = subjectGroupIdFor(subject.id);
+    descriptors.push(
+      withDescriptorIdentity(
+        {
+          id: groupId,
+          parentId: CONFIG_ID,
+          name: "subject",
+          label: subjectLabel(subject),
+          scope: bridgeControlsReadScope,
+          nodeKind: "group",
+          order: 10,
+          disabled: false,
+          visible: false,
+          target: { kind: subject.kind, ...(subject.marketId === undefined ? {} : { marketId: subject.marketId }) }
+        },
+        { package: PACKAGE, idPrefix: "group" }
+      )
+    );
+  }
+};
+
+const toActionDescriptor = (view: StewardFunctionView): FunctionDescriptor => {
+  const parentId = subjectGroupIdFor(view.target?.subjectId ?? "unknown");
+  const target = toTarget(view);
+
+  return withDescriptorIdentity(
+    {
+      id: `${parentId}.action.${view.name}`,
+      parentId,
+      name: view.name,
+      label: view.label,
+      scope: view.scope as CapabilityScope,
+      ...(target === undefined ? {} : { target }),
+      nodeKind: "action",
+      order: 20,
+      disabled: view.disabled,
+      visible: false,
+      ...(view.disabledReason === undefined ? {} : { disabledReason: view.disabledReason }),
+      inputSchema: stewardInputSchema(view)
+    },
+    { package: PACKAGE, idPrefix: "action" }
+  );
+};
+
+// --- helpers ---
+
+const idSlug = (value: string): string => value.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 64);
+
+const subjectGroupIdFor = (subjectId: string): string => `steward.subject.${idSlug(subjectId)}`;
+
+const subjectLabel = (subject: StewardStateSnapshot["watchedSubjects"][number]): string => {
+  switch (subject.kind) {
+    case "market":
+      return subject.marketId ?? subject.id;
+    case "vault":
+      return subject.vaultId ?? subject.id;
+    case "steward":
+      return `Steward ${subject.id}`;
+    default:
+      return subject.id;
+  }
+};
+
 const stewardInputSchema = (view: StewardFunctionView): JsonSchema => ({
   type: "object",
   properties: [
@@ -52,7 +176,7 @@ const stewardInputSchema = (view: StewardFunctionView): JsonSchema => ({
   ]
 });
 
-const toTarget = (view: StewardFunctionView): FunctionDescriptorTarget | undefined => {
+const toTarget = (view: StewardFunctionView): FunctionDescriptor["target"] => {
   if (view.target === undefined) {
     return undefined;
   }
@@ -62,15 +186,16 @@ const toTarget = (view: StewardFunctionView): FunctionDescriptorTarget | undefin
   };
 };
 
-const toDescriptor = (view: StewardFunctionView): FunctionDescriptor => {
-  const target = toTarget(view);
-  return {
-    name: view.name,
-    label: view.label,
-    scope: view.scope as CapabilityScope,
-    ...(target === undefined ? {} : { target }),
-    disabled: view.disabled,
-    ...(view.disabledReason === undefined ? {} : { disabledReason: view.disabledReason }),
-    inputSchema: stewardInputSchema(view)
-  };
-};
+const required = true;
+
+const str = (description: string): JsonSchema => ({ type: "string", required, description });
+
+const obj = (properties: JsonSchema["properties"]): JsonSchema => ({ type: "object", properties });
+
+const CONFIGURE_INPUT_SCHEMA: JsonSchema = obj([
+  {
+    name: "marketId",
+    value: str("Market subject to watch."),
+    help: "When set, steward watches the market subject with this id."
+  }
+]);

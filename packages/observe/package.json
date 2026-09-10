@@ -17,6 +17,7 @@
     "#bridge/*": "./dist/bridge/*",
     "#scope/*": "./dist/scope/*",
     "#market/*": "./dist/market/*",
+    "#flows/*": "./dist/flows/*",
     "#builtins.js": "./dist/builtins.js"
   },
   "files": [

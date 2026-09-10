@@ -22,9 +22,16 @@ export type {
 export { observeRunStreamId } from "./chains/evm.js";
 export { applyMarketLifecycleToBoard } from "./board.js";
 export {
-  forkMarketRegistrationIfNeeded,
-  resolveMarketRegistrarFromOptions,
-  runMarketRegistrationLifecycle
+  createMarketControlSurface,
+  marketCatalogFunctions,
+  marketCloseScope,
+  marketGoLiveScope,
+  marketRegisterScope,
+  marketSetEndedScope
+} from "./control.js";
+export {
+  runMarketRegistrationLifecycle,
+  resolveMarketRegistrarFromOptions
 } from "./registration.js";
 export type { MarketRegistrationForkInput } from "./registration.js";
 export {

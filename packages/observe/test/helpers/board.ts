@@ -48,7 +48,7 @@ export const fileCaptureBoardCell = (capturePath: string): BoardCell => ({
     sourceType: "file",
     sourceMode: "file"
   },
-  functions: []
+  functions: ["configure", "close"]
 });
 
 export const fileSinkBoardCell = (sinkPath: string): BoardCell => ({
@@ -63,6 +63,29 @@ export const fileSinkBoardCell = (sinkPath: string): BoardCell => ({
   readonly: {},
   functions: []
 });
+
+export const marketBoardCell = (): BoardCell => ({
+  label: "Market",
+  catalog: "market",
+  status: ["none", null, Date.now()],
+  readonly: { registrationState: "none" },
+  functions: ["register", "goLive", "setEnded", "close"]
+});
+
+export const systemRunBoardCell = (runId: string): BoardCell => ({
+  label: "Run",
+  catalog: "system:run",
+  status: ["created", null, Date.now()],
+  settings: { stopRequested: false },
+  readonly: { runId, prepared: false },
+  functions: ["prepare", "start", "await", "stop"]
+});
+
+export const extendBoardForMarketTests = (board: Board, runId: string): Board =>
+  extendBoardWithCells(board, {
+    "system:run": systemRunBoardCell(runId),
+    market: marketBoardCell()
+  });
 
 export const systemMemoryBoardCell = (): BoardCell => ({
   label: "Memory",
@@ -83,14 +106,78 @@ export const systemTickBoardCell = (): BoardCell => ({
 export const extendBoardWithCells = (
   board: Board,
   cells: Record<string, BoardCell>
-): Board =>
-  ({
+): Board => {
+  const hasPipelineCell = Object.keys(cells).some(
+    (id) => id.startsWith("capture:") || id.startsWith("sink:")
+  );
+
+  const systemCells: Record<string, BoardCell> = hasPipelineCell
+    ? {
+        "system:run": systemRunBoardCell(readRunIdFromBoard(board)),
+        "system:pause": {
+          label: "Pause",
+          catalog: "system:pause",
+          status: ["idle", null, Date.now()],
+          settings: { requested: false, whilePaused: "hold" },
+          functions: ["pause", "resume", "setPresentation"]
+        },
+        "system:memory": systemMemoryBoardCell(),
+        "system:tick": systemTickBoardCell()
+      }
+    : {};
+
+  const mergedCells = { ...systemCells, ...cells };
+  const liveConfigurators = deriveLiveConfiguratorsFromCells(mergedCells);
+
+  return {
     ...board,
     cells: {
       ...board.cells,
-      ...cells
+      ...(board.cells["system:config"] === undefined
+        ? {}
+        : {
+            "system:config": {
+              ...board.cells["system:config"],
+              readonly: {
+                ...board.cells["system:config"].readonly,
+                liveConfigurators
+              },
+              status: ["configured", null, Date.now()]
+            }
+          }),
+      ...mergedCells
     }
-  });
+  };
+};
+
+const readRunIdFromBoard = (board: Board): string => {
+  const fromConfig = board.cells["system:config"]?.readonly?.runId;
+  return typeof fromConfig === "string" ? fromConfig : "run_test";
+};
+
+const deriveLiveConfiguratorsFromCells = (
+  cells: Record<string, BoardCell>
+): readonly string[] => {
+  const live: string[] = [];
+
+  for (const cellId of Object.keys(cells)) {
+    if (cellId.startsWith("capture:")) {
+      live.push(`observe.capture.${cellId.slice("capture:".length)}`);
+    } else if (cellId.startsWith("sink:")) {
+      live.push(`observe.sink.${cellId.slice("sink:".length)}`);
+    } else if (cellId === "market") {
+      live.push("observe.market");
+    } else if (cellId === "system:run") {
+      live.push("observe.system.run");
+    }
+  }
+
+  if (live.length === 0) {
+    return ["observe.system.config"];
+  }
+
+  return live;
+};
 
 export const createBrowserBoardFixture = (
   runId: string,

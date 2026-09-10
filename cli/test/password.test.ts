@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolvePassword } from "../src/gateway/password.js";
+import { resolvePassword } from "../src/gateway/auth/password.js";
 
 describe("gateway/password — resolvePassword precedence", () => {
   it("returns the explicit flag value immediately (flag > env > prompt)", async () => {

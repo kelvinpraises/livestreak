@@ -1,24 +1,30 @@
-// The Remote Bridge Console page shell (P5): password gate → function cards grouped by
-// target.kind, each rendering an AutoForm from the function's inputSchema → relayed call
-// → live board readout. Renders ONLY the functions the host advertised for this session
+// The Remote Bridge Console page shell (P5): password gate → package tabs → function
+// tree (id/parentId) with auto-forms from inputSchema → relayed call → per-package
+// board readout. Renders ONLY the functions the host advertised for this session
 // (already grant-filtered; the transport mirrors the filter defensively). No seed here —
 // every call goes over the transport to the host relay.
 
 import { useMemo, useState } from 'react'
 import type {
   CallActionEnvelope,
+  ConsolePackage,
   FunctionDescriptor,
   FunctionDescriptorTarget,
 } from '@livestreak/schema'
 import { bridgeActionScope } from '@livestreak/schema'
 import { AutoForm } from '#/components/organisms/auto-form'
+import { FunctionTree } from '#/components/organisms/function-tree'
 import { useRemote } from '#/providers/remote-provider'
 
-const GROUP_ORDER = ['market', 'vault', 'nft', 'lvst', 'global']
+const PACKAGE_TABS: readonly { id: ConsolePackage; label: string }[] = [
+  { id: 'observe', label: 'Observe' },
+  { id: 'options', label: 'Options' },
+  { id: 'bookmaker', label: 'Bookmaker' },
+  { id: 'steward', label: 'Steward' },
+]
 
-const groupKey = (t?: FunctionDescriptorTarget): string => t?.kind ?? 'global'
-
-const groupLabel = (kind: string): string => {
+const groupLabel = (t?: FunctionDescriptorTarget): string => {
+  const kind = t?.kind ?? 'global'
   switch (kind) {
     case 'market':
       return 'Markets'
@@ -122,16 +128,18 @@ function PasswordGate() {
 
 function ConsoleBody() {
   const { functions, board, grant, callRemote } = useRemote()
+  const [activePackage, setActivePackage] = useState<ConsolePackage>('options')
 
-  const groups = useMemo(() => {
-    const map = new Map<string, FunctionDescriptor[]>()
-    for (const fn of functions) {
-      const key = groupKey(fn.target)
-      const list = map.get(key) ?? []
-      list.push(fn)
-      map.set(key, list)
-    }
-    return GROUP_ORDER.filter((k) => map.has(k)).map((k) => ({ kind: k, fns: map.get(k)! }))
+  const packageFns = useMemo(
+    () => functions.filter((fn) => fn.package === activePackage),
+    [functions, activePackage]
+  )
+
+  const activeBoard = board[activePackage] ?? {}
+
+  const packagesWithFns = useMemo(() => {
+    const set = new Set(functions.map((f) => f.package))
+    return PACKAGE_TABS.filter((t) => set.has(t.id))
   }, [functions])
 
   return (
@@ -146,21 +154,60 @@ function ConsoleBody() {
         </span>
       </div>
 
+      <div
+        data-testid="package-tabs"
+        style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}
+      >
+        {PACKAGE_TABS.map((tab) => {
+          const active = tab.id === activePackage
+          const count = functions.filter((f) => f.package === tab.id).length
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              data-testid={`package-tab-${tab.id}`}
+              onClick={() => setActivePackage(tab.id)}
+              style={{
+                fontSize: 12,
+                padding: '6px 12px',
+                borderRadius: 6,
+                border: active ? '1px solid rgba(0,255,135,0.45)' : '1px solid rgba(255,255,255,0.1)',
+                background: active ? 'rgba(0,255,135,0.12)' : 'rgba(255,255,255,0.03)',
+                color: active ? '#00ff87' : 'rgba(255,255,255,0.55)',
+                fontFamily: 'var(--font-mono)',
+                cursor: 'pointer',
+              }}
+            >
+              {tab.label}
+              {count > 0 ? ` (${count})` : ''}
+            </button>
+          )
+        })}
+      </div>
+
       {functions.length === 0 ? (
         <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>
           No functions are authorised for this session.
         </p>
+      ) : packagesWithFns.length > 0 && !packagesWithFns.some((t) => t.id === activePackage) ? (
+        <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)' }}>
+          No functions in the {activePackage} package for this session.
+        </p>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-          {groups.map((g) =>
-            g.fns.map((fn) => (
-              <FunctionCard key={fn.name} fn={fn} groupName={groupLabel(g.kind)} onCall={callRemote} />
-            ))
+        <FunctionTree
+          functions={packageFns}
+          renderAction={(fn) => (
+            <FunctionCard
+              key={fn.id}
+              fn={fn}
+              groupName={groupLabel(fn.target)}
+              onCall={(envelope) => callRemote(envelope, fn.package)}
+            />
           )}
-        </div>
+        />
       )}
 
-      <BoardView board={board} />
+      <BoardView packageId={activePackage} board={activeBoard} />
     </div>
   )
 }
@@ -226,13 +273,14 @@ function FunctionCard({
   )
 }
 
-function BoardView({ board }: { board: Record<string, unknown> }) {
+function BoardView({ packageId, board }: { packageId: string; board: unknown }) {
   return (
     <div style={{ marginTop: 28 }}>
       <h2 style={{ fontSize: 13, color: 'rgba(255,255,255,0.6)', marginBottom: 8, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-        Live Board
+        Live Board · {packageId}
       </h2>
       <pre
+        data-testid={`board-${packageId}`}
         style={{
           fontSize: 11,
           fontFamily: 'var(--font-mono)',

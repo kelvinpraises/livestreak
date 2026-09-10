@@ -95,7 +95,23 @@ export {
   systemPauseResumeScope,
   systemPauseSetPresentationScope
 } from "./run/control/index.js";
-export { systemRunStopScope } from "./run/control/index.js";
+export {
+  systemRunStopScope,
+  systemRunPrepareScope,
+  systemRunStartScope,
+  systemRunAwaitScope
+} from "./run/control/index.js";
+export {
+  systemConfigConfigureScope,
+  systemConfigCloseScope
+} from "./run/control/index.js";
+export {
+  marketRegisterScope,
+  marketGoLiveScope,
+  marketSetEndedScope,
+  marketCloseScope
+} from "#market/control.js";
+export { flowPermutationsV0, isValidFlowPermutation } from "./flows/index.js";
 
 export {
   createObserveBridge,
@@ -196,30 +212,18 @@ export {
   type LocalSinkDriverOptions
 } from "./pipeline/publish/sinks/local/driver.js";
 
-export { streamFileToWebRtc } from "./adapters/webrtc/stream-bridge.js";
 export {
+  streamFileToWebRtcEffect,
   type StreamFileToWebRtcInput,
   type StreamFileToWebRtcResult
 } from "./pipeline/publish/sinks/local/file-stream.js";
 
-export {
-  createFileWebRtcStream,
-  type CliStreamFileInput,
-  type CliStreamFileHandle,
-  type CliFileWebRtcSignaling
-} from "./adapters/webrtc/cli-stream-entry.js";
+export { streamFileToWebRtc } from "./adapters/stream-file-webrtc.js";
 
 export {
   createHostMediatedConsumerSignaling,
   type HostMediatedConsumerSignalingInput
 } from "./pipeline/publish/sinks/local/host-consumer-signaling.js";
-
-export {
-  startBrowserWebRtcFeed,
-  type BrowserWebRtcFeedInput,
-  type BrowserWebRtcFeedHandle,
-  type BrowserWebRtcFeedState
-} from "./adapters/webrtc/browser-feed.js";
 
 export { resolveNodePeerConnectionFactory } from "./pipeline/publish/sinks/local/node-peer.js";
 
@@ -276,3 +280,4 @@ export type {
 } from "./market/index.js";
 
 export { observeRunStreamId, writeMarketLifecycle } from "./market/index.js";
+export { createMarketControlSurface } from "./market/control.js";

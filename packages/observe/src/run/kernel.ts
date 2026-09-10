@@ -1,5 +1,6 @@
 import { Effect, Exit, Fiber, type Scope } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
+import type { PackageRuntimeInit } from "@livestreak/schema";
 import { getBuiltInCaptureDriver, getBuiltInSinkDriver } from "#builtins.js";
 import type { CaptureDriver } from "#pipeline/capture/index.js";
 import type { SinkDriver } from "#pipeline/publish/index.js";
@@ -9,16 +10,15 @@ import { buildControlCatalog } from "./control/catalog.js";
 import { createControlBus, stageCellSurface } from "./control/bus/index.js";
 import { applyWorkerSnapshotToBoard } from "./control/board/index.js";
 import { validateBoardSettings } from "./control/board/index.js";
-import { createSystemPauseSurface } from "./control/index.js";
-import { createSystemRunSurface, systemRunStopScope } from "./control/index.js";
+import { bootstrapLegacyObserveBoard } from "./control/board/legacy-bootstrap.js";
+import { createObserveControlSurfaces } from "./control/surfaces.js";
+import type { BoardPatch } from "./control/bus/types.js";
+import type { SystemRunHooks } from "./control/system/run.js";
+import { systemRunStopScope } from "./control/index.js";
 import type { DescribeControlContext } from "./control/bus/index.js";
 import type { ObserveRun } from "./run.js";
 import { callStoredRunFunction, type ObserveRunHandle, type RunStore } from "./store.js";
 import type { ObserveRunMarketOptions } from "#market/index.js";
-import {
-  forkMarketRegistrationIfNeeded,
-  resolveMarketRegistrarFromOptions
-} from "#market/index.js";
 import { runScopedWorkerUntilStoppedWithBoard } from "./worker/worker.js";
 import type { WorkerRunOutcome } from "./worker/worker.js";
 import { createWorkerBoardWake } from "./worker/wake.js";
@@ -42,6 +42,8 @@ export interface ObserveRunKernelOptions {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- injected sink drivers carry heterogeneous config shapes
   readonly sinkDriver?: SinkDriver<any>;
   readonly market?: ObserveRunMarketOptions;
+  readonly sessionInit?: PackageRuntimeInit;
+  readonly runHooks?: SystemRunHooks;
 }
 
 export const defaultObserveRunMaxTurns = 4096;
@@ -57,17 +59,21 @@ export const prepareObserveRun = (
     const captureConfig = yield* captureDriver.validate(run.config.capture.config);
     const sinkConfig = yield* sinkDriver.validate(run.config.sink.config);
 
-    let board = setBoardRunStatus(run.board, "preparing", "validating observe run");
+    let board = bootstrapLegacyObserveBoard(run.board, run.config);
+    board = setBoardRunStatus(board, "preparing", "validating observe run");
 
     const bus = yield* createControlBus({
       runId: run.config.runId,
       board,
       catalog: buildControlCatalog(),
-      surfaces: [createSystemPauseSurface(), createSystemRunSurface()]
+      surfaces: createObserveControlSurfaces({
+        sessionInit: options.sessionInit,
+        runHooks: options.runHooks
+      })
     });
 
     const nowMs = Date.now();
-    const sinkInstanceId = run.config.sink.instanceId ?? "file-export";
+    const sinkInstanceId = resolveSinkInstanceId(run.config);
     const captureContext: DescribeControlContext = {
       runId: run.config.runId,
       nowMs
@@ -83,6 +89,7 @@ export const prepareObserveRun = (
 
     const sinkCell = yield* sinkDriver.describeControl(sinkConfig, sinkContext);
     yield* bus.mountSurface(stageCellSurface(sinkCell));
+    yield* bus.applyBoardPatch(markSinkCellConfiguredPatch(sinkCell.id));
 
     board = yield* bus.readBoard();
     yield* validateBoardSettings(board);
@@ -133,7 +140,7 @@ export const startObserveRun = (
         yield* bus.mountSurface(attachment.control);
       }
 
-      const sinkInstanceId = run.config.sink.instanceId ?? "file-export";
+      const sinkInstanceId = resolveSinkInstanceId(run.config);
       const sinks: Record<string, SinkStageState> = {
         [sinkInstanceId]: {
           attachment,
@@ -145,16 +152,6 @@ export const startObserveRun = (
 
       const boardWake = yield* createWorkerBoardWake();
       yield* bus.registerWakeWorker(() => boardWake.notify());
-
-      const marketSetup = yield* resolveMarketRegistrarFromOptions(options.market);
-      if (marketSetup !== undefined) {
-        yield* forkMarketRegistrationIfNeeded({
-          runId: run.config.runId,
-          bus,
-          registration: marketSetup.registration,
-          registrar: marketSetup.registrar
-        });
-      }
 
       const result = yield* runScopedWorkerUntilStoppedWithBoard({
         runId: run.config.runId,
@@ -263,6 +260,32 @@ export const stopObserveRun = (
   });
 
 // --- helpers ---
+
+const resolveSinkInstanceId = (config: ObserveRun["config"]): string => {
+  if (config.sink.instanceId !== undefined) {
+    return config.sink.instanceId;
+  }
+
+  if (config.sink.driverId === "memory") {
+    return "memory-sink";
+  }
+
+  if (config.sink.driverId === "local") {
+    return "local";
+  }
+
+  return "file-export";
+};
+
+const markSinkCellConfiguredPatch = (cellId: string): BoardPatch => ({
+  cells: {
+    [cellId]: {
+      readonly: {
+        set: { configured: true }
+      }
+    }
+  }
+});
 
 const resolveSinkDriver = (
   sinkDriverId: string,

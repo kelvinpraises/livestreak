@@ -1,8 +1,12 @@
 # Local EVM dev stack — proven bring-up & full loop
 
-This is the canonical, **verified** path to run the whole keynote loop on a local EVM
-stack with real Account-Abstraction userOps (bundler + verifying paymaster), no mocks.
-Every step below was run end-to-end against anvil on chain 31337.
+> **Canonical operator path (board-first):** `host/docs/remote-console.md` + `docs/GO-LIVE-SCOPE.md`  
+> Use `settings init` → `auth login` → `remote open` → browser package tabs.  
+> Sections §2–§4 below marked **LEGACY** describe the deleted `produce` CLI — kept for AA/paymaster
+> debugging context only.
+
+This document covers local EVM bring-up with real Account-Abstraction userOps (bundler +
+verifying paymaster), no mocks. Verified against anvil on chain 31337.
 
 ## 0. Toolchain
 
@@ -41,86 +45,72 @@ Logs: `/tmp/livestreak-{anvil,host,app}.log`.
 > restart (no build needed): `pkill -f "tsx src/main.ts"` then
 > `cd host && LIVESTREAK_AA_ALLOW_DEV_KEY=1 npm run dev`.
 
-## 2. CLI init + login
+## 2. CLI settings + auth (current)
 
 ```sh
 cd cli
-npx tsx src/main.ts init \
-  --deployment ../packages/contracts/chains/evm/deployments/localhost.json \
-  --host http://127.0.0.1:8787 \
-  --network testnet \
-  --out /tmp/livestreak.json
-
-LIVESTREAK_PASSWORD='<password>' npx tsx src/main.ts login --config /tmp/livestreak.json
+npm run dev -- settings init    # writes ./settings.json — host URL, chain, contracts
+npm run dev -- auth login       # unlock keystore; seed in memory only
+npm run dev -- remote open --scopes 'bridge:action:*,bridge:board:read' --ttl 30m
 ```
 
-`init` reads the deploy artifact + the host `/aa/descriptor` and consumes the **per-chain**
-`chains[].paymasterPath`. `login` derives the AA smart-account address from the password
-seed (seed never written to disk) and caches the public address as `run.operator`.
+`settings init` reads the deploy artifact + host `/aa/descriptor` (per-chain `paymasterPath`).
+`auth login` derives the AA Safe from the password seed (never written to disk).
 
-> The host advertises `walrus.network: null` locally, so `--network testnet` must be
-> passed explicitly (init can't infer it).
+Open the printed `/remote/<code>` URL in the app. See `host/docs/remote-console.md`.
 
-## 3. Fund the operator with mock USDC
+### LEGACY — deleted `init` / `login` on `livestreak.json`
 
-The mock USDC has an open `mint(address,uint256)` faucet (no pre-mint to the deployer):
+The old `init` + `login` + `livestreak.json` path was removed in the board-first CLI (`96292b3`).
+Do not document it as canonical. If you see references in old tests or chat, use settings + remote instead.
+
+## 3. Fund the operator with mock USDC (preflight)
+
+Deploy funds anvil #0, not necessarily the derived operator Safe. Mint before remote `fund`:
 
 ```sh
-USDC=<protocol.mockUsdc from the deployment>
-OP=<run.operator from /tmp/livestreak.json>
+USDC=<protocol.mockUsdc from packages/contracts/chains/evm/deployments/localhost.json>
+OP=<operator Safe from `auth login` output>
 cast send $USDC "mint(address,uint256)" $OP 1000000000 \
   --rpc-url http://127.0.0.1:8545 \
   --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 ```
 
-## 4. Run the full loop
+There is no `faucet` CLI subcommand on the slim CLI — `cast` (or a `scripts/` helper) is intentional.
 
-The gated live test drives produce → vault create → nft mint → fund → withdraw:
+## 4. LEGACY — deleted `produce` live test
 
-```sh
-cd cli
-LIVESTREAK_LIVE=1 \
-LIVESTREAK_CONFIG=/tmp/livestreak.json \
-LIVESTREAK_PASSWORD='<password>' \
-LIVESTREAK_VIDEO=/path/to/clip.mp4 \
-  npx vitest run test/e2e.live.test.ts
-```
+The gated `LIVESTREAK_LIVE=1` / `produce` e2e path was removed with the board-first CLI.
+Keynote proof is **remote-console E2E** (`docs/GO-LIVE-SCOPE.md`, agent-5 prompt).
 
-Each step is a real userOp through the host bundler + verifying paymaster, ~5s/block, so
-the run takes ~2 minutes. `produce` registers the market + fires the observe
-go-live/set-ended lifecycle, uploads the VOD to the host's local content store, and
-publishes the VOD pointer on-chain.
+Each on-chain step still uses real userOps through the host bundler + paymaster (~5s/block).
 
-### 4a. Settlement → LVST loss-mint → stake
+### 4a. LEGACY — settlement via deleted CLI commands
 
-The live test stops at `withdraw`; the loss-mint + stake path needs the vault **resolved**
-first (the default steward is anvil #0). To prove it end-to-end:
+Resolve + claim + stake via remote Steward/Options tabs (canonical). Old one-liners:
 
 ```sh
-# Resolve the funded vault against its YES side (Outcome.No = 2), as the steward:
+# Steward resolve (cast) still valid for infra debugging:
 cast send <stewardRegistry> "resolveVault(bytes32,uint8)" <vaultId> 2 \
   --rpc-url http://127.0.0.1:8545 --private-key <anvil#0 key>
 
-# Loss-claim mints LVST to the operator, then stake it:
-npx tsx src/main.ts claim --vault <vaultId> --side yes --loss --config /tmp/livestreak.json
-npx tsx src/main.ts stake --amount 1 --config /tmp/livestreak.json
+# Deleted: cli claim / stake — use remote Options tab actions instead.
 ```
-
-`claimLossLvst` mints LVST (verified: 200 LVST for the test position); `stake` moves it
-into the treasury (LVST balance drops by the staked amount).
 
 ## Gotchas
 
-- **Sticky runId / "market exists":** `login` persists `run.runId`, and `produce` reuses
-  it, so re-running `produce` against the same config re-derives the same `marketId` and
-  reverts with `MarketRegistry: market exists` (masked by the Safe module as
-  `ExecutionFailed()` / `0xacfdb444`). Re-run `init` (which clears `run`) then `login`
-  to get a fresh market.
-- **Stale file sink:** `produce` writes `/tmp/livestreak-<runId>.mp4`; a leftover from a
-  failed run trips "File sink output path already exists". `rm -f /tmp/livestreak-*.mp4`.
-- **Reverted userOp diagnosis:** the Safe 4337 module masks inner reverts as
-  `ExecutionFailed()` (`0xacfdb444`). Get the real reason with
-  `cast run <txHash>` (full call trace) — that's how the createVault OutOfGas was found.
+- **Duplicate market / "market exists":** Observe `market.register` with the same operator +
+  stream/run identity re-derives the same `marketId` → `MarketRegistry: market exists`
+  (masked as `ExecutionFailed()` / `0xacfdb444`). **Remediation (board-first):** new Observe
+  `system:config:configure` with a fresh run identity, or regenerate `settings.json` after
+  `./dev.sh --force` deploy — **not** deleted `init`/`produce`.
+- **Stale settings after deploy:** `settings init` must be re-run when `localhost.json`
+  addresses change or AA simulation reverts with wrong contract targets.
+- **Reverted userOp diagnosis:** Safe 4337 masks inner reverts as `ExecutionFailed()`
+  (`0xacfdb444`). Get the real reason with `cast run <userOpHash>` (full call trace).
+  Agent-2 may surface decoded reasons in host JSON-RPC errors.
+- **LEGACY stale file sink:** deleted `produce` wrote `/tmp/livestreak-<runId>.mp4`; remote
+  observe runs use temp dirs under `observe-edge` — clear `/tmp/livestreak-remote-*` if needed.
 
 ## 5. Multichain: add the Sui-localnet leg
 

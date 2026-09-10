@@ -1,5 +1,6 @@
 import { Effect, Scope } from "effect";
 import type { LiveStreakError } from "@livestreak/core";
+import type { PackageRuntimeInit } from "@livestreak/schema";
 import type { ControlCallEnvelope, ControlCallResult, ControlArtifact } from "./control/bus/index.js";
 import type {
   ArtifactSubscription,
@@ -37,6 +38,7 @@ export type RuntimeKernelOptions = ObserveRunKernelOptions & { readonly maxTurns
 export interface CreateObserveRuntimeInput {
   readonly store?: RunStore;
   readonly defaultKernelOptions?: RuntimeKernelOptions;
+  readonly sessionInit?: PackageRuntimeInit;
 }
 
 export interface ObserveRuntime {
@@ -103,6 +105,30 @@ const buildObserveRuntime = (
 ): ObserveRuntime => {
   const store = input.store ?? createRunStore();
   const defaultKernelOptions = input.defaultKernelOptions;
+  const sessionInit = input.sessionInit;
+
+  const runHooks: import("./control/system/run.js").SystemRunHooks = {
+    prepare: (runId: string) =>
+      Effect.gen(function* () {
+        const run = yield* store.require(runId);
+        if (run.prepared === true && run.bus !== undefined) {
+          return run;
+        }
+        const prepared = yield* prepareObserveRun(
+          run,
+          mergeKernelOptions(defaultKernelOptions, { sessionInit, runHooks })
+        );
+        yield* store.replace(prepared);
+        return prepared;
+      }),
+    start: (runId: string) =>
+      startRunEffect(store, scope, runId, mergeKernelOptions(defaultKernelOptions, { sessionInit, runHooks })),
+    await: (runId: string) =>
+      Effect.gen(function* () {
+        const handle = yield* store.requireHandle(runId);
+        return yield* handle.awaitResult();
+      })
+  };
 
   return {
     store,
@@ -112,23 +138,14 @@ const buildObserveRuntime = (
         const run = yield* makeObserveRun(config);
         const prepared = yield* prepareObserveRun(
           run,
-          mergeKernelOptions(defaultKernelOptions, options)
+          mergeKernelOptions(defaultKernelOptions, { ...options, sessionInit, runHooks })
         );
         yield* store.put(prepared);
         return prepared;
       }),
 
     startRun: (runId, options) =>
-      Effect.gen(function* () {
-        yield* failIfActiveHandleExists(store, runId);
-        const run = yield* store.require(runId);
-        const handle = yield* startObserveRunAsync({
-          run,
-          options: mergeKernelOptions(defaultKernelOptions, options)
-        }).pipe(Effect.provideService(Scope.Scope, scope));
-        yield* store.putHandle(handle);
-        return handle;
-      }),
+      startRunEffect(store, scope, runId, mergeKernelOptions(defaultKernelOptions, { ...options, sessionInit, runHooks })),
 
     listRuns: () => store.list(),
     listHandles: () => store.listHandles(),
@@ -157,6 +174,23 @@ const buildObserveRuntime = (
     removeHandle: (runId) => store.removeHandle(runId)
   };
 };
+
+const startRunEffect = (
+  store: RunStore,
+  scope: Scope.Scope,
+  runId: string,
+  options: RuntimeKernelOptions
+) =>
+  Effect.gen(function* () {
+    yield* failIfActiveHandleExists(store, runId);
+    const run = yield* store.require(runId);
+    const handle = yield* startObserveRunAsync({
+      run,
+      options
+    }).pipe(Effect.provideService(Scope.Scope, scope));
+    yield* store.putHandle(handle);
+    return handle;
+  });
 
 export const createObserveRuntime = (
   input: CreateObserveRuntimeInput = {}

@@ -20,6 +20,9 @@ export const bridgeBoardReadScope = "bridge:board:read" as const;
 export const bridgeControlsReadScope = "bridge:controls:read" as const;
 export const bridgeActionScope = "bridge:action" as const;
 export const bridgeBoardSubscribeScope = "bridge:board:subscribe" as const;
+/** Configurator scope — operator supplies watched subjects before the action tree becomes visible. */
+export const stewardConfigScope = "steward:config" as const;
+export const stewardConfigCloseScope = "steward:config:close" as const;
 
 export interface BridgeCaller {
   readonly id: string;

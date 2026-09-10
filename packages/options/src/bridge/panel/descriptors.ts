@@ -1,52 +1,229 @@
 // Canonical FunctionDescriptor projection for the Remote Bridge Console auto-UI (Objective 4, P1).
 //
-// WAVE 4: every consumable bridge emits machine-readable descriptors so the remote console can
-// auto-render forms. This projects options' dynamic functions[] (scope/label/target/disabled already
-// resolved by project.ts) into the canonical `@livestreak/schema` FunctionDescriptor, replacing the
-// degenerate `input: "<TypeName>"` string with a real `inputSchema: JsonSchema` that mirrors the
-// writer's `chains/types.ts` input shape. Pure read/projection — no writer/correctness changes.
-//
-// MULTICHAIN: descriptors are chain-agnostic SHAPE only; field VALUES (ids, addresses) are resolved
-// per chain at call time by the writer. bigint inputs are modelled as decimal-string `string` (JSON
-// has no bigint; the writer parses them back via requirePositiveBigInt at call time).
+// Track D: emit a configurator root (`options:config`) plus entity groups (market → vault → nft →
+// lvst) with callable actions as children. Every node carries id/parentId/package/visible via
+// withDescriptorIdentity. Pure read/projection — no writer/correctness changes.
 
 import type { CapabilityScope, FunctionDescriptor, JsonSchema } from "@livestreak/schema";
-import { bridgeActionScope } from "@livestreak/schema";
+import { bridgeActionScope, withDescriptorIdentity } from "@livestreak/schema";
 
+import { bridgeControlsReadScope, optionsConfigScope } from "../types.js";
 import type { OptionsFunctionView, OptionsPanel } from "./types.js";
 import { projectOptionsFunctions } from "./project.js";
+
+const PACKAGE = "options" as const;
+const CONFIG_ID = "options.config.configure";
+const LVST_GROUP_ID = "options.lvst";
+const GLOBAL_GROUP_ID = "options.global";
 
 // --- exports ---
 
 export const projectOptionsDescriptors = (panel: OptionsPanel): readonly FunctionDescriptor[] => {
   const descriptors: FunctionDescriptor[] = [];
+  const views = projectOptionsFunctions(panel);
 
-  // project.ts' functions[] now emits BOTH `mint` and `mintWithSalt` (wave 5), so the descriptor
-  // projection is a straight map — no special-casing.
-  for (const view of projectOptionsFunctions(panel)) {
-    descriptors.push(toDescriptor(view));
+  pushConfigurator(descriptors);
+  pushEntityGroups(descriptors, panel);
+
+  let order = 0;
+  for (const view of views) {
+    descriptors.push(toActionDescriptor(view, resolveParentId(view, panel), order++));
   }
 
   return descriptors;
 };
 
-// --- helpers ---
+// --- tree nodes ---
 
-const toDescriptor = (view: OptionsFunctionView): FunctionDescriptor => {
+const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
+  descriptors.push(
+    withDescriptorIdentity(
+      {
+        id: CONFIG_ID,
+        name: "configure",
+        label: "Configure options",
+        scope: optionsConfigScope,
+        nodeKind: "action",
+        order: 0,
+        disabled: false,
+        visible: true,
+        inputSchema: CONFIGURE_INPUT_SCHEMA
+      },
+      { package: PACKAGE, idPrefix: "config" }
+    )
+  );
+};
+
+const pushEntityGroups = (descriptors: FunctionDescriptor[], panel: OptionsPanel): void => {
+  descriptors.push(
+    withDescriptorIdentity(
+      {
+        id: LVST_GROUP_ID,
+        parentId: CONFIG_ID,
+        name: "lvst",
+        label: "$LVST",
+        scope: bridgeControlsReadScope,
+        nodeKind: "group",
+        order: 30,
+        disabled: false,
+        visible: false
+      },
+      { package: PACKAGE, idPrefix: "group" }
+    )
+  );
+
+  descriptors.push(
+    withDescriptorIdentity(
+      {
+        id: GLOBAL_GROUP_ID,
+        parentId: CONFIG_ID,
+        name: "global",
+        label: "Global",
+        scope: bridgeControlsReadScope,
+        nodeKind: "group",
+        order: 50,
+        disabled: false,
+        visible: false
+      },
+      { package: PACKAGE, idPrefix: "group" }
+    )
+  );
+
+  const vaultIds = new Set<string>();
+  const marketIds = new Set(panel.markets.map((market) => market.marketId));
+  for (const nft of panel.nfts) {
+    marketIds.add(nft.marketId);
+  }
+
+  for (const marketId of marketIds) {
+    const market = panel.markets.find((entry) => entry.marketId === marketId);
+    const marketGroupId = marketGroupIdFor(marketId);
+    descriptors.push(
+      withDescriptorIdentity(
+        {
+          id: marketGroupId,
+          parentId: CONFIG_ID,
+          name: "market",
+          label:
+            market !== undefined && market.title.trim().length > 0 ? market.title : "Market",
+          scope: bridgeControlsReadScope,
+          nodeKind: "group",
+          order: 10,
+          disabled: false,
+          visible: false,
+          target: { kind: "market", marketId }
+        },
+        { package: PACKAGE, idPrefix: "group" }
+      )
+    );
+
+    for (const vault of market?.vaults ?? []) {
+      if (vaultIds.has(vault.vaultId)) {
+        continue;
+      }
+      vaultIds.add(vault.vaultId);
+      descriptors.push(
+        withDescriptorIdentity(
+          {
+            id: vaultGroupIdFor(vault.vaultId),
+            parentId: marketGroupId,
+            name: "vault",
+            label: vault.question.trim().length > 0 ? vault.question : "Vault",
+            scope: bridgeControlsReadScope,
+            nodeKind: "group",
+            order: 20,
+            disabled: false,
+            visible: false,
+            target: { kind: "vault", marketId, vaultId: vault.vaultId }
+          },
+          { package: PACKAGE, idPrefix: "group" }
+        )
+      );
+    }
+  }
+
+  for (const nft of panel.nfts) {
+    descriptors.push(
+      withDescriptorIdentity(
+        {
+          id: nftGroupIdFor(nft.tokenId),
+          parentId: marketGroupIdFor(nft.marketId),
+          name: "nft",
+          label: `Position #${nft.tokenId}`,
+          scope: bridgeControlsReadScope,
+          nodeKind: "group",
+          order: 25,
+          disabled: false,
+          visible: false,
+          target: { kind: "nft", marketId: nft.marketId, tokenId: nft.tokenId }
+        },
+        { package: PACKAGE, idPrefix: "group" }
+      )
+    );
+  }
+};
+
+const resolveParentId = (view: OptionsFunctionView, panel: OptionsPanel): string => {
+  const target = view.target;
+  if (target === undefined) {
+    return GLOBAL_GROUP_ID;
+  }
+
+  switch (target.kind) {
+    case "market":
+      return marketGroupIdFor(target.marketId ?? panel.markets[0]?.marketId ?? "unknown");
+    case "vault":
+      return vaultGroupIdFor(target.vaultId ?? "unknown");
+    case "nft":
+      return nftGroupIdFor(target.tokenId ?? "unknown");
+    case "lvst":
+      return LVST_GROUP_ID;
+    case "global":
+    default:
+      return GLOBAL_GROUP_ID;
+  }
+};
+
+const toActionDescriptor = (
+  view: OptionsFunctionView,
+  parentId: string,
+  order: number
+): FunctionDescriptor => {
   const inputSchema = OPTIONS_INPUT_SCHEMAS[view.name];
+  const actionId = actionIdFor(parentId, view);
 
-  return {
-    name: view.name,
-    label: view.label,
-    // Console scope-unification (wave 5): emit the uniform granular console scope `bridge:action:<name>`
-    // directly so the host authorizes the projected scope with NO downstream scope normalization. The
-    // package-internal `view.scope` (options:<kind>:<name>) stays in the legacy functions[] catalog.
-    scope: `${bridgeActionScope}:${view.name}` as CapabilityScope,
-    ...(view.target === undefined ? {} : { target: view.target }),
-    disabled: view.disabled,
-    ...(view.disabledReason === undefined ? {} : { disabledReason: view.disabledReason }),
-    ...(inputSchema === undefined ? {} : { inputSchema })
-  };
+  return withDescriptorIdentity(
+    {
+      id: actionId,
+      parentId,
+      name: view.name,
+      label: view.label,
+      scope: `${bridgeActionScope}:${view.name}` as CapabilityScope,
+      ...(view.target === undefined ? {} : { target: view.target }),
+      nodeKind: "action",
+      order,
+      disabled: view.disabled,
+      visible: false,
+      ...(view.disabledReason === undefined ? {} : { disabledReason: view.disabledReason }),
+      ...(inputSchema === undefined ? {} : { inputSchema })
+    },
+    { package: PACKAGE, idPrefix: "action" }
+  );
+};
+
+// --- id helpers ---
+
+const idSlug = (value: string): string =>
+  value.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 64);
+
+const marketGroupIdFor = (marketId: string): string => `options.market.${idSlug(marketId)}`;
+const vaultGroupIdFor = (vaultId: string): string => `options.vault.${idSlug(vaultId)}`;
+const nftGroupIdFor = (tokenId: string): string => `options.nft.${idSlug(tokenId)}`;
+
+const actionIdFor = (parentId: string, view: OptionsFunctionView): string => {
+  const suffix =
+    view.target?.side === undefined ? "" : `.${view.target.side}`;
+  return `${parentId}.action.${view.name}${suffix}`;
 };
 
 // --- schema builders (canonical JsonSchema) ---
@@ -64,7 +241,6 @@ const sideEnum: JsonSchema = {
 
 const bool = (description: string): JsonSchema => ({ type: "boolean", required, description });
 
-// bigint base-unit amounts cross the wire as decimal strings (JSON has no bigint).
 const amountStr = (description: string): JsonSchema => ({
   type: "string",
   required,
@@ -80,16 +256,19 @@ const arrayOf = (items: JsonSchema, description: string): JsonSchema => ({
   description
 });
 
-// Each schema mirrors the matching `chains/types.ts` writer input exactly.
+const CONFIGURE_INPUT_SCHEMA: JsonSchema = obj([
+  {
+    name: "marketId",
+    value: str("Market to operate on."),
+    help: "Market id (bytes32 hex) — supplied manually, not inferred from observe."
+  }
+]);
+
 const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
-  // MintNftInput
   mint: obj([
     { name: "marketId", value: str("Market to enter."), help: "Market id (bytes32 hex)." },
     { name: "to", value: str("NFT recipient."), help: "Recipient wallet address." }
   ]),
-  // MintWithSaltInput — salt is `uint64` per the MarketDriver ABI + CLI lane (NOT bytes32 hex; the
-  // options MintWithSaltInput.salt:string comment is doc drift, the contract wins). Modelled as a
-  // numeric `integer` (uint64 range) so the auto-form renders a number input.
   mintWithSalt: obj([
     { name: "marketId", value: str("Market to enter."), help: "Market id (bytes32 hex)." },
     {
@@ -103,7 +282,6 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
     },
     { name: "to", value: str("NFT recipient."), help: "Recipient wallet address." }
   ]),
-  // FundStreamInput
   fund: obj([
     { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
     { name: "vaultId", value: str("Vault to fund."), help: "Target vault id." },
@@ -111,7 +289,6 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
     { name: "rate", value: amountStr("Per-second stream rate."), help: "Stream rate in USDC base units/sec." },
     { name: "deposit", value: amountStr("Initial deposit."), help: "Up-front deposit in USDC base units." }
   ]),
-  // SetLanesInput
   setLanes: obj([
     { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
     {
@@ -128,23 +305,19 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
     },
     { name: "addDeposit", value: amountStr("Additional deposit."), help: "Extra USDC base units to add." }
   ]),
-  // StopFundingInput
   stopFunding: obj([
     { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
     { name: "vaultId", value: str("Vault id."), help: "Vault whose lane to stop." },
     { name: "side", value: sideEnum, help: "Side of the lane to stop." }
   ]),
-  // StopAllFundingInput
   stopAllFunding: obj([
     { name: "tokenId", value: str("Position NFT id."), help: "Stop every active lane on this NFT." }
   ]),
-  // WithdrawInput
   withdraw: obj([
     { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
     { name: "vaultId", value: str("Vault id."), help: "Vault to withdraw winnings from." },
     { name: "to", value: str("Payout recipient."), help: "Address receiving the payout." }
   ]),
-  // WithdrawManyInput
   withdrawMany: obj([
     { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
     {
@@ -154,34 +327,27 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
     },
     { name: "to", value: str("Payout recipient."), help: "Address receiving the payouts." }
   ]),
-  // ClaimLossLvstInput
   claimLossLvst: obj([
     { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
     { name: "vaultId", value: str("Vault id."), help: "Losing vault to claim LVST from." },
     { name: "side", value: sideEnum, help: "Losing side." },
     { name: "to", value: str("LVST recipient."), help: "Address receiving the LVST." }
   ]),
-  // StakeLvstInput
   stakeLvst: obj([
     { name: "amount", value: amountStr("LVST amount to stake."), help: "LVST base units." }
   ]),
-  // UnstakeLvstInput
   unstakeLvst: obj([
     { name: "amount", value: amountStr("LVST amount to unstake."), help: "LVST base units." }
   ]),
-  // claimDividends() takes no input — intentionally omitted (no inputSchema).
-  // TransferNftInput
   transferNft: obj([
     { name: "from", value: str("Current owner."), help: "Address transferring the NFT." },
     { name: "to", value: str("New owner."), help: "Recipient address." },
     { name: "tokenId", value: str("Position NFT id."), help: "NFT to transfer." }
   ]),
-  // ApproveNftInput
   approveNft: obj([
     { name: "operator", value: str("Operator address."), help: "Address approved for the NFT." },
     { name: "tokenId", value: str("Position NFT id."), help: "NFT to approve." }
   ]),
-  // SetApprovalForAllInput
   setApprovalForAll: obj([
     { name: "operator", value: str("Operator address."), help: "Address to grant/revoke." },
     { name: "approved", value: bool("Grant (true) or revoke (false)."), help: "Approval flag." }

@@ -5,6 +5,7 @@ import type { ObserveRunResult } from "#run/kernel.js";
 import type { Board } from "#run/control/board/index.js";
 import type { ControlArtifact, ControlCallEnvelope, ControlCallResult } from "#run/control/bus/index.js";
 import type { ArtifactSubscription, BoardSubscription } from "#run/control/bus/index.js";
+import type { PackageRuntimeInit } from "@livestreak/schema";
 import type { ObserveRuntime } from "#run/runtime.js";
 import type { CapabilityGrant } from "#scope/scopes.js";
 
@@ -59,6 +60,7 @@ export interface BridgeStopRunInput {
 
 export interface CreateObserveBridgeInput {
   readonly runtime: ObserveRuntime;
+  readonly sessionInit?: PackageRuntimeInit;
 }
 
 export interface ObserveBridge {

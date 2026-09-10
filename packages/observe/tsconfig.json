@@ -10,6 +10,7 @@
       "#run/*": ["./src/run/*"],
       "#scope/*": ["./src/scope/*"],
       "#market/*": ["./src/market/*"],
+      "#flows/*": ["./src/flows/*"],
       "#builtins.js": ["./src/builtins.js"],
       "#index.js": ["./src/index.js"],
       "#test/*": ["./test/*"]

@@ -23,6 +23,11 @@ export interface FileSinkDriverOptions {
   readonly binaries?: FfmpegBinaries;
 }
 
+import {
+  fileSinkCloseCommand,
+  fileSinkConfigureCommand
+} from "./commands.js";
+
 const attachmentId = "file-export";
 
 interface NodeFsPromises {
@@ -68,7 +73,7 @@ export const fileSinkDescriptor: SinkDriverDescriptor = {
   flags: [
     flag("path", stringValue("Path for the exported MP4 file.", true), "Write MP4 output to a local file.")
   ],
-  commands: [],
+  commands: [fileSinkConfigureCommand, fileSinkCloseCommand],
   mode: "file",
   requiresHost: false,
   debugOnly: false
@@ -225,7 +230,7 @@ const describeFileSinkCell = (
         required: true
       },
       readonly: {},
-      functions: []
+      functions: ["configure", "close"]
     }
   };
 };

@@ -146,6 +146,7 @@ export const createRemoteRelay = (
       if (session === undefined) {
         return;
       }
+      session.lastBoard = msg.board;
       for (const sink of session.uiSinks.values()) {
         sink({
           type: "board_patch",
@@ -209,6 +210,9 @@ export const createRemoteRelay = (
     // the UI only ever learns about functions it is actually authorized to call.
     const functions = filterFunctionsByGrant(session.functions, grant);
     conn.send({ type: "ready", sessionId, functions });
+    if (session.lastBoard !== undefined) {
+      conn.send({ type: "board_patch", board: session.lastBoard });
+    }
     return true;
   };
 

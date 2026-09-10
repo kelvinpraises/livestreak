@@ -3,6 +3,7 @@ import { Effect, Exit } from "effect";
 import { buildControlCatalog } from "#run/control/index.js";
 import { createControlBus, stageCellSurface } from "#run/control/bus/index.js";
 import { createInitialBoard } from "#run/control/board/index.js";
+import { createSystemConfigSurface } from "#run/control/system/config.js";
 import { createSystemPauseSurface } from "#run/control/index.js";
 import { createSystemRunSurface } from "#run/control/index.js";
 import { browserCaptureClearCropScope } from "#pipeline/capture/browser/control/controls.js";
@@ -256,7 +257,7 @@ describe("control bus surfaces", () => {
         runId: "run_initial_match",
         board,
         catalog: buildControlCatalog(),
-        surfaces: [createSystemPauseSurface(), createSystemRunSurface()]
+        surfaces: [createSystemConfigSurface()]
       })
     );
 
@@ -344,7 +345,7 @@ describe("control bus surfaces", () => {
 });
 
 describe("stage-owned board cells", () => {
-  it("makeObserveRun creates system and market Board cells before prepare", () => {
+  it("makeObserveRun creates only system:config at T0", () => {
     const run = makeObserveRunSync(
       browserCaptureRunConfig(
         "run_system_only",
@@ -353,9 +354,8 @@ describe("stage-owned board cells", () => {
       )
     );
 
-    expect(new Set(Object.keys(run.board.cells))).toEqual(
-      new Set(["market", "system:memory", "system:pause", "system:run", "system:tick"])
-    );
+    expect(new Set(Object.keys(run.board.cells))).toEqual(new Set(["system:config"]));
+    expect(run.board.cells["system:config"]?.readonly?.runId).toBe("run_system_only");
   });
 
   it("prepareObserveRun mounts capture and sink cells from describeControl", async () => {

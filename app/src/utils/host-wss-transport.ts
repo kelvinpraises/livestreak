@@ -1,7 +1,6 @@
-// HostWssTransport — the REAL leg-B client for the Remote Bridge Console (P5).
+// HostWssTransport — leg-B client for the Remote Bridge Console (P5).
 //
-// Implements the same `RemoteTransport` interface as `LocalMockTransport`, so it drops into
-// `RemoteProvider` unchanged. It speaks the ONE canonical wire protocol from `@livestreak/schema`:
+// Speaks the canonical wire protocol from `@livestreak/schema`:
 //   redeem  → POST /remote/:session/join (password → host-signed grant)
 //   connect → open WSS to /remote/:session/ui, send ui.hello{grant, seq:0}, await `ready` (+ functions)
 //   send    → call{callId, seq, nonce, envelope} → await the matching call_result
@@ -60,6 +59,7 @@ export class HostWssTransport implements RemoteTransport {
   private readonly patchSubs = new Set<(b: RemoteBoard) => void>()
   private readonly statusSubs = new Set<(s: RemoteStatus) => void>()
   private functions: readonly FunctionDescriptor[] = []
+  private board: RemoteBoard = {}
   private readonly pending = new Map<string, (r: CallResult) => void>()
   private onReady?: () => void
 
@@ -145,7 +145,8 @@ export class HostWssTransport implements RemoteTransport {
         for (const cb of this.fnSubs) cb(this.functions)
         return
       case 'board_patch':
-        for (const cb of this.patchSubs) cb((f.board ?? {}) as RemoteBoard)
+        this.applyBoardPatch(f.target, f.board)
+        for (const cb of this.patchSubs) cb({ ...this.board })
         return
       case 'call_result': {
         const resolve = this.pending.get(f.callId)
@@ -160,7 +161,11 @@ export class HostWssTransport implements RemoteTransport {
         this.ws?.close(4403, 'revoked')
         return
       case 'error':
-        // A transport-level error frame; surface as status without tearing down a healthy session.
+        if (f.code === -32010 || f.message?.includes('gateway disconnected')) {
+          this.setStatus('closed')
+          this.ws?.close(4410, 'gateway disconnected')
+          return
+        }
         if (this.status !== 'open') this.setStatus('error')
         return
     }
@@ -180,7 +185,18 @@ export class HostWssTransport implements RemoteTransport {
 
   onPatch(cb: (board: RemoteBoard) => void): () => void {
     this.patchSubs.add(cb)
+    if (Object.keys(this.board).length > 0) cb({ ...this.board })
     return () => this.patchSubs.delete(cb)
+  }
+
+  private applyBoardPatch(target: string | undefined, patch: unknown): void {
+    if (target) {
+      this.board = { ...this.board, [target]: patch }
+      return
+    }
+    if (patch && typeof patch === 'object' && !Array.isArray(patch)) {
+      this.board = { ...(patch as RemoteBoard) }
+    }
   }
 
   onStatus(cb: (status: RemoteStatus) => void): () => void {
@@ -189,7 +205,7 @@ export class HostWssTransport implements RemoteTransport {
     return () => this.statusSubs.delete(cb)
   }
 
-  send(envelope: CallActionEnvelope): Promise<CallResult> {
+  send(envelope: CallActionEnvelope, target?: string): Promise<CallResult> {
     if (this.status !== 'open' || !this.ws) {
       return Promise.resolve({ ok: false, error: 'Not connected' })
     }
@@ -200,6 +216,7 @@ export class HostWssTransport implements RemoteTransport {
       callId,
       seq: this.seq,
       nonce: randomNonce(),
+      ...(target ? { target } : {}),
       envelope: { scope: envelope.scope, action: envelope.action, args: envelope.args },
     }
     return new Promise<CallResult>((resolve) => {

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { FunctionDescriptor } from "@livestreak/schema";
-import { projectConsoleFunctions } from "../src/gateway/console-functions.js";
+import { projectConsoleFunctions } from "../src/gateway/console/functions.js";
 
 // Scope-unification (wave 5): package descriptors already carry the granular console scope
 // `bridge:action:<name>` — the gateway only filters by the session's grants now.
 const raw: readonly FunctionDescriptor[] = [
-  { name: "fund", label: "Fund", scope: "bridge:action:fund", disabled: false },
-  { name: "withdraw", label: "Withdraw", scope: "bridge:action:withdraw", disabled: false }
+  { id: "options.fund", package: "options", name: "fund", label: "Fund", scope: "bridge:action:fund", disabled: false },
+  { id: "options.withdraw", package: "options", name: "withdraw", label: "Withdraw", scope: "bridge:action:withdraw", disabled: false }
 ];
 
 describe("projectConsoleFunctions", () => {

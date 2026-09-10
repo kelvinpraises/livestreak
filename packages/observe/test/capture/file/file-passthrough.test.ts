@@ -4,9 +4,11 @@ import { tmpdir } from "node:os";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 import type { ObserveRunResult } from "#run/kernel.js";
-import { makeObserveRunSync } from "#test/helpers/observe-run.js";
 import { fileCaptureRunConfig } from "#test/helpers/run-config.js";
-import { prepareObserveRun, startObserveRun } from "#run/kernel.js";
+import {
+  defaultFileExportConfigure,
+  startObserveRunBoardFirst
+} from "#test/helpers/board-first-run.js";
 import type { ProbedVideoStream } from "#test/helpers/ffmpeg.js";
 import {
   durationWithinEpsilon,
@@ -38,13 +40,14 @@ describe("file passthrough", () => {
 });
 
 const runFilePassthrough = async (inputPath: string, outputPath: string) => {
-  const run = makeObserveRunSync(fileCaptureRunConfig("run_file_passthrough", inputPath, outputPath));
+  const config = fileCaptureRunConfig("run_file_passthrough", inputPath, outputPath);
 
-  const prepared = await Effect.runPromise(prepareObserveRun(run));
-  expect(prepared.prepared).toBe(true);
-  expect(prepared.board.cells["system:run"]?.status[0]).toBe("prepared");
+  const result = await Effect.runPromise(
+    startObserveRunBoardFirst(config, defaultFileExportConfigure())
+  );
+  expect(result.board.cells["system:run"]?.status[0]).toBe("stopped");
 
-  return Effect.runPromise(startObserveRun(prepared));
+  return result;
 };
 
 const assertPassthroughResult = (

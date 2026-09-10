@@ -36,46 +36,16 @@ export const createInitialBoard = (input: CreateInitialBoardInput): Board => {
     revision: 1,
     catalogVersion: "0.1.0",
     cells: {
-      "system:run": {
-        label: "Run",
-        catalog: "system:run",
-        status: ["created", null, nowMs],
-        settings: { ...defaultControlRun },
+      "system:config": {
+        label: "Config",
+        catalog: "system:config",
+        status: ["idle", null, nowMs],
+        settings: {},
         readonly: {
           runId: input.runId,
-          prepared: false
+          liveConfigurators: ["observe.system.config"]
         },
-        functions: ["stop"]
-      },
-      "system:pause": {
-        label: "Pause",
-        catalog: "system:pause",
-        status: ["idle", null, nowMs],
-        settings: { ...defaultControlPause },
-        functions: ["pause", "resume", "setPresentation"]
-      },
-      "system:memory": {
-        label: "Memory",
-        catalog: "system:memory",
-        status: ["idle", null, nowMs],
-        readonly: {},
-        functions: []
-      },
-      "system:tick": {
-        label: "Tick",
-        catalog: "system:tick",
-        status: ["idle", null, nowMs],
-        readonly: {},
-        functions: []
-      },
-      market: {
-        label: "Market",
-        catalog: "market",
-        status: ["none", null, nowMs],
-    readonly: {
-      registrationState: "none"
-    },
-        functions: []
+        functions: ["configure", "close"]
       }
     }
   };

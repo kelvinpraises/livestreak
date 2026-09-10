@@ -36,6 +36,11 @@ export interface JsonSchemaProperty {
   readonly help: string;
 }
 
+/** Remote console package tab — one board + function tree per package. */
+export type ConsolePackage = "observe" | "options" | "bookmaker" | "steward";
+
+export type FunctionNodeKind = "group" | "action";
+
 // What the console attaches a trigger button to. `kind`/`side` are widened `string` so observe's
 // cell-kinds and options'/bookmaker's market/vault/nft targets all fit one cross-package type;
 // packages may narrow locally and assign into this.
@@ -50,7 +55,15 @@ export interface FunctionDescriptorTarget {
 // The cross-package function the console renders. Superset of observe's CatalogFunction (which has
 // `scope` but no `target`) and options' OptionsFunctionView (which has `target` but a degenerate
 // string `input`). `target` optional (observe has none); `inputSchema` is the auto-form source.
+//
+// Tree fields (`id`, `parentId`, `package`, `visible`) drive configurator UX: the full catalog may
+// exist while the UI hides nodes not on the active configurator path.
 export interface FunctionDescriptor {
+  /** Stable unique id across all packages, e.g. `observe.system.config.configure`. */
+  readonly id: string;
+  /** Parent configurator/group id; omitted for top-level roots within a package tab. */
+  readonly parentId?: string;
+  readonly package: ConsolePackage;
   readonly name: string;
   readonly label: string;
   readonly scope: CapabilityScope; // authz — matched by the capability matcher
@@ -58,4 +71,26 @@ export interface FunctionDescriptor {
   readonly disabled: boolean;
   readonly disabledReason?: string;
   readonly inputSchema?: JsonSchema;
+  /** When false the UI hides this node (configurator visibility layer). Defaults true if omitted. */
+  readonly visible?: boolean;
+  /** Sibling sort order within the same parent. */
+  readonly order?: number;
+  /** Group nodes organize children; action nodes are callable. */
+  readonly nodeKind?: FunctionNodeKind;
 }
+
+/** Fill tree metadata when projecting legacy flat descriptors during migration. */
+export const withDescriptorIdentity = (
+  descriptor: Omit<FunctionDescriptor, "id" | "package"> & {
+    readonly id?: string;
+    readonly package?: ConsolePackage;
+  },
+  defaults: { readonly package: ConsolePackage; readonly idPrefix?: string }
+): FunctionDescriptor => ({
+  ...descriptor,
+  id:
+    descriptor.id ??
+    `${defaults.package}.${defaults.idPrefix ?? "fn"}.${descriptor.name}`,
+  package: descriptor.package ?? defaults.package,
+  visible: descriptor.visible ?? true
+});

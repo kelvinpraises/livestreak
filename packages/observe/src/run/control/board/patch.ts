@@ -35,13 +35,29 @@ export const applyBoardPatch = (
     let changed = false;
 
     for (const [cellId, cellPatch] of Object.entries(cellPatches)) {
+      if (cellPatch.remove === true) {
+        if (nextCells[cellId] !== undefined) {
+          const { [cellId]: _removed, ...rest } = nextCells;
+          nextCells = rest as Record<BoardCellId, BoardCell>;
+          changed = true;
+        }
+        continue;
+      }
+
       const currentCell = nextCells[cellId];
       if (currentCell === undefined) {
-        return yield* Effect.fail(
-          new LiveStreakConfigError({
-            message: `Board patch targets unknown cell ${cellId}`
-          })
-        );
+        if (cellPatch.create === undefined) {
+          return yield* Effect.fail(
+            new LiveStreakConfigError({
+              message: `Board patch targets unknown cell ${cellId}`
+            })
+          );
+        }
+
+        yield* validateCellPatch(cellPatch);
+        nextCells = { ...nextCells, [cellId]: cellPatch.create };
+        changed = true;
+        continue;
       }
 
       yield* validateCellPatch(cellPatch);
@@ -113,8 +129,26 @@ const patchBoardCell = (
     changed = true;
   }
 
+  if (patch.label !== undefined && patch.label !== cell.label) {
+    nextCell = { ...nextCell, label: patch.label };
+    changed = true;
+  }
+
+  if (patch.catalog !== undefined && patch.catalog !== cell.catalog) {
+    nextCell = { ...nextCell, catalog: patch.catalog };
+    changed = true;
+  }
+
+  if (patch.functions !== undefined && !functionsEqual(cell.functions, patch.functions)) {
+    nextCell = { ...nextCell, functions: [...patch.functions] };
+    changed = true;
+  }
+
   return { cell: nextCell, changed };
 };
+
+const functionsEqual = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
 
 const applySectionPatch = (
   current: Readonly<Record<string, unknown>>,

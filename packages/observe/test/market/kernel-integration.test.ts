@@ -32,7 +32,7 @@ describe("market registration kernel integration", () => {
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
       expect(exit.value.outcome).toBe("stopped");
-      expect(exit.value.board.cells["market"]?.status[0]).toBe("pending");
+      expect(exit.value.board.cells["market"]?.readonly?.registrationState).toBe("none");
     }
   });
 });

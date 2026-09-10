@@ -4,6 +4,7 @@ import { Address } from "@livestreak/schema";
 import { buildControlCatalog } from "#run/control/index.js";
 import { createControlBus } from "#run/control/bus/index.js";
 import { createInitialBoard } from "#run/control/board/index.js";
+import { extendBoardForMarketTests } from "#test/helpers/board.js";
 import {
   forkMarketRegistrationIfNeeded,
   runMarketRegistrationLifecycle
@@ -33,7 +34,10 @@ describe("market registration lifecycle", () => {
         Effect.gen(function* () {
           const bus = yield* createControlBus({
             runId: "run_idempotent",
-            board: createInitialBoard({ runId: "run_idempotent", nowMs: 1 }),
+            board: extendBoardForMarketTests(
+              createInitialBoard({ runId: "run_idempotent", nowMs: 1 }),
+              "run_idempotent"
+            ),
             catalog: buildControlCatalog(),
             surfaces: []
           });
@@ -61,7 +65,10 @@ describe("market registration lifecycle", () => {
       Effect.gen(function* () {
         const bus = yield* createControlBus({
           runId: "run_receipt",
-          board: createInitialBoard({ runId: "run_receipt", nowMs: 1 }),
+          board: extendBoardForMarketTests(
+            createInitialBoard({ runId: "run_receipt", nowMs: 1 }),
+            "run_receipt"
+          ),
           catalog: buildControlCatalog(),
           surfaces: []
         });
@@ -90,7 +97,10 @@ describe("market registration lifecycle", () => {
       Effect.gen(function* () {
         const bus = yield* createControlBus({
           runId: "run_paymaster",
-          board: createInitialBoard({ runId: "run_paymaster", nowMs: 1 }),
+          board: extendBoardForMarketTests(
+            createInitialBoard({ runId: "run_paymaster", nowMs: 1 }),
+            "run_paymaster"
+          ),
           catalog: buildControlCatalog(),
           surfaces: []
         });
@@ -120,7 +130,10 @@ describe("market registration lifecycle", () => {
       Effect.gen(function* () {
         const bus = yield* createControlBus({
           runId: "run_registered",
-          board: createInitialBoard({ runId: "run_registered", nowMs: 1 }),
+          board: extendBoardForMarketTests(
+            createInitialBoard({ runId: "run_registered", nowMs: 1 }),
+            "run_registered"
+          ),
           catalog: buildControlCatalog(),
           surfaces: []
         });
@@ -159,7 +172,7 @@ describe("market registration lifecycle", () => {
       Effect.gen(function* () {
         const bus = yield* createControlBus({
           runId,
-          board: createInitialBoard({ runId, nowMs: 1 }),
+          board: extendBoardForMarketTests(createInitialBoard({ runId, nowMs: 1 }), runId),
           catalog: buildControlCatalog(),
           surfaces: []
         });
@@ -195,7 +208,10 @@ describe("market registration lifecycle", () => {
       Effect.gen(function* () {
         const bus = yield* createControlBus({
           runId: "run_empty",
-          board: createInitialBoard({ runId: "run_empty", nowMs: 1 }),
+          board: extendBoardForMarketTests(
+            createInitialBoard({ runId: "run_empty", nowMs: 1 }),
+            "run_empty"
+          ),
           catalog: buildControlCatalog(),
           surfaces: []
         });

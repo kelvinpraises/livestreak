@@ -144,6 +144,15 @@ describe("bridge panel CLI contract", () => {
       revision: 1,
       catalogVersion: "0.1.0",
       cells: {
+        "system:config": {
+          label: "Config",
+          catalog: "system:config",
+          status: ["configured", null, Date.now()] as const,
+          readonly: {
+            liveConfigurators: ["observe.system.config", "observe.system.run"]
+          },
+          functions: []
+        },
         "system:run": {
           label: "Run",
           catalog: "system:run",

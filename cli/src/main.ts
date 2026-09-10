@@ -3,35 +3,13 @@
 import { Command } from "@effect/cli";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect } from "effect";
-import { hostCommand, produceCommand } from "./commands/produce.js";
-import { initCommand } from "./commands/init.js";
-import { loginCommand } from "./commands/login.js";
-import { vaultConsumerCommands } from "./commands/vaults.js";
-import { vaultCommand } from "./commands/vault.js";
-import { laneCommands } from "./commands/lanes.js";
-import { nftCommands } from "./commands/nft.js";
+import { authCommand } from "./commands/auth.js";
+import { keystoreCommand } from "./commands/keystore.js";
+import { settingsCommand } from "./commands/settings.js";
 import { remoteCommands } from "./commands/remote.js";
-import { stewardCommands } from "./commands/steward.js";
-import { settleCommands } from "./commands/settle.js";
-import { streamCommands } from "./commands/stream.js";
-import { faucetCommands } from "./commands/faucet.js";
 
 const root = Command.make("livestreak", {}, () => Effect.void).pipe(
-  Command.withSubcommands([
-    initCommand,
-    loginCommand,
-    produceCommand,
-    hostCommand,
-    ...vaultConsumerCommands,
-    vaultCommand,
-    ...laneCommands,
-    ...nftCommands,
-    ...remoteCommands,
-    ...stewardCommands,
-    ...settleCommands,
-    ...streamCommands,
-    ...faucetCommands
-  ])
+  Command.withSubcommands([authCommand, keystoreCommand, settingsCommand, ...remoteCommands])
 );
 
 const cli = Command.run(root, {

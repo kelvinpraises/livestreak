@@ -20,6 +20,8 @@ export interface RemoteSession {
   readonly functions: readonly FunctionDescriptor[];
   expiresAt: number;
   revoked: boolean;
+  /** Latest board snapshot from the gateway (replayed to late-joining UIs). */
+  lastBoard?: unknown;
   gateway: GatewaySink | null;
   /** UI sockets bound to this session, keyed by an internal connection id. */
   readonly uiSinks: Map<string, UiSink>;

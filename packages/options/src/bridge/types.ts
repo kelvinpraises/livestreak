@@ -20,6 +20,8 @@ export const bridgeBoardReadScope = "bridge:board:read" as const;
 export const bridgeControlsReadScope = "bridge:controls:read" as const;
 export const bridgeActionScope = "bridge:action" as const;
 export const bridgeBoardSubscribeScope = "bridge:board:subscribe" as const;
+/** Configurator scope — operator supplies marketId before the action tree becomes visible. */
+export const optionsConfigScope = "options:config" as const;
 
 export interface BridgeCaller {
   readonly id: string;

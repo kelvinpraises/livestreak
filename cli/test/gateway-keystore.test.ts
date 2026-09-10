@@ -7,7 +7,7 @@ import {
   keystoreExists,
   unlockKeystoreAt,
   writeKeystoreFile
-} from "../src/gateway/keystore.js";
+} from "../src/gateway/auth/keystore.js";
 
 const seed = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff);
 

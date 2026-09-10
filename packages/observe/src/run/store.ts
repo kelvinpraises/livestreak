@@ -35,6 +35,7 @@ export const failIfActiveHandleExists = (
 
 export interface RunStore {
   readonly put: (run: ObserveRun) => Effect.Effect<void, LiveStreakConfigError>;
+  readonly replace: (run: ObserveRun) => Effect.Effect<void, LiveStreakConfigError>;
   readonly get: (runId: string) => Effect.Effect<ObserveRun | undefined>;
   readonly require: (runId: string) => Effect.Effect<ObserveRun, LiveStreakConfigError>;
   readonly remove: (runId: string) => Effect.Effect<void>;
@@ -69,6 +70,17 @@ export const createRunStore = (): RunStore => {
         runInsertionOrder.push(runId);
       });
     },
+
+    replace: (run) =>
+      Effect.sync(() => {
+        const runId = run.config.runId;
+        if (!runs.has(runId)) {
+          runs.set(runId, run);
+          runInsertionOrder.push(runId);
+          return;
+        }
+        runs.set(runId, run);
+      }),
 
     get: (runId) => Effect.succeed(runs.get(runId)),
 

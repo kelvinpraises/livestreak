@@ -144,7 +144,12 @@ class StewardRuntimeFacade implements StewardRuntime {
       });
     }
 
-    const finding =
+    // The console can target a specific vault (resolve maps subject -> vault); attach it so the
+    // action planner can emit the resolve contract call.
+    const effectiveSubject =
+      bridgeArgs.vaultId === undefined ? subject : { ...subject, vaultId: bridgeArgs.vaultId };
+
+    const baseFinding =
       snapshot.latestFindings.find(
         (entry) =>
           sameSubject(entry.subject, subject) &&
@@ -153,10 +158,11 @@ class StewardRuntimeFacade implements StewardRuntime {
       ({
         id: `bridge:${action}:${subject.id}`,
         kind: "manual_note" as const,
-        subject,
+        subject: effectiveSubject,
         severity: "info" as const,
         message: bridgeArgs.reason ?? action
       } as const);
+    const finding = { ...baseFinding, subject: effectiveSubject };
 
     const [plan] = planStewardActions(
       [
@@ -166,7 +172,10 @@ class StewardRuntimeFacade implements StewardRuntime {
           reason: bridgeArgs.reason ?? `Bridge action ${action}`
         }
       ],
-      this.config.actionContext
+      {
+        ...this.config.actionContext,
+        ...(bridgeArgs.outcome === undefined ? {} : { resolveOutcome: bridgeArgs.outcome })
+      }
     );
 
     if (plan === undefined) {
@@ -256,6 +265,22 @@ class StewardRuntimeFacade implements StewardRuntime {
 
 // --- helpers ---
 
+// Normalize a resolve outcome from the console: a number (1/2) or a "yes"/"no" string -> the
+// on-chain Vault.Outcome enum value (YES = 1, NO = 2).
+const normalizeOutcome = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const lower = value.trim().toLowerCase();
+    if (lower === "yes") return 1;
+    if (lower === "no") return 2;
+    const parsed = Number(lower);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+};
+
 const readBridgeActionArgs = (
   args: unknown
 ): {
@@ -263,6 +288,8 @@ const readBridgeActionArgs = (
   readonly subjectKind?: StewardSubjectKind;
   readonly reason?: string;
   readonly findingId?: string;
+  readonly outcome?: number;
+  readonly vaultId?: string;
 } => {
   if (args === null || typeof args !== "object" || Array.isArray(args)) {
     throw new LiveStreakConfigError({
@@ -279,10 +306,16 @@ const readBridgeActionArgs = (
     });
   }
 
+  const outcome = normalizeOutcome(record.outcome);
+
   return {
     subjectId: record.subjectId.trim(),
     ...(isStewardSubjectKind(record.subjectKind) ? { subjectKind: record.subjectKind } : {}),
     ...(typeof record.reason === "string" ? { reason: record.reason } : {}),
-    ...(typeof record.findingId === "string" ? { findingId: record.findingId } : {})
+    ...(typeof record.findingId === "string" ? { findingId: record.findingId } : {}),
+    ...(outcome === undefined ? {} : { outcome }),
+    ...(typeof record.vaultId === "string" && record.vaultId.trim().length > 0
+      ? { vaultId: record.vaultId.trim() }
+      : {})
   };
 };

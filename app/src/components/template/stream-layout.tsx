@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { Link } from '@tanstack/react-router'
 import { AnimatePresence } from 'framer-motion'
 import { StreamBar } from '#/components/molecules/stream-bar.tsx'
@@ -16,9 +16,11 @@ import { useFlow } from '#/hooks/use-flow.ts'
 import { useWalletContext } from '#/providers/wallet-provider.tsx'
 import { useOptionsContext } from '#/providers/options-provider.tsx'
 import { useHostStream } from '#/hooks/use-host-stream.ts'
-import { isOptionsModeEnabled } from '#/utils/env.ts'
+import { useWebRtcStreamFeed } from '#/hooks/use-webrtc-stream-feed.ts'
+import { env, isOptionsModeEnabled } from '#/utils/env.ts'
 import { DEFAULT_FUND_DURATION_MIN, panelToStream } from '#/utils/options'
 import { resolveStreamFeed } from '#/utils/stream'
+import { shouldUseHostWebRtcFeed } from '#/utils/webrtc-consumer'
 
 interface StreamLayoutProps {
   streamTitle: string
@@ -45,7 +47,23 @@ export function StreamLayout({ streamTitle, category, totalPooled, streamId }: S
   const streamPointer = optionsEnabled && optionsConnected && board
     ? panelToStream(board.panel, streamId)
     : undefined
-  const streamMedia = resolveStreamFeed(streamPointer, hostStream.stream)
+  const hostDetail = hostStream.stream
+  const webrtcEnabled =
+    hostStream.ready && shouldUseHostWebRtcFeed(streamPointer, hostDetail)
+  const relayStreamId = hostDetail?.marketId ?? streamId
+  const webrtcFeed = useWebRtcStreamFeed({
+    enabled: webrtcEnabled,
+    baseUrl: env.hostBaseUrl,
+    streamId: relayStreamId,
+  })
+  const streamMedia = useMemo(() => {
+    const resolved = resolveStreamFeed(streamPointer, hostDetail)
+    if (!webrtcEnabled) return resolved
+    if (hostDetail?.watchUrl && resolved.src) return resolved
+    if (webrtcFeed.blobUrl) return { kind: 'live' as const, src: webrtcFeed.blobUrl }
+    if (webrtcFeed.status !== 'error') return { kind: 'live' as const }
+    return resolved
+  }, [streamPointer, hostDetail, webrtcFeed.blobUrl, webrtcFeed.status, webrtcEnabled])
 
   const floatingVaults = vaults.filter(v => v.status === 'open' || v.status === 'hot')
 

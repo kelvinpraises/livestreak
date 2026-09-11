@@ -36,7 +36,8 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "pretest": "npm run build",
-    "test": "node --test \"test/**/*.test.mjs\""
+    "test": "node --test \"test/**/*.test.mjs\"",
+    "dev": "tsc -w -p tsconfig.build.json"
   },
   "dependencies": {
     "@mysten/sui": "^2.19.0",

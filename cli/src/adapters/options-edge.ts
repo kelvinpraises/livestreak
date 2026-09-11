@@ -1,4 +1,4 @@
-import { type UserAddress } from "@livestreak/options";
+import { type UserAddress, asMarketId } from "@livestreak/options";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import { bridgeActionScope, type CallActionEnvelope, type FunctionDescriptor } from "@livestreak/schema";
 import {
@@ -39,15 +39,41 @@ export const createOptionsConsoleEdge = (input: CreateOptionsConsoleEdgeInput): 
     package: "options",
 
     describeFunctions: async (): Promise<readonly FunctionDescriptor[]> => {
-      const snapshot = await readUserOptionsSnapshot(chain.reader, input.userAddress, undefined);
-      return projectOptionsDescriptors(projectOptionsPanel(snapshot));
+      try {
+        const snapshot = await readUserOptionsSnapshot(chain.reader, input.userAddress, undefined);
+        return projectOptionsDescriptors(projectOptionsPanel(snapshot));
+      } catch {
+        return projectOptionsDescriptors(
+          projectOptionsPanel({
+            account: input.userAddress,
+            markets: [],
+            vaults: [],
+            nfts: [],
+            lvstAccount: {
+              account: input.userAddress,
+              balance: 0n,
+              staked: 0n,
+              pendingDividends: 0n
+            },
+            usdcBalance: 0n
+          })
+        );
+      }
     },
 
     dispatch: async (_remoteCaller, envelope: CallActionEnvelope) => {
+      if (envelope.action === "configure") {
+        const marketId = readConfigureMarketId(envelope.args);
+        await runtime.refreshMarket(marketId);
+        await runtime.refreshUser(input.userAddress, marketId);
+        return { txId: `configured-${marketId}` };
+      }
+
+      const coercedArgs = coerceRemoteWriteArgs(envelope.action, envelope.args);
       const bridgeEnvelope: CallActionEnvelope = {
         scope: bridgeActionScope,
         action: envelope.action,
-        args: envelope.args
+        args: coercedArgs
       };
       const result = await bridge.callAction(caller, bridgeEnvelope);
       if (typeof result === "object" && result !== null) {
@@ -68,4 +94,56 @@ export const createOptionsConsoleEdge = (input: CreateOptionsConsoleEdgeInput): 
 
     readBoard: () => bridge.readBoard(caller)
   };
+};
+
+const readConfigureMarketId = (args: unknown): ReturnType<typeof asMarketId> => {
+  if (typeof args === "object" && args !== null && !Array.isArray(args)) {
+    const marketId = (args as { marketId?: unknown }).marketId;
+    if (typeof marketId === "string" && marketId.length > 0) {
+      return asMarketId(marketId);
+    }
+  }
+  throw new Error("options configure requires { marketId }");
+};
+
+const toBigIntField = (value: unknown, field: string): bigint => {
+  if (typeof value === "bigint") {
+    return value;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    return BigInt(value);
+  }
+  throw new Error(`${field} must be a bigint-compatible value`);
+};
+
+const coerceRemoteWriteArgs = (action: string, args: unknown): unknown => {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) {
+    return args;
+  }
+  const record = args as Record<string, unknown>;
+  switch (action) {
+    case "fund":
+      return {
+        ...record,
+        tokenId: toBigIntField(record.tokenId, "tokenId"),
+        deposit: toBigIntField(record.deposit, "deposit"),
+        rate: toBigIntField(record.rate, "rate")
+      };
+    case "withdraw":
+    case "withdrawMany":
+    case "setLanes":
+    case "stopFunding":
+    case "stopAllFunding":
+    case "approveNft":
+    case "transferNft":
+      return {
+        ...record,
+        ...(record.tokenId === undefined ? {} : { tokenId: toBigIntField(record.tokenId, "tokenId") }),
+        ...(record.deposit === undefined ? {} : { deposit: toBigIntField(record.deposit, "deposit") }),
+        ...(record.rate === undefined ? {} : { rate: toBigIntField(record.rate, "rate") }),
+        ...(record.addDeposit === undefined ? {} : { addDeposit: toBigIntField(record.addDeposit, "addDeposit") })
+      };
+    default:
+      return args;
+  }
 };

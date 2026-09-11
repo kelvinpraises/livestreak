@@ -18,7 +18,8 @@ export type StewardContractCall =
   | {
       readonly contract: "vault";
       readonly functionName: "resolve";
-      readonly args: readonly [vaultId: string, reason: string];
+      // outcome: the on-chain Vault.Outcome enum value (YES = 1, NO = 2).
+      readonly args: readonly [vaultId: string, outcome: number];
     }
   | {
       readonly contract: "stewardRegistry";

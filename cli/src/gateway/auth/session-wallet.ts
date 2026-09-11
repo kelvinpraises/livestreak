@@ -1,48 +1,24 @@
-import { createWalletManager, type EvmErc4337WalletConfig } from "@livestreak/wallet";
+import { createWalletManager, type EvmErc4337WalletConfig, type SuiWalletConfig } from "@livestreak/wallet";
 import type { SessionWallet, SettingsDoc, WalletInit } from "@livestreak/schema";
-import { chainSettingsFor, mergedContracts } from "../../prefs/settings.js";
+import { chainSettingsFor } from "../../prefs/settings.js";
+import { resolveChainAdapter } from "./chain-registry.js";
 
+// Build the floating WalletInit for a chain by delegating to its registered adapter — the CLI
+// hardcodes no chain here. Adding a chain is a one-adapter change in chain-registry.ts.
 export const buildWalletInitFromSettings = (
   doc: SettingsDoc,
   caip2: string = doc.defaultChain
 ): WalletInit => {
   const chain = chainSettingsFor(doc, caip2);
-  const hostBase = doc.host.url.replace(/\/$/, "");
-  const contracts = mergedContracts(chain);
-
-  const isSponsored = chain.aa?.isSponsored ?? true;
-  const paymasterPath = chain.aa?.paymasterPath ?? "/aa/paymaster/local";
-
-  const config = {
-    chainId: Number(caip2.split(":")[1] ?? "31337"),
-    provider: chain.rpc,
-    bundlerUrl: `${hostBase}${chain.aa?.bundlerPath ?? "/aa/bundler/local"}`,
-    ...(isSponsored ? { paymasterUrl: `${hostBase}${paymasterPath}` } : {}),
-    isSponsored: true,
-    useNativeCoins: false,
-    entryPointAddress: contracts.entryPoint as `0x${string}`,
-    safe4337ModuleAddress: contracts.safe4337Module as `0x${string}`,
-    safeModulesSetupAddress: contracts.safeModuleSetup as `0x${string}`,
-    safeModulesVersion: "0.3.0",
-    contractNetworks: {
-      [String(Number(caip2.split(":")[1] ?? "31337"))]: {
-        safeSingletonAddress: contracts.safeSingleton as `0x${string}`,
-        safeProxyFactoryAddress: contracts.safeProxyFactory as `0x${string}`,
-        multiSendAddress: contracts.multiSend as `0x${string}`,
-        multiSendCallOnlyAddress: contracts.multiSendCallOnly as `0x${string}`,
-        fallbackHandlerAddress: contracts.fallbackHandler as `0x${string}`,
-        signMessageLibAddress: contracts.signMessageLib as `0x${string}`,
-        createCallAddress: contracts.createCall as `0x${string}`,
-        simulateTxAccessorAddress: contracts.simulateTxAccessor as `0x${string}`
-      }
-    }
-  } as EvmErc4337WalletConfig;
-
-  return {
-    chain: "evm",
-    seedSource: "signature-derived",
-    config: config as unknown as Extract<WalletInit, { chain: "evm" }>["config"]
-  } as WalletInit;
+  const adapter = resolveChainAdapter(caip2);
+  const contracts = adapter.deriveContracts(chain.contractOverrides);
+  return adapter.buildWalletInit({
+    caip2,
+    rpc: chain.rpc,
+    hostUrl: doc.host.url,
+    contracts,
+    ...(chain.aa === undefined ? {} : { aa: chain.aa })
+  });
 };
 
 export const buildSessionWallet = async (
@@ -51,11 +27,12 @@ export const buildSessionWallet = async (
   caip2: string = doc.defaultChain
 ): Promise<SessionWallet> => {
   const walletInit = buildWalletInitFromSettings(doc, caip2);
-  const manager = createWalletManager(
-    "evm",
-    seed,
-    walletInit.config as EvmErc4337WalletConfig
-  );
+  // The CLI only INTERFACES the exported wallet: narrow the chain union and hand the chain's config to
+  // the canonical createWalletManager (the signer implementation lives in @livestreak/wallet).
+  const manager =
+    walletInit.chain === "evm"
+      ? createWalletManager("evm", seed, walletInit.config as unknown as EvmErc4337WalletConfig)
+      : createWalletManager("sui", seed, walletInit.config as unknown as SuiWalletConfig);
   const account = await manager.getAccount();
   const operatorAddress = await account.getAddress();
 

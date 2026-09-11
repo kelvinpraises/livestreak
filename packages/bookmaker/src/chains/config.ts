@@ -3,7 +3,7 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import type { WalletInit } from "@livestreak/schema";
 
-import type { BookmakerContractAddresses } from "./addresses.js";
+import { validateBookmakerSuiObjectIds, type BookmakerContractAddresses } from "./addresses.js";
 import type { BookmakerChainConfig } from "./types.js";
 import { validateBookmakerContractAddresses } from "./evm/addresses.js";
 
@@ -38,9 +38,10 @@ export const validateBookmakerChainConfig = (input: unknown): BookmakerChainConf
     });
   }
 
-  const addresses = validateBookmakerContractAddresses(
-    input.addresses as unknown as BookmakerContractAddresses
-  );
+  const addresses =
+    walletInit.chain === "sui"
+      ? validateBookmakerSuiObjectIds(input.addresses)
+      : validateBookmakerContractAddresses(input.addresses as unknown as BookmakerContractAddresses);
 
   const readRpcUrl =
     input.readRpcUrl === undefined

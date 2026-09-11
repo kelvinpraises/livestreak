@@ -50,6 +50,16 @@ export {
 } from "./run/runtime.js";
 
 export {
+  configureObserveBoard,
+  defaultFileExportConfigure,
+  defaultFileLocalConfigure,
+  mountObserveT0Bus,
+  prepareObserveRunBoardFirst,
+  startObserveRunBoardFirst,
+  type SystemConfigConfigurePayload
+} from "./run/board-first.js";
+
+export {
   createInitialBoard,
   type Board,
   type BoardCell,

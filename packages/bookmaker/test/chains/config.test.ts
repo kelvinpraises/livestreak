@@ -45,20 +45,35 @@ describe("validateBookmakerChainConfig", () => {
   });
 });
 
-describe("createBookmakerChain sui stub", () => {
-  it("throws for sui writer operations", async () => {
+const validSuiAddresses = {
+  packageId: `0x${"ab".repeat(32)}`,
+  vaultDriverRegistry: `0x${"01".repeat(32)}`,
+  vaultRegistry: `0x${"02".repeat(32)}`,
+  marketRegistry: `0x${"03".repeat(32)}`,
+  dripsRegistry: `0x${"04".repeat(32)}`,
+  streamsRegistry: `0x${"05".repeat(32)}`
+} as const;
+
+describe("createBookmakerChain sui", () => {
+  it("builds a sui chain (reader + writer) from valid object ids", () => {
     const chain = createBookmakerChain({
-      walletInit: { chain: "sui", seedSource: "raw", config: {} },
+      walletInit: { chain: "sui", seedSource: "raw", config: { rpcUrl: "http://127.0.0.1:9000" } },
       seed: "test-seed",
-      addresses: validConfig.addresses
+      addresses: validSuiAddresses
     });
 
-    await expect(chain.writer.createVault({
-      marketId: `0x${"11".repeat(32)}`,
-      question: "q",
-      creatorSide: "yes",
-      creatorStake: 1n,
-      seedRate: 1n
-    })).rejects.toThrow(/not implemented/i);
+    expect(typeof chain.writer.createVault).toBe("function");
+    expect(typeof chain.reader.marketExists).toBe("function");
+  });
+
+  it("rejects evm-shaped addresses for a sui chain", () => {
+    expect(() =>
+      createBookmakerChain({
+        walletInit: { chain: "sui", seedSource: "raw", config: { rpcUrl: "http://127.0.0.1:9000" } },
+        seed: "test-seed",
+        // EVM 0x+40-hex addresses are not valid Sui object ids (0x + 64 hex).
+        addresses: validConfig.addresses
+      })
+    ).toThrow(/Sui object id/i);
   });
 });

@@ -37,6 +37,10 @@ tmp/
 .mastra/
 context/
 
+# Runtime / generated config (CLI gateway + host write these per-cwd; never commit)
+settings.json
+livestreak.json
+
 # ML weights (keep under context/quary on disk only)
 *.pt
 

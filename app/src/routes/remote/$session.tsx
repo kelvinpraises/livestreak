@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { RemoteProvider, useRemote } from '#/providers/remote-provider'
 import { RemoteConsole } from '#/components/template/remote-console'
 
@@ -23,14 +23,21 @@ function RemoteConsolePage() {
 function RemoteSessionGate({ session }: { readonly session: string }) {
   const { status } = useRemote()
   const navigate = useNavigate()
+  // Only a close that FOLLOWS a real connection ends the session. A pre-open teardown (React dev
+  // double-mount) must not redirect home before the password screen renders.
+  const hadConnected = useRef(false)
+  if (status === 'open') {
+    hadConnected.current = true
+  }
+  const ended = status === 'closed' && hadConnected.current
 
   useEffect(() => {
-    if (status === 'closed') {
+    if (ended) {
       void navigate({ to: '/', replace: true })
     }
-  }, [status, navigate])
+  }, [ended, navigate])
 
-  if (status === 'closed') {
+  if (ended) {
     return (
       <div style={{ maxWidth: 420, margin: '20vh auto', padding: 24, textAlign: 'center' }}>
         <h1 className="display" style={{ fontSize: 18, color: 'rgba(255,255,255,0.85)' }}>

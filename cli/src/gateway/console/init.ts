@@ -1,5 +1,6 @@
 import type { PackageRuntimeInit, SessionWallet, SettingsDoc } from "@livestreak/schema";
-import { chainSettingsFor, mergedContracts } from "../../prefs/settings.js";
+import { chainSettingsFor } from "../../prefs/settings.js";
+import { resolveChainAdapter } from "../auth/chain-registry.js";
 
 export const buildPackageInits = (
   settings: SettingsDoc,
@@ -8,7 +9,7 @@ export const buildPackageInits = (
 ): Record<PackageRuntimeInit["package"], PackageRuntimeInit> => {
   const caip2 = settings.defaultChain;
   const chain = chainSettingsFor(settings, caip2);
-  const contracts = mergedContracts(chain);
+  const contracts = resolveChainAdapter(caip2).deriveContracts(chain.contractOverrides);
   const hostUrl = settings.host.url;
 
   const base = {
@@ -33,12 +34,7 @@ export const buildPackageInits = (
     bookmaker: {
       ...base,
       package: "bookmaker",
-      contracts: {
-        vaultDriver: contracts.vaultDriver ?? "",
-        marketRegistry: contracts.marketRegistry ?? "",
-        vault: contracts.vault ?? "",
-        usdc: contracts.mockUsdc ?? ""
-      },
+      contracts,
       runId
     },
     steward: {

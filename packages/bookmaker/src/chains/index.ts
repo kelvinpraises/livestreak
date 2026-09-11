@@ -31,8 +31,7 @@ export const createBookmakerChain = (config: BookmakerChainConfig): BookmakerCha
       return createEvmBookmakerChain({ ...validated, walletInit });
     }
     case "sui": {
-      void walletInit;
-      return createSuiBookmakerChain();
+      return createSuiBookmakerChain({ ...validated, walletInit });
     }
     default: {
       return unreachableChain(walletInit);

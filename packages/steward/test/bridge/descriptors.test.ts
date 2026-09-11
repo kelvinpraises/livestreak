@@ -47,7 +47,10 @@ describe("projectStewardDescriptors — canonical FunctionDescriptors", () => {
       nodeKind: "action",
       visible: true
     });
-    expect(configure?.inputSchema?.properties?.map((entry) => entry.name)).toEqual(["marketId"]);
+    expect(configure?.inputSchema?.properties?.map((entry) => entry.name)).toEqual([
+      "marketId",
+      "vaultId"
+    ]);
   });
 
   it("emits configure + close configurator roots", () => {
@@ -62,19 +65,21 @@ describe("projectStewardDescriptors — canonical FunctionDescriptors", () => {
     });
   });
 
-  it("emits per-subject groups with parentId and visible:false", () => {
+  it("reveals vault/market subject groups (board-first), hides the steward-self group", () => {
     const descriptors = projectStewardDescriptors(snapshot);
     const groups = descriptors.filter((descriptor) => descriptor.nodeKind === "group");
     const vaultGroup = groups.find((group) => group.id === "steward.subject.vault_1");
+    const stewardGroup = groups.find((group) => group.id === "steward.subject.steward_bad");
 
     expect(vaultGroup?.parentId).toBe("steward.config.configure");
+    expect(vaultGroup?.visible).toBe(true);
+    expect(stewardGroup?.visible).toBe(false);
     for (const group of groups) {
       expect(group.package).toBe("steward");
-      expect(group.visible).toBe(false);
     }
   });
 
-  it("emits action children with id, package, parentId, and granular steward scopes", () => {
+  it("emits action children with identity + scopes; reveals the enabled vault resolve action", () => {
     const descriptors = projectStewardDescriptors(snapshot);
     const actions = descriptors.filter(
       (descriptor) => descriptor.nodeKind === "action" && descriptor.name !== "configure" && descriptor.name !== "close"
@@ -85,9 +90,19 @@ describe("projectStewardDescriptors — canonical FunctionDescriptors", () => {
       expect(action.id.length).toBeGreaterThan(0);
       expect(action.package).toBe("steward");
       expect(action.parentId).toBeDefined();
-      expect(action.visible).toBe(false);
       expect(action.scope.startsWith("steward:")).toBe(true);
     }
+
+    // The watched vault subject's resolve action is revealed (board-first) and enabled.
+    const resolve = actions.find(
+      (action) => action.name === "resolve" && action.parentId === "steward.subject.vault_1"
+    );
+    expect(resolve?.visible).toBe(true);
+    expect(resolve?.disabled).toBe(false);
+
+    // Steward-self subject actions stay hidden.
+    const stewardAction = actions.find((action) => action.parentId === "steward.subject.steward_bad");
+    expect(stewardAction?.visible).toBe(false);
   });
 
   it("projects per-subject disabled rules on triggerHot", () => {

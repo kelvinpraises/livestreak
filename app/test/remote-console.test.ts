@@ -35,6 +35,7 @@ describe('function tree visibility', () => {
       label: 'Configure',
       scope: bridgeActionScope,
       nodeKind: 'group',
+      disabled: false,
       visible: true,
     },
     {
@@ -45,6 +46,7 @@ describe('function tree visibility', () => {
       label: 'Fund vault',
       scope: 'bridge:action:fundVault',
       nodeKind: 'action',
+      disabled: false,
       visible: true,
     },
     {
@@ -55,6 +57,7 @@ describe('function tree visibility', () => {
       label: 'Hidden',
       scope: 'bridge:action:hiddenProbe',
       nodeKind: 'action',
+      disabled: false,
       visible: false,
     },
   ]

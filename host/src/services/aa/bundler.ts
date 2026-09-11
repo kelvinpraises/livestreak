@@ -1,6 +1,10 @@
 import type { Hex } from "viem";
 import { getAltoPort } from "../../infrastructure/bundler/alto.js";
 import { resolveAaChain, type AaServerConfig } from "./chains.js";
+import {
+  BUNDLER_REVERT_DECODE_METHODS,
+  enrichBundlerJsonRpcError
+} from "./decode-userop-revert.js";
 
 // --- exports ---
 
@@ -48,10 +52,16 @@ export const proxyBundlerRpc = async (
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request.body)
     });
-    const data = await response.json();
+    let data = await response.json();
+    if (method === "eth_estimateUserOperationGas") {
+      data = bufferEstimateCallGasLimit(data);
+    }
+    if (BUNDLER_REVERT_DECODE_METHODS.has(method)) {
+      data = enrichBundlerJsonRpcError(data);
+    }
     return {
       status: response.status,
-      body: method === "eth_estimateUserOperationGas" ? bufferEstimateCallGasLimit(data) : data
+      body: data
     };
   } catch {
     return jsonRpcEnvelope(503, request.id, -32000, "Bundler unavailable");

@@ -25,6 +25,7 @@ import {
   type StoredSession
 } from "../gateway/session/store.js";
 import { connectGateway } from "../gateway/remote/wss-client.js";
+import { runRemoteDrive as executeRemoteDrive } from "../gateway/remote/driver.js";
 import { ensureSettings, defaultSettingsPath } from "../prefs/settings.js";
 import { passwordOpt } from "./args.js";
 
@@ -113,7 +114,7 @@ export const runRemoteOpen = async (input: {
   };
 
   const routes = await buildConsoleRoutes(consoleEdges);
-  const dispatch = createMergedDispatch(routes);
+  const dispatch = createMergedDispatch(routes, consoleEdges);
 
   let consoleFunctions: readonly import("@livestreak/schema").FunctionDescriptor[] = [];
   try {
@@ -268,6 +269,30 @@ export const runRemoteRevoke = async (sessionId: string): Promise<string> => {
   return ok ? `revoked ${sessionId}` : `no such session ${sessionId}`;
 };
 
+export const runRemoteDrive = async (input: {
+  readonly session: string;
+  readonly pairPassword: string;
+  readonly hostUrl?: string;
+  readonly settingsPath?: string;
+  readonly marketId?: string;
+  readonly observeOnly?: boolean;
+  readonly fundDeposit?: string;
+  readonly resolveOutcome?: string;
+}): Promise<string> => {
+  const result = await executeRemoteDrive({
+    sessionId: input.session,
+    pairingPassword: input.pairPassword,
+    ...(input.hostUrl === undefined ? {} : { hostUrl: input.hostUrl }),
+    ...(input.settingsPath === undefined ? {} : { settingsPath: input.settingsPath }),
+    ...(input.marketId === undefined ? {} : { marketId: input.marketId }),
+    ...(input.observeOnly === undefined ? {} : { observeOnly: input.observeOnly }),
+    ...(input.fundDeposit === undefined ? {} : { fundDeposit: input.fundDeposit }),
+    ...(input.resolveOutcome === undefined ? {} : { resolveOutcome: input.resolveOutcome })
+  });
+  const summary = result.steps.map((s) => `${s.target}:${s.action}=${s.ok ? "ok" : "fail"}`).join(" ");
+  return `remote drive complete marketId=${result.marketId ?? "n/a"} ${summary}`;
+};
+
 const scopesOpt = Options.text("scopes").pipe(
   Options.withDescription("Comma-separated granular scopes, e.g. bridge:action:fund,bridge:board:read")
 );
@@ -333,8 +358,37 @@ const remoteRevokeCommand = Command.make(
     }).pipe(Effect.flatMap((output) => Console.log(output)))
 );
 
+const remoteDriveCommand = Command.make(
+  "drive",
+  {
+    session: Options.text("session"),
+    pairPassword: Options.text("pair-password"),
+    hostUrl: Options.text("host-url").pipe(Options.optional),
+    settings: settingsPathOpt,
+    marketId: Options.text("market-id").pipe(Options.optional),
+    observeOnly: Options.boolean("observe-only").pipe(Options.optional),
+    fundDeposit: Options.text("fund-deposit").pipe(Options.optional),
+    resolveOutcome: Options.text("resolve-outcome").pipe(Options.optional)
+  },
+  ({ session, pairPassword, hostUrl, settings, marketId, observeOnly, fundDeposit, resolveOutcome }) =>
+    Effect.tryPromise({
+      try: () =>
+        runRemoteDrive({
+          session,
+          pairPassword,
+          ...(Option.isSome(hostUrl) ? { hostUrl: hostUrl.value } : {}),
+          ...(Option.isSome(settings) ? { settingsPath: settings.value } : {}),
+          ...(Option.isSome(marketId) ? { marketId: marketId.value } : {}),
+          ...(Option.isSome(observeOnly) ? { observeOnly: observeOnly.value } : {}),
+          ...(Option.isSome(fundDeposit) ? { fundDeposit: fundDeposit.value } : {}),
+          ...(Option.isSome(resolveOutcome) ? { resolveOutcome: resolveOutcome.value } : {})
+        }),
+      catch: (error) => (error instanceof Error ? error : new Error(String(error)))
+    }).pipe(Effect.flatMap((output) => Console.log(output)))
+);
+
 export const remoteCommand = Command.make("remote", {}).pipe(
-  Command.withSubcommands([remoteOpenCommand, remoteListCommand, remoteRevokeCommand])
+  Command.withSubcommands([remoteOpenCommand, remoteDriveCommand, remoteListCommand, remoteRevokeCommand])
 );
 
 export const remoteCommands = [remoteCommand];

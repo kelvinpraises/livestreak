@@ -1,6 +1,6 @@
 # Local EVM dev stack — proven bring-up & full loop
 
-> **Canonical operator path (board-first):** `host/docs/remote-console.md` + `docs/GO-LIVE-SCOPE.md`  
+> **Canonical operator path (board-first):** `host/docs/remote-console.md` + `context/temp-convo/GO-LIVE-SCOPE.md`  
 > Use `settings init` → `auth login` → `remote open` → browser package tabs.  
 > Sections §2–§4 below marked **LEGACY** describe the deleted `produce` CLI — kept for AA/paymaster
 > debugging context only.
@@ -81,7 +81,7 @@ There is no `faucet` CLI subcommand on the slim CLI — `cast` (or a `scripts/` 
 ## 4. LEGACY — deleted `produce` live test
 
 The gated `LIVESTREAK_LIVE=1` / `produce` e2e path was removed with the board-first CLI.
-Keynote proof is **remote-console E2E** (`docs/GO-LIVE-SCOPE.md`, agent-5 prompt).
+Keynote proof is **remote-console E2E** (`context/temp-convo/GO-LIVE-SCOPE.md`, agent-5 prompt).
 
 Each on-chain step still uses real userOps through the host bundler + paymaster (~5s/block).
 
@@ -107,8 +107,11 @@ cast send <stewardRegistry> "resolveVault(bytes32,uint8)" <vaultId> 2 \
 - **Stale settings after deploy:** `settings init` must be re-run when `localhost.json`
   addresses change or AA simulation reverts with wrong contract targets.
 - **Reverted userOp diagnosis:** Safe 4337 masks inner reverts as `ExecutionFailed()`
-  (`0xacfdb444`). Get the real reason with `cast run <userOpHash>` (full call trace).
-  Agent-2 may surface decoded reasons in host JSON-RPC errors.
+  (`0xacfdb444`). The host bundler proxy appends decoded `reason:` / `innerRevert:` to
+  JSON-RPC error messages when possible. For full traces: `cast run <userOpHash>`.
+- **Fresh-run after `./dev.sh --force`:** (1) `cd cli && rm -f settings.json && npm run dev -- settings init`
+  (2) `remote open` with fresh scopes (3) new Observe `system:config:configure` runId — do **not**
+  reuse stale marketIds or skip settings regen.
 - **LEGACY stale file sink:** deleted `produce` wrote `/tmp/livestreak-<runId>.mp4`; remote
   observe runs use temp dirs under `observe-edge` — clear `/tmp/livestreak-remote-*` if needed.
 

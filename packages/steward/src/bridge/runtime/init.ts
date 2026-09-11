@@ -8,6 +8,7 @@ import type { StewardActionContext } from "../../workflow/action/types.js";
 import type { StewardDecisionPolicy } from "../../workflow/decision/types.js";
 import type { StewardRuleset } from "../../workflow/rules/types.js";
 import type { StewardRuntimeConfig } from "../../runtime/config.js";
+import type { StewardChainConfig } from "../../chains/index.js";
 
 export type { PackageRuntimeInit, SessionWallet };
 
@@ -82,4 +83,18 @@ export const createStewardRuntimeBootstrap = (
   }
 ): { readonly runtimeConfig: StewardRuntimeConfig } => ({
   runtimeConfig: stewardRuntimeConfigFromPackageInit(init, options)
+});
+
+// Map the canonical PackageRuntimeInit -> the on-chain steward executor config (chain-dispatched).
+export const stewardChainConfigFromPackageInit = (init: PackageRuntimeInit): StewardChainConfig => ({
+  walletInit: init.wallet.walletInit,
+  seed: init.wallet.seed,
+  addresses:
+    init.wallet.walletInit.chain === "sui"
+      ? {
+          packageId: init.contracts.packageId ?? "",
+          stewardRegistry: init.contracts.stewardRegistry ?? "",
+          vaultRegistry: init.contracts.vaultRegistry ?? ""
+        }
+      : { stewardRegistry: init.contracts.stewardRegistry ?? "" }
 });

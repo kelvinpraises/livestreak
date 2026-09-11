@@ -212,9 +212,9 @@ const disabledReasonFor = (
     return "No hot or risk finding for this subject";
   }
 
-  if (action === "resolve" && !hasFindingKind(subjectFindings, "bad_resolution")) {
-    return "No resolution-related finding for this subject";
-  }
+  // The remote console lets a human steward resolve a watched vault directly — the outcome is the
+  // steward's call — so resolve is enabled on any vault subject without an autonomous bad_resolution
+  // finding. The autonomous engine still gates resolve through the decision policy upstream.
 
   return undefined;
 };

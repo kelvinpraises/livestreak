@@ -234,7 +234,12 @@ export class HostWssTransport implements RemoteTransport {
     this.fnSubs.clear()
     this.patchSubs.clear()
     this.ws?.close(1000, 'client disconnect')
-    this.setStatus('closed')
+    // Only signal a real close if the socket actually opened. A teardown before connect (e.g. a React
+    // dev double-mount, which reuses this transport instance) must NOT broadcast "closed": that status
+    // would be replayed to the re-mounted provider via onStatus and trip the gate's redirect-home.
+    if (this.status === 'open') {
+      this.setStatus('closed')
+    }
     this.statusSubs.clear()
   }
 

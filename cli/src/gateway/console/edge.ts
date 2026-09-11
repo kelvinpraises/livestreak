@@ -48,12 +48,17 @@ export const buildConsoleRoutes = async (
 
 export const createMergedDispatch = (
   routes: ReadonlyMap<string, ConsoleEdge>,
+  edges: readonly ConsoleEdge[] = [],
   getTargetPackage?: (frame: { readonly target?: string; readonly envelope: CallActionEnvelope }) => ConsolePackage | undefined
 ): ((caller: BridgeCaller, envelope: CallActionEnvelope, target?: string) => Promise<{ readonly txId?: string; readonly tokenId?: string }>) => {
+  const byPackage = new Map<ConsolePackage, ConsoleEdge>(edges.map((edge) => [edge.package, edge]));
   return async (caller, envelope, target) => {
     const pkg = target ?? getTargetPackage?.({ envelope, target });
     const key = pkg === undefined ? envelope.action : `${pkg}:${envelope.action}`;
-    const edge = routes.get(key) ?? routes.get(envelope.action);
+    const edge =
+      routes.get(key) ??
+      routes.get(envelope.action) ??
+      (pkg === undefined ? undefined : byPackage.get(pkg as ConsolePackage));
     if (edge === undefined) {
       throw new Error(`No console bridge registered for "${key}"`);
     }

@@ -60,7 +60,8 @@ const contractCallsForDecision = (
             {
               contract: "vault",
               functionName: "resolve",
-              args: [subject.vaultId, decision.reason]
+              // YES = 1 by default if the caller did not specify an outcome.
+              args: [subject.vaultId, actionContext.resolveOutcome ?? 1]
             }
           ];
     case "proposePenalty":

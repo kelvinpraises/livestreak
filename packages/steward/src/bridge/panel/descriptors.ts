@@ -95,7 +95,9 @@ const pushSubjectGroups = (
           nodeKind: "group",
           order: 10,
           disabled: false,
-          visible: false,
+          // Board-first reveal: a watched vault/market subject (seeded by configure) lights up; the
+          // always-present steward-self subject stays hidden until there is something to act on.
+          visible: subject.kind === "vault" || subject.kind === "market",
           target: { kind: subject.kind, ...(subject.marketId === undefined ? {} : { marketId: subject.marketId }) }
         },
         { package: PACKAGE, idPrefix: "group" }
@@ -119,7 +121,10 @@ const toActionDescriptor = (view: StewardFunctionView): FunctionDescriptor => {
       nodeKind: "action",
       order: 20,
       disabled: view.disabled,
-      visible: false,
+      // Reveal enabled actions on a watched vault/market subject (board-first, like observe/options).
+      visible:
+        !view.disabled &&
+        (view.target?.subjectKind === "vault" || view.target?.subjectKind === "market"),
       ...(view.disabledReason === undefined ? {} : { disabledReason: view.disabledReason }),
       inputSchema: stewardInputSchema(view)
     },
@@ -146,9 +151,8 @@ const subjectLabel = (subject: StewardStateSnapshot["watchedSubjects"][number]):
   }
 };
 
-const stewardInputSchema = (view: StewardFunctionView): JsonSchema => ({
-  type: "object",
-  properties: [
+const stewardInputSchema = (view: StewardFunctionView): JsonSchema => {
+  const properties: Array<NonNullable<JsonSchema["properties"]>[number]> = [
     {
       name: "subjectId",
       help: "Watched subject id the action targets.",
@@ -162,19 +166,40 @@ const stewardInputSchema = (view: StewardFunctionView): JsonSchema => ({
         description: "Subject kind.",
         values: ["market", "vault", "observer", "bookmaker", "steward", "evidence", "resolution"]
       }
-    },
+    }
+  ];
+
+  // resolve carries the steward's YES/NO outcome (and an optional explicit vaultId).
+  if (view.name === "resolve") {
+    properties.push(
+      {
+        name: "outcome",
+        help: "Resolution outcome the steward is calling.",
+        value: { type: "enum", required: true, description: "Outcome (yes or no).", values: ["yes", "no"] }
+      },
+      {
+        name: "vaultId",
+        help: "Vault to resolve (defaults to the subject's vault).",
+        value: { type: "string", description: "Vault id." }
+      }
+    );
+  }
+
+  properties.push(
     {
       name: "reason",
       help: "Operator-supplied justification recorded with the action.",
-      value: { type: "string", required: view.name !== "ignore", description: "Reason." }
+      value: { type: "string", required: view.name !== "ignore" && view.name !== "resolve", description: "Reason." }
     },
     {
       name: "findingId",
       help: "Optional finding this action responds to.",
       value: { type: "string", description: "Finding id." }
     }
-  ]
-});
+  );
+
+  return { type: "object", properties };
+};
 
 const toTarget = (view: StewardFunctionView): FunctionDescriptor["target"] => {
   if (view.target === undefined) {
@@ -186,16 +211,17 @@ const toTarget = (view: StewardFunctionView): FunctionDescriptor["target"] => {
   };
 };
 
-const required = true;
-
-const str = (description: string): JsonSchema => ({ type: "string", required, description });
-
 const obj = (properties: JsonSchema["properties"]): JsonSchema => ({ type: "object", properties });
 
 const CONFIGURE_INPUT_SCHEMA: JsonSchema = obj([
   {
     name: "marketId",
-    value: str("Market subject to watch."),
+    value: { type: "string", description: "Market subject to watch." },
     help: "When set, steward watches the market subject with this id."
+  },
+  {
+    name: "vaultId",
+    value: { type: "string", description: "Vault subject to watch + resolve." },
+    help: "When set, steward watches the vault subject so it can be resolved."
   }
 ]);

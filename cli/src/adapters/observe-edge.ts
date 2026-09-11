@@ -1,15 +1,19 @@
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { Effect } from "effect";
 import {
+  buildControlCatalog,
   createObserveBridge,
   createObserveRuntime,
+  defaultFileExportConfigure,
   fileCaptureRunConfig,
-  projectControlPanelControls,
+  makeObserveRun,
+  mountObserveT0Bus,
   projectObserveDescriptors,
-  buildControlCatalog,
-  type ObserveRuntime
+  systemConfigConfigureScope,
+  type ObserveRuntime,
+  type SystemConfigConfigurePayload
 } from "@livestreak/observe";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import type { BridgeCaller, CallActionEnvelope, FunctionDescriptor } from "@livestreak/schema";
@@ -34,12 +38,12 @@ export interface CreateObserveConsoleEdgeInput {
   readonly runId: string;
 }
 
-const placeholderRunConfig = async (runId: string) => {
+// Shell ObserveRunConfig (temp paths) for store identity only — T0 board stays system:config until
+// configure; kernel prepareRun / drivers mount after configure, not at edge construction.
+const stubRunConfig = async (runId: string) => {
   const base = join(tmpdir(), `livestreak-remote-${runId}`);
   await mkdir(base, { recursive: true });
-  const capturePath = join(base, "capture.mp4");
-  await writeFile(capturePath, "");
-  return fileCaptureRunConfig(runId, capturePath, join(base, "output"), "file-export");
+  return fileCaptureRunConfig(runId, join(base, "capture.mp4"), join(base, "output"), "file-export");
 };
 
 export const createObserveConsoleEdge = (input: CreateObserveConsoleEdgeInput): ConsoleEdge => {
@@ -54,10 +58,7 @@ export const createObserveConsoleEdge = (input: CreateObserveConsoleEdgeInput): 
       runtimePromise = Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
-            const runtime = yield* createObserveRuntime({ sessionInit: packageInit });
-            const config = yield* Effect.promise(() => placeholderRunConfig(runId));
-            yield* runtime.prepareRun(config, { sessionInit: packageInit });
-            return runtime;
+            return yield* createObserveRuntime({ sessionInit: packageInit });
           })
         )
       );
@@ -65,34 +66,75 @@ export const createObserveConsoleEdge = (input: CreateObserveConsoleEdgeInput): 
     return runtimePromise;
   };
 
+  const ensureT0Run = async (runtime: ObserveRuntime): Promise<void> => {
+    const existing = await Effect.runPromise(runtime.store.get(runId));
+    if (existing !== undefined) {
+      return;
+    }
+    const config = await stubRunConfig(runId);
+    const run = await Effect.runPromise(makeObserveRun(config));
+    const mounted = await Effect.runPromise(
+      mountObserveT0Bus(run, { sessionInit: packageInit })
+    );
+    await Effect.runPromise(runtime.store.put(mounted));
+  };
+
   const withRuntime = async <A>(fn: (runtime: ObserveRuntime) => Promise<A>): Promise<A> =>
     fn(await getRuntime());
+
+  const syncRunBoard = async (runtime: ObserveRuntime): Promise<void> => {
+    const run = await Effect.runPromise(runtime.store.require(runId));
+    const board = await Effect.runPromise(runtime.readBoard(runId));
+    await Effect.runPromise(runtime.store.replace({ ...run, board }));
+  };
+
+  const configurePayloadFromArgs = (args: unknown): SystemConfigConfigurePayload => {
+    if (typeof args === "object" && args !== null && !Array.isArray(args)) {
+      const record = args as Record<string, unknown>;
+      if (
+        typeof record.chain === "string" &&
+        typeof record.capture === "string" &&
+        typeof record.publish === "string" &&
+        record.process === null
+      ) {
+        return {
+          chain: record.chain,
+          capture: record.capture,
+          process: null,
+          publish: record.publish
+        };
+      }
+    }
+    return defaultFileExportConfigure({ chain: packageInit.chain });
+  };
 
   return {
     package: "observe",
 
     describeFunctions: async (): Promise<readonly FunctionDescriptor[]> =>
       withRuntime(async (runtime) => {
+        await ensureT0Run(runtime);
         const bridge = createObserveBridge({ runtime, sessionInit: packageInit });
         const board = await Effect.runPromise(runtime.readBoard(runId));
         const controls = await Effect.runPromise(bridge.readControls({ caller: bridgeCaller(), runId }));
         return projectObserveDescriptors(controls, board);
-      }).catch(() => {
-        const catalog = buildControlCatalog();
-        const controls = projectControlPanelControls({
-          board: { revision: 1, catalogVersion: "0.1.0", cells: {} },
-          catalog
-        });
-        return projectObserveDescriptors(controls);
       }),
 
     dispatch: async (_remoteCaller: BridgeCaller, envelope: CallActionEnvelope) => {
-      const internalScope = scopeByAction.get(envelope.action);
+      const internalScope =
+        envelope.action === "configure" && envelope.scope === undefined
+          ? systemConfigConfigureScope
+          : scopeByAction.get(envelope.action);
       if (internalScope === undefined) {
         throw new Error(`Unknown observe action "${envelope.action}"`);
       }
       return withRuntime(async (runtime) => {
+        await ensureT0Run(runtime);
         const bridge = createObserveBridge({ runtime, sessionInit: packageInit });
+        const payload =
+          internalScope === systemConfigConfigureScope
+            ? configurePayloadFromArgs(envelope.args)
+            : envelope.args;
         const result = await Effect.runPromise(
           bridge.callFunction({
             caller: bridgeCaller(),
@@ -100,10 +142,11 @@ export const createObserveConsoleEdge = (input: CreateObserveConsoleEdgeInput): 
               callId: `remote-${Date.now()}`,
               runId,
               scope: internalScope,
-              payload: envelope.args
+              payload
             }
           })
         );
+        await syncRunBoard(runtime);
         return {
           txId: result.callId,
           ...(result.artifactId === undefined ? {} : { tokenId: result.artifactId })
@@ -114,6 +157,7 @@ export const createObserveConsoleEdge = (input: CreateObserveConsoleEdgeInput): 
     subscribeBoard: (listener) => {
       let unsub: (() => void) | undefined;
       void withRuntime(async (runtime) => {
+        await ensureT0Run(runtime);
         const bridge = createObserveBridge({ runtime, sessionInit: packageInit });
         const subscription = await Effect.runPromise(
           bridge.subscribeBoard({
@@ -123,14 +167,13 @@ export const createObserveConsoleEdge = (input: CreateObserveConsoleEdgeInput): 
           })
         );
         unsub = () => subscription.unsubscribe();
-      }).catch(() => {
-        /* runtime init failed */
       });
       return () => unsub?.();
     },
 
     readBoard: () =>
       withRuntime(async (runtime) => {
+        await ensureT0Run(runtime);
         const bridge = createObserveBridge({ runtime, sessionInit: packageInit });
         return Effect.runPromise(bridge.readBoard({ caller: bridgeCaller(), runId }));
       })

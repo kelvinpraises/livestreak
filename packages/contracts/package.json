@@ -64,7 +64,8 @@
     "e2e:sui": "tsx chains/sui/deploy/e2e.ts",
     "e2e:4337": "npm run build -w @livestreak/wallet && tsx chains/evm/deploy/e2e-4337.ts",
     "test": "cd chains/evm && forge test",
-    "build:ts": "tsc -p tsconfig.build.json && mkdir -p dist/chains/evm/deployments && for f in chains/evm/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/evm/deployments/; done && mkdir -p dist/chains/sui/deployments && for f in chains/sui/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/sui/deployments/; done"
+    "build:ts": "tsc -p tsconfig.build.json && mkdir -p dist/chains/evm/deployments && for f in chains/evm/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/evm/deployments/; done && mkdir -p dist/chains/sui/deployments && for f in chains/sui/deployments/*.json; do [ -f \"$f\" ] && cp \"$f\" dist/chains/sui/deployments/; done",
+    "dev": "tsc -w -p tsconfig.build.json"
   },
   "dependencies": {
     "@mysten/sui": "^2.19.0",

@@ -10,7 +10,8 @@ export {
 export {
   createStewardRuntimeBootstrap,
   stewardRuntimeConfigFromPackageInit,
-  stewardSubjectsFromPackageInit
+  stewardSubjectsFromPackageInit,
+  stewardChainConfigFromPackageInit
 } from "./runtime/init.js";
 export type { PackageRuntimeInit, SessionWallet } from "./runtime/init.js";
 export type {

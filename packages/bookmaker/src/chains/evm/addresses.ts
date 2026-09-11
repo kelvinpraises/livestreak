@@ -2,23 +2,27 @@
 
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import type { BookmakerContractAddresses } from "../addresses.js";
+import type { BookmakerContractAddresses, BookmakerSuiObjectIds } from "../addresses.js";
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
 export const validateBookmakerContractAddresses = (
-  input: BookmakerContractAddresses
+  input: BookmakerContractAddresses | BookmakerSuiObjectIds
 ): {
   readonly vaultDriver: `0x${string}`;
   readonly marketRegistry: `0x${string}`;
   readonly vault: `0x${string}`;
   readonly usdc: `0x${string}`;
-} => ({
-  vaultDriver: validateContractAddress(input.vaultDriver, "vaultDriver"),
-  marketRegistry: validateContractAddress(input.marketRegistry, "marketRegistry"),
-  vault: validateContractAddress(input.vault, "vault"),
-  usdc: validateContractAddress(input.usdc, "usdc")
-});
+} => {
+  // Callers (the EVM reader/writer) have already asserted walletInit.chain === "evm".
+  const evm = input as BookmakerContractAddresses;
+  return {
+    vaultDriver: validateContractAddress(evm.vaultDriver, "vaultDriver"),
+    marketRegistry: validateContractAddress(evm.marketRegistry, "marketRegistry"),
+    vault: validateContractAddress(evm.vault, "vault"),
+    usdc: validateContractAddress(evm.usdc, "usdc")
+  };
+};
 
 // --- helpers ---
 

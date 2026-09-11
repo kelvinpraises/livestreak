@@ -46,17 +46,19 @@ export async function deployPaymaster(
   );
 
   // 2. Fund the paymaster's gas deposit on the EntryPoint.
-  console.log("  Funding paymaster (0.05 ETH deposit)...");
+  // R4: seed a generous deposit so a multi-wallet live demo (4+ AA Safes each sending sponsored
+  // userOps) never drains the paymaster mid-run. dev.sh keeps a `cast depositTo` top-up as a fallback.
+  console.log("  Funding paymaster (10 ETH deposit)...");
   const epAbi = loadAbi("out/EntryPoint.sol/EntryPoint.json");
   const depositHash = await walletClient.writeContract({
     address: entryPoint,
     abi: epAbi,
     functionName: "depositTo",
     args: [paymaster],
-    value: parseEther("0.05")
+    value: parseEther("10")
   } as never);
   await client.waitForTransactionReceipt({ hash: depositHash });
-  console.log("  Deposited 0.05 ETH");
+  console.log("  Deposited 10 ETH");
 
   // 3. Stake the paymaster (1 day unstake delay).
   console.log("  Staking paymaster (0.01 ETH, 1 day unstake delay)...");

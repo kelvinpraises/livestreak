@@ -113,15 +113,27 @@ const dispatchWriterAction = async (
   return { txId: result.result.txId, vaultId: result.result.vaultId };
 };
 
+const coerceBigIntArg = (value: unknown): bigint | undefined => {
+  if (typeof value === "bigint") {
+    return value;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    return BigInt(value);
+  }
+  return undefined;
+};
+
 const parseCreateVaultIntentFromArgs = (args: Record<string, unknown>, nowMs: number): CreateVaultIntent => {
+  const creatorStake = coerceBigIntArg(args.creatorStake);
+  const seedRate = coerceBigIntArg(args.seedRate);
   const validated = validateCreateVaultIntent(
     {
       action: "createVault",
       marketId: args.marketId,
       question: args.question,
       creatorSide: args.creatorSide,
-      creatorStake: args.creatorStake,
-      seedRate: args.seedRate,
+      ...(creatorStake === undefined ? {} : { creatorStake }),
+      ...(seedRate === undefined ? {} : { seedRate }),
       resolutionSource: args.resolutionSource,
       resolutionWindowExpiresAtMs: args.resolutionWindowExpiresAtMs
     },

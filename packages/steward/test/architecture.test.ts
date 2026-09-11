@@ -38,7 +38,7 @@ describe("steward architecture guards", () => {
       return statSync(absolute).isDirectory();
     });
 
-    expect(topLevel.sort()).toEqual(["bridge", "model", "runtime", "validate", "workflow"]);
+    expect(topLevel.sort()).toEqual(["bridge", "chains", "model", "runtime", "validate", "workflow"]);
     expect(readdirSync(sourceRoot)).not.toContain("panel");
   });
 

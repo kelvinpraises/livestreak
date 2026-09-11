@@ -3,13 +3,18 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { buildDefaultSettings, ensureSettings, loadSettings } from "../src/prefs/settings.js";
+import { resolveChainAdapter } from "../src/gateway/auth/chain-registry.js";
 
 describe("prefs/settings", () => {
-  it("buildDefaultSettings includes localhost contracts and host url", () => {
+  it("buildDefaultSettings floats the wallet/contracts blob (deployment ref, no baked addresses)", () => {
     const doc = buildDefaultSettings("http://127.0.0.1:8787");
     expect(doc.host.url).toBe("http://127.0.0.1:8787");
     expect(doc.defaultChain).toBe("eip155:31337");
-    expect(doc.chains["eip155:31337"]?.contracts.marketRegistry).toMatch(/^0x/);
+    const chain = doc.chains["eip155:31337"];
+    expect(chain?.deployment).toBe("@livestreak/contracts/evm/deployments/localhost");
+    // Contracts are NOT baked into settings.json — the chain adapter derives them from the deployment.
+    expect(chain?.contracts).toBeUndefined();
+    expect(resolveChainAdapter("eip155:31337").deriveContracts().marketRegistry).toMatch(/^0x/);
   });
 
   it("ensureSettings auto-creates settings.json on first access", async () => {

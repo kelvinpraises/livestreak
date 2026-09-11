@@ -22,7 +22,8 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "dev": "tsc -w -p tsconfig.build.json"
   },
   "dependencies": {
     "@livestreak/schema": "file:../schema",

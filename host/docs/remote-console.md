@@ -40,11 +40,15 @@ or `bridge:action:*` (all). The depth-guarded matcher in `@livestreak/schema/cap
 ## Stand up the channel
 
 ```bash
-./dev-remote.sh                 # anvil + host (remote enabled, LIVESTREAK_APP_ORIGIN set) + app
-# second terminal:
+./dev.sh                        # the WHOLE protocol live: anvil + Sui + contracts (deployed AND wired)
+                                # + host + app + a remote console PER package-role; prints each
+                                # /remote/<code> URL + pairing pass (demo-pass-<role>).
+                                # Flip chains by config alone:  CHAIN=sui ./dev.sh
+# browser: open a printed role console URL and enter its pairing pass.
+#
+# To open an extra ad-hoc console by hand (own keystore + scopes):
 cd cli && npm run dev -- remote open --scopes bridge:action:fund --ttl 10m
 #   → prints: pairing code, pairing pass, the /remote/<code> URL after the host ack
-# browser: open http://localhost:3000/remote/<code>, enter the pairing pass.
 ```
 
 Set `VITE_REMOTE_HOST_URL=http://127.0.0.1:8787` for the app to use the real `HostWssTransport` instead of
@@ -72,7 +76,7 @@ automatable here.
 
 ## E2E success criteria (go-live keynote)
 
-**Canonical scope:** `docs/GO-LIVE-SCOPE.md`. This section is the host-facing summary.
+**Canonical scope:** `context/temp-convo/GO-LIVE-SCOPE.md`. This section is the host-facing summary.
 
 ### Product path (board-first — no `produce`)
 

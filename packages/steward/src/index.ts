@@ -80,7 +80,8 @@ export {
   stewardConfigCloseScope,
   createStewardRuntimeBootstrap,
   stewardRuntimeConfigFromPackageInit,
-  stewardSubjectsFromPackageInit
+  stewardSubjectsFromPackageInit,
+  stewardChainConfigFromPackageInit
 } from "./bridge/index.js";
 export type {
   BridgeCaller,
@@ -115,3 +116,13 @@ export type {
   StewardRuntimeConfig,
   StewardRuntimeInput
 } from "./runtime/index.js";
+
+export {
+  createStewardContractExecutor,
+  validateStewardChainConfig
+} from "./chains/index.js";
+export type {
+  StewardChainConfig,
+  StewardEvmAddresses,
+  StewardSuiObjectIds
+} from "./chains/index.js";

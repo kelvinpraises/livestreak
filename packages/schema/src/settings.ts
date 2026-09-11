@@ -18,7 +18,9 @@ export type ChainWalletSlot = Schema.Schema.Type<typeof ChainWalletSlot>;
 export const ChainSettings = Schema.Struct({
   deployment: Schema.String,
   rpc: Schema.String,
-  contracts: Schema.Record({ key: Schema.String, value: Schema.String }),
+  /** Optional: derived from the deployment by the CLI chain adapter at load. Only overrides are
+   * stored in settings.json (the wallet/contracts blob "floats" — it is never baked in). */
+  contracts: Schema.optional(Schema.Record({ key: Schema.String, value: Schema.String })),
   wallet: ChainWalletSlot,
   aa: Schema.optional(ChainAaSettings),
   /** User overrides merged over generated deployment addresses. */

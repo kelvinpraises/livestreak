@@ -46,51 +46,16 @@ export const saveSettings = async (
   await writeFile(path, `${serialized}\n`, "utf8");
 };
 
-const flattenLocalhostContracts = (): Record<string, string> => {
-  const s = localhostDeployment.scopes;
-  const aa = s.aa.contracts;
-  const protocol = s.protocol.contracts;
-  const streaming = s.streaming.contracts;
-  const wire = s.wire.contracts;
-  if (aa === undefined || protocol === undefined || streaming === undefined || wire === undefined) {
-    throw new Error("localhost deployment is missing contract scopes");
-  }
-  return {
-    entryPoint: aa.entryPoint,
-    safeSingleton: aa.safeSingleton,
-    safeProxyFactory: aa.safeProxyFactory,
-    safeModuleSetup: aa.safeModuleSetup,
-    safe4337Module: aa.safe4337Module,
-    multiSend: aa.multiSend,
-    multiSendCallOnly: aa.multiSendCallOnly,
-    fallbackHandler: aa.fallbackHandler,
-    signMessageLib: aa.signMessageLib,
-    createCall: aa.createCall,
-    simulateTxAccessor: aa.simulateTxAccessor,
-    marketRegistry: protocol.marketRegistry,
-    vault: protocol.vault,
-    mockUsdc: protocol.mockUsdc,
-    lvstToken: protocol.lvstToken,
-    treasury: protocol.treasury,
-    stewardRegistry: protocol.stewardRegistry,
-    dripsStreaming: streaming.dripsStreaming,
-    vaultDriver: wire.vaultDriver,
-    marketDriver: wire.marketDriverProxy
-  };
-};
-
+// The wallet/contracts blob FLOATS: settings.json carries only the deployment ref + rpc + keystore
+// slot. The CLI chain adapter (gateway/auth/chain-registry.ts) derives the contracts bag and the
+// WalletInit from the named deployment at load time. Adding a chain is a new adapter, never a
+// hand-maintained address blob in JSON.
 export const buildDefaultSettings = (hostUrl: string = DEFAULT_HOST_URL): SettingsDocType => {
   const caip2 = DEFAULT_EVM_CAIP2;
   const chainSettings: ChainSettings = {
     deployment: "@livestreak/contracts/evm/deployments/localhost",
     rpc: localhostDeployment.rpc,
-    contracts: flattenLocalhostContracts(),
-    wallet: { keystoreSlot: "evm-localhost" },
-    aa: {
-      bundlerPath: "/aa/bundler/local",
-      paymasterPath: "/aa/paymaster/local",
-      isSponsored: true
-    }
+    wallet: { keystoreSlot: "evm-localhost" }
   };
 
   return {
@@ -123,8 +88,3 @@ export const chainSettingsFor = (
   }
   return chain;
 };
-
-export const mergedContracts = (chain: ChainSettings): Record<string, string> => ({
-  ...chain.contracts,
-  ...(chain.contractOverrides ?? {})
-});

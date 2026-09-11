@@ -10,14 +10,17 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run",
-    "e2e:chain": "npm run build -w @livestreak/wallet && tsx test/e2e/create-vault.e2e.ts"
+    "e2e:chain": "npm run build -w @livestreak/wallet && tsx test/e2e/create-vault.e2e.ts",
+    "dev": "tsc -w -p tsconfig.json"
   },
   "dependencies": {
     "@livestreak/contracts": "file:../contracts",

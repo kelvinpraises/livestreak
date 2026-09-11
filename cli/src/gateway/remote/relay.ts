@@ -10,6 +10,7 @@ import type {
   HostCallFrame
 } from "@livestreak/schema";
 import type { SessionRegistry } from "../session/registry.js";
+import { enrichRelayErrorMessage } from "../decode-revert.js";
 
 // Abstracts the package bridge call so the relay never imports chain/seed code directly. The daemon
 // supplies a closure bound to the unlocked-seed options bridge.
@@ -57,11 +58,11 @@ export const createRelay = (deps: RelayDeps): Relay => {
       }
       return { ...base, ok: true, result: payload };
     } catch (error) {
-      // Surface the package error message (these are authz/validation/chain errors — never the seed).
+      const raw = error instanceof Error ? error.message : String(error);
       return {
         ...base,
         ok: false,
-        error: { message: error instanceof Error ? error.message : String(error) }
+        error: { message: enrichRelayErrorMessage(raw) }
       };
     }
   };

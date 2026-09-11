@@ -66,7 +66,39 @@ describe("bookmaker bridge createVault wiring", () => {
     expect(second).toEqual(first);
   });
 
-  it("rejects non-bigint creatorStake without calling the writer", async () => {
+  it("coerces numeric-string creatorStake/seedRate and creates the vault", async () => {
+    let createCalls = 0;
+    const runtime = createTestRuntime(
+      createFakeBookmakerChain(() => {
+        createCalls += 1;
+        return {
+          txId: `0x${"aa".repeat(32)}` as const,
+          vaultId: `0x${"22".repeat(32)}` as const
+        };
+      })
+    );
+    const bridge = createBookmakerBridge({ runtime });
+
+    // The remote console serializes args as JSON, which has no bigint — amounts
+    // arrive as decimal strings, so the bridge must coerce them before validation.
+    const result = await bridge.callAction(
+      actionCaller([actionGrant]),
+      {
+        scope: bridgeActionScope,
+        action: "createVault",
+        args: { ...createArgs, creatorStake: "5000000", seedRate: "8333" }
+      },
+      nowMs
+    );
+
+    expect(createCalls).toBe(1);
+    expect(result).toEqual({
+      txId: `0x${"aa".repeat(32)}`,
+      vaultId: `0x${"22".repeat(32)}`
+    });
+  });
+
+  it("rejects a non-coercible creatorStake without calling the writer", async () => {
     let createCalls = 0;
     const runtime = createTestRuntime(
       createFakeBookmakerChain(() => {
@@ -85,7 +117,8 @@ describe("bookmaker bridge createVault wiring", () => {
         {
           scope: bridgeActionScope,
           action: "createVault",
-          args: { ...createArgs, creatorStake: 5_000_000 }
+          // An object cannot coerce to bigint → the field is dropped → validation rejects.
+          args: { ...createArgs, creatorStake: { not: "a number" } }
         },
         nowMs
       )

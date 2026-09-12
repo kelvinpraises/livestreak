@@ -5,19 +5,19 @@ import { bcs, SuiJsonRpcClient, Transaction, createSuiReadClient } from "@livest
 import { LiveStreakConfigError } from "@livestreak/core";
 import { MODULES, target } from "@livestreak/contracts/sui";
 
-import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../model/ids.js";
+import { asMarketId, asTokenId, asVaultId } from "../../model/ids.js";
 import { priceOf } from "../../model/math/curve.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
 import type { OptionsBoardState } from "../../model/math/accrual.js";
+import type { FunderBoundary } from "../../model/math/live-pool.js";
 import type { OptionsMarket } from "../../model/market.js";
 import type { OptionsNft } from "../../model/nft.js";
 import type { OptionsStreamState } from "../../model/stream.js";
 import type {
   OptionsVault,
   OptionsVaultShareTotals,
-  OptionsVaultSide,
-  OptionsVaultStewardState
+  OptionsVaultSide
 } from "../../model/vault.js";
 import type { OptionsReader } from "../types.js";
 import type { OptionsSuiObjectIds } from "./addresses.js";
@@ -99,6 +99,7 @@ const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readBoard: (vaultId, side) => readBoard(ctx, vaultId, side),
   readSharePrice: (vaultId, side) => readSharePrice(ctx, vaultId, side),
   readPendingBoundaries: (vaultId, side) => readPendingBoundaries(ctx, vaultId, side),
+  readBoundaries: (vaultId, side) => readBoundaries(ctx, vaultId, side),
   readPendingShares: (vaultId, side, tokenId) => readPendingShares(ctx, vaultId, side, tokenId),
   readUsdcAddress: () => readUsdcAddress(ctx),
   readUsdcBalance: (owner) => readUsdcBalance(ctx, owner),
@@ -524,6 +525,41 @@ const readPendingBoundaries = async (
   }
 };
 
+// Canonical unsettled funder depletion schedule (Move get_boundaries → (vector<u64>, vector<u256>)).
+// Parity with EVM readBoundaries: every active funder's (maxEnd, rate), summing to side_rate, so the
+// live-pool projection caps exactly at what was funded.
+const readBoundaries = async (
+  ctx: ReaderContext,
+  vaultId: VaultId,
+  side: OptionsVaultSide
+): Promise<readonly FunderBoundary[]> => {
+  const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
+  const vaultBytes = Array.from({ length: 32 }, (_, i) =>
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+  );
+
+  try {
+    const tx = new Transaction();
+    tx.moveCall({
+      target: target(ctx.packageId, MODULES.vault, "get_boundaries"),
+      typeArguments: [ctx.coinType],
+      arguments: [
+        tx.object(ctx.ids.vaultRegistry),
+        tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
+        tx.pure.u8(sideToSuiValue(side))
+      ]
+    });
+    const results = await inspect(ctx, tx);
+    const vals = results[0] ?? [];
+    const maxEnds = vals[0] ? (bcs.vector(bcs.u64()).parse(Uint8Array.from(vals[0][0])) as string[]) : [];
+    const rates = vals[1] ? (bcs.vector(bcs.u256()).parse(Uint8Array.from(vals[1][0])) as string[]) : [];
+    return maxEnds.map((maxEnd, i) => ({ maxEndMs: Number(maxEnd) * 1000, rate: BigInt(rates[i] ?? "0") }));
+  } catch (error) {
+    if (error instanceof LiveStreakConfigError) throw error;
+    throw suiReadFailed("boundaries", error);
+  }
+};
+
 const readPendingShares = async (
   ctx: ReaderContext,
   vaultId: VaultId,
@@ -734,6 +770,9 @@ const readNft = async (
 ): Promise<OptionsNft> => {
   try {
     const laneCount = await readLaneCount(ctx, tokenId);
+    // Wall clock for effective depletion — parity with EVM; a lane reads depleted the moment its runway
+    // elapses in real time, matching the UI countdown (chain clock can lag a frozen dev chain).
+    const nowSec = Math.floor(Date.now() / 1000);
     const lanes = [];
     const winningSideByVault = new Map<string, OptionsVaultSide | undefined>();
 
@@ -797,7 +836,7 @@ const readNft = async (
         lostUsdc: posVals[6] !== undefined ? readU256(posVals[6]) : 0n
       };
 
-      const lane = mapSuiLane(tokenId, vaultId, side, laneRate, position);
+      const lane = mapSuiLane(tokenId, vaultId, side, laneRate, position, nowSec);
 
       if (!winningSideByVault.has(vaultId)) {
         const ws = await readWinningSide(ctx, vaultId);
@@ -951,12 +990,20 @@ const readUsdcBalance = async (ctx: ReaderContext, owner: UserAddress): Promise<
   }
 };
 
-const readNftBalance = async (_ctx: ReaderContext, _tokenId: TokenId): Promise<bigint> => {
-  // O5 (KNOWN PARITY GAP): the EVM reader returns Drips `streamsState(tokenId,USDC).balance`, but the
-  // Sui streams/drips registry exposes no public per-account remaining-USDC accessor. Returning a
-  // fabricated estimate on a funds display would be worse than a documented 0, so we return 0 until
-  // contracts add a `streamed_balance(streams_registry, token_id): u128` (parity with EVM). Filed to
-  // the contracts agent. Until then Sui session PnL omits remaining streamed USDC.
-  return 0n;
+const readNftBalance = async (ctx: ReaderContext, tokenId: TokenId): Promise<bigint> => {
+  // streams_state(registry, account_id) → (hash, history_hash, update_time, balance, max_end); account_id
+  // is the token_id (same as EVM, where readNftBalance reads Drips streamsState(tokenId).balance).
+  try {
+    const tx = new Transaction();
+    tx.moveCall({
+      target: target(ctx.packageId, MODULES.streams, "streams_state"),
+      typeArguments: [ctx.coinType],
+      arguments: [tx.object(ctx.ids.streamsRegistry), tx.pure.u256(tokenId)]
+    });
+    const vals = (await inspect(ctx, tx))[0] ?? [];
+    return vals[3] !== undefined ? readU128(vals[3]) : 0n;
+  } catch (error) {
+    throw suiReadFailed("NFT balance", error);
+  }
 };
 

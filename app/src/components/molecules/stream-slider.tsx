@@ -1,183 +1,156 @@
 import { useRef, useState, useLayoutEffect } from 'react'
 import { motion, AnimatePresence, useMotionValue, animate } from 'framer-motion'
-import type { OptionsFunctionView } from '@livestreak/options'
-
-import { shareStringToNumber, usdcStringToNumber } from '#/utils/options'
-import { OptionsActionButton } from '#/components/atoms/options-action-button'
 
 const MAX_RATE = 10
+const MIN_RATE = 0.1 // lowest streamable rate; below it the centre is a pause (pausable) or floors to MIN
+const DETENT_STEP = 0.1 // snap increment in the crunchy low zone
+const DETENT_MAX = 1 // detents apply at/below $1/min; above it the slider runs free
 const THUMB_R = 12
-const THUMB_NEUTRAL = '#7c8595'
+const NEUTRAL = '#7c8595'
+const PAUSE = '#ff7a00' // amber — matches the niko/vault cards' stop/pause CTA (not green)
 
-interface AccrualPreviewView {
-  projectedShares: number
-  valueUsdc: number
-  sharesPerSec: number
-}
+// Quadratic curve: the low end gets far more travel per dollar, so small rates are easy to land on
+// precisely ("crunchy"), while the top stays fast. `mag` is the 0..1 fraction of half-travel.
+const magToRate = (mag: number) => MAX_RATE * mag * mag
+const rateToMag = (rate: number) => Math.sqrt(Math.min(Math.max(rate, 0), MAX_RATE) / MAX_RATE)
+
+// Detent stops shown as faint ticks ($0.10 … $1.00), placed on the curve so they line up with the snap.
+const DETENTS: number[] = []
+for (let d = DETENT_STEP; d <= DETENT_MAX + 1e-9; d += DETENT_STEP) DETENTS.push(Number(d.toFixed(2)))
 
 interface Props {
-  vaultId: string
-  initialSide?: 'yes' | 'no' | null
-  initialRate?: number
+  side: 'yes' | 'no' | null
+  rate: number
+  onChange: (side: 'yes' | 'no' | null, rate: number) => void
   disabled?: boolean
   compact?: boolean
-  onStream?: (side: 'yes' | 'no' | null, rate: number) => void
-  fundYes?: OptionsFunctionView
-  fundNo?: OptionsFunctionView
-  stopFn?: OptionsFunctionView
-  activeFundedSide?: 'yes' | 'no'
-  onStopFunding?: () => void | Promise<unknown>
-  sharePriceYes?: number
-  sharePriceNo?: number
-  accrualPreview?: AccrualPreviewView | null
-  previewLoading?: boolean
-  showPreview?: boolean
+  /** When true, dragging the thumb to the dead centre pauses the running stream: it emits `(null, 0)`
+   *  — one signal, no YES/NO. Off ⇒ the centre just floors to MIN_RATE (a new stream has nothing to
+   *  pause). Only enable it when a live stream exists. */
+  pausable?: boolean
 }
 
-export function StreamSlider({
-  initialSide = null,
-  initialRate = 0,
-  disabled = false,
-  compact = false,
-  onStream,
-  fundYes,
-  fundNo,
-  stopFn,
-  activeFundedSide,
-  onStopFunding,
-  sharePriceYes,
-  sharePriceNo,
-  accrualPreview,
-  previewLoading = false,
-  showPreview = false,
-}: Props) {
+/**
+ * A controlled NO↔YES rate picker. `side` + `rate` are the single source of truth, owned by the parent;
+ * the thumb mirrors them and every gesture reports back through `onChange`. It holds no rate/side of its
+ * own, so a sibling number input bound to the same state stays perfectly in sync.
+ *
+ * Mapping is quadratic so the low end is fine-grained, and snaps to $0.10 detents below $1/min — small
+ * rates are precise ("crunchy"), the top is fast. The bottom floors at MIN_RATE — except on a `pausable`
+ * slider, where the dead centre emits `(null, 0)` to pause. A tiny haptic fires per detent (Android).
+ */
+export function StreamSlider({ side, rate, onChange, disabled = false, compact = false, pausable = false }: Props) {
   const trackRef = useRef<HTMLDivElement>(null)
-  const didInitX = useRef(false)
-  const [isDragging, setIsDragging] = useState(false)
-  const [side, setSide] = useState<'yes' | 'no' | null>(activeFundedSide ?? initialSide)
-  const [rate, setRate] = useState(initialRate)
+  const [dragging, setDragging] = useState(false)
+  const [hw, setHw] = useState(0)
   const x = useMotionValue(0)
+  const lastRate = useRef<number | null>(null)
+  const belowFloor = useRef(false) // sticky: true once a drag crosses below the lowest rate (pause), to ×1.3
 
-  const yesAllowed = fundYes ? !fundYes.disabled : true
-  const noAllowed = fundNo ? !fundNo.disabled : true
-  const sliderDisabled = disabled || (activeFundedSide !== undefined && !!stopFn && !stopFn.disabled)
-
-  function getHalfWidth() { return Math.max(1, (trackRef.current?.clientWidth ?? 280) / 2 - THUMB_R) }
+  const halfWidth = () => Math.max(1, (trackRef.current?.clientWidth ?? 280) / 2 - THUMB_R)
 
   useLayoutEffect(() => {
-    if (activeFundedSide) {
-      const sign = activeFundedSide === 'no' ? -1 : 1
-      const offset = sign * (Math.min(Math.max(rate, 0.8), MAX_RATE) / MAX_RATE) * getHalfWidth()
-      x.set(offset)
-      setSide(activeFundedSide)
+    const w = halfWidth()
+    setHw(w)
+    if (dragging) return
+    const sign = side === 'no' ? -1 : 1
+    const target = side ? sign * rateToMag(rate) * w : 0
+    const controls = animate(x, target, { type: 'spring', stiffness: 500, damping: 30 })
+    return () => controls.stop()
+  }, [side, rate, dragging, x])
+
+  // Map a pixel offset from centre → (side, rate) on the quadratic curve. The dead centre pauses on a
+  // `pausable` slider; otherwise the bottom is a HARD FLOOR at MIN_RATE (no fling-back). Snaps to $0.10
+  // detents in the low zone; during a drag the thumb is pulled onto the snapped stop (the crunch).
+  // Map a pixel offset from centre → (side, rate) on the quadratic curve, PIN the thumb onto the snapped
+  // detent (the crisp "snap"), and report it. The pause zone (below the floor) rides the finger instead — no
+  // pin — and eases to dead-centre on release. The old pause↔$0.10 spasm was NOT this pin: it was `pausable`
+  // flipping (it was keyed off the draft rate, which hits 0 at centre → pausable false → floor to $0.10 →
+  // rate>0 → pausable true → a loop). With a stable, committed-based `pausable` the pin is steady.
+  const snapTo = (px: number) => {
+    if (disabled) return
+    const hw = halfWidth()
+    const signed = Math.max(-1, Math.min(1, px / hw))
+    let r = magToRate(Math.abs(signed))
+    // CENTRE = PAUSE (pausable only): pauses just below the lowest rate, STICKY (hysteresis ×1.4) so the
+    // pause/$0.10 edge can't flip-flop. Rides the finger here (no pin); one signal, no YES/NO.
+    if (pausable && (belowFloor.current ? r < MIN_RATE * 1.4 : r < MIN_RATE)) {
+      belowFloor.current = true
+      lastRate.current = 0
+      onChange(null, 0)
       return
     }
-    if (didInitX.current) return
-    didInitX.current = true
-    if (!initialSide || initialRate <= 0) return
-    const sign = initialSide === 'no' ? -1 : 1
-    const offset = sign * (Math.min(initialRate, MAX_RATE) / MAX_RATE) * getHalfWidth()
-    x.set(offset)
-  })
-
-  function updateFromX(xVal: number) {
-    if (sliderDisabled) return
-    const hw = getHalfWidth(), pct = Math.max(-1, Math.min(1, xVal / hw))
-    const newRate = Math.abs(pct) * MAX_RATE
-    let newSide: 'yes' | 'no' | null = pct > 0.05 ? 'yes' : pct < -0.05 ? 'no' : null
-    if (newSide === 'yes' && !yesAllowed) newSide = null
-    if (newSide === 'no' && !noAllowed) newSide = null
-    setRate(newRate); setSide(newSide); onStream?.(newSide, newRate)
+    belowFloor.current = false
+    const low = r < DETENT_MAX
+    if (low) r = Math.round(r / DETENT_STEP) * DETENT_STEP // snap value to $0.10 detents in the low zone
+    r = Math.min(Math.max(r, MIN_RATE), MAX_RATE) // hard floor / ceiling
+    const next: 'yes' | 'no' = signed >= 0 ? 'yes' : 'no'
+    x.set((next === 'yes' ? 1 : -1) * rateToMag(r) * hw) // pin the thumb onto the detent — crisp snap
+    if (r !== lastRate.current) {
+      if (low && typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(3)
+      lastRate.current = r
+    }
+    onChange(next, r)
   }
 
-  function handleTrackClick(e: React.MouseEvent<HTMLDivElement>) {
-    if (sliderDisabled) return
-    const track = trackRef.current
-    if (!track) return
-    const rect = track.getBoundingClientRect()
-    const clickX = e.clientX - rect.left - rect.width / 2
-    animate(x, clickX, { type: 'spring', stiffness: 500, damping: 30 })
-    updateFromX(clickX)
+  const onTrackClick = (e: React.MouseEvent) => {
+    belowFloor.current = false // a click is a fresh interaction — no carried-over hysteresis
+    const rect = trackRef.current?.getBoundingClientRect()
+    if (rect) snapTo(e.clientX - rect.left - rect.width / 2)
   }
 
-  const rateLabel = rate > 0.01 ? `$${rate.toFixed(2)}/min` : null
-  const sideColor = side === 'yes' ? '#00ff87' : side === 'no' ? '#ff2d78' : 'rgba(255,255,255,0.2)'
-  const thumbBg = side === 'yes' ? '#00ff87' : side === 'no' ? '#ff2d78' : THUMB_NEUTRAL
-  const sideDisabledReason = side === 'yes'
-    ? fundYes?.disabledReason
-    : side === 'no'
-      ? fundNo?.disabledReason
-      : undefined
-  const sharePrice = side === 'yes' ? sharePriceYes : side === 'no' ? sharePriceNo : undefined
+  // Pausable + rate driven to ~0 ⇒ the thumb is parked in the centre PAUSE zone: go amber.
+  const atPause = pausable && rate < MIN_RATE
+  const color = atPause ? PAUSE : side === 'yes' ? '#00ff87' : side === 'no' ? '#ff2d78' : NEUTRAL
+  const fill = side && !atPause ? rateToMag(rate) : 0
+  const label = atPause
+    ? '⏸ release to pause'
+    : side && rate >= MIN_RATE ? `$${rate.toFixed(2)}/min → ${side.toUpperCase()}` : null
 
-  const trackFills = (
-    <>
-      <div style={{ position: 'absolute', right: '50%', top: 0, height: '100%', width: '50%', background: 'linear-gradient(90deg, rgba(255,45,120,0.3), #ff2d78)', borderRadius: 2, transform: `scaleX(${side === 'no' ? rate / MAX_RATE : 0})`, transformOrigin: 'right', transition: 'transform 0.05s', opacity: noAllowed ? 1 : 0.35 }} />
-      <div style={{ position: 'absolute', left: '50%', top: 0, height: '100%', width: '50%', background: 'linear-gradient(90deg, #00ff87, rgba(0,255,135,0.3))', borderRadius: 2, transform: `scaleX(${side === 'yes' ? rate / MAX_RATE : 0})`, transformOrigin: 'left', transition: 'transform 0.05s', opacity: yesAllowed ? 1 : 0.35 }} />
+  const sideLabel = (s: 'yes' | 'no', text: string) => (
+    <span style={{
+      fontSize: compact ? 9 : 11, fontWeight: compact ? 700 : 600,
+      letterSpacing: compact ? '0.06em' : '0.08em', fontFamily: 'var(--font-mono)', flexShrink: 0,
+      color: side === s ? (s === 'yes' ? '#00ff87' : '#ff2d78') : 'rgba(255,255,255,0.22)',
+      transition: 'color 0.2s',
+    }}>{text}</span>
+  )
+
+  const track = (
+    <div ref={trackRef} onClick={onTrackClick} style={{
+      position: 'relative', height: 5, background: 'rgba(255,255,255,0.07)', borderRadius: 2,
+      cursor: disabled ? 'not-allowed' : 'pointer', flex: compact ? 1 : undefined,
+    }}>
+      <div style={{ position: 'absolute', right: '50%', top: 0, height: '100%', width: '50%', background: 'linear-gradient(90deg, rgba(255,45,120,0.3), #ff2d78)', borderRadius: 2, transformOrigin: 'right', transform: `scaleX(${side === 'no' ? fill : 0})`, transition: 'transform 0.05s' }} />
+      <div style={{ position: 'absolute', left: '50%', top: 0, height: '100%', width: '50%', background: 'linear-gradient(90deg, #00ff87, rgba(0,255,135,0.3))', borderRadius: 2, transformOrigin: 'left', transform: `scaleX(${side === 'yes' ? fill : 0})`, transition: 'transform 0.05s' }} />
+      {/* Detent ticks for the crunchy low zone (≤ $1/min each side), placed on the curve so they meet the snap. */}
+      {hw > 0 && !disabled && DETENTS.flatMap(d => [-1, 1].map(s => (
+        <div key={`${s}:${d}`} style={{ position: 'absolute', left: '50%', top: -1, width: 1, height: 7, background: 'rgba(255,255,255,0.10)', transform: `translateX(${s * rateToMag(d) * hw}px)`, pointerEvents: 'none' }} />
+      )))}
       <motion.div
-        drag={sliderDisabled ? false : 'x'} dragMomentum={false} dragConstraints={trackRef} dragElastic={0.05}
-        style={{ x, position: 'absolute', top: -(THUMB_R - 2), left: `calc(50% - ${THUMB_R}px)`, width: THUMB_R * 2, height: THUMB_R * 2, borderRadius: '50%', background: thumbBg, transition: 'background 0.2s', border: '2px solid rgba(0,0,0,0.3)', boxShadow: isDragging ? `0 0 20px ${sideColor}40` : '0 2px 8px rgba(0,0,0,0.5)', cursor: sliderDisabled ? 'not-allowed' : 'grab', zIndex: 2, touchAction: 'none' }}
-        onDrag={() => updateFromX(x.get())}
-        onDragStart={() => setIsDragging(true)}
-        onDragEnd={() => {
-          setIsDragging(false)
-          if (activeFundedSide) return
-          if (Math.abs(x.get()) < getHalfWidth() * 0.05) {
-            animate(x, 0, { type: 'spring', stiffness: 500, damping: 30 })
-            setSide(null); setRate(0); onStream?.(null, 0)
-          }
-        }}
-        whileTap={{ scale: sliderDisabled ? 1 : 1.1 }}
+        drag={disabled ? false : 'x'}
+        dragMomentum={false}
+        dragConstraints={trackRef}
+        dragElastic={0.05}
+        onDragStart={() => { belowFloor.current = false; setDragging(true) }}
+        onDrag={() => snapTo(x.get())}
+        onDragEnd={() => { snapTo(x.get()); setDragging(false) }}
+        initial={false}
+        animate={{ backgroundColor: color }}
+        transition={{ backgroundColor: { duration: 0.25, ease: 'easeOut' } }}
+        whileTap={{ scale: disabled ? 1 : 1.1 }}
+        style={{ x, position: 'absolute', top: -(THUMB_R - 2), left: `calc(50% - ${THUMB_R}px)`, width: THUMB_R * 2, height: THUMB_R * 2, borderRadius: '50%', border: '2px solid rgba(0,0,0,0.3)', boxShadow: dragging ? `0 0 20px ${color}40` : '0 2px 8px rgba(0,0,0,0.5)', cursor: disabled ? 'not-allowed' : 'grab', zIndex: 2, touchAction: 'none' }}
       />
-      <div style={{ position: 'absolute', left: '50%', top: -2, width: 1, height: 8, background: 'rgba(255,255,255,0.15)', transform: 'translateX(-50%)', pointerEvents: 'none' }} />
-    </>
-  )
-
-  const previewBlock = showPreview && (
-    <div style={{ marginTop: compact ? 6 : 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
-      {sharePrice !== undefined && (
-        <p className="mono" style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', margin: 0 }}>
-          Next share ~${sharePrice.toFixed(4)} USDC
-        </p>
-      )}
-      {side && rate > 0.01 && (
-        <p className="mono" style={{ fontSize: 9, color: 'rgba(255,255,255,0.35)', margin: 0 }}>
-          {previewLoading
-            ? 'Projecting accrual…'
-            : accrualPreview
-              ? `~${accrualPreview.projectedShares.toFixed(2)} shares / min → $${accrualPreview.valueUsdc.toFixed(2)} over 60s`
-              : 'Adjust rate to preview accrual'}
-        </p>
-      )}
+      <div style={{ position: 'absolute', left: '50%', top: pausable ? -4 : -3, width: pausable ? 3 : 1, height: pausable ? 13 : 11, borderRadius: pausable ? 1.5 : 0, background: pausable ? PAUSE : 'rgba(255,255,255,0.22)', opacity: pausable ? (atPause ? 0.95 : 0.45) : 1, transform: 'translateX(-50%)', transition: 'opacity 0.2s', pointerEvents: 'none' }} />
     </div>
-  )
-
-  const stopBlock = activeFundedSide && stopFn && onStopFunding && (
-    <div style={{ marginTop: compact ? 6 : 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-      <span className="mono" style={{ fontSize: 10, color: activeFundedSide === 'yes' ? '#00ff87' : '#ff2d78' }}>
-        Streaming {activeFundedSide.toUpperCase()}
-      </span>
-      <OptionsActionButton label="Stop" fn={stopFn} onAction={onStopFunding} variant="ghost" compact />
-    </div>
-  )
-
-  const reasonBlock = side && sideDisabledReason && (
-    <p style={{ fontSize: 9, color: 'rgba(255,122,0,0.85)', margin: compact ? '4px 0 0' : '6px 0 0' }}>{sideDisabledReason}</p>
   )
 
   if (compact) {
     return (
-      <div style={{ userSelect: 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span title={fundNo?.disabledReason} style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: side === 'no' ? '#ff2d78' : noAllowed ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.12)', fontFamily: 'var(--font-mono)', flexShrink: 0, transition: 'color 0.2s' }}>NO</span>
-          <div ref={trackRef} onClick={handleTrackClick} style={{ position: 'relative', height: 5, background: 'rgba(255,255,255,0.07)', borderRadius: 2, cursor: sliderDisabled ? 'not-allowed' : 'pointer', flex: 1 }}>
-            {trackFills}
-          </div>
-          <span title={fundYes?.disabledReason} style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', color: side === 'yes' ? '#00ff87' : yesAllowed ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.12)', fontFamily: 'var(--font-mono)', flexShrink: 0, transition: 'color 0.2s' }}>YES</span>
-        </div>
-        {reasonBlock}
-        {stopBlock}
-        {previewBlock}
+      <div style={{ userSelect: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+        {sideLabel('no', 'NO')}
+        {track}
+        {sideLabel('yes', 'YES')}
       </div>
     )
   }
@@ -185,36 +158,17 @@ export function StreamSlider({
   return (
     <div style={{ userSelect: 'none' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <span title={fundNo?.disabledReason} style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: side === 'no' ? '#ff2d78' : noAllowed ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', transition: 'color 0.2s', fontFamily: 'var(--font-mono)' }}>NO</span>
+        {sideLabel('no', 'NO')}
         <div style={{ textAlign: 'center', minHeight: 16 }}>
           <AnimatePresence mode="wait" initial={false}>
-            {rateLabel
-              ? <motion.span key="rate" initial={{ opacity: 0, y: -4, filter: 'blur(4px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} exit={{ opacity: 0, y: 4, filter: 'blur(4px)' }} transition={{ duration: 0.12 }} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color: sideColor, display: 'inline-block' }}>{rateLabel} → {side?.toUpperCase()}</motion.span>
-              : <motion.span key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }} style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'var(--font-mono)', display: 'inline-block' }}>← drag to stream →</motion.span>
-            }
+            {label
+              ? <motion.span key="rate" initial={{ opacity: 0, y: -4, filter: 'blur(4px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} exit={{ opacity: 0, y: 4, filter: 'blur(4px)' }} transition={{ duration: 0.12 }} style={{ fontSize: 11, fontFamily: 'var(--font-mono)', fontWeight: 600, color }}>{label}</motion.span>
+              : <motion.span key="idle" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.1 }} style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)', fontFamily: 'var(--font-mono)' }}>← drag to stream →</motion.span>}
           </AnimatePresence>
         </div>
-        <span title={fundYes?.disabledReason} style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', color: side === 'yes' ? '#00ff87' : yesAllowed ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', transition: 'color 0.2s', fontFamily: 'var(--font-mono)' }}>YES</span>
+        {sideLabel('yes', 'YES')}
       </div>
-      <div ref={trackRef} onClick={handleTrackClick} style={{ position: 'relative', height: 5, background: 'rgba(255,255,255,0.07)', borderRadius: 2, cursor: sliderDisabled ? 'not-allowed' : 'pointer' }}>
-        {trackFills}
-      </div>
-      {reasonBlock}
-      {stopBlock}
-      {previewBlock}
+      {track}
     </div>
   )
-}
-
-export function mapAccrualPreview(preview: {
-  projectedShares: string
-  valueUSDC: string
-  sharesPerSec: string
-} | null): AccrualPreviewView | null {
-  if (!preview) return null
-  return {
-    projectedShares: shareStringToNumber(preview.projectedShares),
-    valueUsdc: usdcStringToNumber(preview.valueUSDC),
-    sharesPerSec: shareStringToNumber(preview.sharesPerSec),
-  }
 }

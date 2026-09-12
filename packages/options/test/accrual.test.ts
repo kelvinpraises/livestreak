@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { asMarketId, asTokenId, asVaultId } from "../src/model/index.js";
+import { asMarketId, asTokenId, asVaultId, sharesToNumber } from "../src/model/index.js";
 import { isAccrualFrozen, projectStreamAccrual, projectAccrualPreview } from "../src/model/math/accrual.js";
 import { projectOptionsPanel } from "../src/bridge/panel/project.js";
 import { readUserOptionsSnapshot } from "../src/flows/snapshot.js";
@@ -9,7 +9,6 @@ import {
   fixtureNft,
   fixtureResolvedVault,
   fixtureSeed,
-  fixtureShareTotals,
   fixtureUser
 } from "./helpers/fake-chain.js";
 
@@ -42,10 +41,10 @@ describe("stream accrual projector", () => {
       atMs: board.lastAdvanceMs + 5_000
     });
 
-    expect(BigInt(view.pendingShares)).toBeGreaterThan(0n);
-    expect(BigInt(view.valueUSDC)).toBeGreaterThan(0n);
-    expect(view.sharesPerSec).toMatch(/^\d+$/);
-    expect(view.sharePriceNow).toBeTruthy();
+    expect(view.pendingShares).toBeGreaterThan(0);
+    expect(view.valueUSDC).toBeGreaterThan(0);
+    expect(view.sharesPerSec).toBeGreaterThanOrEqual(0);
+    expect(view.sharePriceNow).toBeGreaterThan(0);
   });
 
   it("freezes after resolvedAt", () => {
@@ -62,8 +61,8 @@ describe("stream accrual projector", () => {
       resolvedAtMs
     });
 
-    expect(frozen.pendingShares).toBe(pendingShares.toString());
-    expect(frozen.sharesPerSec).toBe("0");
+    expect(frozen.pendingShares).toBe(sharesToNumber(pendingShares));
+    expect(frozen.sharesPerSec).toBe(0);
     expect(
       isAccrualFrozen({
         board,
@@ -106,9 +105,9 @@ describe("stream accrual projector", () => {
       resolvedAtMs
     });
 
-    expect(first.pendingShares).toBe(firstRead.toString());
-    expect(second.pendingShares).toBe(secondRead.toString());
-    expect(BigInt(second.pendingShares)).toBeGreaterThan(BigInt(first.pendingShares));
+    expect(first.pendingShares).toBe(sharesToNumber(firstRead));
+    expect(second.pendingShares).toBe(sharesToNumber(secondRead));
+    expect(second.pendingShares).toBeGreaterThan(first.pendingShares);
   });
 });
 
@@ -135,10 +134,10 @@ describe("accrual preview projector", () => {
       atMs
     });
 
-    expect(BigInt(preview.projectedShares)).toBeGreaterThan(0n);
-    expect(BigInt(preview.valueUSDC)).toBeGreaterThan(0n);
-    expect(BigInt(preview.sharesPerSec)).toBeGreaterThan(0n);
-    expect(preview.sharePriceUSDC).toBeTruthy();
+    expect(preview.projectedShares).toBeGreaterThan(0);
+    expect(preview.valueUSDC).toBeGreaterThan(0);
+    expect(preview.sharesPerSec).toBeGreaterThan(0);
+    expect(preview.sharePriceUSDC).toBeGreaterThan(0);
   });
 
   it("returns zero accrual when rate is zero", () => {
@@ -152,9 +151,9 @@ describe("accrual preview projector", () => {
       atMs
     });
 
-    expect(preview.projectedShares).toBe("0");
-    expect(preview.valueUSDC).toBe("0");
-    expect(preview.sharesPerSec).toBe("0");
+    expect(preview.projectedShares).toBe(0);
+    expect(preview.valueUSDC).toBe(0);
+    expect(preview.sharesPerSec).toBe(0);
   });
 
   it("returns zero value when the side share total is zero", () => {
@@ -168,8 +167,8 @@ describe("accrual preview projector", () => {
       atMs
     });
 
-    expect(BigInt(preview.projectedShares)).toBeGreaterThan(0n);
-    expect(preview.valueUSDC).toBe("0");
+    expect(preview.projectedShares).toBeGreaterThan(0);
+    expect(preview.valueUSDC).toBe(0);
   });
 });
 
@@ -186,6 +185,7 @@ describe("claim panel projection", () => {
           vaultId,
           side: "yes",
           rate: 0n,
+          committedRate: 0n,
           gPaid: 0n,
           sharesAccrued: 34_000_000n,
           depleted: false,
@@ -198,6 +198,7 @@ describe("claim panel projection", () => {
           vaultId,
           side: "no",
           rate: 0n,
+          committedRate: 0n,
           gPaid: 0n,
           sharesAccrued: 6_000_000n,
           depleted: false,
@@ -223,14 +224,14 @@ describe("claim panel projection", () => {
     const yesLane = panel.nfts[0]?.lanes[0];
     const noLane = panel.nfts[0]?.lanes[1];
 
-    expect(yesLane?.claimableUSDC).toBe("50000000");
-    expect(yesLane?.canClaimWin).toBe(true);
-    expect(yesLane?.won).toBe(true);
-    expect(yesLane?.canClaimLoss).toBe(false);
+    expect(yesLane?.settlement?.claimableUSDC).toBe(50);
+    expect(yesLane?.settlement?.canClaimWin).toBe(true);
+    expect(yesLane?.settlement?.won).toBe(true);
+    expect(yesLane?.settlement?.canClaimLoss).toBe(false);
 
-    expect(noLane?.lossClaimableLVST).toBe("12000000");
-    expect(noLane?.canClaimLoss).toBe(true);
-    expect(noLane?.won).toBe(false);
-    expect(noLane?.canClaimWin).toBe(false);
+    expect(noLane?.settlement?.lossClaimableLVST).toBe(12_000_000 / 1e18);
+    expect(noLane?.settlement?.canClaimLoss).toBe(true);
+    expect(noLane?.settlement?.won).toBe(false);
+    expect(noLane?.settlement?.canClaimWin).toBe(false);
   });
 });

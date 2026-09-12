@@ -252,7 +252,11 @@ contract Vault {
         _settle(vaultId, side, account);
 
         Position storage p = _positions[vaultId][side][account];
-        require(p.rate == 0 && !p.depleted, "Vault: already funding");
+        // A drained side is re-fundable: `rate == 0` still blocks double-funding an ACTIVE side, while
+        // clearing `depleted` re-opens a side whose deposit ran dry. Banked shares + loss basis carry over;
+        // the clear is required so the `rate>0 && !depleted` checks elsewhere treat the re-opened lane live.
+        require(p.rate == 0, "Vault: already funding");
+        p.depleted = false;
 
         Board storage b = _boards[vaultId][side];
         p.rate = rate;
@@ -384,6 +388,39 @@ contract Vault {
     /// bounded `advance` calls precede a `fund` when the board is behind. `_boundaryHead <= length` always.
     function pendingBoundaries(bytes32 vaultId, Side side) external view returns (uint256) {
         return _boundaries[vaultId][side].length - _boundaryHead[vaultId][side];
+    }
+
+    /// @notice The unsettled funder depletion schedule for (vaultId, side): each still-active stream's
+    /// run-dry `maxEnd` and current `rate`. Applies the same validity gate `_advance`/`_previewG` use
+    /// (active, not depleted, matching the funder's current maxEnd), so the returned rates sum to
+    /// `sideRate` — letting an off-chain live-pool projection cap exactly at what was funded. Stale
+    /// entries (a superseded maxEnd from a re-peg, an already-closed stream) are skipped.
+    function getBoundaries(bytes32 vaultId, Side side)
+        external
+        view
+        returns (uint32[] memory maxEnds, uint256[] memory rates)
+    {
+        Boundary[] storage arr = _boundaries[vaultId][side];
+        uint256 head = _boundaryHead[vaultId][side];
+        uint256 len = arr.length;
+
+        uint256 n = 0;
+        for (uint256 i = head; i < len; i++) {
+            Position storage p = _positions[vaultId][side][arr[i].account];
+            if (p.rate > 0 && !p.depleted && p.maxEnd == arr[i].maxEnd) n++;
+        }
+
+        maxEnds = new uint32[](n);
+        rates = new uint256[](n);
+        uint256 j = 0;
+        for (uint256 i = head; i < len; i++) {
+            Position storage p = _positions[vaultId][side][arr[i].account];
+            if (p.rate > 0 && !p.depleted && p.maxEnd == arr[i].maxEnd) {
+                maxEnds[j] = arr[i].maxEnd;
+                rates[j] = p.rate;
+                j++;
+            }
+        }
     }
 
     function getAccountVaultIds(uint256 account) external view returns (bytes32[] memory) {

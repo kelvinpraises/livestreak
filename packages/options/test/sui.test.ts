@@ -28,6 +28,7 @@ import {
   type SuiStreamState
 } from "../src/chains/sui/decode.js";
 import { asMarketId, asTokenId, asVaultId, asUserAddress } from "../src/model/ids.js";
+import { WAD } from "../src/model/math/curve.js";
 
 // ---------------------------------------------------------------------------
 // Fixture addresses — valid 64-hex Sui object IDs.
@@ -346,7 +347,7 @@ describe("mapSuiLane + enrichSuiLane", () => {
   const position: SuiPosition = {
     rate: 1000n,
     gPaid: 50n,
-    sharesAccrued: 200n,
+    sharesAccrued: 200n * WAD, // on-chain WAD·SCALE; decode ÷WAD → 200n SHARE_SCALE
     maxEnd: 999n,
     depleted: false,
     fundStart: 1n,
@@ -358,9 +359,16 @@ describe("mapSuiLane + enrichSuiLane", () => {
     expect(lane.tokenId).toBe(tokenId);
     expect(lane.side).toBe("yes");
     expect(lane.rate).toBe(1000n);
-    expect(lane.sharesAccrued).toBe(200n);
+    expect(lane.sharesAccrued).toBe(200n); // normalized WAD·SCALE → SHARE_SCALE
     expect(lane.maxEndMs).toBe(999_000);
     expect(lane.depleted).toBe(false);
+  });
+
+  it("normalizes a large WAD·SCALE sharesAccrued to SHARE_SCALE (the percentOfSide-inflation bug)", () => {
+    // Pre-fix this passed through raw, making shares ~1e18× too large and percentOfSide explode.
+    const pos = { ...position, sharesAccrued: 95_884_945n * WAD };
+    const lane = mapSuiLane(tokenId, vaultId, "yes", 1000n, pos);
+    expect(lane.sharesAccrued).toBe(95_884_945n);
   });
 
   it("omits maxEndMs when maxEnd is 0", () => {

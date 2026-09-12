@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { Link } from '@tanstack/react-router'
 import { AnimatePresence } from 'framer-motion'
 import { StreamBar } from '#/components/molecules/stream-bar.tsx'
@@ -18,9 +18,14 @@ import { useOptionsContext } from '#/providers/options-provider.tsx'
 import { useHostStream } from '#/hooks/use-host-stream.ts'
 import { useWebRtcStreamFeed } from '#/hooks/use-webrtc-stream-feed.ts'
 import { env, isOptionsModeEnabled } from '#/utils/env.ts'
-import { DEFAULT_FUND_DURATION_MIN, panelToStream } from '#/utils/options'
+import { panelToStream } from '#/utils/options'
 import { resolveStreamFeed } from '#/utils/stream'
-import { shouldUseHostWebRtcFeed } from '#/utils/webrtc-consumer'
+import {
+  shouldUseHostWebRtcFeed,
+  nextWebRtcLatch,
+  resolveWebRtcEnabled,
+  type WebRtcLatch,
+} from '#/utils/webrtc-consumer'
 
 interface StreamLayoutProps {
   streamTitle: string
@@ -52,12 +57,26 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
   // live mode, falling back to this route's host/fixture stream detail (its own watch URL). No global
   // hardcoded video: demo streams play their per-route fixture feed, live streams their market feed.
   const hostStream = useHostStream(streamId)
-  const streamPointer = optionsEnabled && optionsConnected && board
+  const streamPointer = optionsEnabled && board
     ? panelToStream(board.panel, streamId)
     : undefined
   const hostDetail = hostStream.stream
-  const webrtcEnabled =
+
+  // Recomputed every ~3s board poll, so it FLICKERS — between polls the board can momentarily drop
+  // this market or report a non-'live' status, flipping eligibility false→true.
+  const webrtcEligible =
     hostStream.ready && shouldUseHostWebRtcFeed(streamPointer, hostDetail)
+  const streamEnded = streamPointer?.status === 'ended'
+
+  // The consumer downloads a FINITE MP4 in one transfer; a transient flip would abort it mid-flight
+  // (truncated/black blob) AND remount the src-keyed <video>. So LATCH eligibility sticky per streamId
+  // (see nextWebRtcLatch): once live it stays enabled until the pointer reports 'ended'.
+  const [webrtcLatch, setWebrtcLatch] = useState<WebRtcLatch>({ streamId, enabled: false })
+  useEffect(() => {
+    setWebrtcLatch(prev => nextWebRtcLatch(prev, streamId, webrtcEligible, streamEnded))
+  }, [streamId, webrtcEligible, streamEnded])
+  const webrtcEnabled = resolveWebRtcEnabled(webrtcLatch, streamId, webrtcEligible, streamEnded)
+
   const relayStreamId = hostDetail?.marketId ?? streamId
   const webrtcFeed = useWebRtcStreamFeed({
     enabled: webrtcEnabled,
@@ -66,8 +85,10 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
   })
   const streamMedia = useMemo(() => {
     const resolved = resolveStreamFeed(streamPointer, hostDetail)
+    // Not live → the recording / watchUrl (replay). Live → the realtime WebRTC feed; only fall back to the
+    // recording if the live connection actually errors (the watchUrl is the post-stream archive, not a
+    // substitute while broadcasting).
     if (!webrtcEnabled) return resolved
-    if (hostDetail?.watchUrl && resolved.src) return resolved
     if (webrtcFeed.blobUrl) return { kind: 'live' as const, src: webrtcFeed.blobUrl }
     if (webrtcFeed.status !== 'error') return { kind: 'live' as const }
     return resolved
@@ -83,13 +104,12 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
     vaultId: string,
     side: 'yes' | 'no',
     rate: number,
-    durationMinutes = DEFAULT_FUND_DURATION_MIN,
   ) => {
     const vault = vaults.find(v => v.vaultId === vaultId)
 
     if (optionsEnabled && optionsConnected) {
       try {
-        const txId = await fundStream(vaultId, side, rate, durationMinutes)
+        const txId = await fundStream(vaultId, side, rate)
         push({ type: 'stream', rate, side, option: vault?.question ?? vaultId, txId })
       } catch (err) {
         push({
@@ -116,17 +136,39 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
       vaultId: string,
       side: 'yes' | 'no',
       amountUsdc: number,
-      durationMinutes = DEFAULT_FUND_DURATION_MIN,
+      durationMinutes = 60,
     ) => {
-      const minutes = durationMinutes > 0 ? durationMinutes : DEFAULT_FUND_DURATION_MIN
+      // Convert a human-read total USDC into the per-minute stream rate the funding flow expects.
+      const minutes = durationMinutes > 0 ? durationMinutes : 60
       const rate = amountUsdc / minutes
-      return handleStream(vaultId, side, rate, minutes)
+      return handleStream(vaultId, side, rate)
     }
     ;(window as unknown as { livestreakFund?: typeof seam }).livestreakFund = seam
     return () => {
       delete (window as unknown as { livestreakFund?: typeof seam }).livestreakFund
     }
   }, [handleStream])
+
+  // Win/loss toast fires on the unresolved → resolved transition we actually witness this session. Each
+  // (vault:side) must be seen UNRESOLVED at least once before a resolved sighting notifies — so positions
+  // already settled when the page loads never burst toasts, and the 3s board poll can't re-fire a key.
+  const notifiedResolutions = useRef(new Map<string, boolean>())
+  useEffect(() => {
+    const seen = notifiedResolutions.current
+    for (const p of positions) {
+      // Skip paused rows: pausing drops the on-chain lane, so the re-injected row carries no win/loss
+      // verdict (`won`/payout/lvst). Every other resolved position has its verdict projected alongside
+      // `resolved` in the same snapshot, so a non-paused resolved sighting is safe to read.
+      if (p.status === 'paused') continue
+      const key = `${p.vaultId}:${p.side}`
+      const wasUnresolved = seen.get(key) === false
+      seen.set(key, p.resolved)
+      if (p.resolved && wasUnresolved) {
+        if (p.won) push({ type: 'win', amount: p.payout ?? 0, option: p.option })
+        else push({ type: 'loss', lvstReceived: p.lvstReceived ?? 0, option: p.option })
+      }
+    }
+  }, [positions, push])
 
   return (
     <div style={{

@@ -221,7 +221,22 @@ contract MarketDriver is SharedDriverUtils, ERC721Enumerable, ERC721URIStorage, 
         uint256 addedN;
         for (uint256 k = 0; k < desired.length; k++) {
             Lane memory held = _lanes[tokenId][desired[k].vaultId];
-            if (held.rate != desired[k].rate || held.side != desired[k].side) {
+            bool changed = held.rate != desired[k].rate || held.side != desired[k].side;
+            // A run-dry position needs re-opening even when our bookkeeping looks unchanged: depletion
+            // happens inside the Vault (deposit ran dry -> rate 0, depleted=true) and is never mirrored
+            // back here, so a same-rate re-fund would otherwise diff to no-op and skip onFund -- the only
+            // call that clears `depleted`. Ask the Vault directly so re-funding actually revives the lane.
+            // Crucially, also re-open when the lane has run dry (maxEnd passed) but the Board is merely
+            // BEHIND on that boundary -- on an idle chain nothing pokes `advance`, so `depleted` reads
+            // false while the deposit is already spent. Skipping onFund there leaves refreshMaxEnds to
+            // no-op on the (about-to-deplete) lane, so a top-up's Drips delivery is booked nowhere and
+            // strands at resolution. Treat maxEnd<=now as run-dry so the top-up is always re-funded.
+            if (!changed) {
+                (uint256 pRate,,, uint32 pMaxEnd, bool depleted) =
+                    VAULT.getPosition(desired[k].vaultId, desired[k].side, tokenId);
+                changed = depleted || (pRate > 0 && pMaxEnd != 0 && uint256(pMaxEnd) <= block.timestamp);
+            }
+            if (changed) {
                 addedVaults[addedN] = desired[k].vaultId;
                 addedSides[addedN] = desired[k].side;
                 addedRates[addedN] = desired[k].rate;
@@ -275,7 +290,12 @@ contract MarketDriver is SharedDriverUtils, ERC721Enumerable, ERC721URIStorage, 
         return false;
     }
 
-    function stopAll(uint256 tokenId) external onlyHolder(tokenId) {
+    /// @notice Stop every lane and sweep the NFT's unspent Drips balance. Pays the NFT owner by default,
+    /// or `to` when the owner redirects (same `_payee` rule as `withdraw`). The refund NEVER goes to the
+    /// raw caller: an approved operator may trigger the sweep on the owner's behalf but can never siphon
+    /// the balance to itself — only the owner can redirect it elsewhere, so the NFT stays safe.
+    function stopAll(uint256 tokenId, address to) external onlyHolder(tokenId) {
+        address payee = _payee(tokenId, to); // resolve + authorize any redirect before mutating state
         StreamReceiver[] memory curr = _buildReceivers(tokenId);
         bytes32[] memory keys = _laneKeys[tokenId];
         for (uint256 i = 0; i < keys.length; i++) {
@@ -289,7 +309,7 @@ contract MarketDriver is SharedDriverUtils, ERC721Enumerable, ERC721URIStorage, 
         uint256 refunded;
         if (realDelta < 0) {
             refunded = uint256(uint128(-realDelta));
-            DRIPS.withdraw(USDC, _msgSender(), refunded);
+            DRIPS.withdraw(USDC, payee, refunded);
         }
         emit AllLanesStopped(tokenId, refunded);
     }

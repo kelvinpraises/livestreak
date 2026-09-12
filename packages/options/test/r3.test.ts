@@ -46,6 +46,7 @@ describe("session PnL", () => {
             vaultId: vaultWin,
             side: "yes",
             rate: 0n,
+            committedRate: 0n,
             gPaid: 0n,
             sharesAccrued: 1n,
             depleted: false,
@@ -64,6 +65,7 @@ describe("session PnL", () => {
             vaultId: vaultLoss,
             side: "yes",
             rate: 0n,
+            committedRate: 0n,
             gPaid: 0n,
             sharesAccrued: 1n,
             depleted: false,
@@ -122,6 +124,7 @@ describe("claims view", () => {
               vaultId: vaultWin,
               side: "yes",
               rate: 0n,
+              committedRate: 0n,
               gPaid: 0n,
               sharesAccrued: 1n,
               depleted: false,
@@ -140,6 +143,7 @@ describe("claims view", () => {
               vaultId: vaultLoss,
               side: "no",
               rate: 100n,
+              committedRate: 100n,
               gPaid: 0n,
               sharesAccrued: 1n,
               depleted: false
@@ -252,8 +256,8 @@ describe("panel flags and market total", () => {
     expect(panel.lvst.actions.canUnstake).toBe(true);
     expect(panel.lvst.actions.canClaimDividends).toBe(true);
     expect(panel.nfts[0]?.owner).toBe(user);
-    expect(panel.nfts[0]?.approved).toBe(operator);
-    expect(panel.nfts[0]?.isOperator).toBe(true);
-    expect(panel.markets[0]?.totals.totalPooledUSDC).toBe("1000");
+    expect(panel.nfts[0]?.transfer.approved).toBe(operator);
+    expect(panel.nfts[0]?.transfer.isOperator).toBe(true);
+    expect(panel.markets[0]?.totals.totalPooledUSDC).toBe(0.001);
   });
 });

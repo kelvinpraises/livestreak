@@ -30,6 +30,10 @@ export interface RtcMessageEvent {
 export interface RtcDataChannelLike {
   readonly label: string;
   readonly readyState: RtcDataChannelState;
+  /** Bytes queued by `send` but not yet handed to the network. Drives the sink's backpressure +
+   *  drain-before-close (a synchronous loopback channel reports 0). Optional so a transport that
+   *  does not expose it degrades to "no buffering". */
+  readonly bufferedAmount?: number;
   send: (data: Uint8Array) => void;
   close: () => void;
   onopen: (() => void) | null;
@@ -47,9 +51,31 @@ export interface RtcPeerConnectionLike {
   createAnswer: () => Promise<RtcSessionDescription>;
   setLocalDescription: (description: RtcSessionDescription) => Promise<void>;
   setRemoteDescription: (description: RtcSessionDescription) => Promise<void>;
+  /** Non-trickle ICE: wait for ICE gathering, then return the local description with its candidates
+   *  embedded. The host signaling relays only the offer/answer SDP (no separate candidate channel), so the
+   *  candidates must ride inside it or the peers never connect. `fallback` is the just-set description,
+   *  returned when the impl exposes no gathered description (the loopback test peer). */
+  localDescriptionWithCandidates: (fallback: RtcSessionDescription) => Promise<RtcSessionDescription>;
   close: () => void;
   ondatachannel: ((event: RtcDataChannelEvent) => void) | null;
 }
+
+/**
+ * Poll until ICE gathering completes (host/LAN candidates land in a few ms), then hand back the
+ * candidate-rich local description. Falls back to the passed description if gathering stalls or the impl
+ * never populates `localDescription`. Shared by the browser + Node ( @roamhq/wrtc ) adapters.
+ */
+export const gatheredLocalDescription = async (
+  peer: { readonly iceGatheringState: string; readonly localDescription: RtcSessionDescription | null },
+  fallback: RtcSessionDescription,
+  timeoutMs = 3000
+): Promise<RtcSessionDescription> => {
+  const deadline = Date.now() + timeoutMs;
+  while (peer.iceGatheringState !== "complete" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return peer.localDescription ?? fallback;
+};
 
 export type RtcPeerConnectionFactory = () => RtcPeerConnectionLike;
 
@@ -116,6 +142,8 @@ class LoopbackDataChannel implements RtcDataChannelLike {
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onmessage: ((event: RtcMessageEvent) => void) | null = null;
+  // Loopback delivers synchronously (queueMicrotask), so nothing is ever queued — the drain wait is a no-op.
+  readonly bufferedAmount = 0;
   private state: RtcDataChannelState = "connecting";
   partner: LoopbackDataChannel | undefined;
 
@@ -205,6 +233,10 @@ class LoopbackPeerConnection implements RtcPeerConnectionLike {
     offererChannel?.open();
   }
 
+  async localDescriptionWithCandidates(fallback: RtcSessionDescription): Promise<RtcSessionDescription> {
+    return fallback; // loopback has no ICE — the description is already complete
+  }
+
   close(): void {
     for (const channel of this.channels) {
       channel.close();
@@ -237,6 +269,7 @@ export const createLoopbackNetwork = (): LoopbackNetwork => {
 interface BrowserRtcDataChannel {
   readonly label: string;
   readyState: string;
+  readonly bufferedAmount: number;
   binaryType: string;
   send: (data: ArrayBufferView) => void;
   close: () => void;
@@ -249,6 +282,8 @@ interface BrowserRtcPeerConnection {
   createAnswer: () => Promise<RtcSessionDescription>;
   setLocalDescription: (description: RtcSessionDescription) => Promise<void>;
   setRemoteDescription: (description: RtcSessionDescription) => Promise<void>;
+  readonly iceGatheringState: string;
+  readonly localDescription: RtcSessionDescription | null;
   close: () => void;
   addEventListener: (type: string, listener: (event: unknown) => void) => void;
 }
@@ -276,6 +311,9 @@ const adaptBrowserChannel = (channel: BrowserRtcDataChannel): RtcDataChannelLike
     get readyState(): RtcDataChannelState {
       return channel.readyState as RtcDataChannelState;
     },
+    get bufferedAmount(): number {
+      return channel.bufferedAmount;
+    },
     send: (data) => channel.send(data),
     close: () => channel.close(),
     onopen: null,
@@ -298,6 +336,7 @@ const adaptBrowserPeer = (peer: BrowserRtcPeerConnection): RtcPeerConnectionLike
     createAnswer: () => peer.createAnswer(),
     setLocalDescription: (description) => peer.setLocalDescription(description),
     setRemoteDescription: (description) => peer.setRemoteDescription(description),
+    localDescriptionWithCandidates: (fallback) => gatheredLocalDescription(peer, fallback),
     close: () => peer.close(),
     ondatachannel: null
   };

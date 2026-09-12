@@ -32,6 +32,7 @@ export interface BridgeCaller {
 export interface CallActionEnvelope {
   readonly scope: typeof bridgeActionScope;
   readonly action: string;
+  readonly id?: string;
   readonly args: unknown;
 }
 

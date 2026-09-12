@@ -72,7 +72,7 @@ const fakeReader = (snap: OptionsMarketSnapshot): OptionsReader =>
       snap.vaults.find((v) => String(v.vaultId) === String(id))!,
     readStreamState: async () => snap.streamState!,
     readVaultShareTotals: async () => ({ yes: 0n, no: 0n }),
-    readBoard: async (_id, side) => {
+    readBoard: async (_id: string, side: "yes" | "no") => {
       const vault = snap.vaults[0];
       const yes = vault?.pools.yes ?? 0n;
       const no = vault?.pools.no ?? 0n;
@@ -83,7 +83,8 @@ const fakeReader = (snap: OptionsMarketSnapshot): OptionsReader =>
         lastAdvanceMs: NOW
       };
     },
-    readPendingBoundaries: async () => 0n
+    readPendingBoundaries: async () => 0n,
+    readBoundaries: async () => []
   }) as unknown as OptionsReader;
 
 const fakeReaderWithAccrual = (snap: OptionsMarketSnapshot): OptionsReader =>
@@ -94,13 +95,14 @@ const fakeReaderWithAccrual = (snap: OptionsMarketSnapshot): OptionsReader =>
       snap.vaults.find((v) => String(v.vaultId) === String(id))!,
     readStreamState: async () => snap.streamState!,
     readVaultShareTotals: async () => ({ yes: 0n, no: 0n }),
-    readBoard: async (_id, side) => ({
+    readBoard: async (_id: string, side: "yes" | "no") => ({
       pool: 0n,
       sideRate: side === "yes" ? 1_000_000n : 0n,
       g: 0n,
       lastAdvanceMs: Date.now() - 30_000
     }),
-    readPendingBoundaries: async () => 0n
+    readPendingBoundaries: async () => 0n,
+    readBoundaries: async () => []
   }) as unknown as OptionsReader;
 
 const providerFor = (snap: OptionsMarketSnapshot): CatalogReaderProvider => ({

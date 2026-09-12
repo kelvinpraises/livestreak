@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { isAddress } from 'viem'
 import type { OptionsFunctionView, OptionsNftPanel } from '@livestreak/options'
 
@@ -6,11 +6,11 @@ import { isOptionsModeEnabled } from '#/utils/env'
 import { isValidRecipientAddress, type OptionsChainKind } from '#/utils/chain'
 import { useOptionsContext } from '#/providers/options-provider'
 import { OptionsActionButton } from '#/components/atoms/options-action-button'
-import { usdcStringToNumber } from '#/utils/options'
-import { formatUSDC, formatCountdown } from '#/utils/format'
+import { formatUSDC, formatRunway } from '#/utils/format'
 
-function invalidAddressFn(): OptionsFunctionView {
-  return { name: '', scope: '', label: '', disabled: true, disabledReason: 'Enter a valid address' }
+// UI-only input gating (amount/address format); protocol gating comes from the real SDK descriptors.
+function invalidFn(reason: string): OptionsFunctionView {
+  return { name: '', scope: '', label: '', disabled: true, disabledReason: reason }
 }
 
 export function NftPanel() {
@@ -41,15 +41,23 @@ export function NftPanel() {
             key={nft.tokenId}
             nft={nft}
             chain={options.chain}
+            addFundsFn={options.findFunction('addFunds', fn =>
+              fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
+            sweepFn={options.findFunction('stopAllFunding', fn =>
+              fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
+            withdrawAllFn={options.findFunction('withdrawMany', fn =>
+              fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
             transferFn={options.findFunction('transferNft', fn =>
               fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
             approveFn={!isSui
               ? options.findFunction('approveNft', fn =>
                 fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)
               : undefined}
+            onAddFunds={(usd) => options.addFundsNft(nft.tokenId, usd)}
+            onSweep={() => options.sweepNft(nft.tokenId)}
+            onWithdrawAll={() => options.withdrawAllNft(nft.tokenId)}
             onTransfer={(to) => options.transferNft(nft.tokenId, to)}
             onApprove={(operator) => options.approveNft(nft.tokenId, operator)}
-            onTopUp={(depositUsd) => options.topUpNft(nft.tokenId, nft.lanes, depositUsd)}
           />
         ))
       )}
@@ -84,14 +92,14 @@ function ApproveAllRow({
         />
         <OptionsActionButton
           label="Grant"
-          fn={valid ? fn : invalidAddressFn()}
+          fn={valid ? fn : invalidFn('Enter a valid address')}
           onAction={() => onApproveAll(operator, true)}
           variant="ghost"
           compact
         />
         <OptionsActionButton
           label="Revoke"
-          fn={valid ? fn : invalidAddressFn()}
+          fn={valid ? fn : invalidFn('Enter a valid address')}
           onAction={() => onApproveAll(operator, false)}
           variant="ghost"
           compact
@@ -104,36 +112,41 @@ function ApproveAllRow({
 function NftRow({
   nft,
   chain,
+  addFundsFn,
+  sweepFn,
+  withdrawAllFn,
   transferFn,
   approveFn,
+  onAddFunds,
+  onSweep,
+  onWithdrawAll,
   onTransfer,
   onApprove,
-  onTopUp,
 }: {
   nft: OptionsNftPanel
   chain: OptionsChainKind
+  addFundsFn?: OptionsFunctionView
+  sweepFn?: OptionsFunctionView
+  withdrawAllFn?: OptionsFunctionView
   transferFn?: OptionsFunctionView
   approveFn?: OptionsFunctionView
+  onAddFunds: (depositUsd: number) => Promise<unknown>
+  onSweep: () => Promise<unknown>
+  onWithdrawAll: () => Promise<unknown>
   onTransfer: (to: string) => Promise<unknown>
   onApprove: (operator: string) => Promise<unknown>
-  onTopUp: (depositUsd: number) => Promise<unknown>
 }) {
   const [transferTo, setTransferTo] = useState('')
   const [approveOperator, setApproveOperator] = useState('')
-  const [topUpAmount, setTopUpAmount] = useState('')
+  const [addAmount, setAddAmount] = useState('')
   const transferValid = isValidRecipientAddress(chain, transferTo)
   const approveValid = isAddress(approveOperator)
   const showApprove = chain === 'evm' && approveFn !== undefined
 
-  const topUpUsd = parseFloat(topUpAmount)
-  const hasFundableLane = nft.lanes.some((lane) => {
-    try { return BigInt(lane.rate) > 0n } catch { return false }
-  })
-  const topUpFn: OptionsFunctionView = !hasFundableLane
-    ? { name: '', scope: '', label: '', disabled: true, disabledReason: 'No active lane to top up — open a position first' }
-    : !(topUpUsd > 0)
-      ? { name: '', scope: '', label: '', disabled: true, disabledReason: 'Enter an amount' }
-      : { name: '', scope: '', label: '', disabled: false }
+  // Balance-first: addFunds is valid with zero active lanes (it parks the deposit as budget). The protocol
+  // gate (NFT ownership) rides the SDK descriptor; only the amount-format check is UI-side.
+  const addUsd = parseFloat(addAmount)
+  const addButtonFn = !(addUsd > 0) ? invalidFn('Enter an amount') : (addFundsFn ?? invalidFn('Unavailable'))
 
   return (
     <div style={{
@@ -150,10 +163,10 @@ function NftRow({
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
-          {chain === 'evm' && nft.approved && (
+          {chain === 'evm' && nft.transfer.approved && (
             <span style={{ fontSize: 9, color: '#00c8ff', fontFamily: 'var(--font-mono)' }}>approved</span>
           )}
-          {chain === 'evm' && nft.isOperator && (
+          {chain === 'evm' && nft.transfer.isOperator && (
             <span style={{ fontSize: 9, color: '#00ff87', fontFamily: 'var(--font-mono)' }}>operator</span>
           )}
         </div>
@@ -162,30 +175,40 @@ function NftRow({
         owner {nft.owner}
       </div>
 
-      {/* A3: shared Drips balance + runway readout (EVM only; both fields absent on Sui). */}
-      {chain === 'evm' && nft.balanceUSDC !== undefined && (
-        <RunwayReadout balanceUSDC={nft.balanceUSDC} runwayEndMs={nft.runwayEndMs} />
+      {/* Shared Drips balance (live-ticking) + runway + realized winnings (EVM only; balance absent on Sui). */}
+      {chain === 'evm' && nft.account.balanceUSDC !== undefined && (
+        <RunwayReadout account={nft.account} pnl={nft.pnl} />
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {/* Balance-first add funds: budget the NFT (and resume/extend any streams) — no active lane needed. */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input
             type="number"
             min="0"
             step="1"
-            value={topUpAmount}
-            onChange={e => setTopUpAmount(e.target.value)}
-            placeholder="Top up lane funding (USDC)"
+            value={addAmount}
+            onChange={e => setAddAmount(e.target.value)}
+            placeholder="Add to balance (USDC)"
             style={addressInputStyle}
           />
           <OptionsActionButton
-            label="Top up"
-            fn={topUpFn}
-            onAction={async () => { await onTopUp(topUpUsd); setTopUpAmount('') }}
-            variant="ghost"
+            label="Add funds"
+            fn={addButtonFn}
+            onAction={async () => { await onAddFunds(addUsd); setAddAmount('') }}
+            variant="green"
             compact
           />
         </div>
+
+        {/* Get money out: sweep the remaining balance back to the wallet / collect all winnings. EVM only. */}
+        {chain === 'evm' && (
+          <div style={{ display: 'flex', gap: 6 }}>
+            <OptionsActionButton label="Sweep to wallet" fn={sweepFn} onAction={onSweep} variant="ghost" compact />
+            <OptionsActionButton label="Withdraw all" fn={withdrawAllFn} onAction={onWithdrawAll} variant="green" compact />
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input
             value={transferTo}
@@ -195,9 +218,9 @@ function NftRow({
           />
           <OptionsActionButton
             label="Transfer"
-            fn={transferValid ? transferFn : invalidAddressFn()}
+            fn={transferValid ? transferFn : invalidFn('Enter a valid address')}
             onAction={() => onTransfer(transferTo)}
-            variant="green"
+            variant="ghost"
             compact
           />
         </div>
@@ -211,7 +234,7 @@ function NftRow({
           />
           <OptionsActionButton
             label="Approve"
-            fn={approveValid ? approveFn : invalidAddressFn()}
+            fn={approveValid ? approveFn : invalidFn('Enter a valid address')}
             onAction={() => onApprove(approveOperator)}
             variant="ghost"
             compact
@@ -223,26 +246,68 @@ function NftRow({
   )
 }
 
-function RunwayReadout({ balanceUSDC, runwayEndMs }: { balanceUSDC: string; runwayEndMs?: number }) {
-  const balance = usdcStringToNumber(balanceUSDC)
-  const msLeft = runwayEndMs !== undefined ? Math.max(0, runwayEndMs - Date.now()) : undefined
-  const depleted = runwayEndMs !== undefined && msLeft === 0
+// Balance ticks down between polls (linear to 0 at runway end, re-anchored each poll). The account STATUS is
+// canonical from the SDK — streaming / idle (parked, nothing streaming) / depleted / empty — so the readout
+// no longer infers it from the Drips maxEnd (which reads "now" for parked and drained alike).
+function RunwayReadout({
+  account,
+  pnl,
+}: {
+  account: OptionsNftPanel['account']
+  pnl: OptionsNftPanel['pnl']
+}) {
+  // BALANCE is already the SDK's LIVE balance; tick it down between polls at the SDK's canonical drain rate.
+  // Thin display smoothing of canonical values — no re-derivation. Re-anchors whenever the poll moves.
+  const polledBalance = account.balanceUSDC ?? 0
+  const drainRate = account.drainRatePerSecUSDC ?? 0 // USDC/sec; present only while streaming
+  const end = account.endsAtMs // present only while streaming
+  const streaming = account.status === 'streaming'
+  const anchor = useRef({ at: Date.now(), balance: polledBalance })
+  if (anchor.current.balance !== polledBalance) {
+    anchor.current = { at: Date.now(), balance: polledBalance }
+  }
+
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    if (!streaming) return
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [streaming])
+
+  const now = Date.now()
+  const liveBalance = streaming
+    ? Math.max(0, anchor.current.balance - drainRate * ((now - anchor.current.at) / 1000))
+    : anchor.current.balance
+  const msLeft = end !== undefined ? Math.max(0, end - now) : undefined
+  const returned = pnl.returnedUSDC
+
+  const runwayText = account.status === 'streaming'
+    ? (msLeft !== undefined ? formatRunway(msLeft) : '—')
+    : account.status === 'idle' ? 'idle'
+      : account.status === 'depleted' ? 'depleted'
+        : '—'
+  const runwayColor = account.status === 'depleted'
+    ? '#ff2d78'
+    : account.status === 'idle' ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.75)'
+
   return (
     <div style={{
       display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
       background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.1)',
       borderRadius: 8, padding: '7px 10px', marginBottom: 10,
     }}>
-      <div>
-        <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em' }}>BALANCE</div>
-        <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }}>{formatUSDC(balance)}</div>
-      </div>
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em' }}>RUNWAY</div>
-        <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: depleted ? '#ff2d78' : 'rgba(255,255,255,0.75)' }}>
-          {msLeft === undefined ? '—' : depleted ? 'depleted' : formatCountdown(msLeft)}
-        </div>
-      </div>
+      <Stat label="BALANCE" value={formatUSDC(liveBalance)} color="#00c8ff" />
+      <Stat label="RUNWAY" value={runwayText} color={runwayColor} align="right" />
+      {returned > 0 && <Stat label="WON" value={formatUSDC(returned)} color="#ffd553" align="right" />}
+    </div>
+  )
+}
+
+function Stat({ label, value, color, align = 'left' }: { label: string; value: string; color: string; align?: 'left' | 'right' }) {
+  return (
+    <div style={{ textAlign: align }}>
+      <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em' }}>{label}</div>
+      <div className="mono" style={{ fontSize: 13, fontWeight: 600, color }}>{value}</div>
     </div>
   )
 }

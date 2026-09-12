@@ -60,6 +60,11 @@ export {
 } from "./run/board-first.js";
 
 export {
+  runConfigFromBoard,
+  type RunConfigFromBoardInput
+} from "./run/board-run-config.js";
+
+export {
   createInitialBoard,
   type Board,
   type BoardCell,
@@ -148,7 +153,7 @@ export {
   projectControlPanelControls
 } from "./bridge/panel/project.js";
 
-export { projectObserveDescriptors } from "./bridge/panel/descriptors.js";
+export { projectObserveDescriptors, descriptorId } from "./bridge/panel/descriptors.js";
 
 export type {
   ControlsView,

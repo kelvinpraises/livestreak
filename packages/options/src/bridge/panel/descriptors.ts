@@ -1,8 +1,8 @@
 // Canonical FunctionDescriptor projection for the Remote Bridge Console auto-UI (Objective 4, P1).
 //
-// Track D: emit a configurator root (`options:config`) plus entity groups (market → vault → nft →
-// lvst) with callable actions as children. Every node carries id/parentId/package/visible via
-// withDescriptorIdentity. Pure read/projection — no writer/correctness changes.
+// Flat model: one "Options" root group, with Configure + Close + every action as direct children.
+// Actions reveal via `visible: configured && !disabled` (board-first). Every node carries
+// id/parentId/package/visible via withDescriptorIdentity. Pure read/projection.
 
 import type { CapabilityScope, FunctionDescriptor, JsonSchema } from "@livestreak/schema";
 import { bridgeActionScope, withDescriptorIdentity } from "@livestreak/schema";
@@ -209,6 +209,14 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
       help: "All lanes for the NFT (replaces existing)."
     },
     { name: "addDeposit", value: amountStr("Additional deposit."), help: "Extra USDC base units to add." }
+  ]),
+  addFunds: obj([
+    { name: "tokenId", value: str("Position NFT id."), help: "NFT whose shared balance to top up." },
+    {
+      name: "deposit",
+      value: amountStr("Deposit to add."),
+      help: "USDC base units added to the shared balance; existing lanes are preserved/revived."
+    }
   ]),
   stopFunding: obj([
     { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },

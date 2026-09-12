@@ -34,10 +34,10 @@ export const projectVaultPools = (
       : projectVaultLivePools({
           boards: snapshot.boards,
           pendingBoundaries: snapshot.pendingBoundaries,
-          // Cap at the creator-seed runway so the homepage pool stops at what was funded instead of
-          // extrapolating forever (the app passes NFT-lane boundaries on top; the host only has the
-          // seed, which is the dominant funder for an unbet vault).
-          funderBoundaries: snapshot.seedBoundaries,
+          // Cap at the canonical contract boundary schedule (every active funder — seed + all NFTs),
+          // so the anonymous homepage pool stops at exactly what was funded for any vault, not just an
+          // unbet one. No per-user reconstruction needed: Vault.getBoundaries already has them all.
+          funderBoundaries: snapshot.boundaries,
           atMs,
           resolvedAtMs: vault.timing.resolvedAtMs
         });

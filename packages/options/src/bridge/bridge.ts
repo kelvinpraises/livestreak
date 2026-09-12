@@ -3,12 +3,10 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
 import type { MintResult, TxId } from "../chains/types.js";
-import { projectOptionsControls, projectOptionsPanel } from "./panel/project.js";
+import { projectOptionsControls } from "./panel/project.js";
 import type { OptionsControlsView } from "./panel/types.js";
 import { authorizeBridgeCaller } from "./scope.js";
 import type {
-  BridgeCaller,
-  CallActionEnvelope,
   CreateOptionsBridgeInput,
   OptionsBridge
 } from "./types.js";
@@ -18,7 +16,6 @@ import {
   bridgeBoardSubscribeScope,
   bridgeControlsReadScope
 } from "./types.js";
-import type { OptionsBoard } from "../runtime/board.js";
 
 export type {
   BridgeCaller,
@@ -116,12 +113,26 @@ const dispatchWriterAction = async (
       return writer.mintWithSalt(readArgs(args));
     case "fund":
       return runtime.fundStream(readArgs(args));
+    case "streamLane":
+      return runtime.streamLane(readArgs(args));
+    case "pauseLane":
+      return runtime.pauseLane(readArgs(args));
+    case "resumeLane":
+      return runtime.resumeLane(readArgs(args));
     case "setLanes":
       return writer.setLanes(readArgs(args));
+    case "addFunds":
+      if (writer.addFunds === undefined) {
+        throw new LiveStreakConfigError({
+          message: "Options bridge action addFunds is not supported on this chain",
+          metadata: { details: action }
+        });
+      }
+      return writer.addFunds(readArgs(args));
     case "stopFunding":
       return writer.stopFunding(readArgs(args));
     case "stopAllFunding":
-      return writer.stopAllFunding(readArgs(args));
+      return runtime.sweepNft(readArgs(args));
     case "withdraw":
       return writer.withdraw(readArgs(args));
     case "withdrawMany":

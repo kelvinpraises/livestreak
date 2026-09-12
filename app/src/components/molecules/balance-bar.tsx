@@ -109,10 +109,9 @@ export function BalanceBar({ flow, wallet, onStake, onUnstake, onClaim, claiming
         {expanded && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0, transition: { type: 'spring', stiffness: 380, damping: 35, opacity: { duration: 0.1 } } }} transition={{ type: 'spring', stiffness: 300, damping: 30 }} style={{ overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginBottom: 14 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14 }}>
                 <Stat label="Available" value={formatLvst(unstaked)} accent="#00ff87" />
                 <Stat label="Staked" value={formatLvst(flow.staked)} accent="#00c8ff" />
-                <Stat label="APY" value={flow.apy + '%'} accent="#ffd553" />
               </div>
               {actionError && (
                 <p style={{ fontSize: 11, color: '#ff2d78', marginBottom: 10 }}>{actionError}</p>
@@ -226,8 +225,6 @@ export function BalanceBar({ flow, wallet, onStake, onUnstake, onClaim, claiming
           )}
         </div>
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)' }}>EARNED ALL-TIME</span>
-        <span className="mono" style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginLeft: 6 }}>{formatUSDCFull(flow.totalEarned)}</span>
       </div>
     </div>
   )

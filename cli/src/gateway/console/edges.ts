@@ -34,7 +34,8 @@ export const createConsoleEdges = (input: {
     }),
     createObserveConsoleEdge({
       packageInit: inits.observe,
-      runId: input.runId
+      runId: input.runId,
+      hostBaseUrl: input.settings.host.url
     }),
     createStewardConsoleEdge({ packageInit: inits.steward })
   ];

@@ -1,11 +1,12 @@
 import { useState, useEffect, useMemo, type CSSProperties } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Clock, Fire, CheckCircle, XCircle, CaretDown, TrendUp, Users } from '@phosphor-icons/react'
-import { StreamSlider, mapAccrualPreview } from '#/components/molecules/stream-slider'
-import { formatUSDC, formatCountdown, formatMultiplier, formatMinute, calcPoolPct } from '#/utils/format'
+import { Fire, CheckCircle, XCircle, CaretDown, TrendUp, Users, ArrowRight } from '@phosphor-icons/react'
+import { StreamSlider } from '#/components/molecules/stream-slider'
+import { AccrualPreview, mapAccrualPreview } from '#/components/molecules/accrual-preview'
+import { streamMode, streamLabel } from '#/utils/stream-action'
+import { formatUSDC, formatRate, formatCountdown, formatMultiplier, formatMinute, formatShares, calcPoolPct } from '#/utils/format'
 import type { VaultView } from '#/types/demo'
 import type { OptionsVault, OptionsFunctionView } from '@livestreak/options'
-import { DEFAULT_FUND_DURATION_MIN, fundCommitmentUsd } from '#/utils/options'
 import { isOptionsModeEnabled } from '#/utils/env'
 import { useOptionsContext } from '#/providers/options-provider'
 import { OptionsActionButton } from '#/components/atoms/options-action-button'
@@ -13,13 +14,16 @@ import { useVaultFundingControls } from '#/hooks/use-vault-funding-controls'
 import { useVaultView } from '#/hooks/use-vault-views'
 import { useAccrualPreview } from '#/hooks/use-accrual-preview'
 import { useVaultCardUi } from '#/hooks/use-board-ui-state'
+import { useStreamDraft } from '#/hooks/use-stream-draft'
 
-export function VaultCard({ vault, index = 0, onStream }: {
+export function VaultCard({ vault, index = 0, onStream, onGoToMint }: {
   vault: OptionsVault
   index?: number
-  /** Single funding flow commit (D): same handler as the floating-card path — mint-if-needed → fund
-   *  in live mode, mock notification in demo. */
+  /** Funding commit (live: fund an EXISTING position NFT; demo: mock notification). The single flow no
+   *  longer mints inline — a user without a position is routed to the Streams tab via onGoToMint. */
   onStream?: (vaultId: string, side: 'yes' | 'no', rate: number, durationMinutes?: number) => void
+  /** Jump to the Streams tab to mint a position NFT (shown when the user has none for this market). */
+  onGoToMint?: () => void
 }) {
   const view = useVaultView(vault.vaultId)
   const hotUntil = vault.steward.hotUntilMs ?? null
@@ -33,29 +37,22 @@ export function VaultCard({ vault, index = 0, onStream }: {
   const side = view.userPosition?.side
   // A1/S5: expanded + selected side + amount persist across the board's periodic refresh so a
   // mid-fund user is never collapsed back to step 0.
-  const {
-    expanded, setExpanded,
-    side: streamSide, setSide: setStreamSide,
-    rate: streamRate, setRate: setStreamRate,
-  } = useVaultCardUi(vault.vaultId)
-  const [fundDurationMin] = useState(DEFAULT_FUND_DURATION_MIN)
+  const { expanded, setExpanded } = useVaultCardUi(vault.vaultId)
+  const draft = useStreamDraft(vault.vaultId)
+  const streamSide = draft.side
+  const streamRate = draft.rate
   const [fundBusy, setFundBusy] = useState(false)
   const [fundError, setFundError] = useState<string | null>(null)
-  // D: the market NFT may not exist yet — the single flow mints it on first fund, so a connected user
-  // can still initiate. When not using options (demo) the commit goes through the mock handler.
   const needsMint = useOptions && !funding.hasNft
-  const canCommit = !!streamSide
-    && streamRate >= 0.01
-    && !fundBusy
-    && (!useOptions || needsMint || (
-      (streamSide === 'yes' ? funding.fundYes : funding.fundNo) !== undefined
-      && !(streamSide === 'yes' ? funding.fundYes : funding.fundNo)!.disabled
-    ))
-  // Clearing the rate to 0 on a side you're already streaming means "stop". A 0 rate can't be funded,
-  // so rather than greying out with no way forward, the button flips to a STOP action: it halts the
-  // stream (your unstreamed balance stays in the NFT, withdrawable later) instead of trapping the user.
-  const wantsStop = funding.activeFundedSide !== undefined && streamRate < 0.01 && !fundBusy
-  const stopReady = funding.stopFn !== undefined && !funding.stopFn.disabled
+  const streamable = vault.status === 'open' || vault.status === 'hot'
+  const actionInput = { needsMint, side: streamSide, rate: streamRate, activeFundedSide: funding.activeFundedSide }
+  const mode = streamMode(actionInput)
+  const canStream = streamRate >= 0.01 && !fundBusy && (!useOptions || (funding.hasNft && streamable))
+  const stopReady = funding.stopFn !== undefined && !funding.stopFn.disabled && !fundBusy
+  const canAct = mode === 'stop' ? stopReady : (mode === 'stream' || mode === 'switch') && canStream
+  const sharePrice = useOptions
+    ? (streamSide === 'yes' ? view.sharePriceYes : streamSide === 'no' ? view.sharePriceNo : undefined)
+    : undefined
   const { preview, loading: previewLoading } = useAccrualPreview(
     vault.vaultId,
     expanded ? streamSide : null,
@@ -63,16 +60,14 @@ export function VaultCard({ vault, index = 0, onStream }: {
   )
   const accrualPreview = useMemo(() => mapAccrualPreview(preview), [preview])
   const [hotMs, setHotMs] = useState(hotUntil ? Math.max(0, hotUntil - Date.now()) : 0)
-  const [expiryMs, setExpiryMs] = useState(Math.max(0, vault.timing.expiresAtMs - Date.now()))
 
+  // Only the HOT window has a real on-chain deadline (steward hotUntil); tick it down while hot. There is
+  // no vault expiry to count (see StatusBadge), so no expiry timer here.
   useEffect(() => {
-    if (vault.status !== 'hot' && vault.status !== 'open') return
-    const tick = setInterval(() => {
-      if (hotUntil) setHotMs(Math.max(0, hotUntil - Date.now()))
-      setExpiryMs(Math.max(0, vault.timing.expiresAtMs - Date.now()))
-    }, 500)
+    if (!hotUntil) return
+    const tick = setInterval(() => setHotMs(Math.max(0, hotUntil - Date.now())), 500)
     return () => clearInterval(tick)
-  }, [hotUntil, vault.timing.expiresAtMs, vault.status])
+  }, [hotUntil])
 
   const poolPct = calcPoolPct(noTotal, yesTotal)
   const isHot = vault.status === 'hot'
@@ -132,12 +127,12 @@ export function VaultCard({ vault, index = 0, onStream }: {
                   background: view.userPosition!.side === 'yes' ? 'rgba(0,255,135,0.1)' : 'rgba(255,45,120,0.1)',
                   padding: '1px 5px', borderRadius: 3,
                 }}>
-                  {view.userPosition!.side.toUpperCase()} &middot; {formatUSDC(view.userPosition!.streamed)}
+                  {view.userPosition!.side.toUpperCase()} &middot; {formatRate(view.userPosition!.rate)}
                 </span>
               )}
             </div>
           </div>
-          <StatusBadge vault={vault} view={view} hotMs={hotMs} expiryMs={expiryMs} />
+          <StatusBadge vault={vault} view={view} hotMs={hotMs} />
         </div>
 
         {/* Row 2: YES / NO buttons */}
@@ -235,37 +230,19 @@ export function VaultCard({ vault, index = 0, onStream }: {
               {canBet && (
                 <div data-testid={`fund-amount-${vault.vaultId}`} style={{ marginBottom: 14 }}>
                   <StreamSlider
-                    vaultId={vault.vaultId}
-                    initialSide={funding.activeFundedSide ?? streamSide ?? view.userPosition?.side ?? null}
-                    initialRate={streamRate > 0 ? streamRate : (view.userPosition ? 0.8 : 0)}
+                    side={streamSide}
+                    rate={streamRate}
+                    onChange={draft.change}
+                    disabled={!streamable}
+                    pausable={!!funding.activeFundedSide}
                     compact
-                    fundYes={funding.fundYes}
-                    fundNo={funding.fundNo}
-                    stopFn={funding.stopFn}
-                    activeFundedSide={funding.activeFundedSide}
-                    onStopFunding={funding.activeFundedSide
-                      ? () => funding.stopFunding(vault.vaultId, funding.activeFundedSide!)
-                      : undefined}
-                    sharePriceYes={view.sharePriceYes}
-                    sharePriceNo={view.sharePriceNo}
-                    accrualPreview={accrualPreview}
-                    previewLoading={previewLoading}
-                    showPreview={funding.useOptions}
-                    onStream={(nextSide, nextRate) => { setStreamSide(nextSide); setStreamRate(nextRate) }}
                   />
-                  {/* S3/A2: keyboard- and test-accessible alternative to the drag slider. Pick a side
-                      and type a rate — no sub-pixel dragging, no synthetic OS mouse events needed. */}
-                  <div
-                    role="group"
-                    aria-label="Choose side and stream rate"
-                    style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}
-                  >
+                  <div role="group" aria-label="Choose side and stream rate" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
                     <button
                       type="button"
                       data-testid={`fund-side-no-${vault.vaultId}`}
                       aria-pressed={streamSide === 'no'}
-                      disabled={funding.useOptions && funding.fundNo?.disabled}
-                      onClick={() => setStreamSide('no')}
+                      onClick={() => draft.setSide('no')}
                       style={sideToggleStyle(streamSide === 'no', '#ff2d78')}
                     >
                       NO
@@ -274,8 +251,7 @@ export function VaultCard({ vault, index = 0, onStream }: {
                       type="button"
                       data-testid={`fund-side-yes-${vault.vaultId}`}
                       aria-pressed={streamSide === 'yes'}
-                      disabled={funding.useOptions && funding.fundYes?.disabled}
-                      onClick={() => setStreamSide('yes')}
+                      onClick={() => draft.setSide('yes')}
                       style={sideToggleStyle(streamSide === 'yes', '#00ff87')}
                     >
                       YES
@@ -292,7 +268,7 @@ export function VaultCard({ vault, index = 0, onStream }: {
                       placeholder="0.00"
                       onChange={e => {
                         const parsed = parseFloat(e.target.value)
-                        setStreamRate(Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, 10)) : 0)
+                        draft.setRate(Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, 10)) : 0)
                       }}
                       style={{
                         width: 84, padding: '7px 8px', borderRadius: 7,
@@ -303,50 +279,59 @@ export function VaultCard({ vault, index = 0, onStream }: {
                     />
                     <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>/min</span>
                   </div>
-                  {streamSide && streamRate > 0.01 && (
-                    <p className="mono" style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', margin: '8px 0 0' }}>
-                      Funding ${fundCommitmentUsd(streamRate, fundDurationMin).toFixed(2)} over {fundDurationMin} min
-                    </p>
+                  {useOptions && (
+                    <AccrualPreview side={streamSide} rate={streamRate} sharePrice={sharePrice} preview={accrualPreview} loading={previewLoading} />
                   )}
-                  <button
-                    data-testid={`fund-submit-${vault.vaultId}`}
-                    disabled={wantsStop ? !stopReady : !canCommit}
-                    onClick={async () => {
-                      setFundError(null)
-                      setFundBusy(true)
-                      try {
-                        if (wantsStop && funding.activeFundedSide) {
-                          await funding.stopFunding(vault.vaultId, funding.activeFundedSide)
-                        } else if (streamSide && onStream) {
-                          await onStream(vault.vaultId, streamSide, streamRate, fundDurationMin)
+                  {!needsMint && streamSide && streamRate > 0.01 && (
+                    <div style={{ margin: '8px 0 0' }}>
+                      <span className="mono" style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)' }}>
+                        Draws from your shared balance — top up in Positions
+                      </span>
+                    </div>
+                  )}
+                  {mode === 'mint' ? (
+                    <button
+                      data-testid={`fund-mint-cta-${vault.vaultId}`}
+                      onClick={onGoToMint}
+                      style={mintCtaStyle}
+                    >
+                      {streamLabel(mode, actionInput)}
+                      <ArrowRight size={12} weight="bold" />
+                    </button>
+                  ) : (
+                    <button
+                      data-testid={`fund-submit-${vault.vaultId}`}
+                      disabled={!canAct}
+                      onClick={async () => {
+                        setFundError(null)
+                        setFundBusy(true)
+                        try {
+                          if (mode === 'stop' && funding.activeFundedSide) {
+                            await funding.stopFunding(vault.vaultId, funding.activeFundedSide)
+                          } else if (streamSide && onStream) {
+                            await onStream(vault.vaultId, streamSide, streamRate)
+                          }
+                          draft.clear()
+                        } catch (err) {
+                          setFundError(err instanceof Error ? err.message : mode === 'stop' ? 'Stop failed' : 'Fund failed')
+                        } finally {
+                          setFundBusy(false)
                         }
-                      } catch (err) {
-                        setFundError(err instanceof Error ? err.message : wantsStop ? 'Stop failed' : 'Fund failed')
-                      } finally {
-                        setFundBusy(false)
-                      }
-                    }}
-                    style={{
-                      width: '100%', marginTop: 10, padding: '9px 0',
-                      fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-display)',
-                      letterSpacing: '0.04em', borderRadius: 7, border: 'none',
-                      cursor: (wantsStop ? stopReady : canCommit) ? 'pointer' : 'default',
-                      background: wantsStop ? '#ff7a00' : streamSide === 'yes' ? '#00ff87' : streamSide === 'no' ? '#ff2d78' : 'rgba(255,255,255,0.06)',
-                      color: wantsStop || streamSide ? '#000' : 'rgba(255,255,255,0.25)',
-                      opacity: (wantsStop ? stopReady : canCommit) ? 1 : 0.45,
-                      transition: 'background 0.2s, color 0.2s, opacity 0.2s',
-                    }}
-                  >
-                    {fundBusy
-                      ? '...'
-                      : wantsStop
-                        ? `STOP ${funding.activeFundedSide!.toUpperCase()} STREAM`
-                        : !streamSide
-                          ? 'CHOOSE A SIDE'
-                          : needsMint
-                            ? `BACK VAULT → ${streamSide.toUpperCase()}`
-                            : `STREAM → ${streamSide.toUpperCase()}`}
-                  </button>
+                      }}
+                      style={{
+                        width: '100%', marginTop: 10, padding: '9px 0',
+                        fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-display)',
+                        letterSpacing: '0.04em', borderRadius: 7, border: 'none',
+                        cursor: canAct ? 'pointer' : 'default',
+                        background: mode === 'stop' ? '#ff7a00' : streamSide === 'yes' ? '#00ff87' : streamSide === 'no' ? '#ff2d78' : 'rgba(255,255,255,0.06)',
+                        color: mode === 'stop' || streamSide ? '#000' : 'rgba(255,255,255,0.25)',
+                        opacity: canAct ? 1 : 0.45,
+                        transition: 'background 0.2s, color 0.2s, opacity 0.2s',
+                      }}
+                    >
+                      {fundBusy ? '...' : streamLabel(mode, actionInput)}
+                    </button>
+                  )}
                   {fundError && (
                     <p style={{ fontSize: 9, color: '#ff7a00', margin: '6px 0 0' }}>{fundError}</p>
                   )}
@@ -361,7 +346,7 @@ export function VaultCard({ vault, index = 0, onStream }: {
   )
 }
 
-function StatusBadge({ vault, view, hotMs, expiryMs }: { vault: OptionsVault; view: VaultView; hotMs: number; expiryMs: number }) {
+function StatusBadge({ vault, view, hotMs }: { vault: OptionsVault; view: VaultView; hotMs: number }) {
   if (vault.status === 'hot') return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       <div className="broadcast-corners broadcast-corners-pink" style={{
@@ -390,20 +375,16 @@ function StatusBadge({ vault, view, hotMs, expiryMs }: { vault: OptionsVault; vi
     )
     return <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)' }}>RESOLVED</span>
   }
+  // No expiry countdown: the vault contract stores no deadline (createVault takes none, VaultData has
+  // only resolvedAt), so any "expires in" timer was fabricated from a 0 timestamp. A vault stays OPEN
+  // until the steward resolves it.
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 3,
-        background: 'rgba(0,255,135,0.06)', border: '1px solid rgba(0,255,135,0.18)',
-        borderRadius: 5, padding: '2px 6px',
-      }}>
-        <div className="live-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#00ff87' }} />
-        <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: '#00ff87' }}>OPEN</span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-        <Clock size={9} color="rgba(255,255,255,0.25)" />
-        <span className="mono" style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>{formatCountdown(expiryMs)}</span>
-      </div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 3,
+      background: 'rgba(0,255,135,0.06)', border: '1px solid rgba(0,255,135,0.18)',
+      borderRadius: 5, padding: '2px 6px',
+    }}>
+      <div className="live-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: '#00ff87' }} />
+      <span className="mono" style={{ fontSize: 10, fontWeight: 600, color: '#00ff87' }}>OPEN</span>
     </div>
   )
 }
@@ -495,8 +476,8 @@ function ExpandedDetails({ vault, poolPct, view }: { vault: OptionsVault; poolPc
           <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)', marginBottom: 6, letterSpacing: '0.06em' }}>YOUR POSITION</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
             <Mini label="Side" value={view.userPosition.side.toUpperCase()} accent={view.userPosition.side === 'yes' ? '#00ff87' : '#ff2d78'} />
-            <Mini label="Streamed" value={`$${view.userPosition.streamed.toFixed(2)}`} />
-            <Mini label="Shares" value={view.userPosition.shares.toString()} />
+            <Mini label="Rate" value={formatRate(view.userPosition.rate)} />
+            <Mini label="Shares" value={formatShares(view.userPosition.shares)} />
           </div>
         </div>
       )}
@@ -507,11 +488,24 @@ function ExpandedDetails({ vault, poolPct, view }: { vault: OptionsVault; poolPc
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <TrendUp size={10} color="rgba(255,255,255,0.2)" />
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>{new Date(vault.timing.createdAtMs).toLocaleTimeString()}</span>
+          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.2)' }}>{vault.timing.createdAtMs > 0 ? new Date(vault.timing.createdAtMs).toLocaleTimeString() : '—'}</span>
         </div>
       </div>
     </div>
   )
+}
+
+// "Tush" redirect CTA shown when the user has no position NFT: an inviting outlined gradient that points
+// to the Streams tab to mint, distinct from the solid fund button so it doesn't read as "commit now".
+const mintCtaStyle: CSSProperties = {
+  width: '100%', marginTop: 10, padding: '9px 0',
+  fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-display)', letterSpacing: '0.03em',
+  borderRadius: 7, cursor: 'pointer',
+  border: '1px solid rgba(0,200,255,0.35)',
+  background: 'linear-gradient(135deg, rgba(0,200,255,0.14), rgba(0,255,135,0.08))',
+  color: '#00c8ff',
+  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+  transition: 'background 0.2s, border-color 0.2s',
 }
 
 function sideToggleStyle(active: boolean, accent: string): CSSProperties {

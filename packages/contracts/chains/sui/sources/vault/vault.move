@@ -318,6 +318,43 @@ public fun pending_boundaries<T>(registry: &VaultRegistry<T>, vault_id: &vector<
     len - head
 }
 
+/// The unsettled funder depletion schedule for (vault_id, side): each still-active stream's run-dry
+/// max_end and current rate. Same validity gate advance/preview use (active, not depleted, matching the
+/// funder's current max_end), so the rates sum to side_rate — letting an off-chain live-pool projection
+/// cap exactly at what was funded. Stale entries (a superseded max_end, an already-closed stream) skipped.
+public fun get_boundaries<T>(
+    registry: &VaultRegistry<T>,
+    vault_id: &vector<u8>,
+    side: u8,
+): (vector<u64>, vector<u256>) {
+    side::assert_valid(side);
+    let mut max_ends = vector::empty<u64>();
+    let mut rates = vector::empty<u256>();
+    let board_key = BoardKey { vault_id: *vault_id, side };
+    if (!table::contains(&registry.boundaries, board_key)) {
+        return (max_ends, rates)
+    };
+    let len = vector::length(table::borrow(&registry.boundaries, board_key));
+    let mut head = if (table::contains(&registry.boundary_heads, board_key)) {
+        *table::borrow(&registry.boundary_heads, board_key)
+    } else {
+        0
+    };
+    while (head < len) {
+        let boundary = *vector::borrow(table::borrow(&registry.boundaries, board_key), head);
+        let pos_key = PositionKey { vault_id: *vault_id, side, account: boundary.account };
+        if (table::contains(&registry.positions, pos_key)) {
+            let p = table::borrow(&registry.positions, pos_key);
+            if (p.rate > 0 && !p.depleted && p.max_end == boundary.max_end) {
+                vector::push_back(&mut max_ends, boundary.max_end);
+                vector::push_back(&mut rates, p.rate);
+            };
+        };
+        head = head + 1;
+    };
+    (max_ends, rates)
+}
+
 public fun status_resolved(): u8 {
     STATUS_RESOLVED
 }
@@ -600,7 +637,11 @@ public(package) fun on_fund<T>(
         );
     };
     let p = table::borrow_mut(&mut registry.positions, key);
-    assert!(p.rate == 0 && !p.depleted, E_ALREADY_FUNDING);
+    // A drained side is re-fundable: `rate == 0` still blocks double-funding an ACTIVE side, while
+    // clearing `depleted` re-opens a side whose deposit ran dry. Banked shares + loss basis carry over;
+    // the clear is required so the `rate>0 && !depleted` checks elsewhere treat the re-opened lane live.
+    assert!(p.rate == 0, E_ALREADY_FUNDING);
+    p.depleted = false;
 
     let g = table::borrow(&registry.boards, board_key).g;
     p.rate = rate;

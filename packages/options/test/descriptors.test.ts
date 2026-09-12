@@ -27,42 +27,33 @@ describe("projectOptionsDescriptors — canonical FunctionDescriptors", () => {
     expect(JSON.parse(JSON.stringify(descriptors))).toEqual(descriptors);
   });
 
-  it("emits the options:config configure root with tree identity fields", async () => {
+  it("emits the configure root with tree identity fields", async () => {
     const descriptors = await buildDescriptors();
     const configure = descriptors.find((descriptor) => descriptor.name === "configure");
 
     expect(configure).toMatchObject({
       id: "options.config.configure",
       package: "options",
-      scope: "options:config",
+      parentId: "options.root",
+      scope: "bridge:action:configure",
       nodeKind: "action",
       visible: true
     });
     expect(configure?.inputSchema?.properties?.map((entry) => entry.name)).toEqual(["marketId"]);
   });
 
-  it("emits entity groups (market → vault → nft → lvst) with parentId and visible:false", async () => {
+  it("emits a single root group that parents configure + every action (flat console model)", async () => {
     const descriptors = await buildDescriptors();
     const groups = descriptors.filter((descriptor) => descriptor.nodeKind === "group");
 
-    expect(groups.length).toBeGreaterThan(0);
-    const lvst = groups.find((group) => group.id === "options.lvst");
-    const market = groups.find((group) => group.id === "options.market.market_01");
-    const vault = groups.find((group) => group.id?.startsWith("options.vault."));
-    const nft = groups.find((group) => group.id?.startsWith("options.nft."));
+    // Flat model: ONE "Options" container; actions hang directly off it (no per-entity sub-groups).
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ id: "options.root", package: "options", visible: true });
 
-    expect(lvst?.parentId).toBe("options.config.configure");
-    expect(market?.parentId).toBe("options.config.configure");
-    if (vault !== undefined) {
-      expect(vault.parentId).toBe(market?.id);
-    }
-    if (nft !== undefined) {
-      expect(nft.parentId).toBe(market?.id);
-    }
-
-    for (const group of groups) {
-      expect(group.package).toBe("options");
-      expect(group.visible).toBe(false);
+    const actions = descriptors.filter((descriptor) => descriptor.nodeKind === "action");
+    expect(actions.length).toBeGreaterThan(0);
+    for (const action of actions) {
+      expect(action.parentId).toBe("options.root");
     }
   });
 
@@ -74,26 +65,29 @@ describe("projectOptionsDescriptors — canonical FunctionDescriptors", () => {
     for (const action of actions) {
       expect(action.id.length).toBeGreaterThan(0);
       expect(action.package).toBe("options");
-      expect(action.parentId).toBeDefined();
-      expect(action.visible).toBe(false);
+      expect(action.parentId).toBe("options.root");
+      // Visibility is the board-first reveal (configured && !disabled), not a fixed flag.
+      expect(typeof action.visible).toBe("boolean");
       expect(action.scope.startsWith("bridge:action:")).toBe(true);
     }
   });
 
-  it("emits a real inputSchema (not a type-name string) for every arg-bearing function", async () => {
+  it("emits a real inputSchema for every arg-bearing action (and none for no-arg ones)", async () => {
     const descriptors = await buildDescriptors();
+    const noArg = new Set(["close", "claimDividends"]);
     const actions = descriptors.filter(
-      (descriptor) => descriptor.nodeKind === "action" && descriptor.name !== "configure"
+      (descriptor) =>
+        descriptor.nodeKind === "action" && descriptor.name !== "configure" && !noArg.has(descriptor.name)
     );
 
+    expect(actions.length).toBeGreaterThan(0);
     for (const descriptor of actions) {
-      if (descriptor.name === "claimDividends") {
-        expect(descriptor.inputSchema).toBeUndefined();
-        continue;
-      }
       expect(typeof descriptor.inputSchema).toBe("object");
       expect(descriptor.inputSchema?.type).toBe("object");
       expect(Array.isArray(descriptor.inputSchema?.properties)).toBe(true);
+    }
+    for (const name of noArg) {
+      expect(byName(descriptors, name)?.inputSchema).toBeUndefined();
     }
   });
 

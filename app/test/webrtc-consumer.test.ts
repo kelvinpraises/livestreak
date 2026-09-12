@@ -12,7 +12,10 @@ import {
 import {
   assembleChunksToBlobUrl,
   consumeHostWebRtcFeed,
+  nextWebRtcLatch,
+  resolveWebRtcEnabled,
   shouldUseHostWebRtcFeed,
+  type WebRtcLatch,
 } from '../src/utils/webrtc-consumer'
 import { resolveStreamFeed } from '../src/utils/stream'
 
@@ -56,13 +59,16 @@ const makeRelay = () => {
 }
 
 describe('shouldUseHostWebRtcFeed', () => {
-  it('returns false when a fixture watchUrl is present', () => {
+  it('takes the live WebRTC feed even when a recording watchUrl is present (live precedence)', () => {
+    // The watchUrl is the archived recording; a LIVE stream must still use the realtime WebRTC feed
+    // rather than being pre-empted by the recording while the producer is still broadcasting.
     expect(
       shouldUseHostWebRtcFeed(undefined, {
         isLive: true,
         watchUrl: 'https://example.com/demo.mp4',
       }),
-    ).toBe(false)
+    ).toBe(true)
+    // resolveStreamFeed still exposes the recording URL as the replay/archive media src.
     expect(
       resolveStreamFeed(undefined, {
         isLive: true,
@@ -85,6 +91,61 @@ describe('shouldUseHostWebRtcFeed', () => {
     expect(
       shouldUseHostWebRtcFeed({ status: 'none', scheme: 'ipfs', id: 'x' }, { isLive: false }),
     ).toBe(false)
+  })
+})
+
+describe('webrtc enabled latch', () => {
+  // Mirror StreamLayout: each board poll applies nextWebRtcLatch then reads the derived enabled.
+  const apply = (latch: WebRtcLatch, streamId: string, eligible: boolean, ended: boolean) => {
+    const next = nextWebRtcLatch(latch, streamId, eligible, ended)
+    return { latch: next, enabled: resolveWebRtcEnabled(next, streamId, eligible, ended) }
+  }
+
+  it('enables instantly the moment a stream goes live', () => {
+    const start: WebRtcLatch = { streamId: 's1', enabled: false }
+    // First eligible read is enabled on the SAME render — no extra-render lag waiting for the latch.
+    expect(resolveWebRtcEnabled(start, 's1', true, false)).toBe(true)
+    expect(apply(start, 's1', true, false).enabled).toBe(true)
+  })
+
+  it('stays enabled through a transient eligibility flicker mid-transfer (the bug)', () => {
+    // Repro: go live, then the ~3s poll flickers eligibility false→true repeatedly. enabled must NOT
+    // drop — that is what aborted the in-flight transfer and truncated the MP4 blob.
+    let latch: WebRtcLatch = { streamId: 's1', enabled: false }
+    const feed = [true, false, true, false, false, true] // poll readings while the transfer runs
+    const seen: boolean[] = []
+    for (const eligible of feed) {
+      const step = apply(latch, 's1', eligible, false)
+      latch = step.latch
+      seen.push(step.enabled)
+    }
+    expect(seen).toEqual([true, true, true, true, true, true])
+  })
+
+  it("releases only when the pointer reports 'ended'", () => {
+    let latch = nextWebRtcLatch({ streamId: 's1', enabled: false }, 's1', true, false)
+    expect(resolveWebRtcEnabled(latch, 's1', false, false)).toBe(true) // flicker: held
+    const ended = apply(latch, 's1', false, true)
+    expect(ended.enabled).toBe(false) // ended: released
+    latch = ended.latch
+    expect(latch.enabled).toBe(false)
+    // ended overrides even a still-live + latched read (immediate release, no render lag).
+    expect(resolveWebRtcEnabled({ streamId: 's1', enabled: true }, 's1', true, true)).toBe(false)
+  })
+
+  it('does not leak a previous market’s latched value into a new streamId', () => {
+    const live = nextWebRtcLatch({ streamId: 's1', enabled: false }, 's1', true, false)
+    expect(live).toEqual({ streamId: 's1', enabled: true })
+    // Navigate to s2 while s1 is still latched true but s2 is not eligible: enabled must read false.
+    expect(resolveWebRtcEnabled(live, 's2', false, false)).toBe(false)
+    const reset = nextWebRtcLatch(live, 's2', false, false)
+    expect(reset).toEqual({ streamId: 's2', enabled: false })
+  })
+
+  it('returns the same latch reference when nothing changed (avoids re-render)', () => {
+    const latch: WebRtcLatch = { streamId: 's1', enabled: true }
+    expect(nextWebRtcLatch(latch, 's1', true, false)).toBe(latch)
+    expect(nextWebRtcLatch(latch, 's1', false, false)).toBe(latch) // flicker, still enabled → no churn
   })
 })
 

@@ -39,10 +39,10 @@ export interface OptionsVaultSnapshot {
     readonly yes: bigint;
     readonly no: bigint;
   };
-  /** Creator-seed funding boundaries per side (maxEnd + rate). Feeds the live-pool projection so the
-   *  pool stops growing once the seed's deposit runs dry — it never exceeds what was funded. Absent on
-   *  chains/readers that don't surface it (the projection then falls back to the uncapped path). */
-  readonly seedBoundaries?: {
+  /** Canonical unsettled funder depletion schedule per side (maxEnd + rate), read straight from the
+   *  contract (Vault.getBoundaries). Every active funder — seed and all NFTs — so the live-pool
+   *  projection caps at exactly what was funded, for any viewer (no per-user reconstruction). */
+  readonly boundaries: {
     readonly yes: readonly FunderBoundary[];
     readonly no: readonly FunderBoundary[];
   };

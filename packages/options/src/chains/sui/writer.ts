@@ -17,6 +17,7 @@ import { validateOptionsVaultSide } from "../../model/vault.js";
 import { asTokenId, type TokenId } from "../../model/ids.js";
 import {
   asTxId,
+  type AddFundsInput,
   type AdvanceInput,
   type ApproveNftInput,
   type ClaimLossLvstInput,
@@ -37,7 +38,7 @@ import {
   type WithdrawManyInput
 } from "../types.js";
 import { validateSuiBytes32Id, type OptionsSuiObjectIds } from "./addresses.js";
-import { sideToSuiValue } from "./decode.js";
+import { readU8, readU64, readU256, sideToSuiValue, type InspectReturnValue } from "./decode.js";
 import { validateSuiUserAddress } from "./account.js";
 
 // Sui clock object is always the same system object.
@@ -173,6 +174,56 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     return objectIds;
   };
 
+  const devInspect = async (tx: Transaction): Promise<readonly InspectReturnValue[][]> => {
+    const { client } = await getSui();
+    const result = await client.devInspectTransactionBlock({
+      sender: "0x0000000000000000000000000000000000000000000000000000000000000000",
+      transactionBlock: tx
+    });
+    return (result.results ?? []).map((r) => (r.returnValues ?? []) as InspectReturnValue[]);
+  };
+
+  // Current lanes from registry bookkeeping (raw rates, incl. dried ones) so addFunds re-sends them via
+  // set_lanes — extending/reviving every stream, or parking the deposit when there are none.
+  const readCurrentLanes = async (
+    tokenId: bigint
+  ): Promise<ReadonlyArray<{ vaultIdBytes: number[]; side: number; rate: bigint }>> => {
+    const countTx = new Transaction();
+    countTx.moveCall({
+      target: target(packageId, MODULES.marketDriver, "lane_count"),
+      arguments: [countTx.object(ids.marketDriverRegistry), countTx.pure.u256(tokenId)]
+    });
+    const countVal = (await devInspect(countTx))[0]?.[0];
+    const count = countVal !== undefined ? Number(readU64(countVal)) : 0;
+
+    const lanes: { vaultIdBytes: number[]; side: number; rate: bigint }[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const vTx = new Transaction();
+      vTx.moveCall({
+        target: target(packageId, MODULES.marketDriver, "lane_vault_at"),
+        arguments: [vTx.object(ids.marketDriverRegistry), vTx.pure.u256(tokenId), vTx.pure.u64(i)]
+      });
+      const vVal = (await devInspect(vTx))[0]?.[0];
+      if (vVal === undefined) continue;
+      const vaultIdBytes = bcs.vector(bcs.u8()).parse(Uint8Array.from(vVal[0])) as number[];
+
+      const lTx = new Transaction();
+      lTx.moveCall({
+        target: target(packageId, MODULES.marketDriver, "lane_at"),
+        arguments: [
+          lTx.object(ids.marketDriverRegistry),
+          lTx.pure.u256(tokenId),
+          lTx.pure(bcs.vector(bcs.u8()).serialize(vaultIdBytes).toBytes())
+        ]
+      });
+      const lVals = (await devInspect(lTx))[0] ?? [];
+      const side = lVals[0] !== undefined ? readU8(lVals[0]) : 0;
+      const rate = lVals[1] !== undefined ? readU256(lVals[1]) : 0n;
+      lanes.push({ vaultIdBytes, side, rate });
+    }
+    return lanes;
+  };
+
   return {
     mint: async (input: MintNftInput): Promise<MintResult> => {
       const marketBytes = vaultIdByteArray(input.marketId, "marketId");
@@ -306,6 +357,45 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.pure(bcs.vector(bcs.u8()).serialize(desiredSides).toBytes()),
           tx.pure(bcs.vector(bcs.u256()).serialize(desiredRates).toBytes()),
           tx.pure.u128(addDeposit),
+          paymentArg,
+          tx.object(SUI_CLOCK_OBJECT_ID)
+        ]
+      });
+      return asTxId(await send(tx));
+    },
+
+    addFunds: async (input: AddFundsInput) => {
+      const deposit = requirePositiveBigInt(input.deposit, "deposit");
+      const nftObjectId = await findNftObjectId(input.tokenId);
+      const lanes = await readCurrentLanes(input.tokenId);
+      const usdcCoins = await findCoinObject(coinType, deposit);
+      const coinOptionInner = `0x2::coin::Coin<${coinType}>`;
+
+      const tx = new Transaction();
+      const primaryCoin = tx.object(usdcCoins[0]!);
+      if (usdcCoins.length > 1) {
+        tx.mergeCoins(primaryCoin, usdcCoins.slice(1).map((id) => tx.object(id)));
+      }
+      const [payment] = tx.splitCoins(primaryCoin, [tx.pure.u128(deposit)]);
+      const paymentArg = tx.moveCall({
+        target: "0x1::option::some",
+        typeArguments: [coinOptionInner],
+        arguments: [payment!]
+      });
+      tx.moveCall({
+        target: target(packageId, MODULES.marketDriver, "set_lanes"),
+        typeArguments: [coinType],
+        arguments: [
+          tx.object(ids.marketDriverRegistry),
+          tx.object(nftObjectId),
+          tx.object(ids.vaultDriverRegistry),
+          tx.object(ids.vaultRegistry),
+          tx.object(ids.dripsRegistry),
+          tx.object(ids.streamsRegistry),
+          tx.pure(bcs.vector(bcs.vector(bcs.u8())).serialize(lanes.map((l) => l.vaultIdBytes)).toBytes()),
+          tx.pure(bcs.vector(bcs.u8()).serialize(lanes.map((l) => l.side)).toBytes()),
+          tx.pure(bcs.vector(bcs.u256()).serialize(lanes.map((l) => l.rate)).toBytes()),
+          tx.pure.u128(deposit),
           paymentArg,
           tx.object(SUI_CLOCK_OBJECT_ID)
         ]

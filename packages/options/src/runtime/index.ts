@@ -3,6 +3,7 @@
 export {
   type OptionsRuntimeConfig,
   type OptionsRuntimeInput,
+  type PausedLanesPort,
   validateOptionsRuntimeConfig
 } from "./config.js";
 export {
@@ -17,7 +18,13 @@ export {
   type OptionsRuntimeState,
   type OptionsRuntimeStore
 } from "./store.js";
-export { createOptionsRuntime, type OptionsRuntime } from "./runtime.js";
+export {
+  createOptionsRuntime,
+  type OptionsRuntime,
+  type PauseLaneInput,
+  type ResumeLaneInput,
+  type StreamLaneInput
+} from "./runtime.js";
 export { assembleBoard, type OptionsBoard } from "./board.js";
 export {
   createBoardSubscriptionRegistry,

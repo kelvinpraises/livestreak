@@ -27,7 +27,7 @@ export const copyMarketSnapshot = (
 
 // Deep-copy a vault snapshot for the immutable store. structuredClone copies EVERY field (bigints
 // included) so the snapshot can't silently lose one the way the old hand-written spread did — it
-// dropped `seedBoundaries` (and `winningSide`/`pot`/`collected`), so the store served the projection
+// dropped `boundaries` (and `winningSide`/`pot`/`collected`), so the store served the projection
 // a snapshot it couldn't cap the live pool from. One clone designs out the whole add-a-field-then-
 // forget-to-copy class of bug.
 export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultSnapshot =>

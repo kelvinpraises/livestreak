@@ -1709,7 +1709,10 @@ export const marketDriverAbi = [
   },
   {
     type: 'function',
-    inputs: [{ name: 'tokenId', internalType: 'uint256', type: 'uint256' }],
+    inputs: [
+      { name: 'tokenId', internalType: 'uint256', type: 'uint256' },
+      { name: 'to', internalType: 'address', type: 'address' },
+    ],
     name: 'stopAll',
     outputs: [],
     stateMutability: 'nonpayable',
@@ -3186,6 +3189,19 @@ export const vaultAbi = [
       { name: 'sideRate', internalType: 'uint256', type: 'uint256' },
       { name: 'g', internalType: 'uint256', type: 'uint256' },
       { name: 'lastAdvance', internalType: 'uint32', type: 'uint32' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    inputs: [
+      { name: 'vaultId', internalType: 'bytes32', type: 'bytes32' },
+      { name: 'side', internalType: 'enum Side', type: 'uint8' },
+    ],
+    name: 'getBoundaries',
+    outputs: [
+      { name: 'maxEnds', internalType: 'uint32[]', type: 'uint32[]' },
+      { name: 'rates', internalType: 'uint256[]', type: 'uint256[]' },
     ],
     stateMutability: 'view',
   },

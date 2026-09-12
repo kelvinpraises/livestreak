@@ -7,7 +7,8 @@ import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core"
 import { sideFromSolidityValue } from "./encode.js";
 import type { OptionsStreamState } from "../../model/stream.js";
 
-import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../model/ids.js";
+import { asMarketId, asUserAddress, asVaultId } from "../../model/ids.js";
+import { WAD } from "../../model/math/curve.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { OptionsLane } from "../../model/lane.js";
 import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
@@ -205,17 +206,29 @@ export const mapVault = (
 export const mapLane = (
   tokenId: TokenId,
   lane: RawLane,
-  position: RawPosition
-): OptionsLane => ({
-  tokenId,
-  vaultId: asVaultId(bytes32ToHex(lane.vaultId)),
-  side: sideFromSolidityValue(lane.side),
-  rate: lane.rate,
-  gPaid: position.gPaid,
-  sharesAccrued: position.sharesAccrued,
-  maxEndMs: position.maxEnd > 0 ? position.maxEnd * 1000 : undefined,
-  depleted: position.depleted
-});
+  position: RawPosition,
+  nowSec?: number // wall-clock seconds; lets a dry lane read depleted the moment its runway elapses
+): OptionsLane => {
+  // Stored `depleted` only flips on a write; also treat maxEnd ≤ now as dry.
+  const effectiveDepleted =
+    position.depleted ||
+    (nowSec !== undefined && position.rate > 0n && position.maxEnd > 0 && position.maxEnd <= nowSec);
+
+  return {
+    tokenId,
+    vaultId: asVaultId(bytes32ToHex(lane.vaultId)),
+    side: sideFromSolidityValue(lane.side),
+    rate: effectiveDepleted ? 0n : lane.rate, // depleted ⇒ 0 (bookkeeping keeps the stale rate)
+    committedRate: lane.rate, // on-chain bookkeeping rate, retained for setLanes re-assertion
+    gPaid: position.gPaid,
+    // Contract stores sharesAccrued at WAD·SCALE (1e24) for accumulator precision; normalize to the SDK's
+    // canonical SHARE_SCALE (1e6) here — same ÷WAD getPools/sharesFromG already do — so the whole model
+    // speaks one share unit and percentOfSide isn't inflated by 1e18.
+    sharesAccrued: position.sharesAccrued / WAD,
+    maxEndMs: position.maxEnd > 0 ? position.maxEnd * 1000 : undefined,
+    depleted: effectiveDepleted
+  };
+};
 
 export const enrichLane = (
   lane: OptionsLane,
@@ -273,12 +286,22 @@ export type RawStreamsState = {
 
 export const mapStreamsStateBalance = (state: RawStreamsState): bigint => state.balance;
 
-export const mapStreamsStateFull = (
-  state: RawStreamsState
-): { balance: bigint; runwayEndMs: number | undefined } => ({
-  balance: state.balance,
-  runwayEndMs: state.maxEnd > 0 ? state.maxEnd * 1000 : undefined
-});
+// Live account balance: stored minus what's streamed since the last on-chain update (total active rate ×
+// elapsed), floored at 0. The stored balance only changes on a write, so reporting it makes a draining
+// position look static and makes addFunds look like it shrank the balance — the settlement surfacing.
+export const mapStreamsStateLive = (
+  state: RawStreamsState,
+  totalRatePerSec: bigint,
+  nowSec: number
+): { balance: bigint; runwayEndMs: number | undefined } => {
+  const elapsed = BigInt(Math.max(0, nowSec - state.updateTime));
+  const streamed = totalRatePerSec * elapsed;
+  const balance = streamed >= state.balance ? 0n : state.balance - streamed;
+  return {
+    balance,
+    runwayEndMs: state.maxEnd > 0 ? state.maxEnd * 1000 : undefined
+  };
+};
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -330,6 +353,7 @@ export type ContractsReadEntity =
   | "board"
   | "share price"
   | "pending boundaries"
+  | "boundaries"
   | "pending shares"
   | "USDC address"
   | "DRIPS address"

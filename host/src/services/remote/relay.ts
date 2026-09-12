@@ -307,7 +307,14 @@ export const createRemoteRelay = (
       callId: relayCallId,
       sessionId,
       ...(typeof call.target === "string" ? { target: call.target } : {}),
-      envelope: { scope: requiredScope, action: call.envelope.action, args: call.envelope.args }
+      // Forward the cell-qualified dispatch id (when present) so the gateway can address the right cell
+      // for packages whose cells share a fn name; scope is re-derived host-side, never trusted from the UI.
+      envelope: {
+        scope: requiredScope,
+        action: call.envelope.action,
+        ...(call.envelope.id === undefined ? {} : { id: call.envelope.id }),
+        args: call.envelope.args
+      }
     });
   };
 

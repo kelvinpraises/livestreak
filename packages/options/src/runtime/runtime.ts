@@ -3,6 +3,9 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 
 import type { MarketId, UserAddress, VaultId } from "../model/ids.js";
+import type { OptionsNft } from "../model/nft.js";
+import type { OptionsVaultSide } from "../model/vault.js";
+import { lvstDecimalsForChain, perMinUSDCToRate } from "../model/units.js";
 import type { OptionsUserOptionsSnapshot } from "../model/snapshot.js";
 import { createOptionsChain, type OptionsChain } from "../chains/index.js";
 import { readClaimsView, readSessionPnl, readStreamState } from "../flows/index.js";
@@ -13,9 +16,14 @@ import {
   type OptionsAccrualPreview,
   type PreviewAccrualInput
 } from "../model/math/accrual.js";
-import type { FundStreamInput, TxId } from "../chains/types.js";
+import type {
+  FundStreamInput,
+  LaneWriteInput,
+  StopAllFundingInput,
+  TxId
+} from "../chains/types.js";
 import type { OptionsStreamState } from "../model/stream.js";
-import { projectOptionsPanel } from "../bridge/panel/project.js";
+import { projectOptionsPanel, type OptionsPausedLane } from "../bridge/panel/project.js";
 import type { OptionsPanel } from "../bridge/panel/types.js";
 import { assembleBoard, type OptionsBoard } from "./board.js";
 import type { OptionsRuntimeConfig, OptionsRuntimeInput } from "./config.js";
@@ -33,6 +41,24 @@ import {
   type OptionsRuntimeStore
 } from "./store.js";
 
+/** Open / switch / re-rate a vault's stream in one setLanes (the active-card adjust + vault-card stream).
+ *  A vault holds ONE lane: this drops whatever side it streamed and opens the chosen one, preserving every
+ *  other lane on the NFT. Balance-first — draws from the shared balance; only the first stream (no balance
+ *  yet) bundles a starter deposit. */
+export interface StreamLaneInput {
+  readonly vaultId: VaultId;
+  readonly side: OptionsVaultSide;
+  readonly ratePerMin: number;
+  readonly starterMinutes?: number;
+}
+
+export interface PauseLaneInput {
+  readonly vaultId: VaultId;
+  readonly side: OptionsVaultSide;
+}
+
+export type ResumeLaneInput = PauseLaneInput;
+
 export interface OptionsRuntime {
   readonly config: OptionsRuntimeConfig;
   readonly chain: OptionsChain;
@@ -44,6 +70,17 @@ export interface OptionsRuntime {
   readStreamState: (marketId: MarketId) => Promise<OptionsStreamState>;
   previewAccrual: (input: PreviewAccrualInput) => Promise<OptionsAccrualPreview>;
   fundStream: (input: FundStreamInput) => Promise<TxId>;
+  /** Open / switch / re-rate a vault's stream (balance-first). */
+  streamLane: (input: StreamLaneInput) => Promise<TxId>;
+  /** Pause a stream: drop its lane (deposit + accrued shares stay on-chain), remember the rate to resume. */
+  pauseLane: (input: PauseLaneInput) => Promise<TxId>;
+  /** Resume a paused stream at the remembered rate. */
+  resumeLane: (input: ResumeLaneInput) => Promise<TxId>;
+  /** Sweep to wallet: stop every lane and withdraw the shared balance. Positions persist via the ledger,
+   *  now reading `depleted` (the money's gone); clears any paused intent for the NFT. */
+  sweepNft: (input: StopAllFundingInput) => Promise<TxId>;
+  /** The paused lanes the runtime currently remembers. */
+  pausedLanes: () => readonly OptionsPausedLane[];
   refresh: () => Promise<OptionsRuntimeState>;
   refreshMarket: (marketId: MarketId) => Promise<OptionsRuntimeState>;
   refreshVault: (vaultId: VaultId) => Promise<OptionsRuntimeState>;
@@ -57,6 +94,11 @@ export interface OptionsRuntime {
   startPolling: () => { readonly stop: () => void };
 }
 
+// Runway minutes for the STARTER deposit bundled only with the first stream (NFT has no shared balance yet).
+const DEFAULT_STARTER_MINUTES = 60;
+// Fallback resume rate ($/min) when a paused leg has no remembered rate (e.g. one paused by a side-switch).
+const DEFAULT_RESUME_RATE_PER_MIN = 1;
+
 export const createOptionsRuntime = (input: OptionsRuntimeInput): OptionsRuntime =>
   new OptionsRuntimeFacade(input);
 
@@ -64,6 +106,9 @@ class OptionsRuntimeFacade implements OptionsRuntime {
   readonly config: OptionsRuntimeConfig;
   readonly chain: OptionsChain;
   private readonly autoAdvanceOverflow: boolean;
+  private readonly lvstDecimals: number;
+  private readonly persistPausedLanes?: (lanes: readonly OptionsPausedLane[]) => void;
+  private pausedLaneRegistry: OptionsPausedLane[];
   private readonly store: OptionsRuntimeStore;
   private readonly boardSubscriptions = createBoardSubscriptionRegistry();
   private readonly listeners = new Set<(state: OptionsRuntimeState) => void>();
@@ -76,6 +121,9 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     this.store = createOptionsRuntimeStore(this.config.runtimeId);
     this.chain = input.chain ?? createOptionsChain(input.chainConfig);
     this.autoAdvanceOverflow = input.chainConfig.autoAdvanceOverflow === true;
+    this.lvstDecimals = lvstDecimalsForChain(input.chainConfig.walletInit.chain);
+    this.pausedLaneRegistry = [...(input.pausedLanes?.initial ?? [])];
+    this.persistPausedLanes = input.pausedLanes?.onChange;
   }
 
   readSnapshot(): OptionsRuntimeState {
@@ -84,13 +132,20 @@ class OptionsRuntimeFacade implements OptionsRuntime {
 
   readPanel(): OptionsPanel {
     const snapshot = this.requireUserSnapshot();
-    return projectOptionsPanel(snapshot);
+    return this.projectPanel(snapshot);
   }
 
   readBoard(): OptionsBoard {
     const state = this.store.readState();
     const snapshot = this.requireUserSnapshot();
-    return assembleBoard(state.revision, snapshot, projectOptionsPanel(snapshot));
+    return assembleBoard(state.revision, snapshot, this.projectPanel(snapshot));
+  }
+
+  private projectPanel(snapshot: OptionsUserOptionsSnapshot): OptionsPanel {
+    return projectOptionsPanel(snapshot, {
+      lvstDecimals: this.lvstDecimals,
+      pausedLanes: this.pausedLaneRegistry
+    });
   }
 
   async readClaims(): Promise<OptionsClaimsView> {
@@ -146,6 +201,159 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     }
 
     return writer.fund(input);
+  }
+
+  async streamLane(input: StreamLaneInput): Promise<TxId> {
+    const snapshot = this.requireUserSnapshot();
+    const nft = this.findNftForVault(snapshot, input.vaultId);
+    if (nft === undefined) {
+      throw new LiveStreakConfigError({
+        message: "No position NFT for this vault's market — mint one first",
+        metadata: { details: input.vaultId }
+      });
+    }
+
+    const rate = perMinUSDCToRate(input.ratePerMin);
+    const desired = this.existingLaneWrites(nft).filter((lane) => lane.vaultId !== input.vaultId);
+    desired.push({ vaultId: input.vaultId, side: input.side, rate });
+
+    const balance = nft.balance ?? 0n;
+    const starterMinutes = input.starterMinutes ?? DEFAULT_STARTER_MINUTES;
+    const addDeposit = balance > 0n ? 0n : rate * BigInt(Math.max(1, Math.round(starterMinutes * 60)));
+
+    this.forgetPaused(nft.tokenId.toString(), input.vaultId);
+    return this.chain.writer.setLanes({ tokenId: nft.tokenId, lanes: desired, addDeposit });
+  }
+
+  async pauseLane(input: PauseLaneInput): Promise<TxId> {
+    const snapshot = this.requireUserSnapshot();
+    const nft = this.findNftForVault(snapshot, input.vaultId);
+    const target = nft?.lanes.find(
+      (lane) =>
+        lane.vaultId === input.vaultId && lane.side === input.side && lane.rate > 0n && !lane.depleted
+    );
+    if (nft === undefined || target === undefined) {
+      throw new LiveStreakConfigError({
+        message: "No active stream to pause",
+        metadata: { details: `${input.vaultId}:${input.side}` }
+      });
+    }
+
+    const desired = this.existingLaneWrites(nft).filter(
+      (lane) => !(lane.vaultId === input.vaultId && lane.side === input.side)
+    );
+    // Remember the rate BEFORE the tx so a mid-flight refresh still resumes correctly; roll back on failure.
+    this.rememberPaused({
+      tokenId: nft.tokenId.toString(),
+      vaultId: input.vaultId,
+      side: input.side,
+      rate: target.rate
+    });
+    try {
+      return await this.chain.writer.setLanes({ tokenId: nft.tokenId, lanes: desired, addDeposit: 0n });
+    } catch (error) {
+      this.forgetPaused(nft.tokenId.toString(), input.vaultId, input.side);
+      throw error;
+    }
+  }
+
+  async resumeLane(input: ResumeLaneInput): Promise<TxId> {
+    const snapshot = this.requireUserSnapshot();
+    const nft = this.findNftForVault(snapshot, input.vaultId);
+    if (nft === undefined) {
+      throw new LiveStreakConfigError({
+        message: "No position NFT for this vault's market — mint one first",
+        metadata: { details: input.vaultId }
+      });
+    }
+    const tokenId = nft.tokenId.toString();
+    const remembered = this.pausedLaneRegistry.find(
+      (lane) => lane.tokenId === tokenId && lane.vaultId === input.vaultId && lane.side === input.side
+    );
+
+    // Resume at the remembered rate (paused via the button), else a sensible default — a leg paused by a
+    // side-switch has no remembered rate. One lane per vault, so this replaces any side currently on the
+    // vault (doubles as switch-back), and re-funds deposit-free while the shared balance lasts.
+    const rate = remembered?.rate ?? perMinUSDCToRate(DEFAULT_RESUME_RATE_PER_MIN);
+    const desired = this.existingLaneWrites(nft).filter((lane) => lane.vaultId !== input.vaultId);
+    desired.push({ vaultId: input.vaultId, side: input.side, rate });
+    const balance = nft.balance ?? 0n;
+    const addDeposit = balance > 0n ? 0n : rate * BigInt(Math.max(1, Math.round(DEFAULT_STARTER_MINUTES * 60)));
+    const tx = await this.chain.writer.setLanes({ tokenId: nft.tokenId, lanes: desired, addDeposit });
+    this.forgetPaused(tokenId, input.vaultId, input.side);
+    return tx;
+  }
+
+  async sweepNft(input: StopAllFundingInput): Promise<TxId> {
+    const tx = await this.chain.writer.stopAllFunding(input);
+    // Cashed out — no balance to resume from, so drop any remembered pauses for this NFT. The positions
+    // themselves persist via the share ledger, now reading `depleted` (the deposit is gone).
+    this.forgetPausedForToken(input.tokenId.toString());
+    return tx;
+  }
+
+  pausedLanes(): readonly OptionsPausedLane[] {
+    return this.pausedLaneRegistry;
+  }
+
+  private findNftForVault(
+    snapshot: OptionsUserOptionsSnapshot,
+    vaultId: VaultId
+  ): OptionsNft | undefined {
+    const byLane = snapshot.nfts.find((entry) => entry.nft.lanes.some((lane) => lane.vaultId === vaultId));
+    if (byLane !== undefined) {
+      return byLane.nft;
+    }
+    const vault = snapshot.vaults.find((entry) => entry.vault.vaultId === vaultId);
+    if (vault === undefined) {
+      return undefined;
+    }
+    return snapshot.nfts.find((entry) => entry.nft.marketId === vault.vault.marketId)?.nft;
+  }
+
+  // Every on-chain lane as setLanes-ready entries, at its COMMITTED rate. Depleted lanes are included
+  // (committedRate survives depletion) so a setLanes rebuild preserves them instead of deleting them —
+  // setLanes is full-replacement, so a dropped lane is wiped. A dry depleted lane re-asserts with
+  // maxEnd=now (re-depletes immediately, zero accrual, onFund credits so no stranding), staying visible
+  // and re-fundable rather than vanishing when you pause/stream a sibling lane.
+  private existingLaneWrites(nft: OptionsNft): LaneWriteInput[] {
+    return nft.lanes
+      .filter((lane) => lane.committedRate > 0n)
+      .map((lane) => ({ vaultId: lane.vaultId, side: lane.side, rate: lane.committedRate }));
+  }
+
+  private rememberPaused(lane: OptionsPausedLane): void {
+    const others = this.pausedLaneRegistry.filter(
+      (entry) =>
+        !(entry.tokenId === lane.tokenId && entry.vaultId === lane.vaultId && entry.side === lane.side)
+    );
+    this.setPausedRegistry([...others, lane]);
+  }
+
+  private forgetPaused(tokenId: string, vaultId: string, side?: OptionsVaultSide): void {
+    const next = this.pausedLaneRegistry.filter(
+      (entry) =>
+        !(
+          entry.tokenId === tokenId &&
+          entry.vaultId === vaultId &&
+          (side === undefined || entry.side === side)
+        )
+    );
+    if (next.length !== this.pausedLaneRegistry.length) {
+      this.setPausedRegistry(next);
+    }
+  }
+
+  private forgetPausedForToken(tokenId: string): void {
+    const next = this.pausedLaneRegistry.filter((entry) => entry.tokenId !== tokenId);
+    if (next.length !== this.pausedLaneRegistry.length) {
+      this.setPausedRegistry(next);
+    }
+  }
+
+  private setPausedRegistry(lanes: OptionsPausedLane[]): void {
+    this.pausedLaneRegistry = lanes;
+    this.persistPausedLanes?.(this.pausedLaneRegistry);
   }
 
   async refresh(): Promise<OptionsRuntimeState> {
@@ -325,7 +533,7 @@ class OptionsRuntimeFacade implements OptionsRuntime {
 
     if (state.userSnapshot !== undefined) {
       this.boardSubscriptions.notify(
-        assembleBoard(state.revision, state.userSnapshot, projectOptionsPanel(state.userSnapshot))
+        assembleBoard(state.revision, state.userSnapshot, this.projectPanel(state.userSnapshot))
       );
     }
 

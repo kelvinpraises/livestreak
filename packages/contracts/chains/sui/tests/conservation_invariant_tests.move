@@ -187,6 +187,81 @@ fun run_conservation_seed(
     };
 }
 
+// Regression for the live stranding bug (parity with EVM
+// `test_topUpAfterDryWhileBoardBehind_doesNotStrand`). A top-up that lands AFTER a lane ran dry while
+// the Board was merely BEHIND (idle chain: nothing pokes advance once max_end passes, so `depleted`
+// still reads false on-chain) must re-fund the lane, or the top-up's Drips delivery is booked nowhere
+// and strands in the Vault at resolution. Sequence: fund → dry-without-advancing → set_lanes top-up →
+// resolve YES → collect. Pre-fix this left ~`d2` permanently unclaimable in the Vault.
+#[test]
+fun test_topup_after_dry_while_board_behind_does_not_strand() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (vault_id, _alice_token, _bob_token) = setup_conservation_fixture(&mut scenario, &clock);
+
+    let d1 = ((wire::rate() * 4) as u64); // 4s runway -> Alice's lane dries at start+4
+    let d2 = ((wire::rate() * 4) as u64); // the top-up that pre-fix stranded
+    let total_deposits = (wire::creator_seed_deposit() as u256) + (d1 as u256) + (d2 as u256);
+
+    // Alice funds YES; her lane runs dry at start+4.
+    let alice_nft = wire::take_nft(&mut scenario, wire::alice());
+    wire::fund(&mut scenario, wire::alice(), &alice_nft, vault_id, side::yes(), wire::rate(), d1, &clock);
+    wire::return_nft(&mut scenario, wire::alice(), alice_nft);
+
+    // Idle PAST her max_end WITHOUT poking advance — the Board stays behind, so `depleted` reads
+    // false on-chain even though the deposit is already spent. This is the exact trigger.
+    wire::warp(&mut clock, wire::start_secs() + 6);
+
+    // Declarative top-up. Pre-fix: diffs to a no-op (depleted==false), skips on_fund, and
+    // refresh_max_ends no-ops on the now-depleting lane -> d2's delivery is booked nowhere.
+    wire::set_lanes(
+        &mut scenario,
+        wire::alice(),
+        vector[vault_id],
+        vector[side::yes()],
+        vector[wire::rate()],
+        d2,
+        &clock,
+    );
+
+    // Idle past the new max_end (start+10) and the seed max_end (start+10), then resolve YES.
+    wire::warp(&mut clock, wire::start_secs() + 13);
+    wire::resolve_vault(&mut scenario, wire::steward(), vault_id, true, &clock);
+
+    // Settle: full collect + cycle-complete harvest, then winners (Alice + seed creator) pull.
+    wire::collect_vault(&mut scenario, vault_id, &clock);
+    wire::warp(&mut clock, wire::start_secs() + 13 + wire::cycle_secs() * 2);
+    wire::collect_vault(&mut scenario, vault_id, &clock);
+    wire::harvest_both_sides(&mut scenario, vault_id, &clock);
+    wire::collect_vault(&mut scenario, vault_id, &clock);
+
+    let mut withdrawn = 0u256;
+    withdrawn = withdrawn + (wire::withdraw_market(&mut scenario, wire::alice(), vault_id, &clock) as u256);
+    withdrawn = withdrawn + (wire::withdraw_seed(&mut scenario, wire::seed_creator(), vault_id, &clock) as u256);
+
+    // Drain the cycle tail and re-pull.
+    wire::harvest_both_sides(&mut scenario, vault_id, &clock);
+    wire::collect_vault(&mut scenario, vault_id, &clock);
+    withdrawn = withdrawn + (wire::withdraw_market(&mut scenario, wire::alice(), vault_id, &clock) as u256);
+    withdrawn = withdrawn + (wire::withdraw_seed(&mut scenario, wire::seed_creator(), vault_id, &clock) as u256);
+
+    ts::next_tx(&mut scenario, wire::admin());
+    {
+        let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        let drips = ts::take_shared<DripsRegistry<TEST_USDC>>(&scenario);
+        let dust = (vault::usdc_balance(&vault_registry) as u256) + (drips::held_balance(&drips) as u256);
+        // Nothing strands (pre-fix this was ~d2), AND the delivered top-up reached the winners.
+        assert!(dust <= DUST_TOLERANCE, 0);
+        assert!(withdrawn + DUST_TOLERANCE >= total_deposits, 1);
+        assert!(withdrawn + dust == total_deposits, 2);
+        ts::return_shared(vault_registry);
+        ts::return_shared(drips);
+    };
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
 #[test]
 fun test_conservation_seed_1() {
     let mut scenario = ts::begin(wire::admin());

@@ -110,7 +110,12 @@ export interface UiCallFrame {
   readonly seq: number;
   readonly nonce: string;
   readonly target?: string;
-  readonly envelope: { readonly scope?: string; readonly action: string; readonly args?: unknown };
+  readonly envelope: {
+    readonly scope?: string;
+    readonly action: string;
+    readonly id?: string;
+    readonly args?: unknown;
+  };
 }
 export type UiClientFrame = UiHelloFrame | UiCallFrame;
 

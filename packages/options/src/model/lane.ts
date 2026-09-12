@@ -8,6 +8,9 @@ export interface OptionsLane {
   readonly vaultId: VaultId;
   readonly side: OptionsVaultSide;
   readonly rate: bigint;
+  /** On-chain lane rate, retained even when depleted (effective `rate` is 0 then). Lets a setLanes
+   *  rebuild re-assert depleted lanes instead of dropping them — see runtime `existingLaneWrites`. */
+  readonly committedRate: bigint;
   readonly gPaid: bigint;
   readonly sharesAccrued: bigint;
   readonly maxEndMs?: number;

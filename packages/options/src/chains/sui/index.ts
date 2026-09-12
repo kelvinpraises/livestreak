@@ -61,6 +61,7 @@ const createNotImplementedReader = (): OptionsReader => ({
   readBoard: notImplemented("readBoard"),
   readSharePrice: notImplemented("readSharePrice"),
   readPendingBoundaries: notImplemented("readPendingBoundaries"),
+  readBoundaries: notImplemented("readBoundaries"),
   readPendingShares: notImplemented("readPendingShares"),
   readUsdcAddress: notImplemented("readUsdcAddress"),
   readUsdcBalance: notImplemented("readUsdcBalance"),

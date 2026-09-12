@@ -17,6 +17,9 @@ import {
   type StopRunOptions
 } from "./kernel.js";
 import { makeObserveRun, type ObserveRun, type ObserveRunConfig } from "./run.js";
+import { runConfigFromBoard } from "./board-run-config.js";
+import { createLocalSinkDriver } from "#pipeline/publish/sinks/local/driver.js";
+import { resolveNodePeerConnectionFactory } from "#pipeline/publish/sinks/local/node-peer.js";
 import {
   callStoredRunFunction,
   createRunStore,
@@ -29,6 +32,8 @@ import {
   type ObserveRunHandle,
   type RunStore
 } from "./store.js";
+
+type LocalSinkDriver = ReturnType<typeof createLocalSinkDriver>;
 
 export type { StopRunOptions } from "./kernel.js";
 export { defaultStopTimeoutMs } from "./kernel.js";
@@ -47,6 +52,17 @@ export interface ObserveRuntime {
   readonly prepareRun: (
     config: ObserveRunConfig,
     options?: ObserveRunKernelOptions
+  ) => Effect.Effect<ObserveRun, LiveStreakError>;
+
+  /**
+   * Prepare the run from its CONSOLE-configured board: derive the run config (capture/sink/market) from
+   * the board and, for the local WebRTC sink, wire the Node peer factory + host signaling. The caller
+   * passes only the host base URL it owns; observe owns the board→config mapping and the sink wiring.
+   * Prepares in place so the board's market registration / live state survives.
+   */
+  readonly prepareConfiguredRun: (
+    runId: string,
+    options: { readonly hostBaseUrl: string }
   ) => Effect.Effect<ObserveRun, LiveStreakError>;
 
   readonly startRun: (
@@ -107,6 +123,17 @@ const buildObserveRuntime = (
   const defaultKernelOptions = input.defaultKernelOptions;
   const sessionInit = input.sessionInit;
 
+  // The Node WebRTC sink driver (peer factory via @roamhq/wrtc) — built once, reused for prepare + start.
+  let cachedLocalSink: LocalSinkDriver | undefined;
+  const ensureLocalSink = (): Effect.Effect<LocalSinkDriver, LiveStreakError> =>
+    Effect.gen(function* () {
+      if (cachedLocalSink === undefined) {
+        const peerConnectionFactory = yield* resolveNodePeerConnectionFactory();
+        cachedLocalSink = createLocalSinkDriver({ peerConnectionFactory });
+      }
+      return cachedLocalSink;
+    });
+
   const runHooks: import("./control/system/run.js").SystemRunHooks = {
     prepare: (runId: string) =>
       Effect.gen(function* () {
@@ -144,8 +171,37 @@ const buildObserveRuntime = (
         return prepared;
       }),
 
+    prepareConfiguredRun: (runId, options) =>
+      Effect.gen(function* () {
+        const run = yield* store.require(runId);
+        const config = yield* runConfigFromBoard({
+          runId,
+          board: run.board,
+          hostBaseUrl: options.hostBaseUrl
+        });
+        const sinkDriver = yield* ensureLocalSink();
+        const prepared = yield* prepareObserveRun(
+          { ...run, config, manifest: run.manifest, prepared: false },
+          mergeKernelOptions(defaultKernelOptions, { sinkDriver, sessionInit, runHooks })
+        );
+        yield* store.replace(prepared);
+        return prepared;
+      }),
+
     startRun: (runId, options) =>
-      startRunEffect(store, scope, runId, mergeKernelOptions(defaultKernelOptions, { ...options, sessionInit, runHooks })),
+      Effect.gen(function* () {
+        // A board-configured local-sink run needs its injected sink driver re-supplied at start (the kernel
+        // re-resolves it); the runtime owns that wiring so callers don't have to.
+        const run = yield* store.require(runId);
+        const sinkDriver =
+          run.config.sink.driverId === "local" ? yield* ensureLocalSink() : options?.sinkDriver;
+        return yield* startRunEffect(
+          store,
+          scope,
+          runId,
+          mergeKernelOptions(defaultKernelOptions, { ...options, sinkDriver, sessionInit, runHooks })
+        );
+      }),
 
     listRuns: () => store.list(),
     listHandles: () => store.listHandles(),

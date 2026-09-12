@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 
-import { usdcStringToNumber } from '#/utils/options'
 import type { StreamMeta } from '#/types/demo'
 import { useOptionsContext } from '#/providers/options-provider'
 import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
@@ -38,8 +37,8 @@ export function useStreamMeta(routeId: string): StreamMeta {
           // funders stream in. totalPooledUSDC is the settled snapshot and only moves on an on-chain
           // advance, so the header looked frozen. livePooledRatePerSecUSDC is the SDK's real growth
           // rate (the on-chain sideRate); ScoreUSD projects the pool forward with it between the 3s polls.
-          totalPooled: usdcStringToNumber(market.totals.livePooledUSDC),
-          totalPooledRatePerSec: usdcStringToNumber(market.totals.livePooledRatePerSecUSDC),
+          totalPooled: market.totals.livePooledUSDC,
+          totalPooledRatePerSec: market.totals.livePooledRatePerSecUSDC,
           elapsed: '',
           isLive: market.stream?.status === 'live',
         }

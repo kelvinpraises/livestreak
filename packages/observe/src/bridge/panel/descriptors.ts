@@ -59,7 +59,10 @@ const toDescriptor = (
   );
 };
 
-const descriptorId = (cellId: string, fnName: string): string =>
+// The cell-qualified dispatch id for a function (e.g. "observe.capture.file.configure"). Unique across
+// cells, unlike the bare fn name — the remote console sends this so the host relay routes to the right
+// cell (observe has four cells exposing `configure`/`close`). Single source of truth; the edge reuses it.
+export const descriptorId = (cellId: string, fnName: string): string =>
   `observe.${cellId.replace(/:/g, ".")}.${fnName}`;
 
 const parentConfiguratorId = (cellId: string): string | undefined => {

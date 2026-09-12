@@ -370,7 +370,7 @@ public fun set_lanes<T>(
 
     let curr = build_receivers(registry, vault_driver, vault_registry, token_id);
     let (removed_vaults, removed_sides, removed_n) = diff_removed(registry, token_id, &desired_vault_ids, &desired_sides, &desired_rates);
-    let (added_vaults, added_sides, added_rates, added_n) = diff_added(registry, token_id, &desired_vault_ids, &desired_sides, &desired_rates);
+    let (added_vaults, added_sides, added_rates, added_n) = diff_added(registry, vault_registry, token_id, &desired_vault_ids, &desired_sides, &desired_rates, clock);
 
     clear_lanes(registry, token_id);
     let mut k = 0;
@@ -596,12 +596,14 @@ fun diff_removed(
     (removed_vaults, removed_sides, removed_n)
 }
 
-fun diff_added(
+fun diff_added<T>(
     registry: &MarketDriverRegistry,
+    vault_registry: &VaultRegistry<T>,
     token_id: u256,
     desired_vault_ids: &vector<vector<u8>>,
     desired_sides: &vector<u8>,
     desired_rates: &vector<u256>,
+    clock: &Clock,
 ): (vector<vector<u8>>, vector<u8>, vector<u256>, u64) {
     let mut added_vaults = vector[];
     let mut added_sides = vector[];
@@ -618,7 +620,21 @@ fun diff_added(
         } else {
             Lane { vault_id, side: side::yes(), rate: 0 }
         };
-        if (held.rate != rate || held.side != side) {
+        let mut changed = held.rate != rate || held.side != side;
+        // Re-open a run-dry position even when bookkeeping looks unchanged (parity with the EVM revival
+        // fix): depletion lives in the Vault and isn't mirrored here, so a same-rate re-fund must still
+        // on_fund — the only path that clears `depleted`. Also re-open when the lane has run dry
+        // (max_end passed) but the Board is merely BEHIND on that boundary — on an idle chain nothing
+        // pokes advance, so `depleted` reads false while the deposit is already spent. Skipping on_fund
+        // there leaves refresh_max_ends to no-op on the about-to-deplete lane, so a top-up's Drips
+        // delivery is booked nowhere and strands at resolution. Treat max_end<=now as run-dry.
+        if (!changed) {
+            let (p_rate, _, _, p_max_end, depleted, _, _) =
+                vault::get_position(vault_registry, &vault_id, side, token_id);
+            let now = sui::clock::timestamp_ms(clock) / 1000;
+            changed = depleted || (p_rate > 0 && p_max_end != 0 && p_max_end <= now);
+        };
+        if (changed) {
             vector::push_back(&mut added_vaults, vault_id);
             vector::push_back(&mut added_sides, side);
             vector::push_back(&mut added_rates, rate);

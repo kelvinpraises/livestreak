@@ -11,7 +11,7 @@ import {
 } from "../src/bridge/index.js";
 import type { OptionsControlsView, OptionsFunctionView } from "../src/bridge/panel/types.js";
 import { asMarketId, asTokenId, asVaultId } from "../src/model/ids.js";
-import { priceOf } from "../src/model/index.js";
+import { priceOf, usdcToNumber } from "../src/model/index.js";
 import { createOptionsRuntime } from "../src/runtime/index.js";
 import {
   createFakeChainConfig,
@@ -219,6 +219,7 @@ describe("options bridge", () => {
           vaultId,
           side: "yes",
           rate: 0n,
+          committedRate: 0n,
           gPaid: 0n,
           sharesAccrued: 34_000_000n,
           depleted: false,
@@ -231,6 +232,7 @@ describe("options bridge", () => {
           vaultId,
           side: "no",
           rate: 0n,
+          committedRate: 0n,
           gPaid: 0n,
           sharesAccrued: 6_000_000n,
           depleted: false,
@@ -431,7 +433,7 @@ describe("options bridge", () => {
     await rt.refreshUser(user, asMarketId("market_01"));
 
     const board = await bridge.readBoard(trustedCaller);
-    expect(board.panel.user.usdcBalanceUSDC).toBe("250000000");
+    expect(board.panel.user.usdcBalanceUSDC).toBe(250);
   });
 
   it("readBoard surfaces steward severity on a hot vault", async () => {
@@ -482,8 +484,8 @@ describe("options bridge", () => {
     const board = await bridge.readBoard(trustedCaller);
     const pools = board.panel.markets[0]?.vaults[0]?.pools;
 
-    expect(pools?.sharePriceYes).toBe(priceOf(94_000_000n).toString());
-    expect(pools?.sharePriceNo).toBe(priceOf(185_000_000n).toString());
+    expect(pools?.sharePriceYes).toBe(usdcToNumber(priceOf(94_000_000n)));
+    expect(pools?.sharePriceNo).toBe(usdcToNumber(priceOf(185_000_000n)));
   });
 
   it("previewAccrual projects hypothetical stream accrual", async () => {
@@ -522,10 +524,10 @@ describe("options bridge", () => {
       horizonSec: 60
     });
 
-    expect(BigInt(preview.projectedShares)).toBeGreaterThan(0n);
-    expect(BigInt(preview.valueUSDC)).toBeGreaterThan(0n);
-    expect(BigInt(preview.sharesPerSec)).toBeGreaterThan(0n);
-    expect(preview.sharePriceUSDC).toBe(priceOf(20_000_000n).toString());
+    expect(preview.projectedShares).toBeGreaterThan(0);
+    expect(preview.valueUSDC).toBeGreaterThan(0);
+    expect(preview.sharesPerSec).toBeGreaterThan(0);
+    expect(preview.sharePriceUSDC).toBe(usdcToNumber(priceOf(20_000_000n)));
   });
 
   it("previewAccrual returns zero accrual when rate is zero", async () => {
@@ -560,9 +562,9 @@ describe("options bridge", () => {
       rate: 0n
     });
 
-    expect(preview.projectedShares).toBe("0");
-    expect(preview.valueUSDC).toBe("0");
-    expect(preview.sharesPerSec).toBe("0");
+    expect(preview.projectedShares).toBe(0);
+    expect(preview.valueUSDC).toBe(0);
+    expect(preview.sharesPerSec).toBe(0);
   });
 
   it("previewAccrual requires board read scope", async () => {

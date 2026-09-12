@@ -100,10 +100,53 @@ contract MarketDriverTest is Test {
 
         vm.warp(START + 20);
         vm.prank(alice);
-        marketDriver.stopAll(aliceNft);
+        marketDriver.stopAll(aliceNft, address(0));
 
         assertEq(usdc.balanceOf(alice), 30 * RATE, "unspent refunded on stopAll");
         assertEq(marketDriver.laneCount(aliceNft), 0, "all lanes cleared");
+    }
+
+    /// Safety: an approved operator may TRIGGER the sweep but the unspent balance must return to the
+    /// owner — never the operator (the `_payee` rule, previously bypassed by stopAll's raw _msgSender).
+    function test_stopAll_operatorCannotSiphonRefund() public {
+        _fund(alice, aliceNft, v1, Side.Yes, RATE, 50 * RATE);
+        vm.warp(START + 20);
+
+        vm.prank(alice);
+        marketDriver.approve(bob, aliceNft); // alice authorizes bob as operator on her NFT
+
+        uint256 bobBefore = usdc.balanceOf(bob);
+        vm.prank(bob);
+        marketDriver.stopAll(aliceNft, address(0)); // bob triggers; refund must go to alice
+
+        assertEq(usdc.balanceOf(alice), 30 * RATE, "refund returned to owner");
+        assertEq(usdc.balanceOf(bob), bobBefore, "operator siphoned nothing");
+        assertEq(marketDriver.laneCount(aliceNft), 0, "all lanes cleared");
+    }
+
+    /// Safety: an operator cannot redirect the refund to an arbitrary address — only the owner can.
+    function test_stopAll_operatorCannotRedirectRefund() public {
+        _fund(alice, aliceNft, v1, Side.Yes, RATE, 50 * RATE);
+        vm.warp(START + 20);
+        vm.prank(alice);
+        marketDriver.approve(bob, aliceNft);
+
+        vm.prank(bob);
+        vm.expectRevert("MarketDriver: only owner can redirect");
+        marketDriver.stopAll(aliceNft, bob);
+    }
+
+    /// The owner (and only the owner) may redirect the swept balance elsewhere.
+    function test_stopAll_ownerCanRedirect() public {
+        _fund(alice, aliceNft, v1, Side.Yes, RATE, 50 * RATE);
+        vm.warp(START + 20);
+        address sink = makeAddr("sink");
+
+        vm.prank(alice);
+        marketDriver.stopAll(aliceNft, sink);
+
+        assertEq(usdc.balanceOf(sink), 30 * RATE, "owner redirected the refund");
+        assertEq(usdc.balanceOf(alice), 0, "owner kept nothing after redirect");
     }
 
     /// Hedge via the diff: setLanes carrying the vault on the other side stops YES and starts NO,
@@ -130,6 +173,74 @@ contract MarketDriverTest is Test {
 
         (, uint256 noSideRate,,) = vault.getBoard(v1, Side.No);
         assertEq(noSideRate, RATE, "NO board now receiving");
+    }
+
+    /// Regression: a side whose deposit ran dry is re-fundable. Drain NO, hedge to YES, then switch BACK
+    /// onto the drained NO — onFund re-opens it (clearing the run-dry stamp) instead of reverting
+    /// "already funding". The round-1 NO shares survive. Without the depleted-clear in onFund this reverts.
+    function test_setLanes_refundsDrainedSide() public {
+        // Round 1: stream NO briefly (runway 10s → maxEnd START+10), then let it run dry.
+        _fund(alice, aliceNft, v1, Side.No, RATE, 10 * RATE);
+        vm.warp(START + 50);
+        vault.advance(v1, Side.No, 64);
+        (uint256 noRate0,, uint256 noShares0,, bool noDepleted0) = vault.getPosition(v1, Side.No, aliceNft);
+        assertEq(noRate0, 0, "NO ran dry: rate 0");
+        assertTrue(noDepleted0, "NO ran dry: depleted stamped");
+        assertGt(noShares0, 0, "NO accrued shares in round 1");
+
+        // Hedge onto YES (the drained NO drops out; its onStop is a no-op).
+        MarketDriver.Lane[] memory toYes = new MarketDriver.Lane[](1);
+        toYes[0] = MarketDriver.Lane({vaultId: v1, side: Side.Yes, rate: RATE});
+        usdc.mint(alice, 20 * RATE);
+        vm.startPrank(alice);
+        usdc.approve(address(marketDriver), 20 * RATE);
+        marketDriver.setLanes(aliceNft, toYes, 20 * RATE);
+        vm.stopPrank();
+
+        // Switch BACK onto the drained NO — the case that used to revert (masked "already funding").
+        MarketDriver.Lane[] memory toNo = new MarketDriver.Lane[](1);
+        toNo[0] = MarketDriver.Lane({vaultId: v1, side: Side.No, rate: RATE});
+        usdc.mint(alice, 20 * RATE);
+        vm.startPrank(alice);
+        usdc.approve(address(marketDriver), 20 * RATE);
+        marketDriver.setLanes(aliceNft, toNo, 20 * RATE);
+        vm.stopPrank();
+
+        (uint256 noRate2,, uint256 noShares2,, bool noDepleted2) = vault.getPosition(v1, Side.No, aliceNft);
+        assertEq(noRate2, RATE, "NO re-opened at rate");
+        assertFalse(noDepleted2, "NO run-dry stamp cleared on re-fund");
+        assertGe(noShares2, noShares0, "round-1 NO shares survive the re-fund");
+        (uint256 yesRate2,,,,) = vault.getPosition(v1, Side.Yes, aliceNft);
+        assertEq(yesRate2, 0, "YES stopped by the switch back");
+    }
+
+    /// Regression: re-funding a drained side at the SAME rate with NO side switch revives it. The
+    /// MarketDriver bookkeeping still shows the pre-depletion rate, so a same-(vault,side,rate) re-fund
+    /// diffs to "no change" and would skip onFund — leaving the position depleted forever despite added
+    /// funds. The fix consults the Vault's `depleted` flag so onFund runs and re-opens the lane.
+    function test_setLanes_refundsDrainedSide_sameRateNoSwitch() public {
+        // Stream NO briefly (runway 10s → maxEnd START+10), then let it run dry.
+        _fund(alice, aliceNft, v1, Side.No, RATE, 10 * RATE);
+        vm.warp(START + 50);
+        vault.advance(v1, Side.No, 64);
+        (uint256 noRate0,, uint256 noShares0,, bool noDepleted0) = vault.getPosition(v1, Side.No, aliceNft);
+        assertEq(noRate0, 0, "NO ran dry: rate 0");
+        assertTrue(noDepleted0, "NO ran dry: depleted stamped");
+        assertGt(noShares0, 0, "NO accrued shares before draining");
+
+        // Re-fund the SAME side at the SAME rate — the diff-against-stale-bookkeeping no-op case.
+        MarketDriver.Lane[] memory sameNo = new MarketDriver.Lane[](1);
+        sameNo[0] = MarketDriver.Lane({vaultId: v1, side: Side.No, rate: RATE});
+        usdc.mint(alice, 20 * RATE);
+        vm.startPrank(alice);
+        usdc.approve(address(marketDriver), 20 * RATE);
+        marketDriver.setLanes(aliceNft, sameNo, 20 * RATE);
+        vm.stopPrank();
+
+        (uint256 noRate1,, uint256 noShares1,, bool noDepleted1) = vault.getPosition(v1, Side.No, aliceNft);
+        assertEq(noRate1, RATE, "NO re-opened at the same rate");
+        assertFalse(noDepleted1, "run-dry stamp cleared by same-rate re-fund");
+        assertGe(noShares1, noShares0, "shares survive the re-fund");
     }
 
     /// One lane per vault: a second fund on a held vault reverts — same side OR the opposite side.

@@ -217,7 +217,12 @@ export class HostWssTransport implements RemoteTransport {
       seq: this.seq,
       nonce: randomNonce(),
       ...(target ? { target } : {}),
-      envelope: { scope: envelope.scope, action: envelope.action, args: envelope.args },
+      envelope: {
+        scope: envelope.scope,
+        action: envelope.action,
+        ...(envelope.id === undefined ? {} : { id: envelope.id }),
+        args: envelope.args,
+      },
     }
     return new Promise<CallResult>((resolve) => {
       this.pending.set(callId, resolve)

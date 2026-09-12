@@ -11,8 +11,7 @@ export {
   bridgeActionScope,
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
-  bridgeControlsReadScope,
-  optionsConfigScope
+  bridgeControlsReadScope
 } from "./types.js";
 export {
   createOptionsRuntimeBootstrap,
@@ -22,13 +21,16 @@ export {
 } from "./runtime/init.js";
 export type { PackageRuntimeInit, SessionWallet } from "./runtime/init.js";
 export { projectOptionsPanel, projectOptionsControls, projectOptionsFunctions } from "./panel/index.js";
+export type { OptionsPausedLane, ProjectPanelContext } from "./panel/index.js";
 export { projectOptionsDescriptors } from "./panel/index.js";
 export type {
+  OptionsAccountStatus,
   OptionsControlsView,
   OptionsFunctionTarget,
   OptionsFunctionTargetKind,
   OptionsFunctionView,
   OptionsLanePanel,
+  OptionsLaneStatus,
   OptionsLvstPanel,
   OptionsMarketPanel,
   OptionsNftPanel,

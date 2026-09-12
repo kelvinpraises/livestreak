@@ -5,17 +5,27 @@ import type {
   OptionsMarketSnapshot,
   OptionsNftSnapshot,
   OptionsUserOptionsSnapshot,
+  OptionsVaultSide,
   OptionsVaultSnapshot
 } from "../../model/index.js";
-import { totalVaultPool, priceOf, projectVaultLivePools } from "../../model/index.js";
+import {
+  lvstToNumber,
+  priceOf,
+  projectVaultLivePools,
+  rateToPerMinUSDC,
+  sharesToNumber,
+  totalVaultPool,
+  usdcToNumber
+} from "../../model/index.js";
 import type { OptionsBoardState } from "../../model/math/accrual.js";
 import type { FunderBoundary } from "../../model/math/live-pool.js";
-import type { OptionsVaultSide } from "../../model/vault.js";
 import type {
+  OptionsAccountStatus,
   OptionsControlsView,
   OptionsFunctionTarget,
   OptionsFunctionView,
   OptionsLanePanel,
+  OptionsLaneStatus,
   OptionsLvstPanel,
   OptionsMarketPanel,
   OptionsNftPanel,
@@ -23,22 +33,53 @@ import type {
   OptionsVaultPanel
 } from "./types.js";
 
-export const projectOptionsPanel = (snapshot: OptionsUserOptionsSnapshot): OptionsPanel => ({
-  account: snapshot.account,
-  markets: snapshot.markets.map((marketSnapshot) =>
-    projectMarketPanel(marketSnapshot, snapshot.vaults, snapshot.nfts)
-  ),
-  nfts: snapshot.nfts.map((entry) => projectNftPanel(entry)),
-  lvst: projectLvstPanel(snapshot.lvstAccount),
-  ...(snapshot.protocol === undefined ? {} : { protocol: snapshot.protocol }),
-  user: {
+/** A paused lane the runtime remembers (dropped on-chain, intent to resume). The board re-injects it as a
+ *  `status: "paused"` lane so the row survives the poll; this is the SDK's canonical home for pause state. */
+export interface OptionsPausedLane {
+  readonly tokenId: string;
+  readonly vaultId: string;
+  readonly side: OptionsVaultSide;
+  readonly rate: bigint; // base units/sec to resume at
+}
+
+export interface ProjectPanelContext {
+  /** LVST decimals for the active chain (EVM 18 / Sui 9) — normalizes the LVST panel. */
+  readonly lvstDecimals: number;
+  /** Paused lanes (session intent), overlaid onto the matching ledger position by tokenId/vault/side. */
+  readonly pausedLanes?: readonly OptionsPausedLane[];
+  /** Per-vault total shares (yes/no), for each position's `percentOfSide`. Built from the snapshot. */
+  readonly shareTotalsByVault?: ReadonlyMap<string, { readonly yes: bigint; readonly no: bigint }>;
+}
+
+const DEFAULT_CTX: ProjectPanelContext = { lvstDecimals: 18 };
+
+export const projectOptionsPanel = (
+  snapshot: OptionsUserOptionsSnapshot,
+  ctx: ProjectPanelContext = DEFAULT_CTX
+): OptionsPanel => {
+  // Per-vault share totals for each position's `percentOfSide` — assembled once from the snapshot.
+  const shareTotalsByVault = new Map(
+    snapshot.vaults.map((entry) => [entry.vault.vaultId as string, entry.shareTotals])
+  );
+  const nftCtx: ProjectPanelContext = { ...ctx, shareTotalsByVault };
+
+  return {
     account: snapshot.account,
-    ...(snapshot.marketId === undefined ? {} : { marketId: snapshot.marketId }),
-    ...(snapshot.usdcBalance === undefined
-      ? {}
-      : { usdcBalanceUSDC: snapshot.usdcBalance.toString() })
-  }
-});
+    markets: snapshot.markets.map((marketSnapshot) =>
+      projectMarketPanel(marketSnapshot, snapshot.vaults)
+    ),
+    nfts: snapshot.nfts.map((entry) => projectNftPanel(entry, nftCtx)),
+    lvst: projectLvstPanel(snapshot.lvstAccount, ctx.lvstDecimals),
+    ...(snapshot.protocol === undefined ? {} : { protocol: snapshot.protocol }),
+    user: {
+      account: snapshot.account,
+      ...(snapshot.marketId === undefined ? {} : { marketId: snapshot.marketId }),
+      ...(snapshot.usdcBalance === undefined
+        ? {}
+        : { usdcBalanceUSDC: usdcToNumber(snapshot.usdcBalance) })
+    }
+  };
+};
 
 export const projectOptionsFunctions = (panel: OptionsPanel): OptionsFunctionView[] => {
   const functions: OptionsFunctionView[] = [];
@@ -113,6 +154,13 @@ const CATALOG = {
     input: "SetLanesInput",
     targetKind: "nft"
   },
+  addFunds: {
+    name: "addFunds",
+    scope: "options:nft:addFunds",
+    label: "Add funds",
+    input: "AddFundsInput",
+    targetKind: "nft"
+  },
   stopFunding: {
     name: "stopFunding",
     scope: "options:vault:stop",
@@ -123,7 +171,8 @@ const CATALOG = {
   stopAllFunding: {
     name: "stopAllFunding",
     scope: "options:nft:stopAll",
-    label: "Stop all",
+    // stopAll halts lanes AND withdraws the remaining balance to the wallet.
+    label: "Sweep to wallet",
     input: "StopAllFundingInput",
     targetKind: "nft"
   },
@@ -211,22 +260,20 @@ const projectMintFunctions = (panel: OptionsPanel, functions: OptionsFunctionVie
 
 const projectLvstFunctions = (panel: OptionsPanel, functions: OptionsFunctionView[]): void => {
   const target: OptionsFunctionTarget = { kind: "lvst" };
-  const unstaked = BigInt(panel.lvst.unstakedLVST);
-  const staked = BigInt(panel.lvst.stakedLVST);
-  const pendingDividends = BigInt(panel.lvst.pendingDividendsUSDC);
+  const { canStake, canUnstake, canClaimDividends } = panel.lvst.actions;
 
   functions.push(
-    unstaked > 0n
+    canStake
       ? enabledFunction(CATALOG.stakeLvst, target)
       : disabledFunction(CATALOG.stakeLvst, target, "No unstaked LVST")
   );
   functions.push(
-    staked > 0n
+    canUnstake
       ? enabledFunction(CATALOG.unstakeLvst, target)
       : disabledFunction(CATALOG.unstakeLvst, target, "Nothing staked")
   );
   functions.push(
-    pendingDividends > 0n
+    canClaimDividends
       ? enabledFunction(CATALOG.claimDividends, target)
       : disabledFunction(CATALOG.claimDividends, target, "No dividends pending")
   );
@@ -250,14 +297,26 @@ const projectNftFunctions = (
       : disabledFunction(CATALOG.setLanes, target, "NFT not owned")
   );
 
-  const hasActiveLane = nft.lanes.some(isActiveLane);
+  // Balance-first: add funds anytime you own the NFT, no active stream required.
   functions.push(
-    hasActiveLane
-      ? enabledFunction(CATALOG.stopAllFunding, target)
-      : disabledFunction(CATALOG.stopAllFunding, target, "No active streams")
+    ownsNft
+      ? enabledFunction(CATALOG.addFunds, target)
+      : disabledFunction(CATALOG.addFunds, target, "NFT not owned")
   );
 
-  const hasWinningClaim = nft.lanes.some((lane) => lane.canClaimWin === true);
+  // Sweep is available with an active stream OR a parked balance to pull back.
+  const hasSweepable = nft.account.status === "streaming" || nft.account.status === "idle";
+  functions.push(
+    ownsNft && hasSweepable
+      ? enabledFunction(CATALOG.stopAllFunding, target)
+      : disabledFunction(
+          CATALOG.stopAllFunding,
+          target,
+          ownsNft ? "Nothing to sweep" : "NFT not owned"
+        )
+  );
+
+  const hasWinningClaim = nft.lanes.some((lane) => lane.settlement?.canClaimWin === true);
   functions.push(
     hasWinningClaim
       ? enabledFunction(CATALOG.withdrawMany, target)
@@ -327,14 +386,14 @@ const projectVaultFunctions = (
       : enabledFunction(CATALOG.stopFunding, { ...vaultTarget, side: activeLane.side })
   );
 
-  const hasWinningClaim = lanesOnVault.some((lane) => lane.canClaimWin === true);
+  const hasWinningClaim = lanesOnVault.some((lane) => lane.settlement?.canClaimWin === true);
   functions.push(
     hasWinningClaim
       ? enabledFunction(CATALOG.withdraw, vaultTarget)
       : disabledFunction(CATALOG.withdraw, vaultTarget, "No winnings to claim")
   );
 
-  const hasLosingClaim = lanesOnVault.some((lane) => lane.canClaimLoss === true);
+  const hasLosingClaim = lanesOnVault.some((lane) => lane.settlement?.canClaimLoss === true);
   functions.push(
     hasLosingClaim
       ? enabledFunction(CATALOG.claimLossLvst, vaultTarget)
@@ -373,38 +432,7 @@ const disabledFunction = (
 const lanesForVault = (panel: OptionsPanel, vaultId: string): readonly OptionsLanePanel[] =>
   panel.nfts.flatMap((nft) => nft.lanes.filter((lane) => lane.vaultId === vaultId));
 
-const isActiveLane = (lane: OptionsLanePanel): boolean =>
-  BigInt(lane.rate) > 0n && lane.depleted === false;
-
-const collectFunderBoundaries = (
-  vaultId: string,
-  nftSnapshots: readonly OptionsNftSnapshot[]
-): { readonly yes: readonly FunderBoundary[]; readonly no: readonly FunderBoundary[] } => {
-  const yes: FunderBoundary[] = [];
-  const no: FunderBoundary[] = [];
-
-  for (const entry of nftSnapshots) {
-    for (const lane of entry.nft.lanes) {
-      if (
-        lane.vaultId !== vaultId ||
-        lane.depleted ||
-        lane.rate === 0n ||
-        lane.maxEndMs === undefined
-      ) {
-        continue;
-      }
-
-      const boundary: FunderBoundary = { maxEndMs: lane.maxEndMs, rate: lane.rate };
-      if (lane.side === "yes") {
-        yes.push(boundary);
-      } else {
-        no.push(boundary);
-      }
-    }
-  }
-
-  return { yes, no };
-};
+const isActiveLane = (lane: OptionsLanePanel): boolean => lane.status === "streaming";
 
 // The pool's CURRENT growth rate (USDC base units/sec): the on-chain side rate (set at the last
 // advance) minus any funder lane whose runway has already ended by `nowMs`. Subtracting the expired
@@ -426,52 +454,27 @@ const currentSideRate = (
   return rate > 0n ? rate : 0n;
 };
 
-type SideBoundaries = {
-  readonly yes: readonly FunderBoundary[];
-  readonly no: readonly FunderBoundary[];
-};
-
-// Combine two per-side boundary sets (the connected user's NFT lanes + the creator seed) for the
-// projection. Returns undefined only when both are absent, so an unfunded vault keeps the cheap
-// uncapped path; empty arrays are harmless (the projection no-ops on them).
-const mergeFunderBoundaries = (
-  lanes: SideBoundaries | undefined,
-  seed: SideBoundaries | undefined
-): SideBoundaries | undefined => {
-  if (lanes === undefined && seed === undefined) {
-    return undefined;
-  }
-  return {
-    yes: [...(lanes?.yes ?? []), ...(seed?.yes ?? [])],
-    no: [...(lanes?.no ?? []), ...(seed?.no ?? [])]
-  };
-};
-
 const projectMarketPanel = (
   marketSnapshot: OptionsMarketSnapshot,
-  vaultSnapshots: readonly OptionsVaultSnapshot[],
-  nftSnapshots: readonly OptionsNftSnapshot[]
+  vaultSnapshots: readonly OptionsVaultSnapshot[]
 ): OptionsMarketPanel => {
   // One wall-clock instant for the whole panel so every vault's live pool AND its growth rate are
   // measured at the same moment (the rate must be the slope at exactly the pool's read time).
   const nowMs = Date.now();
+  const marketCreatedAtMs = marketSnapshot.market.timing?.createdAtMs;
   const vaultPanels = marketSnapshot.vaults.map((vault) => {
     const enriched = vaultSnapshots.find((entry) => entry.vault.vaultId === vault.vaultId);
-    const funderBoundaries = collectFunderBoundaries(vault.vaultId, nftSnapshots);
-    return projectVaultPanel(vault, enriched, funderBoundaries, nowMs);
+    return projectVaultPanel(vault, enriched, nowMs, marketCreatedAtMs);
   });
 
   const totalPooled = marketSnapshot.vaults.reduce(
     (sum, vault) => sum + totalVaultPool(vault.pools),
     0n
   );
-  const livePooled = vaultPanels.reduce(
-    (sum, vault) => sum + BigInt(vault.pools.livePoolUSDC),
-    0n
-  );
+  const livePooled = vaultPanels.reduce((sum, vault) => sum + vault.pools.livePoolUSDC, 0);
   const livePooledRate = vaultPanels.reduce(
-    (sum, vault) => sum + BigInt(vault.pools.poolRatePerSecUSDC),
-    0n
+    (sum, vault) => sum + vault.pools.poolRatePerSecUSDC,
+    0
   );
 
   const activeVaults = marketSnapshot.vaults.filter(
@@ -494,10 +497,10 @@ const projectMarketPanel = (
     status: marketSnapshot.market.status,
     vaultIds: [...marketSnapshot.market.vaultIds],
     totals: {
-      pooledUSDC: totalPooled.toString(),
-      totalPooledUSDC: totalPooled.toString(),
-      livePooledUSDC: livePooled.toString(),
-      livePooledRatePerSecUSDC: livePooledRate.toString(),
+      pooledUSDC: usdcToNumber(totalPooled),
+      totalPooledUSDC: usdcToNumber(totalPooled),
+      livePooledUSDC: livePooled,
+      livePooledRatePerSecUSDC: livePooledRate,
       activeVaults,
       resolvedVaults
     },
@@ -526,16 +529,19 @@ const projectMarketPanel = (
 const projectVaultPanel = (
   vault: OptionsMarketSnapshot["vaults"][number],
   snapshot?: OptionsVaultSnapshot,
-  funderBoundaries?: { readonly yes: readonly FunderBoundary[]; readonly no: readonly FunderBoundary[] },
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  // The vault contract stores no creation timestamp (VaultData has only resolvedAt), so getVault can't
+  // supply one and mapVault hardcodes 0 — which renders as "1:00:00 AM" and a ~29.7M "minute" downstream.
+  // The market DOES record createdAt, and a vault is created right after its market, so the market's
+  // timestamp is the correct, real, on-chain proxy. Threaded down from projectMarketPanel.
+  marketCreatedAtMs?: number
 ): OptionsVaultPanel => {
   const pools = snapshot?.pools ?? vault.pools;
   const settledTotal = totalVaultPool(pools);
-  // Cap the live pool at funder depletion: combine the connected user's NFT-lane boundaries (passed
-  // in) with the vault's creator-seed boundary (carried on the snapshot, so the host's pool reader
-  // inherits it too). Without the seed boundary the projection extrapolates the seed rate past its
-  // run-dry instant — the pool climbs past what was actually funded.
-  const boundaries = mergeFunderBoundaries(funderBoundaries, snapshot?.seedBoundaries);
+  // Cap the live pool at funder depletion using the contract's canonical boundary schedule (every
+  // active funder's maxEnd + rate). Read straight from Vault.getBoundaries, so the cap holds for any
+  // viewer — connected user, anonymous host pool reader, multi-funder — without reconstruction.
+  const boundaries = snapshot?.boundaries;
   const livePools =
     snapshot?.boards === undefined
       ? pools
@@ -547,7 +553,10 @@ const projectVaultPanel = (
           resolvedAtMs: vault.timing.resolvedAtMs
         });
   const liveTotal = totalVaultPool(livePools);
-  const odds = computeOdds(pools.yes, pools.no, settledTotal);
+  // Odds, pool bars, and share price all read the LIVE per-side pools. The settled pools sit at 0
+  // between advances (always, on a frozen dev chain), and computeOdds(0,0,0) returns a flat 50/50 —
+  // so a vault that has clearly streamed in still showed even odds. Live is the truth the user sees.
+  const odds = computeOdds(livePools.yes, livePools.no, liveTotal);
 
   // Current per-second growth of the live pool. 0 when there is no board (anonymous market view) or
   // the vault has resolved (its pool is frozen at resolution, so it no longer streams).
@@ -568,21 +577,29 @@ const projectVaultPanel = (
     status: vault.status,
     outcome: vault.outcome,
     pools: {
-      yesUSDC: pools.yes.toString(),
-      noUSDC: pools.no.toString(),
-      totalUSDC: settledTotal.toString(),
-      settledPoolUSDC: settledTotal.toString(),
-      livePoolUSDC: liveTotal.toString(),
-      poolRatePerSecUSDC: poolRatePerSec.toString(),
-      sharePriceYes: priceOf(pools.yes).toString(),
-      sharePriceNo: priceOf(pools.no).toString()
+      yesUSDC: usdcToNumber(pools.yes),
+      noUSDC: usdcToNumber(pools.no),
+      totalUSDC: usdcToNumber(settledTotal),
+      settledPoolUSDC: usdcToNumber(settledTotal),
+      livePoolUSDC: usdcToNumber(liveTotal),
+      liveYesUSDC: usdcToNumber(livePools.yes),
+      liveNoUSDC: usdcToNumber(livePools.no),
+      poolRatePerSecUSDC: usdcToNumber(poolRatePerSec),
+      sharePriceYes: usdcToNumber(priceOf(livePools.yes)),
+      sharePriceNo: usdcToNumber(priceOf(livePools.no))
     },
     shareTotals: {
-      yes: (snapshot?.shareTotals.yes ?? 0n).toString(),
-      no: (snapshot?.shareTotals.no ?? 0n).toString()
+      yes: sharesToNumber(snapshot?.shareTotals.yes ?? 0n),
+      no: sharesToNumber(snapshot?.shareTotals.no ?? 0n)
     },
     odds,
-    timing: vault.timing,
+    // Fall back to the market's createdAt only when the vault carries none (EVM: always 0; Sui sets a
+    // real one at decode). Keeps a genuine per-vault timestamp where it exists, kills the epoch-0 render
+    // where it doesn't.
+    timing: {
+      ...vault.timing,
+      createdAtMs: vault.timing.createdAtMs > 0 ? vault.timing.createdAtMs : (marketCreatedAtMs ?? vault.timing.createdAtMs)
+    },
     steward: {
       hot: vault.steward.hot,
       ...(vault.steward.hotUntilMs === undefined
@@ -598,40 +615,139 @@ const projectVaultPanel = (
   };
 };
 
-const projectNftPanel = (entry: OptionsNftSnapshot): OptionsNftPanel => ({
-  tokenId: entry.nft.tokenId.toString(),
-  marketId: entry.nft.marketId,
-  laneCount: entry.nft.laneCount,
-  lanes: entry.nft.lanes.map(projectLanePanel),
-  owner: entry.nft.owner,
-  ...(entry.nft.approved === undefined ? {} : { approved: entry.nft.approved }),
-  ...(entry.nft.isOperator === undefined ? {} : { isOperator: entry.nft.isOperator }),
-  ...(entry.nft.balance === undefined ? {} : { balanceUSDC: entry.nft.balance.toString() }),
-  ...(entry.nft.runwayEndMs === undefined ? {} : { runwayEndMs: entry.nft.runwayEndMs })
-});
+const projectNftPanel = (entry: OptionsNftSnapshot, ctx: ProjectPanelContext): OptionsNftPanel => {
+  const { lvstDecimals } = ctx;
+  const realLanes = entry.nft.lanes;
+  const tokenId = entry.nft.tokenId.toString();
 
-const projectLanePanel = (lane: OptionsNftSnapshot["nft"]["lanes"][number]): OptionsLanePanel => {
-  const claimable = lane.claimable ?? 0n;
-  const lossClaimable = lane.lossClaimable ?? 0n;
+  // Per-NFT realized P&L from existing lane/NFT fields (no new reads).
+  let returned = 0n;
+  let lostLvst = 0n;
+  for (const lane of realLanes) {
+    if (lane.won === true && lane.claimable !== undefined) {
+      returned += lane.claimable;
+    } else if (lane.won === false && lane.lossClaimable !== undefined) {
+      lostLvst += lane.lossClaimable;
+    }
+  }
+
+  // Canonical account status from the LIVE balance + active lanes. The reader already drains the balance,
+  // so depleted ⇒ ~0 with no special-case flooring. activeRate doubles as the UI's drain rate.
+  const balance = entry.nft.balance ?? 0n;
+  const activeRate = realLanes
+    .filter((lane) => lane.rate > 0n && !lane.depleted)
+    .reduce((sum, lane) => sum + lane.rate, 0n);
+  const hasDepleted = realLanes.some((lane) => lane.depleted);
+  const status: OptionsAccountStatus =
+    activeRate > 0n ? "streaming" : hasDepleted ? "depleted" : balance > 0n ? "idle" : "empty";
+
+  // Paused lanes (session intent) overlay the matching ledger position — forcing "paused" + the remembered
+  // resume rate. A paused entry with NO ledger position (paused before any shares accrued) is re-injected.
+  const pausedByKey = new Map(
+    (ctx.pausedLanes ?? [])
+      .filter((p) => p.tokenId === tokenId)
+      .map((p) => [`${p.vaultId}:${p.side}`, p] as const)
+  );
+  const realKeys = new Set(realLanes.map((lane) => `${lane.vaultId}:${lane.side}`));
+  const pausedOnly = [...pausedByKey.values()]
+    .filter((p) => !realKeys.has(`${p.vaultId}:${p.side}`))
+    .map(projectPausedLanePanel);
+
+  return {
+    tokenId,
+    marketId: entry.nft.marketId,
+    owner: entry.nft.owner,
+    laneCount: entry.nft.laneCount,
+    lanes: [
+      ...realLanes.map((lane) =>
+        projectLanePanel(
+          lane,
+          lvstDecimals,
+          ctx.shareTotalsByVault?.get(lane.vaultId)?.[lane.side],
+          pausedByKey.get(`${lane.vaultId}:${lane.side}`)?.rate,
+          balance > 0n
+        )
+      ),
+      ...pausedOnly
+    ],
+    transfer: {
+      ...(entry.nft.approved === undefined ? {} : { approved: entry.nft.approved }),
+      ...(entry.nft.isOperator === undefined ? {} : { isOperator: entry.nft.isOperator })
+    },
+    account: {
+      status,
+      ...(entry.nft.balance === undefined
+        ? {}
+        : { balanceUSDC: usdcToNumber(balance), balanceRaw: balance.toString() }),
+      ...(status === "streaming" && entry.nft.runwayEndMs !== undefined
+        ? { endsAtMs: entry.nft.runwayEndMs, drainRatePerSecUSDC: usdcToNumber(activeRate) }
+        : {})
+    },
+    pnl: {
+      returnedUSDC: usdcToNumber(returned),
+      lostLVST: lvstToNumber(lostLvst, lvstDecimals),
+      remainingUSDC: usdcToNumber(balance)
+    }
+  };
+};
+
+const projectLanePanel = (
+  lane: OptionsNftSnapshot["nft"]["lanes"][number],
+  lvstDecimals: number,
+  sideShareTotal?: bigint,
+  pausedRate?: bigint,
+  hasBalance = false
+): OptionsLanePanel => {
+  const streaming = !lane.depleted && lane.rate > 0n;
+  // Money-driven status: streaming while a rate flows; else PAUSED as long as the deposit (the NFT's shared
+  // balance) is still there to resume from (stopped / switched-away / one leg streaming while the other
+  // sits), or DEPLETED once the money is gone (ran dry or swept). No separate "banked" state.
+  const status: OptionsLaneStatus = streaming ? "streaming" : hasBalance ? "paused" : "depleted";
+  const displayRate = pausedRate ?? lane.rate; // remembered resume rate if paused via the button, else live
 
   return {
     vaultId: lane.vaultId,
     side: lane.side,
-    rate: lane.rate.toString(),
-    sharesAccrued: lane.sharesAccrued.toString(),
-    depleted: lane.depleted,
-    ...(lane.maxEndMs === undefined ? {} : { maxEndMs: lane.maxEndMs }),
-    ...(lane.claimable === undefined ? {} : { claimableUSDC: claimable.toString() }),
-    ...(lane.lossClaimable === undefined
+    status,
+    stream: {
+      ratePerMinUSDC: rateToPerMinUSDC(displayRate),
+      ratePerSecRaw: displayRate.toString(),
+      ...(streaming && lane.maxEndMs !== undefined ? { endsAtMs: lane.maxEndMs } : {})
+    },
+    shares: {
+      accrued: sharesToNumber(lane.sharesAccrued),
+      accruedRaw: lane.sharesAccrued.toString(),
+      ...(sideShareTotal !== undefined && sideShareTotal > 0n
+        ? { percentOfSide: Number((lane.sharesAccrued * 10_000n) / sideShareTotal) / 100 }
+        : {})
+    },
+    ...(lane.won === undefined
       ? {}
-      : { lossClaimableLVST: lossClaimable.toString() }),
-    ...(lane.won === undefined ? {} : { won: lane.won }),
-    ...(lane.claimable === undefined ? {} : { canClaimWin: claimable > 0n }),
-    ...(lane.lossClaimable === undefined ? {} : { canClaimLoss: lossClaimable > 0n })
+      : {
+          settlement: {
+            won: lane.won,
+            claimableUSDC: usdcToNumber(lane.claimable ?? 0n),
+            lossClaimableLVST: lvstToNumber(lane.lossClaimable ?? 0n, lvstDecimals),
+            canClaimWin: (lane.claimable ?? 0n) > 0n,
+            canClaimLoss: (lane.lossClaimable ?? 0n) > 0n
+          }
+        })
   };
 };
 
-const projectLvstPanel = (account: LvstAccount): OptionsLvstPanel => {
+// A paused lane: dropped on-chain so shares aren't re-read (0 here), shown at the rate it resumes at.
+const projectPausedLanePanel = (paused: OptionsPausedLane): OptionsLanePanel => ({
+  vaultId: paused.vaultId,
+  side: paused.side,
+  status: "paused",
+  stream: {
+    ratePerMinUSDC: rateToPerMinUSDC(paused.rate),
+    ratePerSecRaw: paused.rate.toString()
+  },
+  shares: { accrued: 0, accruedRaw: "0" }
+});
+
+const projectLvstPanel = (account: LvstAccount, lvstDecimals: number): OptionsLvstPanel => {
   // O3: staking REMOVES LVST from the wallet (Treasury._stake pulls it), so the reader's `balance`
   // (wallet balanceOf / getBalance) already excludes staked — it IS the stakeable amount. The old
   // `balance - staked` double-subtracted and under-reported (often 0) the unstaked total.
@@ -639,13 +755,13 @@ const projectLvstPanel = (account: LvstAccount): OptionsLvstPanel => {
 
   return {
     account: account.account,
-    balanceLVST: account.balance.toString(),
-    stakedLVST: account.staked.toString(),
-    unstakedLVST: unstaked.toString(),
-    pendingDividendsUSDC: account.pendingDividends.toString(),
+    balanceLVST: lvstToNumber(account.balance, lvstDecimals),
+    stakedLVST: lvstToNumber(account.staked, lvstDecimals),
+    unstakedLVST: lvstToNumber(unstaked, lvstDecimals),
+    pendingDividendsUSDC: usdcToNumber(account.pendingDividends),
     ...(account.totalEarned === undefined
       ? {}
-      : { totalEarnedLVST: account.totalEarned.toString() }),
+      : { totalEarnedLVST: lvstToNumber(account.totalEarned, lvstDecimals) }),
     actions: {
       canStake: unstaked > 0n,
       canUnstake: account.staked > 0n,

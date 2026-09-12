@@ -75,4 +75,19 @@ describe("projectVaultLivePools", () => {
 
     expect(capped).toBe(30_000_000n); // 1_000_000/s × 30s — full deposit, not 600_000_000
   });
+
+  it("clamps side rate at zero when a boundary rate exceeds the board rate", () => {
+    // A boundary's rate can over-count the board rate (e.g. a stale committed rate). Subtracting it
+    // must floor at 0, never drive sideRate negative and shrink the pool below what already streamed.
+    const lastAdvanceMs = 1_700_000_000_000;
+    const board = { pool: 0n, sideRate: 1_000_000n, g: 0n, lastAdvanceMs };
+
+    const capped = projectLivePoolSide({
+      board,
+      atMs: lastAdvanceMs + 600_000,
+      funderBoundaries: [{ maxEndMs: lastAdvanceMs + 30_000, rate: 1_500_000n }]
+    });
+
+    expect(capped).toBe(30_000_000n); // 30s × 1_000_000/s, then frozen — not negative
+  });
 });

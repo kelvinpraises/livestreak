@@ -1,5 +1,4 @@
 import { LiveStreakConfigError } from "@livestreak/core";
-import { marketDriverAbi, treasuryAbi } from "@livestreak/contracts/evm/abis";
 import type { Address } from "@livestreak/schema";
 
 import {
@@ -7,6 +6,7 @@ import {
   asTokenId,
   asUserAddress,
   asVaultId,
+  type FunderBoundary,
   type LvstAccount,
   type MarketId,
   type OptionsBoardState,
@@ -88,6 +88,7 @@ export interface FakeTransportSeed {
   readonly collected?: Readonly<Record<string, boolean>>;
   readonly boards?: Readonly<Record<string, OptionsBoardState>>;
   readonly pendingBoundaries?: Readonly<Record<string, bigint>>;
+  readonly boundaries?: Readonly<Record<string, readonly FunderBoundary[]>>;
   readonly sharePrices?: Readonly<Record<string, bigint>>;
   readonly pendingShares?: Readonly<Record<string, bigint>>;
   readonly accountVaultIds?: Readonly<Record<string, readonly VaultId[]>>;
@@ -112,6 +113,7 @@ export class FakeReaderInMemory implements OptionsReader {
   private readonly collected = new Map<string, boolean>();
   private readonly boards = new Map<string, OptionsBoardState>();
   private readonly pendingBoundaries = new Map<string, bigint>();
+  private readonly boundaries = new Map<string, readonly FunderBoundary[]>();
   private readonly sharePrices = new Map<string, bigint>();
   private readonly pendingShares = new Map<string, bigint>();
   private readonly accountVaultIds = new Map<string, readonly VaultId[]>();
@@ -175,6 +177,9 @@ export class FakeReaderInMemory implements OptionsReader {
 
     for (const [key, value] of Object.entries(seed.pendingBoundaries ?? {})) {
       this.pendingBoundaries.set(key, value);
+    }
+    for (const [key, value] of Object.entries(seed.boundaries ?? {})) {
+      this.boundaries.set(key, value);
     }
 
     for (const [key, value] of Object.entries(seed.sharePrices ?? {})) {
@@ -354,6 +359,10 @@ export class FakeReaderInMemory implements OptionsReader {
     return this.pendingBoundaries.get(boardKey(vaultId, side)) ?? 0n;
   }
 
+  async readBoundaries(vaultId: VaultId, side: OptionsVaultSide): Promise<readonly FunderBoundary[]> {
+    return this.boundaries.get(boardKey(vaultId, side)) ?? [];
+  }
+
   async readPendingShares(
     vaultId: VaultId,
     side: OptionsVaultSide,
@@ -498,6 +507,7 @@ export const fixtureNft = (
         vaultId: asVaultId("vault_01"),
         side: "yes",
         rate: 800_000n,
+        committedRate: 800_000n,
         gPaid: 0n,
         sharesAccrued: 34_000_000n,
         depleted: false
@@ -507,6 +517,7 @@ export const fixtureNft = (
         vaultId: asVaultId("vault_01"),
         side: "no",
         rate: 0n,
+        committedRate: 0n,
         gPaid: 0n,
         sharesAccrued: 6_000_000n,
         depleted: false
@@ -527,6 +538,7 @@ export const fixtureOtherMarketNft = (user: UserAddress = fixtureUser()): Option
         vaultId: asVaultId("vault_02"),
         side: "yes",
         rate: 100_000n,
+        committedRate: 100_000n,
         gPaid: 0n,
         sharesAccrued: 1_000_000n,
         depleted: false

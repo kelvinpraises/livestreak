@@ -9,32 +9,73 @@ import type {
   OptionsVaultType
 } from "../../model/index.js";
 
+/** Canonical position-lane state, money-driven. `streaming` = a rate is flowing. `paused` = no active
+ *  stream but the NFT's shared balance is still there to resume from (stopped, paused, or a switched-away
+ *  leg while the other side streams). `depleted` = no stream and no money left (ran dry or swept to
+ *  wallet). The board owns these names so no consumer re-derives them. */
+export type OptionsLaneStatus = "streaming" | "paused" | "depleted";
+
+/** Canonical NFT-account state. `idle` = funds parked, nothing streaming; `depleted` = a stream ran the
+ *  balance dry; `empty` = no balance and no lanes. Distinguishes "parked" from "drained" at the source. */
+export type OptionsAccountStatus = "streaming" | "idle" | "depleted" | "empty";
+
 export interface OptionsLanePanel {
   readonly vaultId: string;
   readonly side: OptionsVaultSide;
-  readonly rate: string;
-  readonly sharesAccrued: string;
-  readonly depleted: boolean;
-  readonly maxEndMs?: number;
-  readonly claimableUSDC?: string;
-  readonly lossClaimableLVST?: string;
-  readonly won?: boolean;
-  readonly canClaimWin?: boolean;
-  readonly canClaimLoss?: boolean;
+  readonly status: OptionsLaneStatus;
+  readonly stream: {
+    /** Effective stream rate, USDC/min. 0 unless `status === "streaming"`. */
+    readonly ratePerMinUSDC: number;
+    /** Effective stream rate, USDC base units/sec (precision-preserving). "0" unless streaming. */
+    readonly ratePerSecRaw: string;
+    /** When this lane's runway ends (ms since epoch). Present only while streaming. */
+    readonly endsAtMs?: number;
+  };
+  readonly shares: {
+    readonly accrued: number;
+    readonly accruedRaw: string;
+    /** This position's share of its side's total shares, as a percent (0–100) — the payout-relevant
+     *  ownership fraction. Absent when the side has no shares yet (nothing to take a fraction of). */
+    readonly percentOfSide?: number;
+  };
+  /** Settlement view — present only once the vault has resolved (win/loss known). */
+  readonly settlement?: {
+    readonly won: boolean;
+    readonly claimableUSDC: number;
+    readonly lossClaimableLVST: number;
+    readonly canClaimWin: boolean;
+    readonly canClaimLoss: boolean;
+  };
 }
 
 export interface OptionsNftPanel {
   readonly tokenId: string;
   readonly marketId: string;
+  readonly owner: string;
   readonly laneCount: number;
   readonly lanes: readonly OptionsLanePanel[];
-  readonly owner: string;
-  readonly approved?: string;
-  readonly isOperator?: boolean;
-  /** Shared Drips account balance in USDC raw units (string). EVM only; absent on Sui. */
-  readonly balanceUSDC?: string;
-  /** Account-level runway as ms-since-epoch when the balance runs out. EVM only; absent on Sui. */
-  readonly runwayEndMs?: number;
+  readonly transfer: {
+    readonly approved?: string;
+    readonly isOperator?: boolean;
+  };
+  /** Shared Drips budget + canonical account status. EVM-only fields are absent on Sui. */
+  readonly account: {
+    readonly status: OptionsAccountStatus;
+    /** LIVE shared balance — stored minus what's streamed since the last write. Always the real number. */
+    readonly balanceUSDC?: number;
+    readonly balanceRaw?: string;
+    /** When the shared balance runs dry (ms). Present only while `status === "streaming"`. */
+    readonly endsAtMs?: number;
+    /** Total drain rate (USDC/sec) across active lanes. Lets the UI tick `balanceUSDC` down between polls
+     *  without re-deriving anything. Present only while `status === "streaming"`. */
+    readonly drainRatePerSecUSDC?: number;
+  };
+  /** Per-NFT realized P&L (no net figure — streaming records no cost basis on-chain). */
+  readonly pnl: {
+    readonly returnedUSDC: number; // Σ claimable on won lanes
+    readonly lostLVST: number; // Σ lossClaimable on lost lanes
+    readonly remainingUSDC: number; // shared balance still at stake
+  };
 }
 
 export interface OptionsVaultPanel {
@@ -46,24 +87,26 @@ export interface OptionsVaultPanel {
   readonly status: OptionsVaultStatus;
   readonly outcome: OptionsVaultOutcome;
   readonly pools: {
-    readonly yesUSDC: string;
-    readonly noUSDC: string;
-    readonly totalUSDC: string;
+    readonly yesUSDC: number;
+    readonly noUSDC: number;
+    readonly totalUSDC: number;
     /** Settled on-chain pool (getVaultPools) — unchanged until advance. */
-    readonly settledPoolUSDC: string;
+    readonly settledPoolUSDC: number;
     /** Board-replayed pool at read time (pool + sideRate × Δt). */
-    readonly livePoolUSDC: string;
-    /** Current growth rate of livePoolUSDC in USDC base units per second: the on-chain side rate
-     *  (yes + no) net of funder lanes whose runway has already ended. 0 once resolved/frozen. This is
-     *  the exact slope of segMath (pool += sideRate × Δt), so the UI ticks the pool forward between
-     *  polls and lands on the next poll's value rather than estimating the rate from poll deltas. */
-    readonly poolRatePerSecUSDC: string;
-    readonly sharePriceYes: string;
-    readonly sharePriceNo: string;
+    readonly livePoolUSDC: number;
+    /** Live per-side pools. Settled per-side pools sit at 0 between advances (always on a frozen dev
+     *  chain), collapsing odds to 50/50; the UI reads these. liveYesUSDC + liveNoUSDC === livePoolUSDC. */
+    readonly liveYesUSDC: number;
+    readonly liveNoUSDC: number;
+    /** livePoolUSDC growth in USDC/sec (segMath slope: yes+no side rate, net of ended lanes; 0 once
+     *  frozen). Lets the UI tick the pool forward between polls. */
+    readonly poolRatePerSecUSDC: number;
+    readonly sharePriceYes: number;
+    readonly sharePriceNo: number;
   };
   readonly shareTotals: {
-    readonly yes: string;
-    readonly no: string;
+    readonly yes: number;
+    readonly no: number;
   };
   readonly odds: {
     readonly yesMultiplier: number;
@@ -96,12 +139,12 @@ export interface OptionsMarketPanel {
   readonly status: OptionsMarketStatus;
   readonly vaultIds: readonly string[];
   readonly totals: {
-    readonly pooledUSDC: string;
-    readonly totalPooledUSDC: string;
+    readonly pooledUSDC: number;
+    readonly totalPooledUSDC: number;
     /** Sum of vault livePoolUSDC (board-replayed). */
-    readonly livePooledUSDC: string;
-    /** Sum of vault poolRatePerSecUSDC — the market pool's current per-second growth (USDC base units). */
-    readonly livePooledRatePerSecUSDC: string;
+    readonly livePooledUSDC: number;
+    /** Sum of vault poolRatePerSecUSDC — the market pool's current growth in USDC/sec. */
+    readonly livePooledRatePerSecUSDC: number;
     readonly activeVaults: number;
     readonly resolvedVaults: number;
   };
@@ -123,11 +166,11 @@ export interface OptionsMarketPanel {
 
 export interface OptionsLvstPanel {
   readonly account: string;
-  readonly balanceLVST: string;
-  readonly stakedLVST: string;
-  readonly unstakedLVST: string;
-  readonly pendingDividendsUSDC: string;
-  readonly totalEarnedLVST?: string;
+  readonly balanceLVST: number;
+  readonly stakedLVST: number;
+  readonly unstakedLVST: number;
+  readonly pendingDividendsUSDC: number;
+  readonly totalEarnedLVST?: number;
   readonly actions: {
     readonly canStake: boolean;
     readonly canUnstake: boolean;
@@ -143,7 +186,7 @@ export interface OptionsProtocolPanel {
 export interface OptionsUserPanel {
   readonly account: string;
   readonly marketId?: string;
-  readonly usdcBalanceUSDC?: string;
+  readonly usdcBalanceUSDC?: number;
 }
 
 export interface OptionsPanel {

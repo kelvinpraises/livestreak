@@ -227,7 +227,9 @@ function FunctionCard({
   useEffect(() => () => clearTimeout(resultTimer.current), [])
 
   const submit = async (args: Record<string, unknown>) => {
-    const envelope: CallActionEnvelope = { scope: bridgeActionScope, action: fn.name, args }
+    // action = bare name (authz/spend key); id = cell-qualified descriptor id (dispatch key, so same-named
+    // functions across cells — observe's per-cell configure/close — route to the right cell).
+    const envelope: CallActionEnvelope = { scope: bridgeActionScope, action: fn.name, id: fn.id, args }
     const res = await onCall(envelope)
     setResult(res.ok ? { text: '✓ sent', ok: true } : { text: `✗ ${res.error ?? 'failed'}`, ok: false })
     // Auto-dismiss after 3s. The row below is ALWAYS rendered (opacity toggles, not mount/unmount), so

@@ -35,6 +35,15 @@ export {
   WAD
 } from "./math/index.js";
 export type { FunderBoundary, ProjectLivePoolSideInput, ProjectVaultLivePoolsInput } from "./math/index.js";
+export {
+  lvstDecimalsForChain,
+  lvstToNumber,
+  perMinUSDCToRate,
+  rateToPerMinUSDC,
+  sharesToNumber,
+  usdcToNumber,
+  usdcToRaw
+} from "./units.js";
 export type { LvstAccount } from "./lvst.js";
 export type { OptionsNft } from "./nft.js";
 export type {

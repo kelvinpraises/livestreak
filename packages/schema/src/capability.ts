@@ -43,10 +43,14 @@ export const bridgeControlsReadScope = "bridge:controls:read" as const;
 export const bridgeActionScope = "bridge:action" as const;
 export const bridgeBoardSubscribeScope = "bridge:board:subscribe" as const;
 
-// Canonical action envelope (re-declared identically in options/bookmaker bridge/types.ts).
+// Canonical action envelope (re-declared identically in options/bookmaker/steward bridge/types.ts).
+// `action` is the bare fn name — the authz + spend key (`bridge:action:<action>`). `id` is the OPTIONAL
+// cell-qualified descriptor id (e.g. "observe.capture.file.configure") used only for DISPATCH, so a
+// package whose cells share a fn name (observe's per-cell configure/close) can be addressed precisely.
 export interface CallActionEnvelope {
   readonly scope: typeof bridgeActionScope;
   readonly action: string;
+  readonly id?: string;
   readonly args: unknown;
 }
 

@@ -111,7 +111,7 @@ const projectLivePoolWithBoundaries = (
         sideRate,
         dtSeconds: boundarySec - tSec
       }).newPool;
-      sideRate -= boundary.rate;
+      sideRate = sideRate > boundary.rate ? sideRate - boundary.rate : 0n;
       tMs = boundary.maxEndMs;
     }
   }

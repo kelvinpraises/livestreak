@@ -224,6 +224,81 @@ fun test_set_lanes_hedge_flips_side_keeping_shares() {
     ts::end(scenario);
 }
 
+/// Regression (parity with EVM test_setLanes_refundsDrainedSide): a side whose deposit ran dry is
+/// re-fundable. Drain NO, hedge to YES, then switch BACK onto the drained NO — on_fund re-opens it
+/// (clearing the run-dry stamp) instead of aborting E_ALREADY_FUNDING. The round-1 NO shares survive.
+/// Without the depleted-clear in on_fund this aborts.
+#[test]
+fun test_set_lanes_refunds_drained_side() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (_, v1, alice_token, _) = setup_fixture(&mut scenario, &clock);
+
+    // Round 1: stream NO briefly (runway 10s → max_end start+10), then let it run dry.
+    fund_holder(
+        &mut scenario,
+        wire::alice(),
+        v1,
+        side::no(),
+        wire::rate(),
+        deposit_units(10),
+        &clock,
+    );
+    wire::warp(&mut clock, wire::start_secs() + 50);
+    wire::advance_side(&mut scenario, wire::admin(), v1, side::no(), &clock);
+
+    ts::next_tx(&mut scenario, wire::admin());
+    let no_shares0 = {
+        let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        let (no_rate0, _, no_shares0, _, no_depleted0, _, _) =
+            vault::get_position(&vault_registry, &v1, side::no(), alice_token);
+        assert!(no_rate0 == 0, 0);
+        assert!(no_depleted0, 1);
+        assert!(no_shares0 > 0, 2);
+        ts::return_shared(vault_registry);
+        no_shares0
+    };
+
+    // Hedge onto YES (the drained NO drops out; its on_stop is a no-op).
+    wire::set_lanes(
+        &mut scenario,
+        wire::alice(),
+        vector[v1],
+        vector[side::yes()],
+        vector[wire::rate()],
+        deposit_units(20),
+        &clock,
+    );
+
+    // Switch BACK onto the drained NO — the case that used to abort E_ALREADY_FUNDING.
+    wire::set_lanes(
+        &mut scenario,
+        wire::alice(),
+        vector[v1],
+        vector[side::no()],
+        vector[wire::rate()],
+        deposit_units(20),
+        &clock,
+    );
+
+    ts::next_tx(&mut scenario, wire::admin());
+    {
+        let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        let (no_rate2, _, no_shares2, _, no_depleted2, _, _) =
+            vault::get_position(&vault_registry, &v1, side::no(), alice_token);
+        assert!(no_rate2 == wire::rate(), 3);
+        assert!(!no_depleted2, 4);
+        assert!(no_shares2 >= no_shares0, 5);
+        let (yes_rate2, _, _, _, _, _, _) =
+            vault::get_position(&vault_registry, &v1, side::yes(), alice_token);
+        assert!(yes_rate2 == 0, 6);
+        ts::return_shared(vault_registry);
+    };
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
 #[test, expected_failure(abort_code = 6)]
 fun test_fund_reverts_on_second_lane_same_vault() {
     let mut scenario = ts::begin(wire::admin());

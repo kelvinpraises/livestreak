@@ -11,32 +11,13 @@ import type {
   HomepageLiveVaultCard,
   HomepageStreamCard,
 } from '#/types/homepage'
-import { SHARE_SCALE, asMarketId, asVaultId } from '@livestreak/options'
+import { asMarketId, asVaultId } from '@livestreak/options'
 
 import type { FlowState, Position, VaultView } from '#/types/demo'
-import type { OptionsChainKind } from '#/utils/chain'
 import type { StreamPointer } from '#/utils/stream'
 
-const USDC_SCALE = 1_000_000
-
-// LVST decimals are chain-LOCAL (contracts D2 decision): EVM = 18, Sui = 9. The display scale MUST be
-// resolved per active chain — a single hardcoded 1e18 renders Sui LVST 1e9× too small.
-const LVST_SCALE_BY_CHAIN: Record<OptionsChainKind, number> = {
-  evm: 1_000_000_000_000_000_000, // 1e18
-  sui: 1_000_000_000, // 1e9
-}
-
-export function usdcStringToNumber(value: string): number {
-  return Number(BigInt(value)) / USDC_SCALE
-}
-
-export function shareStringToNumber(value: string): number {
-  return Number(BigInt(value)) / Number(SHARE_SCALE)
-}
-
-function lvstStringToNumber(value: string, chain: OptionsChainKind): number {
-  return Number(BigInt(value)) / LVST_SCALE_BY_CHAIN[chain]
-}
+// The SDK board ships every amount (lanes, account, LVST, pnl, vault pools, accrual) already normalized
+// to numbers and owns all unit conversion (incl. per-chain LVST decimals). No scale math in the app.
 
 function mapVaultStatus(status: OptionsVaultPanel['status']): OptionsVault['status'] {
   if (status === 'hot') return 'open'
@@ -47,10 +28,6 @@ function vaultMultiplier(vault: OptionsVaultPanel, side?: 'yes' | 'no'): number 
   if (side === 'no') return vault.odds.noMultiplier
   if (side === 'yes') return vault.odds.yesMultiplier
   return Math.max(vault.odds.yesMultiplier, vault.odds.noMultiplier)
-}
-
-function chainRateToUsdPerMin(rate: string): number {
-  return (Number(BigInt(rate)) * 60) / USDC_SCALE
 }
 
 function marketsForStream(panel: OptionsPanel, streamId?: string) {
@@ -74,8 +51,8 @@ export function panelToVaults(panel: OptionsPanel, streamId?: string): OptionsVa
         status: mapVaultStatus(vault.status),
         outcome: vault.outcome,
         pools: {
-          yes: BigInt(Math.round(usdcStringToNumber(vault.pools.yesUSDC))),
-          no: BigInt(Math.round(usdcStringToNumber(vault.pools.noUSDC))),
+          yes: BigInt(Math.round(vault.pools.yesUSDC)),
+          no: BigInt(Math.round(vault.pools.noUSDC)),
         },
         timing: {
           createdAtMs: vault.timing.createdAtMs,
@@ -107,31 +84,32 @@ export function panelToVaultViews(
       const side = lane?.side
 
       views[vault.vaultId] = {
-        sharePriceYes: usdcStringToNumber(vault.pools.sharePriceYes),
-        sharePriceNo: usdcStringToNumber(vault.pools.sharePriceNo),
+        sharePriceYes: vault.pools.sharePriceYes,
+        sharePriceNo: vault.pools.sharePriceNo,
         multiplier: vaultMultiplier(vault, side),
         odds: vault.odds,
-        poolYes: usdcStringToNumber(vault.pools.yesUSDC),
-        poolNo: usdcStringToNumber(vault.pools.noUSDC),
-        poolTotal: usdcStringToNumber(vault.pools.totalUSDC),
+        // LIVE per-side pools (board-replayed), not settled. The settled pools sit at 0 between on-chain
+        // advances — which made the bars read empty and the odds collapse to 50/50 even after the pool
+        // had streamed in. liveYes/liveNo + livePool are what the user actually sees moving.
+        poolYes: vault.pools.liveYesUSDC,
+        poolNo: vault.pools.liveNoUSDC,
+        poolTotal: vault.pools.livePoolUSDC,
         ...(vault.steward.severity !== undefined ? { severity: vault.steward.severity } : {}),
         ...(lane && side ? { fundedSide: side } : {}),
         ...(lane && side
           ? {
               userPosition: {
                 side,
-                streamed: chainRateToUsdPerMin(lane.rate),
-                shares: shareStringToNumber(lane.sharesAccrued),
-                currentValue: lane.claimableUSDC
-                  ? usdcStringToNumber(lane.claimableUSDC)
-                  : 0,
+                // SDK-normalized: ratePerMinUSDC is the effective rate (0 when depleted) / resume rate when paused.
+                rate: lane.stream.ratePerMinUSDC,
+                shares: lane.shares.accrued,
               },
             }
           : {}),
-        ...(vault.status === 'resolved' && lane?.won !== undefined
+        ...(vault.status === 'resolved' && lane?.settlement !== undefined
           ? {
-              userWon: lane.won,
-              payout: lane.claimableUSDC ? usdcStringToNumber(lane.claimableUSDC) : 0,
+              userWon: lane.settlement.won,
+              payout: lane.settlement.claimableUSDC,
             }
           : {}),
       }
@@ -151,18 +129,15 @@ export function panelToStream(panel: OptionsPanel, streamId?: string): StreamPoi
   return undefined
 }
 
-export function panelToFlow(panel: OptionsPanel, chain: OptionsChainKind): FlowState {
+export function panelToFlow(panel: OptionsPanel): FlowState {
   const lvst = panel.lvst
-  const balance = lvstStringToNumber(lvst.balanceLVST, chain)
-  const staked = lvstStringToNumber(lvst.stakedLVST, chain)
   return {
-    balance,
-    staked,
-    pendingDividends: usdcStringToNumber(lvst.pendingDividendsUSDC),
-    totalEarned: lvst.totalEarnedLVST
-      ? lvstStringToNumber(lvst.totalEarnedLVST, chain)
-      : balance + staked,
-    apy: 14.2,
+    balance: lvst.balanceLVST,
+    staked: lvst.stakedLVST,
+    pendingDividends: lvst.pendingDividendsUSDC,
+    // No honest live source for lifetime-earned LVST or APY (see deep TODO); not displayed in live.
+    totalEarned: lvst.totalEarnedLVST ?? 0,
+    apy: 0,
   }
 }
 
@@ -176,48 +151,32 @@ export function panelToPositions(panel: OptionsPanel, streamId?: string): Positi
     }
   }
 
+  // The SDK board is the single source: each lane carries its canonical status (streaming/paused/depleted),
+  // effective rate, runway, shares (+ percentOfSide) and settlement — all normalized. Paused/depleted
+  // positions (no active stream) come from the SDK too; this is a straight mapping.
   for (const nft of panel.nfts) {
     for (const lane of nft.lanes) {
       const vault = vaultById.get(lane.vaultId)
       if (!vault) continue
-      const streamRate = chainRateToUsdPerMin(lane.rate)
-      const currentValue = lane.claimableUSDC ? usdcStringToNumber(lane.claimableUSDC) : 0
-      const streamed = streamRate
       positions.push({
         vaultId: lane.vaultId,
         option: vault.question,
         side: lane.side,
-        streamed,
-        streamRate,
-        shares: shareStringToNumber(lane.sharesAccrued),
-        currentValue,
-        // Unrealized P&L proxy: claimable value now minus what has been streamed in (per-minute rate
-        // basis). Display-only; replace with options' projectSessionPnl when it's exported.
-        pnl: currentValue - streamed,
+        status: lane.status,
+        streamRate: lane.stream.ratePerMinUSDC,
+        shares: lane.shares.accrued,
         resolved: vault.status === 'resolved',
-        ...(lane.won !== undefined ? { won: lane.won } : {}),
-        ...(lane.claimableUSDC ? { payout: usdcStringToNumber(lane.claimableUSDC) } : {}),
+        ...(lane.shares.percentOfSide !== undefined ? { sharePercent: lane.shares.percentOfSide } : {}),
+        ...(lane.stream.endsAtMs !== undefined ? { runwayEndMs: lane.stream.endsAtMs } : {}),
+        ...(lane.settlement !== undefined ? { won: lane.settlement.won } : {}),
+        ...(lane.settlement?.claimableUSDC ? { payout: lane.settlement.claimableUSDC } : {}),
+        ...(lane.settlement?.lossClaimableLVST ? { lvstReceived: lane.settlement.lossClaimableLVST } : {}),
         minute: Math.max(0, Math.floor((Date.now() - vault.timing.createdAtMs) / 60_000)),
       })
     }
   }
 
   return positions
-}
-
-export const DEFAULT_FUND_DURATION_MIN = 60
-
-export function usdPerMinToChainRate(rateUsdPerMin: number): bigint {
-  return BigInt(Math.max(1, Math.round((rateUsdPerMin * USDC_SCALE) / 60)))
-}
-
-export function fundDepositForDuration(chainRate: bigint, durationMinutes: number): bigint {
-  const durationSeconds = BigInt(Math.max(1, Math.round(durationMinutes * 60)))
-  return chainRate * durationSeconds
-}
-
-export function fundCommitmentUsd(rateUsdPerMin: number, durationMinutes: number): number {
-  return rateUsdPerMin * durationMinutes
 }
 
 export function findTokenIdForVault(panel: OptionsPanel, vaultId: string): string | undefined {
@@ -285,7 +244,7 @@ export function panelToHomepage(panel: OptionsPanel): HomepageData {
   let yesOutcomes = 0
 
   for (const market of panel.markets) {
-    const pooled = usdcStringToNumber(market.totals.totalPooledUSDC)
+    const pooled = market.totals.totalPooledUSDC
     totalVolume += pooled
 
     const routeId = market.marketId
@@ -312,7 +271,7 @@ export function panelToHomepage(panel: OptionsPanel): HomepageData {
           streamTitle: market.title,
           option: vault.question,
           multiplier: homepageVaultMultiplier(vault),
-          totalPool: usdcStringToNumber(vault.pools.totalUSDC),
+          totalPool: vault.pools.totalUSDC,
           status: vault.status === 'hot' ? 'hot' : 'open',
           expiresInSec: Math.max(0, Math.floor((vault.timing.expiresAtMs - Date.now()) / 1000)),
         })
@@ -326,7 +285,7 @@ export function panelToHomepage(panel: OptionsPanel): HomepageData {
           option: vault.question,
           streamTitle: market.title,
           outcome: vault.outcome,
-          totalPool: usdcStringToNumber(vault.pools.totalUSDC),
+          totalPool: vault.pools.totalUSDC,
           resolvedAtMs: vault.timing.resolvedAtMs ?? vault.timing.expiresAtMs,
         })
       }

@@ -44,7 +44,7 @@ export function VaultList({ vaults, events, positions, selectedVaultId, streamId
       {/* Focused vault from NikoNiko click */}
       <AnimatePresence>
         {selectedVault && (
-          <FocusedVault key="focused-vault" vault={selectedVault} onDismiss={onDismissVault} onStream={onStream} />
+          <FocusedVault key="focused-vault" vault={selectedVault} onDismiss={onDismissVault} onStream={onStream} onGoToMint={() => setTab('mine')} />
         )}
       </AnimatePresence>
 
@@ -74,13 +74,13 @@ export function VaultList({ vaults, events, positions, selectedVaultId, streamId
             </div>
           )}
           <NftPanel />
-          <MyPositions positions={positions} vaults={vaults} onSelectVault={() => { /* scroll up to focused vault handled by parent */ }} />
+          <MyPositions positions={positions} vaults={vaults} />
         </TabPanel>
         <TabPanel active={tab === 'vaults'}>
           {activeVaults.length > 0 ? (
             <div style={{ padding: '14px 10px 4px' }}>
               {activeVaults.map((v, i) => (
-                <VaultCard key={v.vaultId} vault={v} index={i} onStream={onStream} />
+                <VaultCard key={v.vaultId} vault={v} index={i} onStream={onStream} onGoToMint={() => setTab('mine')} />
               ))}
             </div>
           ) : (

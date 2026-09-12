@@ -1,6 +1,7 @@
 // --- exports ---
 
 import type { OptionsVaultPools, OptionsVaultShareTotals, OptionsVaultSide } from "../vault.js";
+import { sharesToNumber, usdcToNumber } from "../units.js";
 import { priceOf, projectShares } from "./curve.js";
 
 export type OptionsBoardState = {
@@ -11,10 +12,10 @@ export type OptionsBoardState = {
 };
 
 export type OptionsStreamAccrualView = {
-  readonly pendingShares: string;
-  readonly valueUSDC: string;
-  readonly sharesPerSec: string;
-  readonly sharePriceNow: string;
+  readonly pendingShares: number;
+  readonly valueUSDC: number;
+  readonly sharesPerSec: number;
+  readonly sharePriceNow: number;
 };
 
 export type PreviewAccrualInput = {
@@ -25,10 +26,10 @@ export type PreviewAccrualInput = {
 };
 
 export type OptionsAccrualPreview = {
-  readonly sharePriceUSDC: string;
-  readonly sharesPerSec: string;
-  readonly projectedShares: string;
-  readonly valueUSDC: string;
+  readonly sharePriceUSDC: number;
+  readonly sharesPerSec: number;
+  readonly projectedShares: number;
+  readonly valueUSDC: number;
 };
 
 export type ProjectAccrualPreviewInput = {
@@ -79,10 +80,10 @@ export const projectAccrualPreview = (
     sideShareTotal > 0n ? (projectedShares * totalPool) / sideShareTotal : 0n;
 
   return {
-    sharePriceUSDC: priceOf(input.board.pool).toString(),
-    sharesPerSec: sharesPerSec.toString(),
-    projectedShares: projectedShares.toString(),
-    valueUSDC: valueUSDC.toString()
+    sharePriceUSDC: usdcToNumber(priceOf(input.board.pool)),
+    sharesPerSec: sharesToNumber(sharesPerSec),
+    projectedShares: sharesToNumber(projectedShares),
+    valueUSDC: usdcToNumber(valueUSDC)
   };
 };
 
@@ -145,10 +146,10 @@ export const projectStreamAccrual = (
     : estimateSharesPerSec(input.board, input.position, input.atMs, input.resolvedAtMs);
 
   return {
-    pendingShares: projectedShares.toString(),
-    valueUSDC: valueUSDC.toString(),
-    sharesPerSec: sharesPerSec.toString(),
-    sharePriceNow: sharePriceNow.toString()
+    pendingShares: sharesToNumber(projectedShares),
+    valueUSDC: usdcToNumber(valueUSDC),
+    sharesPerSec: sharesToNumber(sharesPerSec),
+    sharePriceNow: usdcToNumber(sharePriceNow)
   };
 };
 

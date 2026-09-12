@@ -2,6 +2,7 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it } from "vitest";
 
 import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../src/model/ids.js";
+import { WAD } from "../../src/model/math/curve.js";
 
 import type { OptionsContractAddresses } from "../../src/chains/evm/addresses.js";
 import { createEvmOptionsReaderFromCall } from "../../src/chains/evm/reader.js";
@@ -290,7 +291,7 @@ const respond = (request: SimRequest, options: FakeReaderOptions): unknown => {
         return {
           rate: 1_000n,
           gPaid: 0n,
-          sharesAccrued: 100n,
+          sharesAccrued: 100n * WAD, // on-chain WAD·SCALE; decode ÷WAD → 100n SHARE_SCALE
           maxEnd: 0,
           depleted: false
         };
@@ -299,7 +300,7 @@ const respond = (request: SimRequest, options: FakeReaderOptions): unknown => {
       return {
         rate: 0n,
         gPaid: 0n,
-        sharesAccrued: 50n,
+        sharesAccrued: 50n * WAD,
         maxEnd: 0,
         depleted: false
       };

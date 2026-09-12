@@ -46,7 +46,10 @@ export {
   CURVE_K,
   isAccrualFrozen,
   isOptionsVaultSide,
+  lvstDecimalsForChain,
+  lvstToNumber,
   OPTIONS_VAULT_SIDES,
+  perMinUSDCToRate,
   priceOf,
   projectClaimsView,
   projectSessionPnl,
@@ -55,10 +58,14 @@ export {
   projectAccrualPreview,
   projectLivePoolSide,
   projectVaultLivePools,
+  rateToPerMinUSDC,
   segMath,
   SHARE_SCALE,
   sharesPerUsdc,
+  sharesToNumber,
   totalVaultPool,
+  usdcToNumber,
+  usdcToRaw,
   validateOptionsVaultSide,
   WAD
 } from "./model/index.js";
@@ -75,7 +82,10 @@ export {
   type ContractsReadEntity
 } from "./flows/index.js";
 export type {
+  OptionsAccountStatus,
   OptionsLanePanel,
+  OptionsLaneStatus,
+  OptionsPausedLane,
   OptionsLvstPanel,
   OptionsMarketPanel,
   OptionsNftPanel,
@@ -108,7 +118,6 @@ export {
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
   bridgeControlsReadScope,
-  optionsConfigScope,
   authorizeBridgeCaller,
   requireAnyScope,
   createOptionsRuntimeBootstrap,
@@ -121,7 +130,11 @@ export type {
   OptionsRuntimeInput,
   OptionsRuntimeLastError,
   OptionsRuntimeState,
-  OptionsBoard
+  OptionsBoard,
+  PausedLanesPort,
+  PauseLaneInput,
+  ResumeLaneInput,
+  StreamLaneInput
 } from "./runtime/index.js";
 export { createOptionsRuntime, validateOptionsRuntimeConfig } from "./runtime/index.js";
 export type {

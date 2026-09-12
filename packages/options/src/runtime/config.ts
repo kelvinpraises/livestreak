@@ -4,7 +4,7 @@ import { LiveStreakConfigError } from "@livestreak/core";
 
 import { asMarketId, asUserAddress, type MarketId, type UserAddress } from "../model/ids.js";
 import type { OptionsChain, OptionsChainConfig } from "../chains/types.js";
-import { createOptionsChain } from "../chains/index.js";
+import type { OptionsPausedLane } from "../bridge/panel/project.js";
 
 export interface OptionsRuntimeConfig {
   readonly runtimeId: string;
@@ -14,10 +14,19 @@ export interface OptionsRuntimeConfig {
   readonly refreshIntervalMs?: number;
 }
 
+/** Persistence port for the paused-lane registry the runtime owns. The runtime holds the lanes in memory
+ *  (surviving the poll); the host app wires `initial`/`onChange` to sessionStorage so they survive a reload.
+ *  Pause is session intent the chain can't express, so this is its canonical home — not the UI. */
+export interface PausedLanesPort {
+  readonly initial?: readonly OptionsPausedLane[];
+  readonly onChange?: (lanes: readonly OptionsPausedLane[]) => void;
+}
+
 export interface OptionsRuntimeInput {
   readonly config: unknown;
   readonly chainConfig: OptionsChainConfig;
   readonly chain?: OptionsChain;
+  readonly pausedLanes?: PausedLanesPort;
 }
 
 export const validateOptionsRuntimeConfig = (input: unknown): OptionsRuntimeConfig => {

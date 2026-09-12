@@ -12,6 +12,7 @@ import {
   encodeFunctionData,
   http,
   maxUint256,
+  zeroAddress,
   type Abi,
   type Log
 } from "viem";
@@ -20,6 +21,7 @@ import { asTokenId, type TokenId } from "../../model/ids.js";
 import { validateOptionsVaultSide } from "../../model/vault.js";
 import {
   asTxId,
+  type AddFundsInput,
   type AdvanceInput,
   type ApproveNftInput,
   type ClaimLossLvstInput,
@@ -42,6 +44,7 @@ import {
 } from "../types.js";
 import { DEFAULT_ABIS } from "./abis.js";
 import { validateOptionsContractAddresses, type OptionsContractAddresses } from "./addresses.js";
+import { tupleToObject, type RawLane } from "./decode.js";
 import {
   sideToSolidityValue,
   validateMarketIdForContracts,
@@ -142,6 +145,29 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       return;
     }
     await send(usdc, abis.LvstToken, "approve", [addresses.marketDriver, maxUint256]);
+  };
+
+  // Raw current lanes from MarketDriver bookkeeping (incl. dried ones, which the reader zeroes for display
+  // but addFunds re-sends at their original rate to revive). Empty set ⇒ deposit just parks as balance.
+  const readCurrentLanes = async (
+    tokenId: bigint
+  ): Promise<ReadonlyArray<{ vaultId: `0x${string}`; side: number; rate: bigint }>> => {
+    const count = await readContract<bigint>(
+      addresses.marketDriver,
+      abis.MarketDriver,
+      "laneCount",
+      [tokenId]
+    );
+    const lanes: Array<{ vaultId: `0x${string}`; side: number; rate: bigint }> = [];
+    for (let index = 0n; index < count; index += 1n) {
+      const raw = await readContract<unknown>(addresses.marketDriver, abis.MarketDriver, "laneAt", [
+        tokenId,
+        index
+      ]);
+      const lane = tupleToObject<RawLane>(raw, ["vaultId", "side", "rate"]);
+      lanes.push({ vaultId: lane.vaultId, side: lane.side, rate: lane.rate });
+    }
+    return lanes;
   };
 
   const sendForReceipt = async (
@@ -278,6 +304,16 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       ]);
     },
 
+    addFunds: async (input: AddFundsInput) => {
+      const tokenId = validateTokenIdForContracts(input.tokenId);
+      const deposit = requirePositiveBigInt(input.deposit, "deposit");
+
+      await ensureUsdcApproval(deposit);
+
+      const lanes = await readCurrentLanes(tokenId);
+      return send(addresses.marketDriver, abis.MarketDriver, "setLanes", [tokenId, lanes, deposit]);
+    },
+
     stopFunding: async (input: StopFundingInput) => {
       const tokenId = validateTokenIdForContracts(input.tokenId);
       const vaultBytes = validateVaultIdForContracts(input.vaultId);
@@ -292,7 +328,9 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
 
     stopAllFunding: async (input: StopAllFundingInput) => {
       const tokenId = validateTokenIdForContracts(input.tokenId);
-      return send(addresses.marketDriver, abis.MarketDriver, "stopAll", [tokenId]);
+      // Owner by default (zero ⇒ owner in `_payee`); only the owner may redirect the swept refund.
+      const to = input.to ? validateUserAddress(input.to, "to") : zeroAddress;
+      return send(addresses.marketDriver, abis.MarketDriver, "stopAll", [tokenId, to]);
     },
 
     withdraw: async (input: WithdrawInput) => {

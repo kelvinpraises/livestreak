@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 import type { RtcDataChannelState, RtcPeerConnectionFactory, RtcPeerConnectionLike } from "./signaling.js";
-import { resolveDefaultPeerFactory } from "./signaling.js";
+import { gatheredLocalDescription, resolveDefaultPeerFactory } from "./signaling.js";
 
 /**
  * Node.js RTCPeerConnection factory for the CLI file→WebRTC producer.
@@ -19,6 +19,7 @@ const importNode = (specifier: string): Promise<unknown> => import(/* @vite-igno
 interface NodeRtcDataChannel {
   readonly label: string;
   readonly readyState: string;
+  readonly bufferedAmount?: number;
   send: (data: Uint8Array) => void;
   close: () => void;
   addEventListener: (type: string, listener: (...args: unknown[]) => void) => void;
@@ -31,6 +32,8 @@ interface NodeRtcPeer {
   createAnswer: () => Promise<{ type: "offer" | "answer"; sdp: string }>;
   setLocalDescription: (d: { type: "offer" | "answer"; sdp: string }) => Promise<void>;
   setRemoteDescription: (d: { type: "offer" | "answer"; sdp: string }) => Promise<void>;
+  readonly iceGatheringState: string;
+  readonly localDescription: { type: "offer" | "answer"; sdp: string } | null;
   close: () => void;
   addEventListener: (type: string, listener: (event: { channel: NodeRtcDataChannel }) => void) => void;
 }
@@ -41,6 +44,9 @@ const adaptNodeChannel = (channel: NodeRtcDataChannel) => {
     label: channel.label,
     get readyState(): RtcDataChannelState {
       return channel.readyState as RtcDataChannelState;
+    },
+    get bufferedAmount(): number {
+      return channel.bufferedAmount ?? 0;
     },
     send: (data: Uint8Array) => channel.send(data),
     close: () => channel.close(),
@@ -70,6 +76,7 @@ const adaptNodePeer = (peer: NodeRtcPeer): RtcPeerConnectionLike => {
     createAnswer: () => peer.createAnswer(),
     setLocalDescription: (d) => peer.setLocalDescription(d),
     setRemoteDescription: (d) => peer.setRemoteDescription(d),
+    localDescriptionWithCandidates: (fallback) => gatheredLocalDescription(peer, fallback),
     close: () => peer.close(),
     ondatachannel: null
   };
@@ -90,7 +97,11 @@ export const resolveNodePeerConnectionFactory = (): Effect.Effect<
 
     let wrtc: WrtcModule | undefined;
     try {
-      wrtc = (yield* Effect.promise(() => importNode("@roamhq/wrtc"))) as WrtcModule;
+      // @roamhq/wrtc is CJS — under ESM `import()` its exports land on `.default`, so unwrap it.
+      const mod = (yield* Effect.promise(() => importNode("@roamhq/wrtc"))) as
+        | WrtcModule
+        | { readonly default?: WrtcModule };
+      wrtc = (mod as { default?: WrtcModule }).default ?? (mod as WrtcModule);
     } catch {
       wrtc = undefined;
     }
@@ -105,5 +116,23 @@ export const resolveNodePeerConnectionFactory = (): Effect.Effect<
     }
 
     const Ctor = wrtc.RTCPeerConnection;
-    return () => adaptNodePeer(new Ctor({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }));
+    // ICE servers are env-overridable (LIVESTREAK_ICE_SERVERS = JSON array) so a
+    // Dockerized/remote producer can point at a TURN relay; default stays STUN-only.
+    const iceServers: { urls: string; username?: string; credential?: string }[] = (() => {
+      const raw = process.env.LIVESTREAK_ICE_SERVERS;
+      if (raw !== undefined && raw.trim() !== "") {
+        try {
+          return JSON.parse(raw) as { urls: string; username?: string; credential?: string }[];
+        } catch {
+          /* malformed → STUN default */
+        }
+      }
+      return [{ urls: "stun:stun.l.google.com:19302" }];
+    })();
+    // Relay-only (LIVESTREAK_ICE_RELAY_ONLY=1) forces TURN. A Dockerized producer's
+    // host candidates are container-private (unreachable from the viewer), so without
+    // this ICE stalls on them instead of using the reachable TURN relay.
+    const relayOnly = process.env.LIVESTREAK_ICE_RELAY_ONLY === "1";
+    return () =>
+      adaptNodePeer(new Ctor(relayOnly ? { iceServers, iceTransportPolicy: "relay" } : { iceServers }));
   });

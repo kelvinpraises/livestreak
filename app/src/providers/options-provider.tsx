@@ -21,12 +21,15 @@ import {
   createOptionsBridge,
   createOptionsRuntime,
   createOptionsSuiConfig,
+  perMinUSDCToRate,
   resolveOptionsAccountAddress,
+  usdcToRaw,
   type BridgeCaller,
   type OptionsBoard,
   type OptionsBridge,
   type OptionsChainConfig,
   type OptionsFunctionView,
+  type OptionsPausedLane,
   type OptionsRuntime,
   type OptionsAccrualPreview,
   type TxId,
@@ -46,10 +49,7 @@ import {
   type OptionsChainKind,
 } from '#/utils/chain'
 import {
-  DEFAULT_FUND_DURATION_MIN,
   findTokenIdForVault,
-  fundDepositForDuration,
-  usdPerMinToChainRate,
   findOptionsFunction,
   findFundFunction,
   findStopFundingFunction,
@@ -121,20 +121,24 @@ interface OptionsContextValue {
   findFunction: (name: string, match?: (fn: OptionsFunctionView) => boolean) => OptionsFunctionView | undefined
   findFundFunction: (vaultId: string, side: 'yes' | 'no') => OptionsFunctionView | undefined
   findStopFundingFunction: (vaultId: string) => OptionsFunctionView | undefined
-  fundStream: (
-    vaultId: string,
-    side: 'yes' | 'no',
-    rateUsdPerMin: number,
-    durationMinutes?: number,
-  ) => Promise<TxId>
+  /** Open / switch / re-rate a vault's stream (balance-first). The SDK runtime decides starter-deposit vs.
+   *  pure re-rate and preserves every other lane. Backs both the vault-card "stream" and active-card "adjust". */
+  fundStream: (vaultId: string, side: 'yes' | 'no', rateUsdPerMin: number) => Promise<TxId>
   stopFunding: (vaultId: string, side: 'yes' | 'no') => Promise<TxId>
-  /** Add USDC deposit to a position NFT's shared funding (extends every lane's runway) by re-asserting
-   *  its existing lanes with addDeposit — no lane is added or removed. */
-  topUpNft: (
-    tokenId: string,
-    lanes: readonly { vaultId: string; side: 'yes' | 'no'; rate: string }[],
-    depositUsd: number,
-  ) => Promise<TxId>
+  /** Re-rate an existing stream in place (the active-card "adjust rate"). Same SDK operation as fundStream. */
+  updateLaneRate: (vaultId: string, side: 'yes' | 'no', rateUsdPerMin: number) => Promise<TxId>
+  /** Pause a stream: the SDK drops its lane (deposit + accrued shares retained) and remembers the rate. */
+  pauseLane: (vaultId: string, side: 'yes' | 'no') => Promise<TxId>
+  /** Resume a paused stream at the remembered rate (from the SDK's paused registry). */
+  resumeLane: (vaultId: string, side: 'yes' | 'no') => Promise<TxId>
+  /** Balance-first deposit to a position NFT's shared budget. The SDK `addFunds` action re-asserts the
+   *  NFT's existing lanes itself (extending/reviving streams, or parking funds when there are none), so the
+   *  UI passes only the amount — never a reconstructed lane set. */
+  addFundsNft: (tokenId: string, depositUsd: number) => Promise<TxId>
+  /** Sweep to wallet: stop every lane and withdraw the NFT's remaining Drips balance to the owner (stopAll). */
+  sweepNft: (tokenId: string) => Promise<TxId>
+  /** Withdraw winnings from every resolved winning lane on this NFT in one tx (withdrawMany). */
+  withdrawAllNft: (tokenId: string) => Promise<TxId>
   previewAccrual: (
     vaultId: string,
     side: 'yes' | 'no',
@@ -154,6 +158,44 @@ interface OptionsContextValue {
 }
 
 const OptionsContext = createContext<OptionsContextValue | null>(null)
+
+// The paused-lane registry lives in the SDK runtime (canonical). The runtime survives the 3s poll itself;
+// these adapters are the persistence PORT it calls — sessionStorage so paused state survives a reload. The
+// runtime holds rate as bigint, which isn't JSON-serializable, so the stored form carries rate as a string.
+const PAUSED_LANES_KEY = 'livestreak.pausedLanes'
+
+type StoredPausedLane = { tokenId: string; vaultId: string; side: 'yes' | 'no'; rate: string }
+
+function loadPausedLanes(): OptionsPausedLane[] {
+  if (typeof sessionStorage === 'undefined') return []
+  try {
+    const raw = sessionStorage.getItem(PAUSED_LANES_KEY)
+    if (!raw) return []
+    return (JSON.parse(raw) as StoredPausedLane[]).map(p => ({
+      tokenId: p.tokenId,
+      vaultId: asVaultId(p.vaultId),
+      side: p.side,
+      rate: BigInt(p.rate),
+    }))
+  } catch {
+    return []
+  }
+}
+
+function savePausedLanes(lanes: readonly OptionsPausedLane[]): void {
+  if (typeof sessionStorage === 'undefined') return
+  try {
+    const stored: StoredPausedLane[] = lanes.map(p => ({
+      tokenId: p.tokenId,
+      vaultId: p.vaultId,
+      side: p.side,
+      rate: p.rate.toString(),
+    }))
+    sessionStorage.setItem(PAUSED_LANES_KEY, JSON.stringify(stored))
+  } catch {
+    /* runtime in-memory registry still covers the poll */
+  }
+}
 
 function buildWalletInit(descriptor: AaCapabilityDescriptor): WalletInit {
   const chain = descriptor.chains.find(c => c.chainId === LOCAL_CHAIN_ID)
@@ -191,6 +233,13 @@ function buildWalletInit(descriptor: AaCapabilityDescriptor): WalletInit {
   })
 
   return { chain: 'evm', seedSource: 'raw', config: evmConfig }
+}
+
+// Read-only viewer used to populate the board for a disconnected visitor — a dummy address that owns
+// nothing, so the board carries the market + vaults with zero positions. Writes stay gated on isConnected.
+const ANON_VIEWER: Record<OptionsChainKind, string> = {
+  evm: '0x000000000000000000000000000000000000dead',
+  sui: '0x000000000000000000000000000000000000000000000000000000000000dead',
 }
 
 function buildChainConfig(
@@ -258,7 +307,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     setBoard(next)
     const usdc = next.panel.user.usdcBalanceUSDC
     if (usdc !== undefined) {
-      setUsdcBalance(Number(BigInt(usdc)) / 1_000_000)
+      setUsdcBalance(usdc)
     }
   }, [])
 
@@ -294,6 +343,8 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
           : {}),
       },
       chainConfig,
+      // Paused-lane registry is owned by the runtime; this port persists it across reloads.
+      pausedLanes: { initial: loadPausedLanes(), onChange: savePausedLanes },
     })
     const bridge = createOptionsBridge({ runtime })
 
@@ -315,6 +366,18 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
 
     await refreshConnected(user, marketId)
   }, [applyBoard, refreshConnected, teardownRuntime])
+
+  // Read-only board for a disconnected visitor: boot the runtime against the dummy viewer (placeholder
+  // secret; the writer is never invoked while disconnected) so the active market's vaults render.
+  const bootAnonymous = useCallback(async () => {
+    if (!activeMarketIdRef.current) return
+    if (chainRef.current === 'evm' && !walletInitRef.current) return
+    try {
+      await bootRuntime(new Uint8Array(32), ANON_VIEWER[chainRef.current] as UserAddress)
+    } catch (err) {
+      console.error('[options] anonymous board boot failed', err)
+    }
+  }, [bootRuntime])
 
   // S12/A8: derive the Safe address with visible progress, hitting the localStorage cache first so a
   // reconnect after reload is instant instead of a silent ~1-min "Deriving…" that looks like a hang.
@@ -369,13 +432,14 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!enabled || !ready || typeof window === 'undefined') return
-    const cached = sessionStorage.getItem(SESSION_SECRET_KEY)
-    if (!cached) return
-    // B: during an EVM⇄Sui switch the EVM wallet config can briefly be unloaded (a `ready`/`chain`
-    // commit can fire before `loadEvmDescriptor` repopulates `walletInitRef`). Skip — do NOT treat
-    // this as a derive failure, which would wipe SESSION_SECRET_KEY and drop the wallet. The chain
-    // effect re-toggles `ready` once the descriptor loads, re-running this effect cleanly.
+    // EVM wallet config can briefly be unloaded during an EVM⇄Sui switch; skip (re-runs once ready settles)
+    // rather than treating it as a derive failure that would wipe the secret.
     if (chainRef.current === 'evm' && !walletInitRef.current) return
+    const cached = sessionStorage.getItem(SESSION_SECRET_KEY)
+    if (!cached) {
+      void bootAnonymous() // disconnected: read-only board for the active market
+      return () => teardownRuntime()
+    }
 
     setIsLoading(true)
     void (async () => {
@@ -398,7 +462,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     })()
 
     return () => teardownRuntime()
-  }, [enabled, ready, chain, bootRuntime, teardownRuntime, deriveUserAddress])
+  }, [enabled, ready, chain, bootRuntime, teardownRuntime, deriveUserAddress, bootAnonymous])
 
   const disconnect = useCallback(() => {
     sessionStorage.removeItem(SESSION_SECRET_KEY)
@@ -407,7 +471,8 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     setIsConnected(false)
     setUsdcBalance(0)
     setError(null)
-  }, [teardownRuntime])
+    void bootAnonymous() // fall back to the read-only board for the current market
+  }, [teardownRuntime, bootAnonymous])
 
   const setChain = useCallback((next: OptionsChainKind) => {
     if (next === chainRef.current) return
@@ -483,8 +548,12 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     const cached = typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_SECRET_KEY) : null
     if (isConnected && user && cached) {
       void bootRuntime(hexToBytes(cached as `0x${string}`), user)
+    } else if (marketId) {
+      void bootAnonymous()
+    } else {
+      teardownRuntime()
     }
-  }, [address, isConnected, bootRuntime])
+  }, [address, isConnected, bootRuntime, bootAnonymous, teardownRuntime])
 
   const requireUser = useCallback((): UserAddress => {
     if (!address) throw new Error('Wallet not connected')
@@ -515,30 +584,6 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     return findTokenIdForVault(board.panel, vaultId) !== undefined
   }, [board])
 
-  // D: ONE coherent "back this vault" path — ensure the market's position NFT exists (mint it if the
-  // user hasn't entered the market yet), then return its tokenId. Reads the board straight from the
-  // bridge after minting so we don't depend on async React state to settle first. This is the root
-  // fix that lets fundStream below work without a pre-existing board panel / manual mint step.
-  const ensureTokenId = useCallback(async (vaultId: string): Promise<bigint> => {
-    const panel = requirePanel()
-    const existing = findTokenIdForVault(panel, vaultId)
-    if (existing) return BigInt(existing)
-
-    const market = panel.markets.find(m => m.vaults.some(v => v.vaultId === vaultId))
-    if (!market) throw new Error('No market for this vault')
-
-    const bridge = requireBridge()
-    await bridge.callAction(APP_CALLER, {
-      scope: bridgeActionScope,
-      action: 'mint',
-      args: { marketId: asMarketId(market.marketId), to: requireUser() },
-    })
-    const fresh = await bridge.readBoard(APP_CALLER)
-    applyBoard(fresh)
-    const minted = findTokenIdForVault(fresh.panel, vaultId)
-    if (!minted) throw new Error('Mint did not produce an NFT for this market')
-    return BigInt(minted)
-  }, [requirePanel, requireBridge, requireUser, applyBoard])
 
   const afterWrite = useCallback(async () => {
     const user = address as UserAddress | null
@@ -574,56 +619,58 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     vaultId: string,
   ) => findStopFundingFunction(controls, vaultId), [controls])
 
-  const fundStream = useCallback(async (
-    vaultId: string,
-    side: 'yes' | 'no',
-    rateUsdPerMin: number,
-    durationMinutes = DEFAULT_FUND_DURATION_MIN,
-  ): Promise<TxId> => {
-    const chainRate = usdPerMinToChainRate(rateUsdPerMin)
-    // D: mint the position NFT first if the user hasn't entered this market yet, then fund — one call.
-    const tokenId = await ensureTokenId(vaultId)
-    return callBridgeAction('fund', {
-      tokenId: asTokenId(tokenId),
-      vaultId: asVaultId(vaultId),
-      side,
-      rate: chainRate,
-      deposit: fundDepositForDuration(chainRate, durationMinutes),
-    })
-  }, [callBridgeAction, ensureTokenId])
-
-  // Top up a position NFT's shared Drips balance: re-assert its CURRENT lanes (so none are removed or
-  // re-rated) with addDeposit > 0. setLanes diffs desired-vs-current, so passing the existing lanes
-  // back is a pure deposit. Extends the runway for every lane the NFT funds.
-  const topUpNft = useCallback(async (
-    tokenId: string,
-    lanes: readonly { vaultId: string; side: 'yes' | 'no'; rate: string }[],
-    depositUsd: number,
-  ): Promise<TxId> => {
-    const fundable = lanes.filter((lane) => {
-      try { return BigInt(lane.rate) > 0n } catch { return false }
-    })
-    if (fundable.length === 0) throw new Error('No active lane to top up — open a position first')
-    const addDeposit = BigInt(Math.round(depositUsd * 1_000_000))
-    if (addDeposit <= 0n) throw new Error('Enter an amount greater than 0')
-    return callBridgeAction('setLanes', {
+  // Balance-first top-up: hand the SDK `addFunds` action only the deposit — it re-asserts the NFT's existing
+  // lanes itself (extending/reviving every stream, or parking the funds when there are none), so the UI
+  // never reconstructs the lane set. Works with zero active lanes (parks as budget).
+  const addFundsNft = useCallback(async (tokenId: string, depositUsd: number): Promise<TxId> => {
+    const deposit = usdcToRaw(depositUsd)
+    if (deposit <= 0n) throw new Error('Enter an amount greater than 0')
+    return callBridgeAction('addFunds', {
       tokenId: asTokenId(BigInt(tokenId)),
-      lanes: fundable.map((lane) => ({
-        vaultId: asVaultId(lane.vaultId),
-        side: lane.side,
-        rate: BigInt(lane.rate),
-      })),
-      addDeposit,
+      deposit,
     })
   }, [callBridgeAction])
 
-  const stopFunding = useCallback(async (vaultId: string, side: 'yes' | 'no'): Promise<TxId> => {
-    return callBridgeAction('stopFunding', {
-      tokenId: asTokenId(resolveTokenId(vaultId)),
-      vaultId: asVaultId(vaultId),
-      side,
+  // Sweep to wallet: stopAll halts every lane (banking shares) and withdraws the remaining shared Drips
+  // balance back to the owner's wallet.
+  const sweepNft = useCallback(async (tokenId: string): Promise<TxId> =>
+    callBridgeAction('stopAllFunding', { tokenId: asTokenId(BigInt(tokenId)) }),
+  [callBridgeAction])
+
+  // Withdraw all winnings: collect from every resolved winning lane on the NFT in one withdrawMany call.
+  // The winning vaults are derived from the panel here (provider-side), so the UI just calls withdrawAllNft.
+  const withdrawAllNft = useCallback(async (tokenId: string): Promise<TxId> => {
+    const panel = requirePanel()
+    const nft = panel.nfts.find(n => n.tokenId === tokenId)
+    const vaultIds = (nft?.lanes ?? []).filter(l => l.settlement?.canClaimWin === true).map(l => l.vaultId)
+    if (vaultIds.length === 0) throw new Error('No winnings to withdraw')
+    return callBridgeAction('withdrawMany', {
+      tokenId: asTokenId(BigInt(tokenId)),
+      vaultIds: vaultIds.map(v => asVaultId(v)),
+      to: requireUser(),
     })
-  }, [callBridgeAction, resolveTokenId])
+  }, [callBridgeAction, requirePanel, requireUser])
+
+  // --- Active-stream lane controls (stream / adjust / pause / resume) ---
+  // The SDK runtime owns ALL lane orchestration now: it reads its own snapshot to build the setLanes set,
+  // preserves every other lane, applies the balance-first starter deposit, and owns the paused registry.
+  // The app just names the gesture and forwards the high-level args — no lane reconstruction here.
+
+  // Open / switch / re-rate a vault's stream (balance-first). One operation behind both the vault-card
+  // "stream" gesture and the active-card "adjust rate" — the runtime decides deposit vs. pure re-rate.
+  const streamLane = useCallback((
+    vaultId: string,
+    side: 'yes' | 'no',
+    rateUsdPerMin: number,
+  ): Promise<TxId> =>
+    callBridgeAction('streamLane', { vaultId: asVaultId(vaultId), side, ratePerMin: rateUsdPerMin }),
+  [callBridgeAction])
+
+  const pauseLane = useCallback((vaultId: string, side: 'yes' | 'no'): Promise<TxId> =>
+    callBridgeAction('pauseLane', { vaultId: asVaultId(vaultId), side }), [callBridgeAction])
+
+  const resumeLane = useCallback((vaultId: string, side: 'yes' | 'no'): Promise<TxId> =>
+    callBridgeAction('resumeLane', { vaultId: asVaultId(vaultId), side }), [callBridgeAction])
 
   const previewAccrual = useCallback(async (
     vaultId: string,
@@ -631,11 +678,10 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     rateUsdPerMin: number,
     horizonSec?: number,
   ): Promise<OptionsAccrualPreview> => {
-    const chainRate = usdPerMinToChainRate(rateUsdPerMin)
     return requireBridge().previewAccrual(APP_CALLER, {
       vaultId: asVaultId(vaultId),
       side,
-      rate: chainRate,
+      rate: perMinUSDCToRate(rateUsdPerMin),
       ...(horizonSec !== undefined ? { horizonSec } : {}),
     })
   }, [requireBridge])
@@ -733,9 +779,14 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     findFunction,
     findFundFunction: findFundFunctionForVault,
     findStopFundingFunction: findStopFundingFunctionForVault,
-    fundStream,
-    stopFunding,
-    topUpNft,
+    fundStream: streamLane,
+    stopFunding: pauseLane, // stop ≡ pause on-chain (drop lane, keep deposit+shares); stays visible & resumable
+    updateLaneRate: streamLane,
+    pauseLane,
+    resumeLane,
+    addFundsNft,
+    sweepNft,
+    withdrawAllNft,
     previewAccrual,
     claimWin,
     hasNftForVault,
@@ -750,7 +801,8 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   }), [
     enabled, ready, chain, setChain, isConnected, isLoading, derivationStep, claiming, error, address, usdcBalance, board, controls,
     connect, disconnect, afterWrite, setActiveMarketId, findFunction, findFundFunctionForVault,
-    findStopFundingFunctionForVault, fundStream, stopFunding, topUpNft, previewAccrual, claimWin, hasNftForVault, mint, claimLoss,
+    findStopFundingFunctionForVault, streamLane, pauseLane, resumeLane,
+    addFundsNft, sweepNft, withdrawAllNft, previewAccrual, claimWin, hasNftForVault, mint, claimLoss,
     stake, unstake, claimDividends, transferNft, approveNft, setApprovalForAll,
   ])
 

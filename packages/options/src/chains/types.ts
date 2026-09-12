@@ -10,6 +10,7 @@ import type {
   VaultId
 } from "../model/ids.js";
 import type { OptionsBoardState } from "../model/math/accrual.js";
+import type { FunderBoundary } from "../model/math/live-pool.js";
 import type { OptionsMarket } from "../model/market.js";
 import type { OptionsNft } from "../model/nft.js";
 import type { OptionsProtocolSummary } from "../model/snapshot.js";
@@ -25,15 +26,6 @@ import type { OptionsSuiObjectIds } from "./sui/addresses.js";
 export type TxId = string & { readonly __brand: "TxId" };
 
 export const asTxId = (hash: string): TxId => hash as TxId;
-
-/** A creator-seed funding lane's depletion boundary for one vault side — the instant its Drips stream
- *  runs dry (`maxEndMs`) and the `rate` it contributed until then. Lets the live-pool projection cap
- *  the pool at what was actually funded instead of extrapolating the seed rate forever. */
-export interface SeedBoundary {
-  readonly side: OptionsVaultSide;
-  readonly maxEndMs: number;
-  readonly rate: bigint;
-}
 
 export type MintNftInput = {
   readonly marketId: MarketId;
@@ -73,6 +65,14 @@ export type SetLanesInput = {
   readonly addDeposit: bigint;
 };
 
+// Balance-first top-up: add USDC to the NFT's shared Drips balance WITHOUT the caller specifying any
+// lanes. The writer re-sends the NFT's existing lanes unchanged so the deposit refills the budget and
+// every stream (including any that ran dry) resumes/extends; with no lanes it simply parks the funds.
+export type AddFundsInput = {
+  readonly tokenId: TokenId;
+  readonly deposit: bigint;
+};
+
 export type StopFundingInput = {
   readonly tokenId: TokenId;
   readonly vaultId: VaultId;
@@ -81,6 +81,8 @@ export type StopFundingInput = {
 
 export type StopAllFundingInput = {
   readonly tokenId: TokenId;
+  /** Refund recipient for the swept balance. Owner by default; only the owner may redirect elsewhere. */
+  readonly to?: UserAddress;
 };
 
 export type WithdrawInput = {
@@ -166,10 +168,11 @@ export interface OptionsReader {
   readOwnerOf(tokenId: TokenId): Promise<UserAddress>;
   readApproved(tokenId: TokenId): Promise<UserAddress | undefined>;
   readIsApprovedForAll(owner: UserAddress, operator: UserAddress): Promise<boolean>;
-  // The creator-seed boundary (maxEnd + rate) for live-pool capping. EVM derives it from
-  // VaultDriver.seedAccount + Vault.getPosition; Sui has no equivalent yet and omits it (the
-  // projection then falls back to the uncapped path for that leg).
-  readSeedBoundary?(vaultId: VaultId, creator: UserAddress): Promise<SeedBoundary | undefined>;
+  // The canonical unsettled funder depletion schedule for a side, straight from the contract
+  // (Vault.getBoundaries). Each entry's rate is still summed into board.sideRate, so the live-pool
+  // projection caps exactly at what was funded — for every funder (seed + all NFTs), not just the
+  // connected user's reconstructed lanes.
+  readBoundaries(vaultId: VaultId, side: OptionsVaultSide): Promise<readonly FunderBoundary[]>;
   readProtocolSummary?(): Promise<OptionsProtocolSummary>;
 }
 
@@ -179,6 +182,9 @@ export interface OptionsWriter {
   fund(input: FundStreamInput): Promise<TxId>;
   advance(input: AdvanceInput): Promise<TxId>;
   setLanes(input: SetLanesInput): Promise<TxId>;
+  // Balance-first deposit that preserves existing lanes (see AddFundsInput). Optional: EVM implements it;
+  // Sui has no equivalent yet, so the bridge rejects the action on a chain that omits it.
+  addFunds?(input: AddFundsInput): Promise<TxId>;
   stopFunding(input: StopFundingInput): Promise<TxId>;
   stopAllFunding(input: StopAllFundingInput): Promise<TxId>;
   withdraw(input: WithdrawInput): Promise<TxId>;

@@ -102,6 +102,7 @@ class OptionsRuntimeStoreInMemory implements OptionsRuntimeStore {
           }
         },
         pendingBoundaries: { yes: 0n, no: 0n },
+        boundaries: { yes: [], no: [] },
         hot: vault.steward,
         dispute: {
           active: vault.steward.disputeId !== undefined,

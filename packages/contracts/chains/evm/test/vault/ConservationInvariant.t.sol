@@ -150,11 +150,76 @@ contract ConservationInvariantTest is Test {
         );
     }
 
+    /// Regression for the live stranding bug. A top-up that lands AFTER a lane ran dry while the Board
+    /// was merely BEHIND (idle chain: nothing poked `advance` since maxEnd passed, so `depleted` still
+    /// reads false on-chain) must re-fund the lane, or the top-up's Drips delivery is booked nowhere and
+    /// strands in the Vault at resolution. Sequence: fund → dry-without-advancing → setLanes top-up →
+    /// resolve YES → collect. Pre-fix this left ~`d2` permanently unclaimable in the Vault.
+    function test_topUpAfterDryWhileBoardBehind_doesNotStrand() public {
+        uint256 d1 = 4 * RATE; // 4s of runway -> Alice's lane dries at t=START+4
+        uint256 d2 = 4 * RATE; // the top-up that pre-fix stranded
+
+        // Alice funds YES; her lane runs dry at t=START+4.
+        MarketDriverHarness.fund(marketDriver, usdc, alice, aliceNft, vaultId, Side.Yes, RATE, d1);
+
+        // Idle PAST her maxEnd without poking advance — the Board stays behind, so `depleted` reads
+        // false on-chain even though the deposit is already spent. This is the exact trigger.
+        vm.warp(START + 6);
+        assertEq(marketDriver.laneCount(aliceNft), 1, "lane still tracked pre-topup");
+
+        // Declarative top-up. Pre-fix: diffs to a no-op (depleted==false), skips onFund, and
+        // refreshMaxEnds no-ops on the now-depleting lane -> d2's delivery is booked nowhere.
+        usdc.mint(alice, d2);
+        vm.startPrank(alice);
+        usdc.approve(address(marketDriver), d2);
+        MarketDriver.Lane[] memory lanes = new MarketDriver.Lane[](1);
+        lanes[0] = MarketDriver.Lane({vaultId: vaultId, side: Side.Yes, rate: RATE});
+        marketDriver.setLanes(aliceNft, lanes, d2);
+        vm.stopPrank();
+
+        // Idle past the new maxEnd (START+10) and the seed maxEnd (START+10), then resolve YES.
+        vm.warp(START + 13);
+        vm.prank(steward);
+        stewardRegistry.resolveVault(vaultId, Vault.Outcome.Yes);
+
+        // Settle: full collect + cycle-complete harvest, then winners pull (Alice + the seed creator).
+        vault.collect(vaultId);
+        vm.warp(block.timestamp + CYCLE * 2);
+        vault.collect(vaultId);
+        vaultDriver.harvest(vaultId, Side.Yes);
+        vaultDriver.harvest(vaultId, Side.No);
+        vault.collect(vaultId);
+
+        uint256 withdrawn;
+        vm.prank(alice);
+        withdrawn += marketDriver.withdraw(aliceNft, vaultId, address(0));
+        vm.prank(VaultDriverHarness.SEED_CREATOR);
+        withdrawn += vaultDriver.withdraw(vaultId);
+
+        // Drain the cycle tail and re-pull, mirroring the proven settle path.
+        vaultDriver.harvest(vaultId, Side.Yes);
+        vault.collect(vaultId);
+        vm.prank(alice);
+        withdrawn += marketDriver.withdraw(aliceNft, vaultId, address(0));
+        vm.prank(VaultDriverHarness.SEED_CREATOR);
+        withdrawn += vaultDriver.withdraw(vaultId);
+
+        // Every dollar delivered (seed 10s + Alice 4s + 4s) is fully streamed before resolution.
+        uint256 delivered = CREATOR_SEED + d1 + d2;
+        uint256 vaultRemainder = usdc.balanceOf(address(vault));
+        uint256 dripsRemainder = usdc.balanceOf(address(drips));
+
+        // Nothing strands (pre-fix this was ~d2), AND the delivered top-up reached the winners.
+        assertLe(vaultRemainder + dripsRemainder, 2, "top-up delivery stranded in Vault");
+        assertGe(withdrawn, delivered - 2, "winners did not receive all delivered USDC");
+        assertEq(delivered, withdrawn + vaultRemainder + dripsRemainder, "conservation");
+    }
+
     function _stopAllRefund(address who, uint256 tokenId) internal returns (uint256 refunded) {
         if (marketDriver.laneCount(tokenId) == 0) return 0;
         uint256 before = usdc.balanceOf(who);
         vm.prank(who);
-        marketDriver.stopAll(tokenId);
+        marketDriver.stopAll(tokenId, address(0));
         refunded = usdc.balanceOf(who) - before;
     }
 }

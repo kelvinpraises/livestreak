@@ -38,8 +38,8 @@ describe("OptionsNftPanel — balanceUSDC + runwayEndMs (Part A)", () => {
     const snapshot = await readUserOptionsSnapshot(reader, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
-    expect(panel.nfts[0]?.balanceUSDC).toBe("5000000");
-    expect(panel.nfts[0]?.runwayEndMs).toBe(1_800_000_000_000);
+    expect(panel.nfts[0]?.account.balanceUSDC).toBe(5);
+    expect(panel.nfts[0]?.account.endsAtMs).toBe(1_800_000_000_000);
   });
 
   it("omits balanceUSDC and runwayEndMs when nft.balance is absent (Sui graceful path)", async () => {
@@ -52,8 +52,8 @@ describe("OptionsNftPanel — balanceUSDC + runwayEndMs (Part A)", () => {
     const snapshot = await readUserOptionsSnapshot(reader, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
-    expect(panel.nfts[0]).not.toHaveProperty("balanceUSDC");
-    expect(panel.nfts[0]).not.toHaveProperty("runwayEndMs");
+    expect(panel.nfts[0]?.account).not.toHaveProperty("balanceUSDC");
+    expect(panel.nfts[0]?.account).not.toHaveProperty("endsAtMs");
   });
 
   it("projects only balanceUSDC when runwayEndMs is absent", async () => {
@@ -66,8 +66,8 @@ describe("OptionsNftPanel — balanceUSDC + runwayEndMs (Part A)", () => {
     const snapshot = await readUserOptionsSnapshot(reader, user, asMarketId("market_01"));
     const panel = projectOptionsPanel(snapshot);
 
-    expect(panel.nfts[0]?.balanceUSDC).toBe("1000000");
-    expect(panel.nfts[0]).not.toHaveProperty("runwayEndMs");
+    expect(panel.nfts[0]?.account.balanceUSDC).toBe(1);
+    expect(panel.nfts[0]?.account).not.toHaveProperty("endsAtMs");
   });
 
   it("copy.ts gotcha — balance and runwayEndMs survive copyNftSnapshot round-trip", () => {
@@ -264,8 +264,8 @@ describe("refresh round-trip — new fields survive copy layer", () => {
     const panel = projectOptionsPanel(snapshot);
 
     // NFT balance panel fields
-    expect(panel.nfts[0]?.balanceUSDC).toBe("2500000");
-    expect(panel.nfts[0]?.runwayEndMs).toBe(1_750_000_000_000);
+    expect(panel.nfts[0]?.account.balanceUSDC).toBe(2.5);
+    expect(panel.nfts[0]?.account.endsAtMs).toBe(1_750_000_000_000);
 
     // Market stream pointer
     expect(panel.markets[0]?.stream?.status).toBe("live");

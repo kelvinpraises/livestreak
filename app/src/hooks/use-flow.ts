@@ -7,7 +7,7 @@ import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
 export function useFlow() {
   const preferFixture = usePreferFixture()
   const parsed = useParsedFixture()
-  const { board, chain } = useOptionsContext()
+  const { board } = useOptionsContext()
   const [flow, setFlow] = useState<FlowState>(parsed.flow)
   const [claiming, setClaiming] = useState(false)
 
@@ -16,7 +16,7 @@ export function useFlow() {
   }, [parsed])
 
   const liveFlow = !preferFixture && board
-    ? panelToFlow(board.panel, chain)
+    ? panelToFlow(board.panel)
     : preferFixture
       ? flow
       : { balance: 0, staked: 0, pendingDividends: 0, totalEarned: 0, apy: 0 }

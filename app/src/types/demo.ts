@@ -1,4 +1,4 @@
-import type { OptionsVaultPanel, OptionsVaultSide } from '@livestreak/options'
+import type { OptionsLaneStatus, OptionsVaultPanel, OptionsVaultSide } from '@livestreak/options'
 
 /** Authoritative per-side odds from the options board (one formula for YES & NO). */
 export type VaultOdds = OptionsVaultPanel['odds']
@@ -36,15 +36,25 @@ export interface Position {
   vaultId: string
   option: string
   side: OptionsVaultSide
-  streamed: number
+  /** Canonical lane status from the SDK board: streaming | paused | depleted. Single source for the row's
+   *  badge/controls — the app no longer re-derives these. Money-driven: paused = stopped but the shared
+   *  balance is still there to resume from; depleted = no money left (ran dry or swept to wallet). */
+  status: OptionsLaneStatus
+  /** CURRENT stream rate in USDC/min (0 when depleted; the resume rate when paused). */
   streamRate: number
   shares: number
-  currentValue: number
-  pnl: number
+  /** This position's share of its side's total shares, as a percent (0–100), from the SDK. Undefined when
+   *  the side has no shares yet. Lets the UI show "X% of YES" alongside the raw share count. */
+  sharePercent?: number
   resolved: boolean
   won?: boolean
   payout?: number
+  /** Loss-mint LVST a losing resolved position can claim (from the lane's `lossClaimableLVST`). Drives the
+   *  loss toast's "You received N $LVST". */
+  lvstReceived?: number
   minute: number
+  /** Runway: ms-since-epoch when this lane's deposit runs dry (streaming only; drives the time-left readout). */
+  runwayEndMs?: number
 }
 
 export interface VaultView {
@@ -60,7 +70,9 @@ export interface VaultView {
   poolNo?: number
   poolTotal?: number
   fundedSide?: OptionsVaultSide
-  userPosition?: { side: OptionsVaultSide; streamed: number; shares: number; currentValue: number }
+  /** rate = the lane's CURRENT stream rate (USDC/min), 0 when depleted. An existing position's slider
+   *  seeds from this so it opens at its real rate, not a placeholder. */
+  userPosition?: { side: OptionsVaultSide; rate: number; shares: number }
   userWon?: boolean
   payout?: number
   lvstReceived?: number

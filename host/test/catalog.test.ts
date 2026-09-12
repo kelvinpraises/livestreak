@@ -67,7 +67,7 @@ const fakeReader = (snap: OptionsMarketSnapshot): OptionsReader =>
     readVault: async (id: string) => snap.vaults.find((v) => String(v.vaultId) === String(id))!,
     readStreamState: async () => snap.streamState!,
     readVaultShareTotals: async () => ({ yes: 0n, no: 0n }),
-    readBoard: async (id, side) => {
+    readBoard: async (id: string, side: "yes" | "no") => {
       const vault = snap.vaults.find((v) => String(v.vaultId) === String(id));
       const yes = vault?.pools.yes ?? 0n;
       const no = vault?.pools.no ?? 0n;
@@ -78,7 +78,8 @@ const fakeReader = (snap: OptionsMarketSnapshot): OptionsReader =>
         lastAdvanceMs: NOW
       };
     },
-    readPendingBoundaries: async () => 0n
+    readPendingBoundaries: async () => 0n,
+    readBoundaries: async () => []
   }) as unknown as OptionsReader;
 
 describe("catalog mapper", () => {

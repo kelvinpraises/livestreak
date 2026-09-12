@@ -2,7 +2,6 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import { describe, expect, it, vi } from "vitest";
 
 import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../src/model/ids.js";
-import type { OptionsContractAddresses } from "../../src/chains/evm/addresses.js";
 import {
   createOptionsRuntime,
   validateOptionsRuntimeConfig,
@@ -11,7 +10,6 @@ import {
 import {
   createFakeChainConfig,
   createFakeChainWriter,
-  createFakeOptionsChain,
   createFakeOptionsReader,
   FakeReaderInMemory,
   fixtureSeed,
@@ -22,16 +20,6 @@ import type { OptionsChain } from "../../src/chains/types.js";
 const HEX_MARKET_ID = asMarketId(
   "0x0000000000000000000000000000000000000000000000000000000000000001"
 );
-
-const CONTRACT_ADDRESSES: OptionsContractAddresses = {
-  marketRegistry: "0x0000000000000000000000000000000000000011",
-  vault: "0x0000000000000000000000000000000000000014",
-  marketDriver: "0x0000000000000000000000000000000000000015",
-  stewardRegistry: "0x0000000000000000000000000000000000000017",
-  treasury: "0x0000000000000000000000000000000000000018",
-  lvstToken: "0x0000000000000000000000000000000000000016",
-  dripsStreaming: "0x0000000000000000000000000000000000000019"
-};
 
 const baseInput = (chain: OptionsChain): OptionsRuntimeInput => ({
   config: {
@@ -435,6 +423,10 @@ const wrapReader = (
   readPendingBoundaries: async (vaultId, side) => {
     onCall();
     return reader.readPendingBoundaries(vaultId, side);
+  },
+  readBoundaries: async (vaultId, side) => {
+    onCall();
+    return reader.readBoundaries(vaultId, side);
   },
   readPendingShares: async (vaultId, side, tokenId) => {
     onCall();

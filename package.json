@@ -3,15 +3,15 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/contracts",
     "packages/core",
     "packages/schema",
+    "packages/wallet",
+    "packages/contracts",
+    "packages/host",
     "packages/observe",
     "packages/options",
     "packages/bookmaker",
     "packages/steward",
-    "packages/wallet",
-    "packages/host",
     "host",
     "cli",
     "app"

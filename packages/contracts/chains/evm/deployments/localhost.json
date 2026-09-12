@@ -7,7 +7,7 @@
   "scopes": {
     "aa": {
       "status": "completed",
-      "deployedAt": "2026-06-26T01:38:44.226Z",
+      "deployedAt": "2026-06-30T20:28:29.637Z",
       "contracts": {
         "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
         "safeSingleton": "0x31ea225b4289bcf8d16764b86af6a699faa31c45",
@@ -24,7 +24,7 @@
     },
     "streaming": {
       "status": "completed",
-      "deployedAt": "2026-06-26T01:38:44.227Z",
+      "deployedAt": "2026-06-30T20:28:29.638Z",
       "contracts": {
         "dripsStreaming": "0xc20641edde8cecf5a6530a3edbd7fbbffe0bf3d5",
         "dripsProxy": "0xbf1f98e88faecf0fb3c8bea93cbdfbeef4aa57d4",
@@ -33,29 +33,29 @@
     },
     "protocol": {
       "status": "completed",
-      "deployedAt": "2026-06-26T01:38:44.311Z",
+      "deployedAt": "2026-06-30T20:28:29.716Z",
       "contracts": {
         "protocol": "0xfe7b1de3c0b7a330b04d854c91fb762886aeb69e",
         "marketRegistry": "0x24599b53386dbe94dc7acb48dd5815ff51416683",
-        "vault": "0x58a0f06e4454e163d92b7b8bdc968d344a0b4a69",
+        "vault": "0x0a4ccf1ab21ff093d82c92b23f9cb3060dece377",
         "mockUsdc": "0x76bb00aa1936dd7cda6df2fa403f1439e3db456a",
         "lvstToken": "0x25db7a4a2aadbdd1c0045006a5df4eaa8f2ce46b",
         "treasury": "0xf9ebbc137fe61723bbe644dfc5dca8eea568bbb5",
-        "stewardRegistry": "0xddf5e005034641a40505180d8ab28e9f9ce0ae82"
+        "stewardRegistry": "0xef7431bfb8a65e04ab3244c72cd7bdc55196dd4a"
       }
     },
     "wire": {
       "status": "completed",
-      "deployedAt": "2026-06-26T01:38:44.405Z",
+      "deployedAt": "2026-06-30T20:28:29.804Z",
       "contracts": {
-        "vaultDriver": "0x5d10a013887b7bfccbd571a56b11307d0c323703",
-        "marketDriverLogic": "0xfceff8892bf6f25aba4e53b1c25cb149239deb2c",
-        "marketDriverProxy": "0x1d70e0d9339ff84b77ea8c26feaa0947094ae2f0"
+        "vaultDriver": "0x981a0340610d6ccc666911bbd3bf291c0e13919e",
+        "marketDriverLogic": "0x955825800bdf781f29db41b7b438d3162632a151",
+        "marketDriverProxy": "0x1db2e16805d28057d298d794591f8a620a3a1c1d"
       }
     },
     "paymaster": {
       "status": "completed",
-      "deployedAt": "2026-06-26T01:38:44.422Z",
+      "deployedAt": "2026-06-30T20:28:29.821Z",
       "contracts": {
         "verifyingPaymaster": "0x547f60b6c453178c851d529bf36e9bccc57ba844",
         "verifyingSigner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"

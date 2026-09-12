@@ -1,9 +1,9 @@
 // --- exports ---
 
-import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
+import { LiveStreakConfigError } from "@livestreak/core";
 import { createPublicClient, http, type Abi } from "viem";
 
-import { asMarketId, asTokenId, asVaultId } from "../../model/ids.js";
+import { asMarketId, asTokenId } from "../../model/ids.js";
 import type {
   MarketId,
   TokenId,
@@ -12,6 +12,7 @@ import type {
 } from "../../model/ids.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { OptionsBoardState } from "../../model/math/accrual.js";
+import type { FunderBoundary } from "../../model/math/live-pool.js";
 import type { OptionsMarket } from "../../model/market.js";
 import type { OptionsNft } from "../../model/nft.js";
 import type { OptionsProtocolSummary } from "../../model/snapshot.js";
@@ -21,7 +22,7 @@ import type {
   OptionsVaultShareTotals,
   OptionsVaultSide
 } from "../../model/vault.js";
-import type { OptionsChainConfig, OptionsReader, SeedBoundary } from "../types.js";
+import type { OptionsChainConfig, OptionsReader } from "../types.js";
 import { DEFAULT_ABIS, type OptionsContractAbis } from "./abis.js";
 import {
   validateOptionsContractAddresses,
@@ -41,7 +42,7 @@ import {
   mapProtocolSummary,
   mapStreamState,
   mapStreamsStateBalance,
-  mapStreamsStateFull,
+  mapStreamsStateLive,
   mapVault,
   mapVaultIds,
   mapVaultShareTotals,
@@ -74,7 +75,6 @@ type ReaderContext = {
   readonly transferOperator?: UserAddress;
   usdcAddress?: `0x${string}`;
   dripsAddress?: `0x${string}`;
-  vaultDriverAddress?: `0x${string}`;
 };
 
 export type EvmContractCall = (
@@ -164,6 +164,7 @@ const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readBoard: (vaultId, side) => readBoard(ctx, vaultId, side),
   readSharePrice: (vaultId, side) => readSharePrice(ctx, vaultId, side),
   readPendingBoundaries: (vaultId, side) => readPendingBoundaries(ctx, vaultId, side),
+  readBoundaries: (vaultId, side) => readBoundaries(ctx, vaultId, side),
   readPendingShares: (vaultId, side, tokenId) =>
     readPendingShares(ctx, vaultId, side, tokenId),
   readUsdcAddress: () => readUsdcAddress(ctx),
@@ -171,8 +172,7 @@ const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readNftBalance: (tokenId) => readNftBalance(ctx, tokenId),
   readOwnerOf: (tokenId) => readOwnerOf(ctx, tokenId),
   readApproved: (tokenId) => readApproved(ctx, tokenId),
-  readIsApprovedForAll: (owner, operator) => readIsApprovedForAll(ctx, owner, operator),
-  readSeedBoundary: (vaultId, creator) => readSeedBoundary(ctx, vaultId, creator)
+  readIsApprovedForAll: (owner, operator) => readIsApprovedForAll(ctx, owner, operator)
 });
 
 // --- reads ---
@@ -644,9 +644,13 @@ const readNft = async (
     );
 
     const count = Number(laneCount);
-    const lanes = [];
-    const winningSideByVault = new Map<string, OptionsVaultSide | undefined>();
+    // Wall clock for the effective-depletion check: a lane reads depleted the moment its runway elapses
+    // in real time, matching the UI countdown (chain block.timestamp freezes between txs on a dev chain).
+    const nowSec = Math.floor(Date.now() / 1000);
 
+    // Active lanes (in _laneKeys): (vaultId:side) → on-chain bookkeeping rate. This IS the committedRate
+    // setLanes re-asserts; a side with no entry here has no active stream (paused/depleted by balance).
+    const activeRates = new Map<string, bigint>();
     for (let index = 0; index < count; index += 1) {
       const laneRaw = await call<unknown>(
         ctx,
@@ -656,41 +660,64 @@ const readNft = async (
         [id, BigInt(index)]
       );
       const lane = tupleToObject<RawLane>(laneRaw, ["vaultId", "side", "rate"]);
+      activeRates.set(`${bytes32ToHex(lane.vaultId)}:${sideFromSolidityValue(lane.side)}`, lane.rate);
+    }
 
-      const vaultBytes = lane.vaultId;
-      const vaultId = asVaultId(bytes32ToHex(vaultBytes));
-      const positionRaw = await call<unknown>(
-        ctx,
-        ctx.addresses.vault,
-        ctx.abis.Vault,
-        "getPosition",
-        [vaultBytes, lane.side, id]
-      );
-      const position = tupleToObject<RawPosition>(positionRaw, [
-        "rate",
-        "gPaid",
-        "sharesAccrued",
-        "maxEnd",
-        "depleted"
-      ]);
+    // Positions come from the SHARE LEDGER, not the active lanes: getAccountVaultIds is append-only (every
+    // vault ever funded, never pruned), so a swept / switched-away / depleted side keeps surfacing its
+    // banked shares instead of vanishing. Read BOTH sides per vault to show sequential-hedge legs.
+    const vaultIds = await readAccountVaultIds(ctx, asTokenId(id));
+    const winningSideByVault = new Map<string, OptionsVaultSide | undefined>();
+    const lanes = [];
+    let totalActiveRate = 0n;
 
-      const mapped = mapLane(asTokenId(id), lane, position);
+    for (const vaultId of vaultIds) {
+      const vaultBytes = validateVaultIdForContracts(vaultId);
       let winningSide = winningSideByVault.get(vaultId);
-
       if (!winningSideByVault.has(vaultId)) {
         winningSide = await readWinningSide(ctx, vaultId);
         winningSideByVault.set(vaultId, winningSide);
       }
 
-      const claimable = await readClaimable(ctx, asTokenId(id), vaultId, mapped.side);
-      const lossClaimable = await readLossClaimable(ctx, asTokenId(id), vaultId, mapped.side);
+      for (const side of ["yes", "no"] as const) {
+        const positionRaw = await call<unknown>(
+          ctx,
+          ctx.addresses.vault,
+          ctx.abis.Vault,
+          "getPosition",
+          [vaultBytes, sideToSolidityValue(side), id]
+        );
+        const position = tupleToObject<RawPosition>(positionRaw, [
+          "rate",
+          "gPaid",
+          "sharesAccrued",
+          "maxEnd",
+          "depleted"
+        ]);
 
-      lanes.push(enrichLane(mapped, claimable, lossClaimable, winningSide));
+        const committedRate = activeRates.get(`${vaultId}:${side}`) ?? 0n;
+        // Never-touched side: no banked shares and no active lane — skip.
+        if (position.sharesAccrued === 0n && position.rate === 0n && committedRate === 0n) {
+          continue;
+        }
+        totalActiveRate += committedRate;
+
+        const rawLane: RawLane = {
+          vaultId: vaultBytes,
+          side: sideToSolidityValue(side),
+          rate: committedRate
+        };
+        const mapped = mapLane(asTokenId(id), rawLane, position, nowSec);
+        const claimable = await readClaimable(ctx, asTokenId(id), vaultId, side);
+        const lossClaimable = await readLossClaimable(ctx, asTokenId(id), vaultId, side);
+        lanes.push(enrichLane(mapped, claimable, lossClaimable, winningSide));
+      }
     }
 
     const transferFlags = await readTransferFlags(ctx, id);
 
-    // Fetch the account-level Drips balance + runway in one call.
+    // Account balance: LIVE balance + runway. Live = stored − streamed-since-update at the total active
+    // rate (see mapStreamsStateLive) so the UI shows the real draining number, not the stale stored value.
     let nftAccount: { balance?: bigint; runwayEndMs?: number } | undefined;
     try {
       const usdc = await readUsdcAddress(ctx);
@@ -709,7 +736,7 @@ const readNft = async (
         "balance",
         "maxEnd"
       ]);
-      nftAccount = mapStreamsStateFull(streamsState);
+      nftAccount = mapStreamsStateLive(streamsState, totalActiveRate, nowSec);
     } catch {
       // Non-fatal: balance/runway stay undefined if Drips is unavailable.
     }
@@ -862,88 +889,28 @@ const readDripsAddress = async (ctx: ReaderContext): Promise<`0x${string}`> => {
   }
 };
 
-// Minimal ABIs for the seed-boundary read. The creator's seed funder isn't an NFT lane, so its
-// depletion boundary lives on the VaultDriver's seedAccount, not in any NFT snapshot. We resolve the
-// VaultDriver off the Vault itself (no extra address wiring) and read the seed position's run-dry time.
-const VAULT_DRIVER_REF_ABI = [
-  { type: "function", name: "vaultDriver", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] }
-] as const;
-
-const SEED_ACCOUNT_ABI = [
-  {
-    type: "function",
-    name: "seedAccount",
-    stateMutability: "view",
-    inputs: [
-      { type: "address", name: "creator" },
-      { type: "bytes32", name: "vaultId" }
-    ],
-    outputs: [{ type: "uint256", name: "account" }]
-  }
-] as const;
-
-const readVaultDriverAddress = async (ctx: ReaderContext): Promise<`0x${string}`> => {
-  if (ctx.vaultDriverAddress !== undefined) {
-    return ctx.vaultDriverAddress;
-  }
-  const address = await call<`0x${string}`>(
-    ctx,
-    ctx.addresses.vault,
-    VAULT_DRIVER_REF_ABI,
-    "vaultDriver",
-    []
-  );
-  ctx.vaultDriverAddress = validateContractAddress(address, "vaultDriver");
-  return ctx.vaultDriverAddress;
-};
-
-// The creator-seed funding boundary (maxEnd + rate) for a vault side. Surfaced so the live-pool
-// projection caps the pool at the funded amount instead of extrapolating the seed rate forever past
-// its run-dry instant. Best-effort: any read failure (e.g. a deployment without the VaultDriver
-// getter) returns undefined so the snapshot still loads — the projection just stays uncapped.
-const readSeedBoundary = async (
+// The canonical unsettled funder depletion schedule for (vaultId, side), straight from the contract
+// (Vault.getBoundaries applies the same validity gate `_advance`/`_previewG` use). Each entry's rate
+// is still summed into board.sideRate, so the live-pool projection caps exactly at what was funded —
+// covering every funder (seed + all NFTs), not a per-connected-user reconstruction.
+const readBoundaries = async (
   ctx: ReaderContext,
   vaultId: VaultId,
-  creator: UserAddress
-): Promise<SeedBoundary | undefined> => {
+  side: OptionsVaultSide
+): Promise<readonly FunderBoundary[]> => {
   const vaultBytes = validateVaultIdForContracts(vaultId);
-  const creatorAddr = validateUserAddress(creator, "seed creator");
-
-  let seedAcct: bigint;
   try {
-    const vaultDriver = await readVaultDriverAddress(ctx);
-    seedAcct = await call<bigint>(ctx, vaultDriver, SEED_ACCOUNT_ABI, "seedAccount", [
-      creatorAddr,
-      vaultBytes
-    ]);
-  } catch {
-    return undefined;
+    const [maxEnds, rates] = await call<readonly [readonly number[], readonly bigint[]]>(
+      ctx,
+      ctx.addresses.vault,
+      ctx.abis.Vault,
+      "getBoundaries",
+      [vaultBytes, sideToSolidityValue(side)]
+    );
+    return maxEnds.map((maxEnd, i) => ({ maxEndMs: Number(maxEnd) * 1000, rate: rates[i]! }));
+  } catch (error) {
+    throw contractsReadFailed("boundaries", error);
   }
-
-  // The seed funds exactly one side; read both and return whichever holds the active position.
-  for (const side of ["yes", "no"] as const) {
-    try {
-      const positionRaw = await call<unknown>(ctx, ctx.addresses.vault, ctx.abis.Vault, "getPosition", [
-        vaultBytes,
-        sideToSolidityValue(side),
-        seedAcct
-      ]);
-      const position = tupleToObject<RawPosition>(positionRaw, [
-        "rate",
-        "gPaid",
-        "sharesAccrued",
-        "maxEnd",
-        "depleted"
-      ]);
-      if (position.rate > 0n && !position.depleted && position.maxEnd > 0) {
-        return { side, maxEndMs: Number(position.maxEnd) * 1000, rate: position.rate };
-      }
-    } catch {
-      // A side that fails to decode is skipped; the other side may still hold the seed.
-    }
-  }
-
-  return undefined;
 };
 
 const readUsdcBalance = async (ctx: ReaderContext, owner: UserAddress): Promise<bigint> => {

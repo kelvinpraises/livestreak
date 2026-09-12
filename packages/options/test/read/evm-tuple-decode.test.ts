@@ -111,8 +111,8 @@ describe("evm positional-array tuple decode", () => {
     };
     const panel = projectOptionsPanel(userSnapshot);
     expect(panel.markets[0]?.vaults).toHaveLength(1);
-    expect(panel.markets[0]?.vaults[0]?.pools.yesUSDC).toBe("5000000");
-    expect(panel.user.usdcBalanceUSDC).toBe("997000000");
+    expect(panel.markets[0]?.vaults[0]?.pools.yesUSDC).toBe(5);
+    expect(panel.user.usdcBalanceUSDC).toBe(997);
   });
 
   it("drops an unreadable vault instead of zeroing the whole market (resilience permutation)", async () => {

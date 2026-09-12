@@ -4,7 +4,8 @@ import { bcs } from "@livestreak/wallet";
 import type { PointerScheme } from "@livestreak/host";
 
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
-import { asMarketId, asTokenId, asUserAddress, asVaultId } from "../../model/ids.js";
+import { asMarketId, asUserAddress, asVaultId } from "../../model/ids.js";
+import { WAD } from "../../model/math/curve.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { OptionsLane } from "../../model/lane.js";
 import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
@@ -216,17 +217,30 @@ export const mapSuiLane = (
   vaultId: VaultId,
   side: OptionsVaultSide,
   laneRate: bigint,
-  position: SuiPosition
-): OptionsLane => ({
-  tokenId,
-  vaultId,
-  side,
-  rate: laneRate,
-  gPaid: position.gPaid,
-  sharesAccrued: position.sharesAccrued,
-  ...(position.maxEnd > 0n ? { maxEndMs: Number(position.maxEnd) * 1000 } : {}),
-  depleted: position.depleted
-});
+  position: SuiPosition,
+  nowSec?: number // Sui chain clock (s); reports a dry lane depleted before any tx flips the flag
+): OptionsLane => {
+  // Stored `depleted` only flips on a write; also treat maxEnd ≤ chain-now as dry (parity with EVM).
+  const depleted =
+    position.depleted ||
+    (nowSec !== undefined &&
+      position.rate > 0n &&
+      position.maxEnd > 0n &&
+      position.maxEnd <= BigInt(nowSec));
+  return {
+    tokenId,
+    vaultId,
+    side,
+    rate: depleted ? 0n : laneRate, // depleted ⇒ 0 (bookkeeping keeps the stale rate)
+    committedRate: laneRate, // on-chain bookkeeping rate, retained for setLanes re-assertion
+    gPaid: position.gPaid,
+    // WAD·SCALE (1e24, accumulator precision) → canonical SHARE_SCALE (1e6), matching board_side_shares' ÷wad
+    // and sharesFromG — so the model speaks one share unit and percentOfSide isn't inflated by 1e18.
+    sharesAccrued: position.sharesAccrued / WAD,
+    ...(position.maxEnd > 0n ? { maxEndMs: Number(position.maxEnd) * 1000 } : {}),
+    depleted
+  };
+};
 
 export const enrichSuiLane = (
   lane: OptionsLane,
@@ -305,6 +319,7 @@ export type SuiContractsReadEntity =
   | "board"
   | "share price"
   | "pending boundaries"
+  | "boundaries"
   | "pending shares"
   | "USDC address"
   | "USDC balance"

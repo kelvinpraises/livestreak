@@ -67,12 +67,17 @@ export const readVaultSnapshot = async (
   vaultId: VaultId
 ): Promise<OptionsVaultSnapshot> => {
   const vault = await readOrThrow(() => reader.readVault(vaultId), "vault", vaultId);
-  const [shareTotals, boardYes, boardNo, pendingYes, pendingNo] = await Promise.all([
+  const [shareTotals, boardYes, boardNo, pendingYes, pendingNo, seedBoundary] = await Promise.all([
     readOrThrow(() => reader.readVaultShareTotals(vaultId), "vault share totals", vaultId),
     readOrThrow(() => reader.readBoard(vaultId, "yes"), "vault board yes", vaultId),
     readOrThrow(() => reader.readBoard(vaultId, "no"), "vault board no", vaultId),
     readOrThrow(() => reader.readPendingBoundaries(vaultId, "yes"), "pending boundaries yes", vaultId),
-    readOrThrow(() => reader.readPendingBoundaries(vaultId, "no"), "pending boundaries no", vaultId)
+    readOrThrow(() => reader.readPendingBoundaries(vaultId, "no"), "pending boundaries no", vaultId),
+    // Best-effort: the seed boundary caps the live pool but is never required for a snapshot. A reader
+    // without it (Sui) or a transient failure just leaves the projection uncapped, not broken.
+    reader.readSeedBoundary === undefined
+      ? Promise.resolve(undefined)
+      : reader.readSeedBoundary(vaultId, vault.creator as UserAddress).catch(() => undefined)
   ]);
 
   return {
@@ -81,6 +86,10 @@ export const readVaultSnapshot = async (
     shareTotals,
     boards: { yes: boardYes, no: boardNo },
     pendingBoundaries: { yes: pendingYes, no: pendingNo },
+    seedBoundaries: {
+      yes: seedBoundary?.side === "yes" ? [{ maxEndMs: seedBoundary.maxEndMs, rate: seedBoundary.rate }] : [],
+      no: seedBoundary?.side === "no" ? [{ maxEndMs: seedBoundary.maxEndMs, rate: seedBoundary.rate }] : []
+    },
     hot: vault.steward,
     dispute: {
       active: vault.steward.disputeId !== undefined,

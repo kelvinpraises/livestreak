@@ -1,13 +1,18 @@
-// Renders the in-package function catalog as an id/parentId tree. Nodes with
-// `visible === false` are omitted; roots are nodes with no parentId or whose
-// parent is not in the visible set. Group nodes (`nodeKind === 'group'`) nest
-// their children; action nodes are rendered via the caller-supplied slot.
+// Renders the in-package function catalog as ONE package container (the "GLOBAL" pattern), uniform
+// across all four packages. Two descriptor shapes converge here:
+//   - a package that emits a single wrapping root group (bookmaker/steward/options) → the group IS
+//     the container (unwrapped, so its label titles the pane).
+//   - a package that emits loose root actions (observe) → a container is synthesized from packageLabel.
+// Either way the console shows exactly one titled container per package. GROUP nodes nest as indented
+// sub-containers (e.g. steward "Subject: vault X"); ACTION nodes are leaf cards rendered by the slot.
+// Nodes with `visible === false` are omitted.
 
 import { useMemo, type ReactNode } from 'react'
 import type { FunctionDescriptor } from '@livestreak/schema'
 
 interface Props {
   readonly functions: readonly FunctionDescriptor[]
+  readonly packageLabel: string
   readonly renderAction: (fn: FunctionDescriptor) => ReactNode
 }
 
@@ -41,46 +46,98 @@ export function buildTree(functions: readonly FunctionDescriptor[]): TreeIndex {
   return { roots, childrenOf }
 }
 
-function TreeNode({
+function Node({
   fn,
   childrenOf,
   renderAction,
+  depth,
 }: {
   fn: FunctionDescriptor
   childrenOf: ReadonlyMap<string, readonly FunctionDescriptor[]>
   renderAction: (fn: FunctionDescriptor) => ReactNode
+  depth: number
 }) {
   const kids = childrenOf.get(fn.id) ?? []
-  const isGroup = fn.nodeKind === 'group' || kids.length > 0
 
-  if (isGroup && kids.length > 0) {
+  // A group is a nested sub-container (header + stacked children), never a form.
+  if (fn.nodeKind === 'group') {
     return (
-      <section data-testid={`fn-group-${fn.id}`} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <h3
-          style={{
-            fontSize: 12,
-            color: 'rgba(255,255,255,0.55)',
-            fontFamily: 'var(--font-mono)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.04em',
-            margin: 0,
-          }}
-        >
-          {fn.label}
-        </h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingLeft: 8 }}>
+      <Container title={fn.label} nodes={kids} childrenOf={childrenOf} renderAction={renderAction} depth={depth + 1} />
+    )
+  }
+
+  // An action is a leaf card. Permutation guard: an action should never have children, but if a
+  // descriptor ever nests actions under one (the steward bug), render the FORM first, then the
+  // children indented below — the form is never swallowed into a header.
+  if (kids.length > 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+        {renderAction(fn)}
+        <div style={{ paddingLeft: 12, borderLeft: '2px solid rgba(0,255,135,0.16)', display: 'flex', flexDirection: 'column', gap: 26 }}>
           {kids.map((child) => (
-            <TreeNode key={child.id} fn={child} childrenOf={childrenOf} renderAction={renderAction} />
+            <Node key={child.id} fn={child} childrenOf={childrenOf} renderAction={renderAction} depth={depth + 1} />
           ))}
         </div>
-      </section>
+      </div>
     )
   }
 
   return <>{renderAction(fn)}</>
 }
 
-export function FunctionTree({ functions, renderAction }: Props) {
+function Container({
+  title,
+  nodes,
+  childrenOf,
+  renderAction,
+  depth,
+}: {
+  title: string
+  nodes: readonly FunctionDescriptor[]
+  childrenOf: ReadonlyMap<string, readonly FunctionDescriptor[]>
+  renderAction: (fn: FunctionDescriptor) => ReactNode
+  depth: number
+}) {
+  const isRoot = depth === 0
+  return (
+    <section
+      data-testid={`fn-container-${title}`}
+      style={
+        isRoot
+          ? {
+              border: '1px solid rgba(255,255,255,0.08)',
+              borderRadius: 12,
+              background: 'rgba(255,255,255,0.015)',
+              padding: 24,
+            }
+          : {
+              borderLeft: '2px solid rgba(0,255,135,0.22)',
+              paddingLeft: 18,
+            }
+      }
+    >
+      <h3
+        style={{
+          fontSize: isRoot ? 11 : 10,
+          color: isRoot ? 'rgba(255,255,255,0.5)' : 'rgba(0,255,135,0.6)',
+          fontFamily: 'var(--font-mono)',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          margin: '0 0 22px',
+        }}
+      >
+        {title}
+      </h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+        {nodes.map((node) => (
+          <Node key={node.id} fn={node} childrenOf={childrenOf} renderAction={renderAction} depth={depth} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+export function FunctionTree({ functions, packageLabel, renderAction }: Props) {
   const { roots, childrenOf } = useMemo(() => buildTree(functions), [functions])
 
   if (roots.length === 0) {
@@ -91,14 +148,13 @@ export function FunctionTree({ functions, renderAction }: Props) {
     )
   }
 
+  // Normalize both shapes to one titled container. If the package wraps everything in a single root
+  // group, that group's label titles the pane; otherwise synthesize the pane from packageLabel.
+  const single = roots.length === 1 && roots[0].nodeKind === 'group' ? roots[0] : undefined
+  const title = single ? single.label : packageLabel
+  const topNodes = single ? childrenOf.get(single.id) ?? [] : roots
+
   return (
-    <div
-      data-testid="function-tree"
-      style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}
-    >
-      {roots.map((fn) => (
-        <TreeNode key={fn.id} fn={fn} childrenOf={childrenOf} renderAction={renderAction} />
-      ))}
-    </div>
+    <Container title={title} nodes={topNodes} childrenOf={childrenOf} renderAction={renderAction} depth={0} />
   )
 }

@@ -59,6 +59,10 @@ describe("projectOptionsPanel", () => {
     expect(vault?.pools.settledPoolUSDC).toBe("0");
     expect(BigInt(vault?.pools.livePoolUSDC ?? "0")).toBeGreaterThan(0n);
     expect(BigInt(panel.markets[0]?.totals.livePooledUSDC ?? "0")).toBeGreaterThan(0n);
+    // The growth rate is surfaced from the real board sideRate (yes accrues at 1_000_000/sec, no at 0),
+    // so the UI ticks the pool between polls with the true slope instead of estimating it from deltas.
+    expect(BigInt(vault?.pools.poolRatePerSecUSDC ?? "0")).toBeGreaterThan(0n);
+    expect(BigInt(panel.markets[0]?.totals.livePooledRatePerSecUSDC ?? "0")).toBeGreaterThan(0n);
   });
 
   it("projects NFT lane rates and accrued shares", async () => {

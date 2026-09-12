@@ -26,17 +26,25 @@ interface StreamLayoutProps {
   streamTitle: string
   category: string
   totalPooled: number
+  totalPooledRatePerSec?: number
   streamId: string
 }
 
-export function StreamLayout({ streamTitle, category, totalPooled, streamId }: StreamLayoutProps) {
+export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRatePerSec, streamId }: StreamLayoutProps) {
   const vaults = useVaults(streamId)
   const positions = usePositions(streamId)
   const { frame, events } = useWebSocket()
   const { legacyWallet } = useWalletContext()
   const { flow, stake, unstake, claimDividends, claiming } = useFlow()
-  const { board, fundStream, isConnected: optionsConnected } = useOptionsContext()
+  const { board, fundStream, isConnected: optionsConnected, setActiveMarketId } = useOptionsContext()
   const optionsEnabled = isOptionsModeEnabled()
+
+  // The route param IS the marketId — point the options runtime at THIS stream's market so its vaults
+  // (board) load + poll live. Without this the runtime has no market and every stream shows no vaults.
+  useEffect(() => {
+    if (!optionsEnabled) return
+    setActiveMarketId(streamId)
+  }, [optionsEnabled, streamId, setActiveMarketId])
   const { notifications, push, dismiss } = useWinNotifications()
   const [selectedVaultId, setSelectedVaultId] = useState<string | null>(null)
 
@@ -163,7 +171,7 @@ export function StreamLayout({ streamTitle, category, totalPooled, streamId }: S
       </div>
 
       {/* Stream bar */}
-      <StreamBar frame={frame} streamTitle={streamTitle} totalPooled={totalPooled} />
+      <StreamBar frame={frame} streamTitle={streamTitle} totalPooled={totalPooled} totalPooledRatePerSec={totalPooledRatePerSec} />
 
       {/* Main content: LEFT video + RIGHT predictions */}
       <div className="stream-split" style={{ flex: 1, display: 'flex', position: 'relative', zIndex: 1, overflow: 'hidden' }}>

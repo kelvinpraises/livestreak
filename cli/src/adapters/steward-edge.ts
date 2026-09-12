@@ -98,6 +98,29 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
     });
   };
 
+  // Rebuild the runtime/bridge over a new watched set and emit a board so the gateway re-projects
+  // the catalog. configure seeds subject(s) (their actions reveal); close passes {} (actions collapse,
+  // board clears) — Close is the exact inverse of Configure.
+  const applyWatched = async (next: { marketId?: string; vaultId?: string }): Promise<void> => {
+    watched = next;
+    runtime = buildRuntime();
+    bridge = createStewardBridge({ runtime });
+    if (boardListeners.size > 0) {
+      resubscribeBoard();
+    }
+    // Populate the store so the LIVE BOARD reflects the watched subject(s) — readBoard reads the store,
+    // which only fills on refresh(). noop fact sources make it cheap.
+    try {
+      await runtime.refresh();
+    } catch {
+      // best-effort: the emit below still re-projects the catalog.
+    }
+    const board = await bridge.readBoard(CONSOLE_CALLER);
+    for (const listener of boardListeners) {
+      listener(board);
+    }
+  };
+
   return {
     package: "steward",
 
@@ -106,22 +129,34 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
 
     dispatch: async (remoteCaller: BridgeCaller, envelope: CallActionEnvelope) => {
       // Board-first: configure seeds the watched market/vault subject(s) so their actions (resolve)
-      // light up in the function tree, then rebuilds the runtime/bridge over the new subjects.
+      // light up in the function tree.
       if (envelope.action === "configure") {
-        watched = readConfigure(envelope.args);
-        runtime = buildRuntime();
-        bridge = createStewardBridge({ runtime });
-        if (boardListeners.size > 0) {
-          resubscribeBoard();
-        }
+        await applyWatched(readConfigure(envelope.args));
         return { txId: `configured-${watched.vaultId ?? watched.marketId ?? "steward"}` };
       }
-      const txId = await bridge.callAction(remoteCaller, {
+      // Close = deconfigure: drop the watched subjects so the revealed actions collapse back to
+      // just Configure + Close and the board clears.
+      if (envelope.action === "close") {
+        await applyWatched({});
+        return { txId: "closed" };
+      }
+      const result: unknown = await bridge.callAction(remoteCaller, {
         scope: bridgeActionScope,
         action: envelope.action,
         args: envelope.args
       });
-      return { txId: String(txId) };
+      // callAction returns the action-plan result object — surface the real tx hash, not "[object Object]".
+      const pickTxId = (v: unknown): string => {
+        if (typeof v === "string") return v;
+        if (v !== null && typeof v === "object") {
+          const o = v as Record<string, unknown>;
+          if (typeof o.txId === "string") return o.txId;
+          if (typeof o.hash === "string") return o.hash;
+          return JSON.stringify(v);
+        }
+        return String(v);
+      };
+      return { txId: pickTxId(result) };
     },
 
     subscribeBoard: (listener) => {

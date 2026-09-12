@@ -1,7 +1,13 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import type { NextFunction, Request, Response } from "express";
 import type { HostRouteDeps } from "../../deps.js";
+import type { ChainTag } from "../../infrastructure/database/schema.js";
 import { asyncHandler, param, sendRouteResult } from "../middleware/respond.js";
+
+// `?chain=evm|sui` scopes /homepage to one chain (the per-chain router); anything else (absent/invalid)
+// falls back to the cross-chain aggregate.
+const parseChainParam = (raw: unknown): ChainTag | undefined =>
+  raw === "evm" || raw === "sui" ? raw : undefined;
 
 // Page-shaped discovery endpoints: ONE response shape per page, served from the DB
 // projection (lazily refreshed by the indexer), typed by `@livestreak/host`. The app
@@ -9,10 +15,11 @@ import { asyncHandler, param, sendRouteResult } from "../middleware/respond.js";
 // source swap. The live options board (vaults/odds/funding) is NOT here — that's the SDK's.
 
 export const createPagesController = (deps: HostRouteDeps) => ({
-  // GET /homepage -> HomepageData { streams, liveVaults, lifetimeVaults, protocolStats }.
-  homepage: asyncHandler(async (_req: Request, res: Response, next: NextFunction) => {
+  // GET /homepage[?chain=evm|sui] -> HomepageData { streams, liveVaults, lifetimeVaults, protocolStats }.
+  homepage: asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     await deps.catalogIndexer.ensureAll();
-    sendRouteResult(res, { ok: true, result: await deps.catalogReadModel.homepage() }, next);
+    const chain = parseChainParam(req.query.chain);
+    sendRouteResult(res, { ok: true, result: await deps.catalogReadModel.homepage(chain) }, next);
   }),
 
   // GET /agents -> AgentsData { agents }.

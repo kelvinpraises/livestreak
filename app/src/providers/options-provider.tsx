@@ -33,7 +33,7 @@ import {
   type UserAddress,
 } from '@livestreak/options'
 
-import { HOST_BASE_URL, LOCAL_CHAIN_ID, defaultOptionsMarketId, isOptionsModeEnabled, testOptionsSeed } from '#/utils/env'
+import { HOST_BASE_URL, LOCAL_CHAIN_ID, isOptionsModeEnabled, testOptionsSeed } from '#/utils/env'
 import {
   buildOptionsContractAddresses,
   LOCALHOST_AA_CONTRACTS,
@@ -115,6 +115,8 @@ interface OptionsContextValue {
   bridge: OptionsBridge | null
   connect: (password: string) => Promise<void>
   disconnect: () => void
+  /** Re-read the connected user's board/balance now (e.g. after an out-of-band wallet top-up). */
+  refresh: () => Promise<void>
   setActiveMarketId: (marketId: string | undefined) => void
   findFunction: (name: string, match?: (fn: OptionsFunctionView) => boolean) => OptionsFunctionView | undefined
   findFundFunction: (vaultId: string, side: 'yes' | 'no') => OptionsFunctionView | undefined
@@ -126,6 +128,13 @@ interface OptionsContextValue {
     durationMinutes?: number,
   ) => Promise<TxId>
   stopFunding: (vaultId: string, side: 'yes' | 'no') => Promise<TxId>
+  /** Add USDC deposit to a position NFT's shared funding (extends every lane's runway) by re-asserting
+   *  its existing lanes with addDeposit — no lane is added or removed. */
+  topUpNft: (
+    tokenId: string,
+    lanes: readonly { vaultId: string; side: 'yes' | 'no'; rate: string }[],
+    depositUsd: number,
+  ) => Promise<TxId>
   previewAccrual: (
     vaultId: string,
     side: 'yes' | 'no',
@@ -228,7 +237,9 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   const bridgeRef = useRef<OptionsBridge | null>(null)
   const pollingStopRef = useRef<(() => void) | null>(null)
   const boardUnsubRef = useRef<(() => void) | null>(null)
-  const activeMarketIdRef = useRef<string | undefined>(defaultOptionsMarketId())
+  // The active market is driven by the ROUTE (/stream/$id → setActiveMarketId), not a build-time
+  // constant. Starts undefined: the homepage needs no single market, and each stream page sets its own.
+  const activeMarketIdRef = useRef<string | undefined>(undefined)
   const chainRef = useRef(chain)
   chainRef.current = chain
 
@@ -461,13 +472,19 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     }
   }, [enabled, bootRuntime, teardownRuntime, deriveUserAddress])
 
+  // Point the runtime at a (newly-viewed) market. We REBOOT the runtime rather than just refreshing
+  // once, because the 3s poll targets the market baked into the runtime config at boot
+  // (config.defaultMarketId) — a one-off refresh would be overwritten by the next poll on the old
+  // market. Rebooting from the cached secret re-pins board + poll to the new market together.
   const setActiveMarketId = useCallback((marketId: string | undefined) => {
+    if (marketId === activeMarketIdRef.current) return
     activeMarketIdRef.current = marketId
     const user = address as UserAddress | null
-    if (isConnected && user) {
-      void refreshConnected(user, marketId)
+    const cached = typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_SECRET_KEY) : null
+    if (isConnected && user && cached) {
+      void bootRuntime(hexToBytes(cached as `0x${string}`), user)
     }
-  }, [address, isConnected, refreshConnected])
+  }, [address, isConnected, bootRuntime])
 
   const requireUser = useCallback((): UserAddress => {
     if (!address) throw new Error('Wallet not connected')
@@ -574,6 +591,31 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       deposit: fundDepositForDuration(chainRate, durationMinutes),
     })
   }, [callBridgeAction, ensureTokenId])
+
+  // Top up a position NFT's shared Drips balance: re-assert its CURRENT lanes (so none are removed or
+  // re-rated) with addDeposit > 0. setLanes diffs desired-vs-current, so passing the existing lanes
+  // back is a pure deposit. Extends the runway for every lane the NFT funds.
+  const topUpNft = useCallback(async (
+    tokenId: string,
+    lanes: readonly { vaultId: string; side: 'yes' | 'no'; rate: string }[],
+    depositUsd: number,
+  ): Promise<TxId> => {
+    const fundable = lanes.filter((lane) => {
+      try { return BigInt(lane.rate) > 0n } catch { return false }
+    })
+    if (fundable.length === 0) throw new Error('No active lane to top up — open a position first')
+    const addDeposit = BigInt(Math.round(depositUsd * 1_000_000))
+    if (addDeposit <= 0n) throw new Error('Enter an amount greater than 0')
+    return callBridgeAction('setLanes', {
+      tokenId: asTokenId(BigInt(tokenId)),
+      lanes: fundable.map((lane) => ({
+        vaultId: asVaultId(lane.vaultId),
+        side: lane.side,
+        rate: BigInt(lane.rate),
+      })),
+      addDeposit,
+    })
+  }, [callBridgeAction])
 
   const stopFunding = useCallback(async (vaultId: string, side: 'yes' | 'no'): Promise<TxId> => {
     return callBridgeAction('stopFunding', {
@@ -686,12 +728,14 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     bridge: bridgeRef.current,
     connect,
     disconnect,
+    refresh: afterWrite,
     setActiveMarketId,
     findFunction,
     findFundFunction: findFundFunctionForVault,
     findStopFundingFunction: findStopFundingFunctionForVault,
     fundStream,
     stopFunding,
+    topUpNft,
     previewAccrual,
     claimWin,
     hasNftForVault,
@@ -705,8 +749,8 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     setApprovalForAll,
   }), [
     enabled, ready, chain, setChain, isConnected, isLoading, derivationStep, claiming, error, address, usdcBalance, board, controls,
-    connect, disconnect, setActiveMarketId, findFunction, findFundFunctionForVault,
-    findStopFundingFunctionForVault, fundStream, stopFunding, previewAccrual, claimWin, hasNftForVault, mint, claimLoss,
+    connect, disconnect, afterWrite, setActiveMarketId, findFunction, findFundFunctionForVault,
+    findStopFundingFunctionForVault, fundStream, stopFunding, topUpNft, previewAccrual, claimWin, hasNftForVault, mint, claimLoss,
     stake, unstake, claimDividends, transferNft, approveNft, setApprovalForAll,
   ])
 

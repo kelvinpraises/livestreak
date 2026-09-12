@@ -63,6 +63,54 @@ describe('pollUntilUserOperationIncluded', () => {
       /Timed out/,
     )
   })
+
+  // Regression: the first userOp (Safe deploy + mint) used to hang forever because a single stalled
+  // getUserOperationReceipt blocked the loop and the overall deadline was never reached. The
+  // per-attempt timeout must bound that stall and let a later attempt pick up the now-available receipt.
+  it('does not hang when one attempt stalls — bounds it and retries', async () => {
+    const receipt = { success: true, transactionHash: '0xabc' }
+    let calls = 0
+    const reader = {
+      async getUserOperationReceipt() {
+        calls += 1
+        if (calls === 1) return new Promise(() => {}) // never settles — the stalled first attempt
+        return receipt
+      },
+    }
+    const out = await pollUntilUserOperationIncluded(reader, '0xh', {
+      timeoutMs: 5_000,
+      intervalMs: 1,
+      maxIntervalMs: 1,
+      attemptTimeoutMs: 20,
+    })
+    assert.equal(out, receipt)
+    assert.ok(calls >= 2)
+  })
+
+  it('retries a transient fetch error and resolves on a later attempt', async () => {
+    const receipt = { success: true }
+    let calls = 0
+    const reader = {
+      async getUserOperationReceipt() {
+        calls += 1
+        if (calls === 1) throw new Error('socket hang up')
+        return receipt
+      },
+    }
+    assert.equal(await pollUntilUserOperationIncluded(reader, '0xh', fast), receipt)
+  })
+
+  it('surfaces the last transport error when it never recovers', async () => {
+    const reader = {
+      async getUserOperationReceipt() {
+        throw new Error('bundler down')
+      },
+    }
+    await assert.rejects(
+      () => pollUntilUserOperationIncluded(reader, '0xh', { timeoutMs: 30, intervalMs: 5, maxIntervalMs: 5 }),
+      /last error: bundler down/,
+    )
+  })
 })
 
 describe('readUserOperationSuccess / assertUserOperationSucceeded', () => {

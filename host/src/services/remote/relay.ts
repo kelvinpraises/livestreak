@@ -146,13 +146,31 @@ export const createRemoteRelay = (
       if (session === undefined) {
         return;
       }
-      session.lastBoard = msg.board;
+      if (typeof msg.target === "string") {
+        session.lastBoards[msg.target] = msg.board;
+      }
       for (const sink of session.uiSinks.values()) {
         sink({
           type: "board_patch",
           ...(typeof msg.target === "string" ? { target: msg.target } : {}),
           board: msg.board
         });
+      }
+      return;
+    }
+    if (msg.type === "functions" && Array.isArray(msg.functions)) {
+      const session = store.get(sessionId);
+      if (session === undefined) {
+        return;
+      }
+      // Keep the catalog current for late-joining UIs, and push the scope-filtered set to each bound UI.
+      session.functions = msg.functions;
+      for (const [connId, sink] of session.uiSinks.entries()) {
+        const grant = boundGrants.get(grantKey(sessionId, connId));
+        if (grant === undefined) {
+          continue;
+        }
+        sink({ type: "functions", functions: filterFunctionsByGrant(msg.functions, grant) });
       }
       return;
     }
@@ -210,8 +228,10 @@ export const createRemoteRelay = (
     // the UI only ever learns about functions it is actually authorized to call.
     const functions = filterFunctionsByGrant(session.functions, grant);
     conn.send({ type: "ready", sessionId, functions });
-    if (session.lastBoard !== undefined) {
-      conn.send({ type: "board_patch", board: session.lastBoard });
+    // Replay EVERY package's latest board (keyed by target) so a late-joining UI sees all boards, not
+    // just whichever package pushed last.
+    for (const [target, board] of Object.entries(session.lastBoards)) {
+      conn.send({ type: "board_patch", target, board });
     }
     return true;
   };

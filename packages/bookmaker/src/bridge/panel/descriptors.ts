@@ -7,13 +7,13 @@
 import type { CapabilityScope, FunctionDescriptor, JsonSchema } from "@livestreak/schema";
 import { bridgeActionScope, withDescriptorIdentity } from "@livestreak/schema";
 
-import { bookmakerConfigCloseScope, bookmakerConfigScope, bridgeControlsReadScope } from "../types.js";
+import { bridgeControlsReadScope } from "../types.js";
 import type { BookmakerPanelView } from "../../model/watch-source.js";
 
 const PACKAGE = "bookmaker" as const;
+const ROOT_ID = "bookmaker.root";
 const CONFIG_ID = "bookmaker.config.configure";
 const CLOSE_ID = "bookmaker.config.close";
-const GLOBAL_GROUP_ID = "bookmaker.global";
 
 // --- exports ---
 
@@ -22,8 +22,8 @@ export const projectBookmakerDescriptors = (
 ): readonly FunctionDescriptor[] => {
   const descriptors: FunctionDescriptor[] = [];
 
+  pushRoot(descriptors);
   pushConfigurator(descriptors);
-  pushEntityGroups(descriptors);
   descriptors.push(createVaultDescriptor(panel));
 
   return descriptors;
@@ -31,14 +31,35 @@ export const projectBookmakerDescriptors = (
 
 // --- tree nodes ---
 
+// Single root pane: every action nests under one "Bookmaker" group so the console shows ONE clean
+// section (not loose cards). Mirrors the uniform shape across packages.
+const pushRoot = (descriptors: FunctionDescriptor[]): void => {
+  descriptors.push(
+    withDescriptorIdentity(
+      {
+        id: ROOT_ID,
+        name: "bookmaker",
+        label: "Bookmaker",
+        scope: bridgeControlsReadScope,
+        nodeKind: "group",
+        order: 0,
+        disabled: false,
+        visible: true
+      },
+      { package: PACKAGE, idPrefix: "root" }
+    )
+  );
+};
+
 const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
   descriptors.push(
     withDescriptorIdentity(
       {
         id: CONFIG_ID,
+        parentId: ROOT_ID,
         name: "configure",
         label: "Configure bookmaker",
-        scope: bookmakerConfigScope,
+        scope: `${bridgeActionScope}:configure` as CapabilityScope,
         nodeKind: "action",
         order: 0,
         disabled: false,
@@ -53,9 +74,10 @@ const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
     withDescriptorIdentity(
       {
         id: CLOSE_ID,
+        parentId: ROOT_ID,
         name: "close",
         label: "Close",
-        scope: bookmakerConfigCloseScope,
+        scope: `${bridgeActionScope}:close` as CapabilityScope,
         nodeKind: "action",
         order: 1,
         disabled: false,
@@ -66,32 +88,13 @@ const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
   );
 };
 
-const pushEntityGroups = (descriptors: FunctionDescriptor[]): void => {
-  descriptors.push(
-    withDescriptorIdentity(
-      {
-        id: GLOBAL_GROUP_ID,
-        parentId: CONFIG_ID,
-        name: "global",
-        label: "Global",
-        scope: bridgeControlsReadScope,
-        nodeKind: "group",
-        order: 10,
-        disabled: false,
-        visible: false
-      },
-      { package: PACKAGE, idPrefix: "group" }
-    )
-  );
-};
-
 const createVaultDescriptor = (panel: BookmakerPanelView): FunctionDescriptor => {
   const hasMarket = panel.marketId.trim().length > 0;
 
   return withDescriptorIdentity(
     {
-      id: `${GLOBAL_GROUP_ID}.action.createVault`,
-      parentId: GLOBAL_GROUP_ID,
+      id: `${ROOT_ID}.action.createVault`,
+      parentId: ROOT_ID,
       name: "createVault",
       label: "Create vault",
       scope: `${bridgeActionScope}:createVault` as CapabilityScope,
@@ -99,7 +102,8 @@ const createVaultDescriptor = (panel: BookmakerPanelView): FunctionDescriptor =>
       nodeKind: "action",
       order: 20,
       disabled: !hasMarket,
-      visible: false,
+      // Board-first reveal (like observe register): createVault lights up once configure sets a market.
+      visible: hasMarket,
       ...(hasMarket ? {} : { disabledReason: "No market context" }),
       inputSchema: CREATE_VAULT_INPUT_SCHEMA
     },
@@ -161,5 +165,23 @@ const CREATE_VAULT_INPUT_SCHEMA: JsonSchema = obj([
       description: "Initial stream rate. Base-unit integer as a decimal string."
     },
     help: "USDC base units/sec seed rate."
+  },
+  {
+    name: "resolutionSource",
+    value: {
+      type: "string",
+      required,
+      description: 'How the vault resolves (e.g. "manual").',
+      default: "manual"
+    },
+    help: "Resolution source — defaults to manual."
+  },
+  {
+    name: "resolutionWindowExpiresAtMs",
+    value: {
+      type: "integer",
+      description: "Resolution deadline (epoch ms). Leave blank to default to 24h from now."
+    },
+    help: "Optional — the gateway defaults this to now + 24h when blank."
   }
 ]);

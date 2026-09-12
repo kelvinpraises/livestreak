@@ -21,7 +21,7 @@ import type {
   OptionsVaultShareTotals,
   OptionsVaultSide
 } from "../../model/vault.js";
-import type { OptionsChainConfig, OptionsReader } from "../types.js";
+import type { OptionsChainConfig, OptionsReader, SeedBoundary } from "../types.js";
 import { DEFAULT_ABIS, type OptionsContractAbis } from "./abis.js";
 import {
   validateOptionsContractAddresses,
@@ -73,6 +73,8 @@ type ReaderContext = {
   readonly abis: OptionsContractAbis;
   readonly transferOperator?: UserAddress;
   usdcAddress?: `0x${string}`;
+  dripsAddress?: `0x${string}`;
+  vaultDriverAddress?: `0x${string}`;
 };
 
 export type EvmContractCall = (
@@ -145,6 +147,7 @@ export const createEvmOptionsReader = (config: OptionsChainConfig): OptionsReade
 const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readMarket: (marketId) => readMarket(ctx, marketId),
   readStreamState: (marketId) => readStreamState(ctx, marketId),
+  listMarketIds: () => listMarketIds(ctx),
   listMarketVaults: (marketId) => listMarketVaults(ctx, marketId),
   readVault: (vaultId) => readVault(ctx, vaultId),
   readVaultShareTotals: (vaultId) => readVaultShareTotals(ctx, vaultId),
@@ -168,7 +171,8 @@ const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readNftBalance: (tokenId) => readNftBalance(ctx, tokenId),
   readOwnerOf: (tokenId) => readOwnerOf(ctx, tokenId),
   readApproved: (tokenId) => readApproved(ctx, tokenId),
-  readIsApprovedForAll: (owner, operator) => readIsApprovedForAll(ctx, owner, operator)
+  readIsApprovedForAll: (owner, operator) => readIsApprovedForAll(ctx, owner, operator),
+  readSeedBoundary: (vaultId, creator) => readSeedBoundary(ctx, vaultId, creator)
 });
 
 // --- reads ---
@@ -253,6 +257,32 @@ const readStreamState = async (
 
     throw contractsReadFailed("stream state", error);
   }
+};
+
+// Enumerate every registered market straight off the registry (marketCount + marketIdAt).
+// The host indexer uses this so observe-registered markets surface on the homepage without
+// relying on the in-memory discovery store or an env seed.
+const listMarketIds = async (ctx: ReaderContext): Promise<readonly MarketId[]> => {
+  const marketCount = await call<bigint>(
+    ctx,
+    ctx.addresses.marketRegistry,
+    ctx.abis.MarketRegistry,
+    "marketCount",
+    []
+  );
+  const count = Number(marketCount);
+  const ids: MarketId[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const raw = await call<`0x${string}`>(
+      ctx,
+      ctx.addresses.marketRegistry,
+      ctx.abis.MarketRegistry,
+      "marketIdAt",
+      [BigInt(index)]
+    );
+    ids.push(asMarketId(raw));
+  }
+  return ids;
 };
 
 const listMarketVaults = async (
@@ -664,9 +694,10 @@ const readNft = async (
     let nftAccount: { balance?: bigint; runwayEndMs?: number } | undefined;
     try {
       const usdc = await readUsdcAddress(ctx);
+      const drips = await readDripsAddress(ctx);
       const streamsStateRaw = await call<unknown>(
         ctx,
-        ctx.addresses.dripsStreaming,
+        drips,
         ctx.abis.DripsStreaming,
         "streamsState",
         [id, usdc]
@@ -805,6 +836,114 @@ const readUsdcAddress = async (ctx: ReaderContext): Promise<`0x${string}`> => {
   } catch (error) {
     throw contractsReadFailed("USDC address", error);
   }
+};
+
+// The streaming contract the MarketDriver ACTUALLY uses for this NFT's Drips account — read straight
+// off MarketDriver.DRIPS(), not the deployment's `dripsStreaming` field, which can point at a
+// different Drips instance. Querying the wrong one returns an all-zero streamsState, which surfaced
+// as a position NFT stuck at "$0.00 balance / — runway" even while it was actively streaming.
+const readDripsAddress = async (ctx: ReaderContext): Promise<`0x${string}`> => {
+  if (ctx.dripsAddress !== undefined) {
+    return ctx.dripsAddress;
+  }
+
+  try {
+    const address = await call<`0x${string}`>(
+      ctx,
+      ctx.addresses.marketDriver,
+      ctx.abis.MarketDriver,
+      "DRIPS",
+      []
+    );
+    ctx.dripsAddress = validateContractAddress(address, "DRIPS");
+    return ctx.dripsAddress;
+  } catch (error) {
+    throw contractsReadFailed("DRIPS address", error);
+  }
+};
+
+// Minimal ABIs for the seed-boundary read. The creator's seed funder isn't an NFT lane, so its
+// depletion boundary lives on the VaultDriver's seedAccount, not in any NFT snapshot. We resolve the
+// VaultDriver off the Vault itself (no extra address wiring) and read the seed position's run-dry time.
+const VAULT_DRIVER_REF_ABI = [
+  { type: "function", name: "vaultDriver", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] }
+] as const;
+
+const SEED_ACCOUNT_ABI = [
+  {
+    type: "function",
+    name: "seedAccount",
+    stateMutability: "view",
+    inputs: [
+      { type: "address", name: "creator" },
+      { type: "bytes32", name: "vaultId" }
+    ],
+    outputs: [{ type: "uint256", name: "account" }]
+  }
+] as const;
+
+const readVaultDriverAddress = async (ctx: ReaderContext): Promise<`0x${string}`> => {
+  if (ctx.vaultDriverAddress !== undefined) {
+    return ctx.vaultDriverAddress;
+  }
+  const address = await call<`0x${string}`>(
+    ctx,
+    ctx.addresses.vault,
+    VAULT_DRIVER_REF_ABI,
+    "vaultDriver",
+    []
+  );
+  ctx.vaultDriverAddress = validateContractAddress(address, "vaultDriver");
+  return ctx.vaultDriverAddress;
+};
+
+// The creator-seed funding boundary (maxEnd + rate) for a vault side. Surfaced so the live-pool
+// projection caps the pool at the funded amount instead of extrapolating the seed rate forever past
+// its run-dry instant. Best-effort: any read failure (e.g. a deployment without the VaultDriver
+// getter) returns undefined so the snapshot still loads — the projection just stays uncapped.
+const readSeedBoundary = async (
+  ctx: ReaderContext,
+  vaultId: VaultId,
+  creator: UserAddress
+): Promise<SeedBoundary | undefined> => {
+  const vaultBytes = validateVaultIdForContracts(vaultId);
+  const creatorAddr = validateUserAddress(creator, "seed creator");
+
+  let seedAcct: bigint;
+  try {
+    const vaultDriver = await readVaultDriverAddress(ctx);
+    seedAcct = await call<bigint>(ctx, vaultDriver, SEED_ACCOUNT_ABI, "seedAccount", [
+      creatorAddr,
+      vaultBytes
+    ]);
+  } catch {
+    return undefined;
+  }
+
+  // The seed funds exactly one side; read both and return whichever holds the active position.
+  for (const side of ["yes", "no"] as const) {
+    try {
+      const positionRaw = await call<unknown>(ctx, ctx.addresses.vault, ctx.abis.Vault, "getPosition", [
+        vaultBytes,
+        sideToSolidityValue(side),
+        seedAcct
+      ]);
+      const position = tupleToObject<RawPosition>(positionRaw, [
+        "rate",
+        "gPaid",
+        "sharesAccrued",
+        "maxEnd",
+        "depleted"
+      ]);
+      if (position.rate > 0n && !position.depleted && position.maxEnd > 0) {
+        return { side, maxEndMs: Number(position.maxEnd) * 1000, rate: position.rate };
+      }
+    } catch {
+      // A side that fails to decode is skipped; the other side may still hold the seed.
+    }
+  }
+
+  return undefined;
 };
 
 const readUsdcBalance = async (ctx: ReaderContext, owner: UserAddress): Promise<bigint> => {

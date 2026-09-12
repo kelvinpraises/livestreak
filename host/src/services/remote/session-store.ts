@@ -16,12 +16,14 @@ export interface RemoteSession {
   readonly sessionId: string;
   readonly scopes: readonly CapabilityScope[];
   readonly passwordVerifier: string;
-  // Gateway-projected, console-normalized function catalog (the UI renders these).
-  readonly functions: readonly FunctionDescriptor[];
+  // Gateway-projected, console-normalized function catalog (the UI renders these). Mutable: the
+  // gateway re-pushes it on board-first reveals, and late-joining UIs must get the current set.
+  functions: readonly FunctionDescriptor[];
   expiresAt: number;
   revoked: boolean;
-  /** Latest board snapshot from the gateway (replayed to late-joining UIs). */
-  lastBoard?: unknown;
+  /** Latest board snapshot PER package target (replayed to late-joining UIs so EVERY package's board
+   *  survives the initial connect, not just whichever package pushed last). */
+  lastBoards: Record<string, unknown>;
   gateway: GatewaySink | null;
   /** UI sockets bound to this session, keyed by an internal connection id. */
   readonly uiSinks: Map<string, UiSink>;
@@ -98,7 +100,8 @@ export const createRemoteSessionStore = (): RemoteSessionStore => {
       revoked: false,
       gateway: input.gateway,
       uiSinks: new Map(),
-      replay: new Map()
+      replay: new Map(),
+      lastBoards: {}
     };
     sessions.set(session.sessionId, session);
     return session;

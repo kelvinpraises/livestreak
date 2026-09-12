@@ -51,6 +51,11 @@ export function VaultCard({ vault, index = 0, onStream }: {
       (streamSide === 'yes' ? funding.fundYes : funding.fundNo) !== undefined
       && !(streamSide === 'yes' ? funding.fundYes : funding.fundNo)!.disabled
     ))
+  // Clearing the rate to 0 on a side you're already streaming means "stop". A 0 rate can't be funded,
+  // so rather than greying out with no way forward, the button flips to a STOP action: it halts the
+  // stream (your unstreamed balance stays in the NFT, withdrawable later) instead of trapping the user.
+  const wantsStop = funding.activeFundedSide !== undefined && streamRate < 0.01 && !fundBusy
+  const stopReady = funding.stopFn !== undefined && !funding.stopFn.disabled
   const { preview, loading: previewLoading } = useAccrualPreview(
     vault.vaultId,
     expanded ? streamSide : null,
@@ -305,15 +310,18 @@ export function VaultCard({ vault, index = 0, onStream }: {
                   )}
                   <button
                     data-testid={`fund-submit-${vault.vaultId}`}
-                    disabled={!canCommit}
+                    disabled={wantsStop ? !stopReady : !canCommit}
                     onClick={async () => {
-                      if (!streamSide || !onStream) return
                       setFundError(null)
                       setFundBusy(true)
                       try {
-                        await onStream(vault.vaultId, streamSide, streamRate, fundDurationMin)
+                        if (wantsStop && funding.activeFundedSide) {
+                          await funding.stopFunding(vault.vaultId, funding.activeFundedSide)
+                        } else if (streamSide && onStream) {
+                          await onStream(vault.vaultId, streamSide, streamRate, fundDurationMin)
+                        }
                       } catch (err) {
-                        setFundError(err instanceof Error ? err.message : 'Fund failed')
+                        setFundError(err instanceof Error ? err.message : wantsStop ? 'Stop failed' : 'Fund failed')
                       } finally {
                         setFundBusy(false)
                       }
@@ -322,20 +330,22 @@ export function VaultCard({ vault, index = 0, onStream }: {
                       width: '100%', marginTop: 10, padding: '9px 0',
                       fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-display)',
                       letterSpacing: '0.04em', borderRadius: 7, border: 'none',
-                      cursor: canCommit ? 'pointer' : 'default',
-                      background: streamSide === 'yes' ? '#00ff87' : streamSide === 'no' ? '#ff2d78' : 'rgba(255,255,255,0.06)',
-                      color: streamSide ? '#000' : 'rgba(255,255,255,0.25)',
-                      opacity: canCommit ? 1 : 0.45,
+                      cursor: (wantsStop ? stopReady : canCommit) ? 'pointer' : 'default',
+                      background: wantsStop ? '#ff7a00' : streamSide === 'yes' ? '#00ff87' : streamSide === 'no' ? '#ff2d78' : 'rgba(255,255,255,0.06)',
+                      color: wantsStop || streamSide ? '#000' : 'rgba(255,255,255,0.25)',
+                      opacity: (wantsStop ? stopReady : canCommit) ? 1 : 0.45,
                       transition: 'background 0.2s, color 0.2s, opacity 0.2s',
                     }}
                   >
                     {fundBusy
                       ? '...'
-                      : !streamSide
-                        ? 'CHOOSE A SIDE'
-                        : needsMint
-                          ? `BACK VAULT → ${streamSide.toUpperCase()}`
-                          : `STREAM → ${streamSide.toUpperCase()}`}
+                      : wantsStop
+                        ? `STOP ${funding.activeFundedSide!.toUpperCase()} STREAM`
+                        : !streamSide
+                          ? 'CHOOSE A SIDE'
+                          : needsMint
+                            ? `BACK VAULT → ${streamSide.toUpperCase()}`
+                            : `STREAM → ${streamSide.toUpperCase()}`}
                   </button>
                   {fundError && (
                     <p style={{ fontSize: 9, color: '#ff7a00', margin: '6px 0 0' }}>{fundError}</p>

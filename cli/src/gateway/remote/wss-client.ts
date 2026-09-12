@@ -40,6 +40,7 @@ export interface WssClient {
   revoke(sessionId: string): void;
   send(frame: GatewayFrame): void;
   sendBoardPatch(sessionId: string, board: unknown, target?: string): void;
+  sendFunctions(sessionId: string, functions: readonly FunctionDescriptor[]): void;
   close(): void;
   isConnected(): boolean;
 }
@@ -167,6 +168,9 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
         board,
         ...(target === undefined ? {} : { target })
       });
+    },
+    sendFunctions: (sessionId, functions) => {
+      safeSend({ type: "functions", sessionId, functions });
     },
     close: () => {
       closing = true;

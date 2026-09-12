@@ -48,7 +48,9 @@ const toDescriptor = (
       target: { kind: cell.kind },
       disabled: fn.disabled,
       visible,
-      nodeKind: fn.name === "configure" || fn.name === "close" ? "group" : "action",
+      // All observe controls are callable actions (consistent with the other packages' shape); the
+      // console counts visible non-group functions, so configure/close must be 'action' to count.
+      nodeKind: "action",
       order: cell.order,
       ...(fn.disabledReason === undefined ? {} : { disabledReason: fn.disabledReason }),
       ...(fn.input === undefined ? {} : { inputSchema: toCanonicalSchema(fn.input) })

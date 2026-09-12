@@ -7,7 +7,7 @@
   },
   "scripts": {
     "clean": "rm -rf .output .tanstack",
-    "build": "vite build",
+    "build": "NODE_OPTIONS=--max-old-space-size=4096 vite build",
     "check": "tsc --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
@@ -21,6 +21,7 @@
     "@livestreak/observe": "file:../packages/observe",
     "@livestreak/options": "file:../packages/options",
     "@livestreak/schema": "file:../packages/schema",
+    "@number-flow/react": "^0.6.0",
     "@phosphor-icons/react": "^2.1.10",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.18",

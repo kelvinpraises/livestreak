@@ -55,4 +55,24 @@ describe("projectVaultLivePools", () => {
     expect(stretchOnly).toBe(120_000_000n);
     expect(withBoundary).toBe(90_000_000n);
   });
+
+  it("caps a forward projection at a funder boundary even when pendingBoundaries is 0", () => {
+    // The seed's runway elapsed in WALL-CLOCK, but the chain hasn't mined a block to settle the
+    // boundary (pendingBoundaries still 0 — exactly the idle-anvil / live-projection case). The pool
+    // must stop at what was funded, not extrapolate the seed rate forever. Before the gate fix this
+    // took the uncapped path and climbed to 600_000_000 (the "pool exceeds deposits" bug).
+    const lastAdvanceMs = 1_700_000_000_000;
+    const seedMaxEndMs = lastAdvanceMs + 30_000; // seed runs dry 30s in
+    const atMs = lastAdvanceMs + 600_000; // ...we project 10 minutes later
+    const board = { pool: 0n, sideRate: 1_000_000n, g: 0n, lastAdvanceMs };
+
+    const capped = projectLivePoolSide({
+      board,
+      atMs,
+      pendingBoundaries: 0n,
+      funderBoundaries: [{ maxEndMs: seedMaxEndMs, rate: 1_000_000n }]
+    });
+
+    expect(capped).toBe(30_000_000n); // 1_000_000/s × 30s — full deposit, not 600_000_000
+  });
 });

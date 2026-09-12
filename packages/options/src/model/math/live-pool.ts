@@ -47,10 +47,15 @@ export const projectLivePoolSide = (input: ProjectLivePoolSideInput): bigint => 
     return board.pool;
   }
 
-  const pending = input.pendingBoundaries ?? 0n;
   const boundaries = input.funderBoundaries;
 
-  if (pending === 0n || boundaries === undefined || boundaries.length === 0) {
+  // Cap at funder depletion whenever ANY boundary is known — judged against `freezeMs` (wall-clock),
+  // NOT the on-chain `pendingBoundaries` count. A live projection runs ahead of block time, so a
+  // funder whose runway has elapsed in wall-clock must drop out even though the chain hasn't settled
+  // its boundary yet; gating on the on-chain count let the seed rate extrapolate forever past its
+  // run-dry instant (the "pool climbs past what was funded" bug). The boundary walk no-ops on
+  // still-future boundaries, so this stays exact while the funder is live.
+  if (boundaries === undefined || boundaries.length === 0) {
     const dtSeconds = Math.floor((freezeMs - board.lastAdvanceMs) / 1000);
     return segMath({ pool: board.pool, sideRate: board.sideRate, dtSeconds }).newPool;
   }

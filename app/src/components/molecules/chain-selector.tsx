@@ -1,12 +1,7 @@
 import { isOptionsModeEnabled } from '#/utils/env'
 import { useOptionsContext } from '#/providers/options-provider'
 import { Button } from '#/components/atoms/button'
-import type { OptionsChainKind } from '#/utils/chain'
-
-const CHAINS: { id: OptionsChainKind; label: string }[] = [
-  { id: 'evm', label: 'EVM' },
-  { id: 'sui', label: 'Sui' },
-]
+import { SUPPORTED_CHAINS } from '#/utils/chain'
 
 // Segmented two-pill control. This is NOT a hand-rolled overlay (no fragile
 // dismiss logic to fix), so converting it to a DropdownMenu/Select would change
@@ -22,7 +17,7 @@ export function ChainSelector() {
 
   return (
     <div data-testid="chain-selector" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-      {CHAINS.map(item => {
+      {SUPPORTED_CHAINS.map(item => {
         const active = chain === item.id
         return (
           <Button

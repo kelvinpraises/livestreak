@@ -332,6 +332,7 @@ export type ContractsReadEntity =
   | "pending boundaries"
   | "pending shares"
   | "USDC address"
+  | "DRIPS address"
   | "USDC balance"
   | "NFT balance"
   | "ownerOf"

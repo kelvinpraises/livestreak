@@ -21,6 +21,10 @@ ANVIL_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 # Which chain the role consoles + wiring target. Infra (both legs) always comes up; CHAIN selects
 # which chain the consoles are pinned to and which chain gets demo-wired this run.
 CHAIN="${CHAIN:-evm}"
+# foundry's `cast`/`anvil` read $CHAIN as their `--chain` flag. Our values ("evm"/"sui") are not valid
+# foundry chain names, so an inherited CHAIN makes EVERY cast reject with "invalid value for --chain"
+# (this was the silent wiring failure). Keep CHAIN shell-local: dev.sh still uses it; children don't see it.
+export -n CHAIN 2>/dev/null || true
 WITH_SUI="${WITH_SUI:-1}"
 [ "$CHAIN" = "sui" ] && WITH_SUI=1
 SUI_PID=""
@@ -52,7 +56,10 @@ role_label() {
 
 # Broad demo grant covering every package's console + config scopes (granular; never the coarse
 # bridge:action or "*"). a:b:* matches a:b:c only, so list each category.
-ROLE_SCOPES="bridge:action:*,bridge:board:read,bridge:board:subscribe,bridge:controls:read,steward:config:*,steward:vault:*,steward:subject:*,steward:proposal:*,steward:steward:*,options:config:*,observe:system:*,bookmaker:config:*"
+# Every console descriptor advertises scope `bridge:action:<name>` (uniform across all 4 packages) — the
+# SAME scope the relay authorizes a call against (host requiredScopeForCall). Structural group nodes use
+# `bridge:controls:read`. So the grant is simply: all actions + board read/subscribe + controls read.
+ROLE_SCOPES="bridge:action:*,bridge:board:read,bridge:board:subscribe,bridge:controls:read"
 
 # Colors
 G='\033[0;32m' Y='\033[0;33m' R='\033[0;31m' N='\033[0m'
@@ -61,21 +68,161 @@ warn() { echo -e "${Y}!${N} $1"; }
 err()  { echo -e "${R}✗${N} $1"; }
 
 cleanup() {
+  [ -n "${_CLEANED:-}" ] && return
+  _CLEANED=1
   log "Shutting down..."
-  pkill -f "remote open" 2>/dev/null || true
+  # Kill the ACTUAL children by pattern, not just $HOST_PID/$APP_PID — those are the `npm run dev`
+  # wrappers, and npm does NOT forward the signal to its tsx/vite/alto child, so killing the wrapper
+  # alone orphans the real servers (the app keeps serving after the shell is "down").
+  pkill -f "remote open" 2>/dev/null || true        # cli role consoles (tsx + npm wrapper)
+  pkill -f "tsx src/main.ts" 2>/dev/null || true     # host server
+  pkill -f "vite dev --port 3000" 2>/dev/null || true # app
+  pkill -f "alto --entrypoints" 2>/dev/null || true   # AA bundler (host's child)
   pkill -f "anvil" 2>/dev/null || true
   [ -n "$HOST_PID" ] && kill "$HOST_PID" 2>/dev/null || true
   [ -n "$APP_PID" ]  && kill "$APP_PID"  2>/dev/null || true
   [ -n "$SUI_PID" ]  && kill "$SUI_PID"  2>/dev/null || true
   pkill -f "sui start" 2>/dev/null || true
   pkill -f "sui-faucet" 2>/dev/null || true
-  exit 0
+  for p in 8545 8787 3000; do lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true; done
 }
-trap cleanup SIGINT SIGTERM
+# EXIT runs cleanup on ANY exit (normal end or the exit below). The signal trap converts Ctrl-C /
+# kill / terminal-close (HUP) into an exit so cleanup runs exactly once. Only kill -9 escapes
+# (uncatchable) — the startup kill-stale block is the backstop for that case.
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
 
-# Sui-localnet leg helpers (sui_leg_up / sui_leg_env). Sourcing does not start anything.
-# shellcheck source=dev-sui.sh
-source "$ROOT/dev-sui.sh"
+# ── Sui-localnet leg (folded in: sui_leg_up boots localnet+faucet, deploys the Move package, funds the
+#    host sponsor; sui_leg_env exports the host's Sui targeting). The app flips EVM<->Sui by config alone:
+#    deploy:sui rewrites chains/sui/deployments/localnet.{json,ts}, which the app + host read. ──
+SUI_ROOT="$ROOT"
+SUI_RPC_LOCAL="http://127.0.0.1:9000"
+SUI_FAUCET_LOCAL="http://127.0.0.1:9123/gas"
+SUI_LOG="/tmp/livestreak-sui.log"
+# Dev-only keypair (localnet only; NOT a secret). The Sui deploy tooling falls back to this mnemonic on
+# localnet; we reuse it as the host gas-station sponsor so we can faucet-fund it here.
+DEV_SUI_MNEMONIC="cargo town galaxy wonder animal digital buddy member object detect home chapter"
+# Deterministic address for DEV_SUI_MNEMONIC at m/44'/784'/0'/0'/0'.
+DEV_SUI_SPONSOR_ADDRESS="0x184692a4d95ec8c54940b58b501356d903c2c0bef8a5c215c3b4dd1551c325f6"
+
+slog()  { echo -e "${G}→${N} $1"; }
+swarn() { echo -e "${Y}!${N} $1"; }
+serr()  { echo -e "${R}✗${N} $1"; }
+
+# Resolve node/npm before booting — a missing toolchain must fail BEFORE --force-regenesis wipes state.
+sui_ensure_node() {
+  if command -v npm >/dev/null 2>&1; then
+    return 0
+  fi
+  export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+  if [ -s "$NVM_DIR/nvm.sh" ]; then
+    slog "npm not on PATH — sourcing nvm from $NVM_DIR"
+    # shellcheck disable=SC1090
+    \. "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true
+    nvm use --lts >/dev/null 2>&1 || nvm use default >/dev/null 2>&1 || true
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    serr "npm not found (and nvm could not provide it). Aborting BEFORE touching Sui chain state."
+    return 1
+  fi
+  slog "npm resolved → $(command -v npm)"
+}
+
+sui_kill_stale() {
+  slog "Killing stale Sui processes..."
+  pkill -9 -f "sui start" 2>/dev/null || true
+  pkill -9 -f "sui-faucet" 2>/dev/null || true
+  for port in 9000 9123 9124; do
+    lsof -ti:"$port" | xargs kill -9 2>/dev/null || true
+  done
+  sleep 1
+}
+
+sui_ensure_env() {
+  sui client new-env --alias localnet --rpc "$SUI_RPC_LOCAL" >/dev/null 2>&1 || true
+  sui client switch --env localnet >/dev/null 2>&1 || true
+  if ! sui client active-address >/dev/null 2>&1; then
+    slog "No active Sui address — generating one (ed25519)..."
+    sui client new-address ed25519 >/dev/null 2>&1 || true
+  fi
+}
+
+sui_start() {
+  slog "Starting Sui localnet (sui start --with-faucet --force-regenesis)..."
+  sui start --with-faucet --force-regenesis > "$SUI_LOG" 2>&1 &
+  SUI_PID=$!
+  for _ in $(seq 1 60); do
+    if curl -s -X POST "$SUI_RPC_LOCAL" -H 'content-type: application/json' \
+         -d '{"jsonrpc":"2.0","id":1,"method":"sui_getChainIdentifier","params":[]}' \
+         2>/dev/null | grep -q result; then
+      slog "Sui localnet up (PID $SUI_PID) — $SUI_RPC_LOCAL"
+      return 0
+    fi
+    sleep 1
+  done
+  serr "Sui localnet failed to start. See $SUI_LOG"
+  return 1
+}
+
+# Faucet-fund an address and block until a gas coin actually lands (regenesis wipes balances).
+sui_fund_and_wait() {
+  local addr="$1"
+  for _ in $(seq 1 5); do
+    curl -s -X POST "$SUI_FAUCET_LOCAL" -H 'content-type: application/json' \
+      -d "{\"FixedAmountRequest\":{\"recipient\":\"$addr\"}}" >/dev/null 2>&1 || true
+    for _ in $(seq 1 6); do
+      if sui client gas "$addr" --json 2>/dev/null | grep -q mistBalance; then
+        return 0
+      fi
+      sleep 1
+    done
+  done
+  swarn "Gas coin for $addr not confirmed (deploy may still self-fund)"
+}
+
+sui_deploy() {
+  local deployer
+  deployer="$(sui client active-address 2>/dev/null)"
+  if [ -n "$deployer" ]; then
+    slog "Funding deployer $deployer from faucet..."
+    sui_fund_and_wait "$deployer"
+  fi
+  slog "Deploying Sui Move package (deploy:sui --name localnet --force)..."
+  ( cd "$SUI_ROOT/packages/contracts" && npm run deploy:sui -- --name localnet --force ) 2>&1 | sed 's/^/  /'
+  # PIPESTATUS[0] is the npm exit code (sed is [1]); pipefail alone reports sed's status.
+  local rc=${PIPESTATUS[0]}
+  local snap="$SUI_ROOT/packages/contracts/chains/sui/deployments/localnet.json"
+  if [ "$rc" -ne 0 ] || [ ! -f "$snap" ]; then
+    serr "Sui deploy failed (exit $rc) — see output above"
+    return 1
+  fi
+  slog "Sui deployed → chains/sui/deployments/localnet.{json,ts}"
+}
+
+sui_fund_sponsor() {
+  slog "Funding host Sui sponsor $DEV_SUI_SPONSOR_ADDRESS from faucet..."
+  curl -s -X POST "$SUI_FAUCET_LOCAL" -H 'content-type: application/json' \
+    -d "{\"FixedAmountRequest\":{\"recipient\":\"$DEV_SUI_SPONSOR_ADDRESS\"}}" \
+    >/dev/null 2>&1 || swarn "Faucet request for sponsor failed (non-fatal)"
+}
+
+sui_leg_env() {
+  export LIVESTREAK_SUI_RPC_URL="$SUI_RPC_LOCAL"
+  export SUI_RPC="$SUI_RPC_LOCAL"
+  export LIVESTREAK_SUI_NETWORK="localnet"
+  export SUI_NETWORK="localnet"
+  export LIVESTREAK_SUI_SPONSOR_MNEMONIC="$DEV_SUI_MNEMONIC"
+}
+
+sui_leg_up() {
+  sui_ensure_node || return 1
+  sui_kill_stale
+  sui_ensure_env
+  sui_start || return 1
+  sui_deploy || return 1
+  sui_fund_sponsor
+  sui_leg_env
+}
 
 # ── Write the chain-pinned settings.json the consoles + CLI use (contracts FLOAT: the chain adapter
 #    derives them from the deployment, so settings carries only the ref). ──
@@ -136,6 +283,15 @@ lsof -ti:3000 | xargs kill -9 2>/dev/null || true
 rm -rf "$ROLES_DIR" && mkdir -p "$ROLES_DIR"
 sleep 1
 
+# ── 1b. Build workspace libraries ──
+# The cli + host import each library's BUILT dist (package.json main → dist/index.js), NOT its src, so a
+# package source edit only takes effect once rebuilt — a stale dist silently runs old descriptors/scopes
+# in the consoles even after a restart. Orchestration lives in the root package.json (build:packages);
+# dev.sh just invokes it.
+log "Building workspace libraries (cli/host import the built dist)..."
+( cd "$ROOT" && npm run build:packages ) > /tmp/livestreak-build.log 2>&1 \
+  || { err "package build failed — see /tmp/livestreak-build.log"; exit 1; }
+
 # ── 2. Start Anvil ──
 log "Starting Anvil (instant mining)..."
 anvil > /tmp/livestreak-anvil.log 2>&1 &
@@ -176,7 +332,9 @@ fi
 # ── 5. Start host server (wait until the AA bundler route actually ANSWERS — address derivation
 #       and every sponsored write go through it, so a fixed sleep is not enough). ──
 log "Starting host server..."
-( cd "$ROOT/host" && LIVESTREAK_AA_ALLOW_DEV_KEY=1 npm run dev ) > /tmp/livestreak-host.log 2>&1 &
+# LIVESTREAK_RESET_CATALOG=1: anvil + sui localnet are wiped every run, so clear the persisted discovery
+# projection on boot — otherwise the homepage shows vaults from a previous boot that no longer exist.
+( cd "$ROOT/host" && LIVESTREAK_AA_ALLOW_DEV_KEY=1 LIVESTREAK_RESET_CATALOG=1 npm run dev ) > /tmp/livestreak-host.log 2>&1 &
 HOST_PID=$!
 host_ready=0
 for _ in $(seq 1 40); do
@@ -240,27 +398,69 @@ if [ "$CHAIN" = "sui" ]; then
       --args "$USDC_MINT_CAP" 1000000000000000 "$addr" --gas-budget 100000000 >/dev/null 2>&1 \
       || warn "Sui mint_to $role failed"
   done
+  # Fund the UI demo wallet(s) on Sui too (see the EVM block for why). Default "1234".
+  for pw in ${UI_DEMO_PASSWORDS:-1234}; do
+    ui_addr="$(role_address "$pw")"
+    [ -z "$ui_addr" ] && { warn "UI demo wallet '$pw' derive failed — not funded"; continue; }
+    sui client call --package "$PKG" --module mock_usdc --function mint_to \
+      --args "$USDC_MINT_CAP" 1000000000000000 "$ui_addr" --gas-budget 100000000 >/dev/null 2>&1 \
+      || warn "Sui mint_to UI($pw) failed"
+  done
 else
   log "Wiring EVM: register steward + mint USDC + paymaster deposit..."
   STEWARD_REGISTRY="$(jq -r '.scopes.protocol.contracts.stewardRegistry' "$EVM_DEPLOYMENT")"
   MOCK_USDC="$(jq -r '.scopes.protocol.contracts.mockUsdc' "$EVM_DEPLOYMENT")"
   ENTRY_POINT="$(jq -r '.scopes.aa.contracts.entryPoint' "$EVM_DEPLOYMENT")"
   PAYMASTER="$(jq -r '.scopes.paymaster.contracts.verifyingPaymaster' "$EVM_DEPLOYMENT")"
+  WIRE_LOG="/tmp/livestreak-wiring.log"; : > "$WIRE_LOG"
+  # The deploy promotes the artifact a beat before a fresh caller sees the new bytecode; wait until the
+  # registry actually has code so the first wiring tx isn't sent to a not-yet-visible address (this was
+  # the silent failure that left the steward unregistered / balances unminted on boot).
+  for _ in $(seq 1 30); do
+    rc="$(cast code "$STEWARD_REGISTRY" --rpc-url "$RPC" 2>/dev/null || true)"
+    [ -n "$rc" ] && [ "$rc" != "0x" ] && break
+    sleep 0.5
+  done
+  # Retry each tx (cast send is synchronous) so a transient post-deploy race self-heals; everything is
+  # captured to $WIRE_LOG for diagnosis instead of silently dropped to /dev/null.
+  wire() { # <label> <to> <sig> [args/flags...]
+    local label="$1" to="$2" sig="$3"; shift 3
+    local i
+    for i in 1 2 3; do
+      if cast send "$to" "$sig" "$@" --rpc-url "$RPC" --private-key "$ANVIL_KEY" >>"$WIRE_LOG" 2>&1; then
+        return 0
+      fi
+      sleep 0.6
+    done
+    warn "$label failed (see $WIRE_LOG)"
+  }
   if [ -n "$STEWARD_ADDR" ]; then
-    cast send "$STEWARD_REGISTRY" "registerSteward(address)" "$STEWARD_ADDR" --rpc-url "$RPC" --private-key "$ANVIL_KEY" >/dev/null 2>&1 \
-      || warn "registerSteward failed"
-    cast send "$STEWARD_REGISTRY" "setDefaultSteward(address)" "$STEWARD_ADDR" --rpc-url "$RPC" --private-key "$ANVIL_KEY" >/dev/null 2>&1 \
-      || warn "setDefaultSteward failed"
+    wire "registerSteward" "$STEWARD_REGISTRY" "registerSteward(address)" "$STEWARD_ADDR"
+    wire "setDefaultSteward" "$STEWARD_REGISTRY" "setDefaultSteward(address)" "$STEWARD_ADDR"
   fi
   for role in bookmaker options; do
     addr="$(cat "$ROLES_DIR/$role/addr" 2>/dev/null || true)"
     [ -z "$addr" ] && continue
-    cast send "$MOCK_USDC" "mint(address,uint256)" "$addr" 1000000000000000 --rpc-url "$RPC" --private-key "$ANVIL_KEY" >/dev/null 2>&1 \
-      || warn "mint USDC -> $role failed"
+    wire "mint USDC -> $role" "$MOCK_USDC" "mint(address,uint256)" "$addr" 1000000000000000
   done
-  # Sponsorship headroom (R4) — top up the paymaster's EntryPoint deposit (the deploy already seeds it).
-  cast send "$ENTRY_POINT" "depositTo(address)" "$PAYMASTER" --value 5ether --rpc-url "$RPC" --private-key "$ANVIL_KEY" >/dev/null 2>&1 \
-    || warn "paymaster depositTo top-up failed"
+  # Fund the UI demo wallet(s) too: the app logs in with a password (default "1234") and bets from
+  # the SAME counterfactual Safe the CLI derives (getAddress() on the wallet manager). dev.sh
+  # otherwise only funds the ROLE passwords, so UI bets would revert on insufficient USDC. Override
+  # the set with UI_DEMO_PASSWORDS="1234 demo ..." to fund more demo logins.
+  for pw in ${UI_DEMO_PASSWORDS:-1234}; do
+    ui_addr="$(role_address "$pw")"
+    [ -z "$ui_addr" ] && { warn "UI demo wallet '$pw' derive failed — not funded"; continue; }
+    wire "mint USDC -> UI($pw)" "$MOCK_USDC" "mint(address,uint256)" "$ui_addr" 1000000000000000
+  done
+  # Sponsorship headroom (R4) — top up the paymaster's EntryPoint deposit so a long demo never hits
+  # AA31 ("paymaster deposit too low"). A billion ETH is far past anything the dev EOA holds, so give
+  # the depositor headroom first (local anvil only; harmless on a throwaway chain).
+  DEPOSITOR="$(cast wallet address --private-key "$ANVIL_KEY" 2>/dev/null)"
+  if [ -n "$DEPOSITOR" ]; then
+    cast rpc anvil_setBalance "$DEPOSITOR" "$(cast to-hex "$(cast to-wei 2000000000 ether)")" \
+      --rpc-url "$RPC" >/dev/null 2>&1 || warn "anvil_setBalance depositor failed"
+  fi
+  wire "paymaster depositTo top-up" "$ENTRY_POINT" "depositTo(address)" "$PAYMASTER" --value 1000000000ether
 fi
 
 # ── 9. Open a remote console per package-role (each its own keystore; chain per settings) ──
@@ -273,8 +473,11 @@ for role in $ROLES; do
        LIVESTREAK_SESSION_STORE="$dir/sessions.json" \
        npm run dev -- remote open --scopes "$ROLE_SCOPES" --ttl 12h --pair-password "demo-pass-$role" ) \
     > "$dir/console.log" 2>&1 &
+  cpid=$!
   for _ in $(seq 1 40); do
     if grep -q "console URL:" "$dir/console.log" 2>/dev/null; then break; fi
+    # Fail fast instead of waiting out the timeout when remote open dies (bad scope, host down, …).
+    if ! kill -0 "$cpid" 2>/dev/null; then err "console for $role exited early — see $dir/console.log"; break; fi
     sleep 1
   done
   { grep -m1 "console URL:" "$dir/console.log" 2>/dev/null | sed 's/.*console URL: *//'; } > "$dir/url" || true

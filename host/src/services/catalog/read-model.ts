@@ -8,6 +8,7 @@ import {
   vaultRowToLiveRaw
 } from "./mapper.js";
 import type { CatalogRepository } from "../../infrastructure/database/repository.js";
+import type { ChainTag } from "../../infrastructure/database/schema.js";
 
 // The discovery READ-MODEL: turns the materialized DB projection into the exact
 // `@livestreak/host` page shapes — ONE shape per page, zero composition on the app side.
@@ -23,7 +24,8 @@ export interface CatalogReadModelConfig {
 }
 
 export interface CatalogReadModel {
-  homepage(): Promise<HomepageData>;
+  // `chain` scopes the page to one chain (the per-chain router); omit for the cross-chain aggregate.
+  homepage(chain?: ChainTag): Promise<HomepageData>;
   agents(): Promise<AgentsData>;
   stream(routeId: string): Promise<HostStreamDetail | null>;
 }
@@ -44,13 +46,13 @@ export const createCatalogReadModel = (
   const now = config.now ?? (() => Date.now());
   const agents = config.agents ?? [];
 
-  const homepage = async (): Promise<HomepageData> => {
+  const homepage = async (chain?: ChainTag): Promise<HomepageData> => {
     const nowMs = now();
     const [markets, live, lifetime, protocolStats] = await Promise.all([
-      config.repo.allMarkets(),
-      config.repo.liveVaults(),
-      config.repo.lifetimeVaults(),
-      config.repo.protocolStats()
+      config.repo.allMarkets(chain),
+      config.repo.liveVaults(chain),
+      config.repo.lifetimeVaults(chain),
+      config.repo.protocolStats(chain)
     ]);
     return {
       streams: markets.map((m) => marketRowToSummary(m, nowMs)),

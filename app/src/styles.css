@@ -440,13 +440,17 @@ body {
   from { opacity: 1; }
   to   { opacity: 0; }
 }
+/* Tailwind v4 centers DialogContent via the `translate` PROPERTY (translate-x/y-[-50%]), which is
+   separate from `transform`. So these keyframes must animate ONLY `transform: scale(...)` — re-adding
+   translate(-50%,-50%) here would stack on top of the `translate` property and shift the panel up-left
+   for the whole animation, then snap to center (the "comes in from top-left" bug). */
 @keyframes dialogIn {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); filter: blur(4px); }
-  to   { opacity: 1; transform: translate(-50%, -50%) scale(1);    filter: blur(0px); }
+  from { opacity: 0; transform: scale(0.96); filter: blur(4px); }
+  to   { opacity: 1; transform: scale(1);    filter: blur(0px); }
 }
 @keyframes dialogOut {
-  from { opacity: 1; transform: translate(-50%, -50%) scale(1);    filter: blur(0px); }
-  to   { opacity: 0; transform: translate(-50%, -50%) scale(0.98); filter: blur(2px); }
+  from { opacity: 1; transform: scale(1);    filter: blur(0px); }
+  to   { opacity: 0; transform: scale(0.98); filter: blur(2px); }
 }
 
 /* The connect modal now uses the canonical Dialog atom, whose overlay carries
@@ -458,12 +462,9 @@ body {
 }
 .wallet-dialog-overlay[data-state="open"]   { animation: fadeIn 0.15s ease-out; }
 .wallet-dialog-overlay[data-state="closed"] { animation: fadeOut 0.12s ease-in; }
-/* Centering-correct enter/exit for EVERY Dialog. The dialogIn/dialogOut
-   keyframes preserve translate(-50%,-50%), so the content fades+scales from
-   its true center. Keyed on the atom's data-slot so plain <Dialog> instances
-   (no wallet-dialog-content class) are centered too. The transform-animating
-   tw-animate-css classes have been removed from DialogContent, so no
-   !important / per-instance override is needed. */
+/* Centering-correct enter/exit for EVERY Dialog. Centering is the `translate` property (Tailwind v4);
+   the keyframes only scale `transform`, so the panel fades+scales from its true center. Keyed on the
+   atom's data-slot so plain <Dialog> instances are centered too. */
 [data-slot="dialog-content"] { transform-origin: center; }
 [data-slot="dialog-content"][data-state="open"]   { animation: dialogIn 0.2s cubic-bezier(0.23, 1, 0.32, 1); }
 [data-slot="dialog-content"][data-state="closed"] { animation: dialogOut 0.15s cubic-bezier(0.23, 1, 0.32, 1); }

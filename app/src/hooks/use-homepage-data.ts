@@ -4,6 +4,7 @@ import { env } from '#/utils/env'
 import { fetchHomepage, hostHomepageToCards } from '#/utils/host'
 import type { HomepageData } from '#/types/homepage'
 import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
+import { useOptionsContext } from '#/providers/options-provider'
 
 /** Honest empty state for live mode before/without host data — never the fixture (A). */
 const EMPTY_HOMEPAGE: HomepageData = {
@@ -29,6 +30,7 @@ const EMPTY_HOMEPAGE: HomepageData = {
 export function useHomepageData(): HomepageData {
   const preferFixture = usePreferFixture()
   const fixture = useParsedFixture()
+  const { chain } = useOptionsContext()
   const [live, setLive] = useState<HomepageData>(EMPTY_HOMEPAGE)
 
   useEffect(() => {
@@ -36,12 +38,13 @@ export function useHomepageData(): HomepageData {
     let cancelled = false
     setLive(EMPTY_HOMEPAGE)
 
-    void fetchHomepage(env.hostBaseUrl)
+    // Scope discovery to the selected chain (the host's per-chain router); re-fetch on chain switch.
+    void fetchHomepage(env.hostBaseUrl, chain)
       .then(data => { if (!cancelled) setLive(hostHomepageToCards(data)) })
       .catch(() => { if (!cancelled) setLive(EMPTY_HOMEPAGE) })
 
     return () => { cancelled = true }
-  }, [preferFixture])
+  }, [preferFixture, chain])
 
   return preferFixture ? fixture.homepage : live
 }

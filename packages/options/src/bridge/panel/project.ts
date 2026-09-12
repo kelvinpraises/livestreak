@@ -8,6 +8,7 @@ import type {
   OptionsVaultSnapshot
 } from "../../model/index.js";
 import { totalVaultPool, priceOf, projectVaultLivePools } from "../../model/index.js";
+import type { OptionsBoardState } from "../../model/math/accrual.js";
 import type { FunderBoundary } from "../../model/math/live-pool.js";
 import type { OptionsVaultSide } from "../../model/vault.js";
 import type {
@@ -405,15 +406,59 @@ const collectFunderBoundaries = (
   return { yes, no };
 };
 
+// The pool's CURRENT growth rate (USDC base units/sec): the on-chain side rate (set at the last
+// advance) minus any funder lane whose runway has already ended by `nowMs`. Subtracting the expired
+// boundaries keeps the slope honest — a lane that has run dry no longer adds to the pool, so the UI
+// won't over-tick and then snap back on the next poll.
+const currentSideRate = (
+  board: OptionsBoardState,
+  boundaries: readonly FunderBoundary[] | undefined,
+  nowMs: number
+): bigint => {
+  let rate = board.sideRate;
+  if (boundaries !== undefined) {
+    for (const boundary of boundaries) {
+      if (boundary.rate > 0n && boundary.maxEndMs <= nowMs) {
+        rate -= boundary.rate;
+      }
+    }
+  }
+  return rate > 0n ? rate : 0n;
+};
+
+type SideBoundaries = {
+  readonly yes: readonly FunderBoundary[];
+  readonly no: readonly FunderBoundary[];
+};
+
+// Combine two per-side boundary sets (the connected user's NFT lanes + the creator seed) for the
+// projection. Returns undefined only when both are absent, so an unfunded vault keeps the cheap
+// uncapped path; empty arrays are harmless (the projection no-ops on them).
+const mergeFunderBoundaries = (
+  lanes: SideBoundaries | undefined,
+  seed: SideBoundaries | undefined
+): SideBoundaries | undefined => {
+  if (lanes === undefined && seed === undefined) {
+    return undefined;
+  }
+  return {
+    yes: [...(lanes?.yes ?? []), ...(seed?.yes ?? [])],
+    no: [...(lanes?.no ?? []), ...(seed?.no ?? [])]
+  };
+};
+
 const projectMarketPanel = (
   marketSnapshot: OptionsMarketSnapshot,
   vaultSnapshots: readonly OptionsVaultSnapshot[],
   nftSnapshots: readonly OptionsNftSnapshot[]
 ): OptionsMarketPanel => {
+  // One wall-clock instant for the whole panel so every vault's live pool AND its growth rate are
+  // measured at the same moment (the rate must be the slope at exactly the pool's read time).
+  const nowMs = Date.now();
   const vaultPanels = marketSnapshot.vaults.map((vault) => {
     const enriched = vaultSnapshots.find((entry) => entry.vault.vaultId === vault.vaultId);
     const funderBoundaries = collectFunderBoundaries(vault.vaultId, nftSnapshots);
-    return projectVaultPanel(vault, enriched, funderBoundaries);
+    return projectVaultPanel(vault, enriched, funderBoundaries, nowMs);
   });
 
   const totalPooled = marketSnapshot.vaults.reduce(
@@ -422,6 +467,10 @@ const projectMarketPanel = (
   );
   const livePooled = vaultPanels.reduce(
     (sum, vault) => sum + BigInt(vault.pools.livePoolUSDC),
+    0n
+  );
+  const livePooledRate = vaultPanels.reduce(
+    (sum, vault) => sum + BigInt(vault.pools.poolRatePerSecUSDC),
     0n
   );
 
@@ -448,6 +497,7 @@ const projectMarketPanel = (
       pooledUSDC: totalPooled.toString(),
       totalPooledUSDC: totalPooled.toString(),
       livePooledUSDC: livePooled.toString(),
+      livePooledRatePerSecUSDC: livePooledRate.toString(),
       activeVaults,
       resolvedVaults
     },
@@ -476,21 +526,38 @@ const projectMarketPanel = (
 const projectVaultPanel = (
   vault: OptionsMarketSnapshot["vaults"][number],
   snapshot?: OptionsVaultSnapshot,
-  funderBoundaries?: { readonly yes: readonly FunderBoundary[]; readonly no: readonly FunderBoundary[] }
+  funderBoundaries?: { readonly yes: readonly FunderBoundary[]; readonly no: readonly FunderBoundary[] },
+  nowMs: number = Date.now()
 ): OptionsVaultPanel => {
   const pools = snapshot?.pools ?? vault.pools;
   const settledTotal = totalVaultPool(pools);
+  // Cap the live pool at funder depletion: combine the connected user's NFT-lane boundaries (passed
+  // in) with the vault's creator-seed boundary (carried on the snapshot, so the host's pool reader
+  // inherits it too). Without the seed boundary the projection extrapolates the seed rate past its
+  // run-dry instant — the pool climbs past what was actually funded.
+  const boundaries = mergeFunderBoundaries(funderBoundaries, snapshot?.seedBoundaries);
   const livePools =
     snapshot?.boards === undefined
       ? pools
       : projectVaultLivePools({
           boards: snapshot.boards,
+          atMs: nowMs,
           pendingBoundaries: snapshot.pendingBoundaries,
-          funderBoundaries,
+          funderBoundaries: boundaries,
           resolvedAtMs: vault.timing.resolvedAtMs
         });
   const liveTotal = totalVaultPool(livePools);
   const odds = computeOdds(pools.yes, pools.no, settledTotal);
+
+  // Current per-second growth of the live pool. 0 when there is no board (anonymous market view) or
+  // the vault has resolved (its pool is frozen at resolution, so it no longer streams).
+  const resolvedAtMs = vault.timing.resolvedAtMs;
+  const frozen = resolvedAtMs !== undefined && resolvedAtMs <= nowMs;
+  const poolRatePerSec =
+    snapshot?.boards === undefined || frozen
+      ? 0n
+      : currentSideRate(snapshot.boards.yes, boundaries?.yes, nowMs) +
+        currentSideRate(snapshot.boards.no, boundaries?.no, nowMs);
 
   return {
     vaultId: vault.vaultId,
@@ -506,6 +573,7 @@ const projectVaultPanel = (
       totalUSDC: settledTotal.toString(),
       settledPoolUSDC: settledTotal.toString(),
       livePoolUSDC: liveTotal.toString(),
+      poolRatePerSecUSDC: poolRatePerSec.toString(),
       sharePriceYes: priceOf(pools.yes).toString(),
       sharePriceNo: priceOf(pools.no).toString()
     },

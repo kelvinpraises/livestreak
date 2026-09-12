@@ -34,39 +34,56 @@ export const createOptionsConsoleEdge = (input: CreateOptionsConsoleEdgeInput): 
   const runtime = createOptionsRuntime({ chain, chainConfig, config: runtimeConfig });
   const bridge = createOptionsBridge({ runtime });
   const caller = localOperatorCaller();
+  // Remember the configured market so describeFunctions re-projects WITH it (board-first reveal). Without
+  // this, every catalog projection reads an empty snapshot and mint/fund never appear.
+  let configuredMarketId: ReturnType<typeof asMarketId> | undefined;
+
+  const emptyPanel = () =>
+    projectOptionsPanel({
+      account: input.userAddress,
+      markets: [],
+      vaults: [],
+      nfts: [],
+      lvstAccount: {
+        account: input.userAddress,
+        balance: 0n,
+        staked: 0n,
+        pendingDividends: 0n
+      },
+      usdcBalance: 0n
+    });
 
   return {
     package: "options",
 
     describeFunctions: async (): Promise<readonly FunctionDescriptor[]> => {
+      // The configured market LENS (not incidental on-chain holdings) drives the reveal: when
+      // unconfigured (initial state or after Close) show only Configure + Close, deterministically.
+      if (configuredMarketId === undefined) {
+        return projectOptionsDescriptors(emptyPanel());
+      }
       try {
-        const snapshot = await readUserOptionsSnapshot(chain.reader, input.userAddress, undefined);
+        const snapshot = await readUserOptionsSnapshot(chain.reader, input.userAddress, configuredMarketId);
         return projectOptionsDescriptors(projectOptionsPanel(snapshot));
       } catch {
-        return projectOptionsDescriptors(
-          projectOptionsPanel({
-            account: input.userAddress,
-            markets: [],
-            vaults: [],
-            nfts: [],
-            lvstAccount: {
-              account: input.userAddress,
-              balance: 0n,
-              staked: 0n,
-              pendingDividends: 0n
-            },
-            usdcBalance: 0n
-          })
-        );
+        return projectOptionsDescriptors(emptyPanel());
       }
     },
 
     dispatch: async (_remoteCaller, envelope: CallActionEnvelope) => {
       if (envelope.action === "configure") {
-        const marketId = readConfigureMarketId(envelope.args);
-        await runtime.refreshMarket(marketId);
-        await runtime.refreshUser(input.userAddress, marketId);
-        return { txId: `configured-${marketId}` };
+        configuredMarketId = readConfigureMarketId(envelope.args);
+        await runtime.refreshMarket(configuredMarketId);
+        await runtime.refreshUser(input.userAddress, configuredMarketId);
+        return { txId: `configured-${configuredMarketId}` };
+      }
+      // Close = deconfigure: drop the configured market lens so mint/fund/withdraw collapse back to
+      // just Configure + Close. refresh() fires the board subscription → the gateway re-projects the
+      // catalog, which now reads configuredMarketId === undefined → empty. Close is configure's inverse.
+      if (envelope.action === "close") {
+        configuredMarketId = undefined;
+        await runtime.refresh();
+        return { txId: "closed" };
       }
 
       const coercedArgs = coerceRemoteWriteArgs(envelope.action, envelope.args);

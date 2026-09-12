@@ -25,23 +25,13 @@ export const copyMarketSnapshot = (
   ...(snapshot.streamState === undefined ? {} : { streamState: { ...snapshot.streamState } })
 });
 
-export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultSnapshot => ({
-  vault: {
-    ...snapshot.vault,
-    pools: { ...snapshot.vault.pools },
-    steward: { ...snapshot.vault.steward },
-    timing: { ...snapshot.vault.timing }
-  },
-  pools: { ...snapshot.pools },
-  shareTotals: { ...snapshot.shareTotals },
-  boards: {
-    yes: { ...snapshot.boards.yes },
-    no: { ...snapshot.boards.no }
-  },
-  pendingBoundaries: { ...snapshot.pendingBoundaries },
-  hot: { ...snapshot.hot },
-  dispute: { ...snapshot.dispute }
-});
+// Deep-copy a vault snapshot for the immutable store. structuredClone copies EVERY field (bigints
+// included) so the snapshot can't silently lose one the way the old hand-written spread did — it
+// dropped `seedBoundaries` (and `winningSide`/`pot`/`collected`), so the store served the projection
+// a snapshot it couldn't cap the live pool from. One clone designs out the whole add-a-field-then-
+// forget-to-copy class of bug.
+export const copyVaultSnapshot = (snapshot: OptionsVaultSnapshot): OptionsVaultSnapshot =>
+  structuredClone(snapshot);
 
 export const copyNftSnapshot = (snapshot: OptionsNftSnapshot): OptionsNftSnapshot => ({
   nft: {

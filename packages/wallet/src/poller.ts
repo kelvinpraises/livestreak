@@ -17,12 +17,40 @@ export interface PollUserOperationOptions {
   readonly intervalMs?: number; // default 1_000 (first delay)
   readonly backoff?: number; // default 1.5 (multiplier, capped)
   readonly maxIntervalMs?: number; // default 5_000
+  readonly attemptTimeoutMs?: number; // default 20_000 — per-fetch cap (see ATTEMPT_TIMEOUT below)
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A single poll attempt that outran its per-attempt budget. The overall `timeoutMs` only governs the
+// SLEEP between attempts — so without this, one `getUserOperationReceipt` call that stalls (the heavy
+// first userOp: Safe deploy + mint, with the bundler mid-bundle) blocks the loop forever and the
+// deadline check below is never reached. That was the real "first bet hangs" bug. We bound every
+// attempt and treat an over-budget one as "not included yet → retry", so the deadline is always honored.
+const ATTEMPT_TIMEOUT = Symbol("userop-poll-attempt-timeout");
+
+const withAttemptTimeout = async <T>(
+  work: Promise<T>,
+  ms: number
+): Promise<T | typeof ATTEMPT_TIMEOUT> => {
+  // The losing branch (an abandoned, possibly-stalled fetch) may settle later; swallow it so it can't
+  // surface as an unhandled rejection after we've moved on.
+  work.catch(() => undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<typeof ATTEMPT_TIMEOUT>((resolve) => {
+    timer = setTimeout(() => resolve(ATTEMPT_TIMEOUT), ms);
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+};
 
 // Canonical success reader: accepts boolean | number | hex/decimal/textual string. `undefined` =
 // unknown shape (caller throws "missing success").
@@ -84,13 +112,30 @@ export const pollUntilUserOperationIncluded = async (
   const timeoutMs = options.timeoutMs ?? 60_000;
   const maxIntervalMs = options.maxIntervalMs ?? 5_000;
   const backoff = options.backoff ?? 1.5;
+  const attemptTimeoutMs = Math.min(options.attemptTimeoutMs ?? 20_000, timeoutMs);
   let interval = options.intervalMs ?? 1_000;
 
   const deadline = Date.now() + timeoutMs;
 
   // Always attempt at least once, then keep polling until the deadline.
+  let lastError: unknown;
   for (;;) {
-    const receipt = await readOnly.getUserOperationReceipt(userOpHash);
+    let receipt: unknown = null;
+    try {
+      const result = await withAttemptTimeout(
+        readOnly.getUserOperationReceipt(userOpHash),
+        attemptTimeoutMs
+      );
+      if (result !== ATTEMPT_TIMEOUT) {
+        receipt = result;
+      }
+    } catch (error) {
+      // A throw HERE is a transport/lookup failure (a dropped socket, a transient bundler error) —
+      // NOT a revert, which surfaces as receipt.success === false via assert below. On a real bundler
+      // these hiccups happen; failing the user's action on one is wrong. Remember it and retry until
+      // the deadline, then surface it so the caller sees the real cause rather than a bare timeout.
+      lastError = error;
+    }
 
     if (receipt !== null && receipt !== undefined) {
       assertUserOperationSucceeded(receipt);
@@ -98,7 +143,10 @@ export const pollUntilUserOperationIncluded = async (
     }
 
     if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting for UserOperation receipt for ${userOpHash}`);
+      const base = `Timed out waiting for UserOperation receipt for ${userOpHash}`;
+      throw new Error(
+        lastError instanceof Error ? `${base} (last error: ${lastError.message})` : base
+      );
     }
 
     const remaining = deadline - Date.now();

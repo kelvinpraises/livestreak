@@ -34,7 +34,12 @@ export function useStreamMeta(routeId: string): StreamMeta {
           title: market.title,
           category: market.category ?? 'Tech',
           activeVaults: market.totals.activeVaults,
-          totalPooled: usdcStringToNumber(market.totals.totalPooledUSDC),
+          // livePooledUSDC = the board-replayed pool (pool + sideRate × Δt at poll time) — it grows as
+          // funders stream in. totalPooledUSDC is the settled snapshot and only moves on an on-chain
+          // advance, so the header looked frozen. livePooledRatePerSecUSDC is the SDK's real growth
+          // rate (the on-chain sideRate); ScoreUSD projects the pool forward with it between the 3s polls.
+          totalPooled: usdcStringToNumber(market.totals.livePooledUSDC),
+          totalPooledRatePerSec: usdcStringToNumber(market.totals.livePooledRatePerSecUSDC),
           elapsed: '',
           isLive: market.stream?.status === 'live',
         }

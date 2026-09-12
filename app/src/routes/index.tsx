@@ -6,6 +6,7 @@ import { useHomepageData } from '#/hooks/use-homepage-data'
 import { usePreferFixture } from '#/hooks/use-fixture-mode'
 import { useOptionsContext } from '#/providers/options-provider'
 import { ChainSelector } from '#/components/molecules/chain-selector'
+import { chainLabel } from '#/utils/chain'
 import { isOptionsModeEnabled } from '#/utils/env'
 import { formatUSDCFull } from '#/utils/format'
 
@@ -13,7 +14,6 @@ export const Route = createFileRoute('/')({
   component: HomePage,
 })
 
-const CHAIN_LABEL: Record<'evm' | 'sui', string> = { evm: 'EVM', sui: 'Sui' }
 
 /** Permutation #4: headline = effective pool; muted settled subline when host splits them. */
 function showsSettledSubline(effective: number, settled?: number): settled is number {
@@ -129,7 +129,7 @@ function HomePage() {
           {chainFilterActive && (
             <div data-testid="homepage-active-chain" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
               <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em' }}>
-                CHAIN: <span style={{ color: '#00ff87' }}>{CHAIN_LABEL[chain]}</span>
+                CHAIN: <span style={{ color: '#00ff87' }}>{chainLabel(chain)}</span>
               </span>
               <ChainSelector />
             </div>
@@ -141,8 +141,8 @@ function HomePage() {
             style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '28px 20px', textAlign: 'center' }}
           >
             <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginBottom: otherChainHasVaults ? 14 : 0 }}>
-              No live vaults on <strong style={{ color: '#00ff87' }}>{CHAIN_LABEL[chain]}</strong> right now.
-              {otherChainHasVaults && <> There are open vaults on {CHAIN_LABEL[otherChain]}.</>}
+              No live vaults on <strong style={{ color: '#00ff87' }}>{chainLabel(chain)}</strong> right now.
+              {otherChainHasVaults && <> There are open vaults on {chainLabel(otherChain)}.</>}
             </p>
             {otherChainHasVaults && (
               <button
@@ -151,7 +151,7 @@ function HomePage() {
                 onClick={() => setChain(otherChain)}
                 style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid rgba(0,255,135,0.35)', background: 'rgba(0,255,135,0.12)', color: '#00ff87', fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-mono)', letterSpacing: '0.04em', cursor: 'pointer' }}
               >
-                Switch to {CHAIN_LABEL[otherChain]}
+                Switch to {chainLabel(otherChain)}
               </button>
             )}
           </div>

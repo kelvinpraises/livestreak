@@ -5,6 +5,12 @@ export const LOCALHOST_RPC_URL = localhostDeployment.rpc
 
 export const LOCALHOST_AA_CONTRACTS = localhostDeployment.scopes.aa?.contracts ?? {}
 
+// The local MockUSDC (permissionless `mint`). Only the dev faucet (useWalletActions) reads it, on the
+// localhost EVM stack; undefined on any deployment that ships no mock token.
+export const LOCALHOST_MOCK_USDC = (
+  localhostDeployment.scopes.protocol?.contracts as Record<string, string> | undefined
+)?.mockUsdc as `0x${string}` | undefined
+
 export function buildOptionsContractAddresses(): OptionsContractAddresses {
   const protocol = localhostDeployment.scopes.protocol?.contracts ?? {}
   const wire = localhostDeployment.scopes.wire?.contracts ?? {}

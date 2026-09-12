@@ -157,6 +157,17 @@ export const runRemoteOpen = async (input: {
     },
     log
   });
+  // Board-first reveal: a board change can newly reveal (or hide) actions, so re-project the catalog
+  // and re-push it. Without this the UI's function panel freezes at the open-time projection and
+  // board-gated actions (observe register, options fund, …) never appear as buttons after configure.
+  const refreshFunctions = async (): Promise<void> => {
+    try {
+      const raw = await mergeConsoleDescriptors(consoleEdges);
+      wss.sendFunctions(record.sessionId, projectConsoleFunctions(raw, scopes));
+    } catch (error) {
+      log(`functions refresh skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
   for (const edge of consoleEdges) {
     if (edge.subscribeBoard === undefined) {
       continue;
@@ -164,6 +175,7 @@ export const runRemoteOpen = async (input: {
     boardUnsubs.push(
       edge.subscribeBoard((board) => {
         pushBoard(edge.package, board);
+        void refreshFunctions();
       })
     );
   }

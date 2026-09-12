@@ -126,12 +126,12 @@ default; set `WITH_SUI=0` for the EVM-only stack.
 
 - `sui` CLI on `PATH` (`brew install sui`; verified on 1.73.0).
 - A `sui client` env named `localnet` → `http://127.0.0.1:9000`, with an active address.
-  `dev-sui.sh` creates/switches it automatically (`sui client new-env --alias localnet …`).
+  `dev.sh` creates/switches it automatically (`sui client new-env --alias localnet …`).
 
 ### One command — `./dev.sh`
 
-With `WITH_SUI=1` (default) `dev.sh` runs the EVM bring-up, then sources `dev-sui.sh`
-and brings the Sui leg up, in order: kill stale `sui` → `sui start --with-faucet
+With `WITH_SUI=1` (default) `dev.sh` runs the EVM bring-up, then brings the Sui leg up
+(the folded-in `sui_leg_up`), in order: kill stale `sui` → `sui start --with-faucet
 --force-regenesis` (RPC `:9000`, faucet `:9123`) → faucet-fund the deployer + wait for a
 gas coin → `npm run deploy:sui -- --name localnet --force` → faucet-fund the host gas
 sponsor. It then starts the host with the Sui env exported so the host targets localnet:
@@ -145,10 +145,10 @@ Logs: `/tmp/livestreak-sui.log`. The deploy rewrites
 `packages/contracts/chains/sui/deployments/localnet.{json,ts}` — these are **ephemeral**
 (regenerated every run from a fresh genesis); don't commit run-to-run churn.
 
-### Sui leg on its own — `./dev-sui.sh`
+### Sui leg
 
-`./dev-sui.sh` boots just the Sui localnet + faucet, deploys, funds the sponsor, and
-blocks (Ctrl+C to stop). Useful for iterating on the Sui path without anvil/host/app.
+The Sui leg is folded into `dev.sh` (the `sui_*` helpers) — there's no separate script.
+It comes up by default (`WITH_SUI=1`); pin the consoles to Sui with `CHAIN=sui ./dev.sh`.
 
 ### Flip the app to Sui
 
@@ -176,7 +176,7 @@ sui client gas 0x184692a4d95ec8c54940b58b501356d903c2c0bef8a5c215c3b4dd1551c325f
 ### Gotchas (Sui)
 
 - **`Cannot find gas coin for signer …`:** `--force-regenesis` wipes balances; the deploy
-  tool's own faucet poke is racy. `dev-sui.sh` pre-funds the active deployer and blocks on
+  tool's own faucet poke is racy. `dev.sh` pre-funds the active deployer and blocks on
   `sui client gas` before deploying — if you deploy by hand, faucet the active address first.
 - **Deployer keypair:** `deploy:sui` uses the `sui client` active address' key when one is
   exportable, else falls back to the localnet dev mnemonic (localnet only — it refuses to

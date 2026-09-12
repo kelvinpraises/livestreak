@@ -37,6 +37,7 @@
     "@livestreak/schema": "file:../schema",
     "@livestreak/wallet": "file:../wallet",
     "effect": "3.21.3",
+    "uuid": "^11.1.1",
     "viem": "^2.23.0"
   },
   "devDependencies": {

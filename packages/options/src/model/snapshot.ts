@@ -6,6 +6,7 @@ import type { OptionsNft } from "./nft.js";
 import type { OptionsMarket } from "./market.js";
 import type { OptionsStreamState } from "./stream.js";
 import type { OptionsBoardState } from "./math/accrual.js";
+import type { FunderBoundary } from "./math/live-pool.js";
 import type {
   OptionsVault,
   OptionsVaultPools,
@@ -37,6 +38,13 @@ export interface OptionsVaultSnapshot {
   readonly pendingBoundaries: {
     readonly yes: bigint;
     readonly no: bigint;
+  };
+  /** Creator-seed funding boundaries per side (maxEnd + rate). Feeds the live-pool projection so the
+   *  pool stops growing once the seed's deposit runs dry — it never exceeds what was funded. Absent on
+   *  chains/readers that don't surface it (the projection then falls back to the uncapped path). */
+  readonly seedBoundaries?: {
+    readonly yes: readonly FunderBoundary[];
+    readonly no: readonly FunderBoundary[];
   };
   readonly hot: OptionsVaultStewardState;
   readonly dispute: Pick<OptionsVaultStewardState, "disputeId"> & { readonly active: boolean };

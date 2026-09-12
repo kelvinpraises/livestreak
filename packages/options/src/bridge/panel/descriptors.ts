@@ -7,14 +7,14 @@
 import type { CapabilityScope, FunctionDescriptor, JsonSchema } from "@livestreak/schema";
 import { bridgeActionScope, withDescriptorIdentity } from "@livestreak/schema";
 
-import { bridgeControlsReadScope, optionsConfigScope } from "../types.js";
+import { bridgeControlsReadScope } from "../types.js";
 import type { OptionsFunctionView, OptionsPanel } from "./types.js";
 import { projectOptionsFunctions } from "./project.js";
 
 const PACKAGE = "options" as const;
+const ROOT_ID = "options.root";
 const CONFIG_ID = "options.config.configure";
-const LVST_GROUP_ID = "options.lvst";
-const GLOBAL_GROUP_ID = "options.global";
+const CLOSE_ID = "options.config.close";
 
 // --- exports ---
 
@@ -22,12 +22,15 @@ export const projectOptionsDescriptors = (panel: OptionsPanel): readonly Functio
   const descriptors: FunctionDescriptor[] = [];
   const views = projectOptionsFunctions(panel);
 
+  pushRoot(descriptors);
   pushConfigurator(descriptors);
-  pushEntityGroups(descriptors, panel);
 
+  // Board-first: hide every action (even always-enabled globals like setApprovalForAll) until a market
+  // is configured, so the pane shows only Configure + Close until you configure.
+  const configured = panel.markets.length > 0;
   let order = 0;
   for (const view of views) {
-    descriptors.push(toActionDescriptor(view, resolveParentId(view, panel), order++));
+    descriptors.push(toActionDescriptor(view, ROOT_ID, configured, order++));
   }
 
   return descriptors;
@@ -35,14 +38,34 @@ export const projectOptionsDescriptors = (panel: OptionsPanel): readonly Functio
 
 // --- tree nodes ---
 
+// Single root pane: configure/close + all actions nest under one "Options" group.
+const pushRoot = (descriptors: FunctionDescriptor[]): void => {
+  descriptors.push(
+    withDescriptorIdentity(
+      {
+        id: ROOT_ID,
+        name: "options",
+        label: "Options",
+        scope: bridgeControlsReadScope,
+        nodeKind: "group",
+        order: 0,
+        disabled: false,
+        visible: true
+      },
+      { package: PACKAGE, idPrefix: "root" }
+    )
+  );
+};
+
 const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
   descriptors.push(
     withDescriptorIdentity(
       {
         id: CONFIG_ID,
+        parentId: ROOT_ID,
         name: "configure",
         label: "Configure options",
-        scope: optionsConfigScope,
+        scope: `${bridgeActionScope}:configure` as CapabilityScope,
         nodeKind: "action",
         order: 0,
         disabled: false,
@@ -52,141 +75,29 @@ const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
       { package: PACKAGE, idPrefix: "config" }
     )
   );
-};
-
-const pushEntityGroups = (descriptors: FunctionDescriptor[], panel: OptionsPanel): void => {
-  descriptors.push(
-    withDescriptorIdentity(
-      {
-        id: LVST_GROUP_ID,
-        parentId: CONFIG_ID,
-        name: "lvst",
-        label: "$LVST",
-        scope: bridgeControlsReadScope,
-        nodeKind: "group",
-        order: 30,
-        disabled: false,
-        visible: false
-      },
-      { package: PACKAGE, idPrefix: "group" }
-    )
-  );
 
   descriptors.push(
     withDescriptorIdentity(
       {
-        id: GLOBAL_GROUP_ID,
-        parentId: CONFIG_ID,
-        name: "global",
-        label: "Global",
-        scope: bridgeControlsReadScope,
-        nodeKind: "group",
-        order: 50,
+        id: CLOSE_ID,
+        parentId: ROOT_ID,
+        name: "close",
+        label: "Close",
+        scope: `${bridgeActionScope}:close` as CapabilityScope,
+        nodeKind: "action",
+        order: 1,
         disabled: false,
-        visible: false
+        visible: true
       },
-      { package: PACKAGE, idPrefix: "group" }
+      { package: PACKAGE, idPrefix: "config" }
     )
   );
-
-  const vaultIds = new Set<string>();
-  const marketIds = new Set(panel.markets.map((market) => market.marketId));
-  for (const nft of panel.nfts) {
-    marketIds.add(nft.marketId);
-  }
-
-  for (const marketId of marketIds) {
-    const market = panel.markets.find((entry) => entry.marketId === marketId);
-    const marketGroupId = marketGroupIdFor(marketId);
-    descriptors.push(
-      withDescriptorIdentity(
-        {
-          id: marketGroupId,
-          parentId: CONFIG_ID,
-          name: "market",
-          label:
-            market !== undefined && market.title.trim().length > 0 ? market.title : "Market",
-          scope: bridgeControlsReadScope,
-          nodeKind: "group",
-          order: 10,
-          disabled: false,
-          visible: false,
-          target: { kind: "market", marketId }
-        },
-        { package: PACKAGE, idPrefix: "group" }
-      )
-    );
-
-    for (const vault of market?.vaults ?? []) {
-      if (vaultIds.has(vault.vaultId)) {
-        continue;
-      }
-      vaultIds.add(vault.vaultId);
-      descriptors.push(
-        withDescriptorIdentity(
-          {
-            id: vaultGroupIdFor(vault.vaultId),
-            parentId: marketGroupId,
-            name: "vault",
-            label: vault.question.trim().length > 0 ? vault.question : "Vault",
-            scope: bridgeControlsReadScope,
-            nodeKind: "group",
-            order: 20,
-            disabled: false,
-            visible: false,
-            target: { kind: "vault", marketId, vaultId: vault.vaultId }
-          },
-          { package: PACKAGE, idPrefix: "group" }
-        )
-      );
-    }
-  }
-
-  for (const nft of panel.nfts) {
-    descriptors.push(
-      withDescriptorIdentity(
-        {
-          id: nftGroupIdFor(nft.tokenId),
-          parentId: marketGroupIdFor(nft.marketId),
-          name: "nft",
-          label: `Position #${nft.tokenId}`,
-          scope: bridgeControlsReadScope,
-          nodeKind: "group",
-          order: 25,
-          disabled: false,
-          visible: false,
-          target: { kind: "nft", marketId: nft.marketId, tokenId: nft.tokenId }
-        },
-        { package: PACKAGE, idPrefix: "group" }
-      )
-    );
-  }
-};
-
-const resolveParentId = (view: OptionsFunctionView, panel: OptionsPanel): string => {
-  const target = view.target;
-  if (target === undefined) {
-    return GLOBAL_GROUP_ID;
-  }
-
-  switch (target.kind) {
-    case "market":
-      return marketGroupIdFor(target.marketId ?? panel.markets[0]?.marketId ?? "unknown");
-    case "vault":
-      return vaultGroupIdFor(target.vaultId ?? "unknown");
-    case "nft":
-      return nftGroupIdFor(target.tokenId ?? "unknown");
-    case "lvst":
-      return LVST_GROUP_ID;
-    case "global":
-    default:
-      return GLOBAL_GROUP_ID;
-  }
 };
 
 const toActionDescriptor = (
   view: OptionsFunctionView,
   parentId: string,
+  configured: boolean,
   order: number
 ): FunctionDescriptor => {
   const inputSchema = OPTIONS_INPUT_SCHEMAS[view.name];
@@ -203,7 +114,8 @@ const toActionDescriptor = (
       nodeKind: "action",
       order,
       disabled: view.disabled,
-      visible: false,
+      // Board-first reveal: an action lights up only after configure AND once its prerequisites exist.
+      visible: configured && !view.disabled,
       ...(view.disabledReason === undefined ? {} : { disabledReason: view.disabledReason }),
       ...(inputSchema === undefined ? {} : { inputSchema })
     },
@@ -212,13 +124,6 @@ const toActionDescriptor = (
 };
 
 // --- id helpers ---
-
-const idSlug = (value: string): string =>
-  value.replace(/[^a-zA-Z0-9]/g, "_").slice(0, 64);
-
-const marketGroupIdFor = (marketId: string): string => `options.market.${idSlug(marketId)}`;
-const vaultGroupIdFor = (vaultId: string): string => `options.vault.${idSlug(vaultId)}`;
-const nftGroupIdFor = (tokenId: string): string => `options.nft.${idSlug(tokenId)}`;
 
 const actionIdFor = (parentId: string, view: OptionsFunctionView): string => {
   const suffix =

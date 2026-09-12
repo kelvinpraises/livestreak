@@ -63,7 +63,19 @@ export interface BoardPatchFrame {
   readonly target?: string;
   readonly board: unknown;
 }
-export type GatewayFrame = RegisterFrame | RevokeFrame | CallResultFrame | BoardPatchFrame;
+// Sent when a board change reveals/hides actions (board-first reveal) so the gateway can re-project
+// and re-push the catalog. The host forwards it to the UI as a UiFunctionsFrame (scope-filtered).
+export interface GatewayFunctionsFrame {
+  readonly type: "functions";
+  readonly sessionId: string;
+  readonly functions: readonly FunctionDescriptor[];
+}
+export type GatewayFrame =
+  | RegisterFrame
+  | RevokeFrame
+  | CallResultFrame
+  | BoardPatchFrame
+  | GatewayFunctionsFrame;
 
 // ── leg A: host → gateway ────────────────────────────────────────────────────
 export interface AckFrame {
@@ -146,7 +158,7 @@ const typeOf = (value: unknown): string | undefined =>
     ? (value as { type?: unknown }).type as string | undefined
     : undefined;
 
-const GATEWAY_TYPES = new Set(["register", "revoke", "call_result", "board_patch"]);
+const GATEWAY_TYPES = new Set(["register", "revoke", "call_result", "board_patch", "functions"]);
 const HOST_TYPES = new Set(["ack", "call", "session_closed"]);
 const UI_CLIENT_TYPES = new Set(["ui.hello", "call"]);
 const UI_SERVER_TYPES = new Set([

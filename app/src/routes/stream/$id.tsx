@@ -15,6 +15,7 @@ function StreamPage() {
       streamTitle={stream.title}
       category={stream.category}
       totalPooled={stream.totalPooled}
+      totalPooledRatePerSec={stream.totalPooledRatePerSec}
       streamId={id}
     />
   )

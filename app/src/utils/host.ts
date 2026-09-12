@@ -7,6 +7,7 @@ import type {
 import type { Agent } from '#/types/demo'
 import type { HomepageData } from '#/types/homepage'
 import type { AppFixture } from '#/types/host-edge'
+import type { OptionsChainKind } from '#/utils/chain'
 
 const CATALOG_PATH = '/catalog'
 
@@ -29,9 +30,14 @@ export async function fetchHostCatalog(baseUrl: string): Promise<HostCatalog> {
   return (await res.json()) as HostCatalog
 }
 
-/** GET /homepage -> the whole homepage payload (catalog rail + vault rails + protocol stats). */
-export async function fetchHomepage(baseUrl: string): Promise<HostHomepageData> {
-  const res = await fetch(`${baseUrl}${HOMEPAGE_PATH}`)
+/** GET /homepage[?chain] -> the homepage payload. Passing `chain` scopes it to that chain (the host's
+ *  per-chain router); omit for the cross-chain aggregate. */
+export async function fetchHomepage(
+  baseUrl: string,
+  chain?: OptionsChainKind,
+): Promise<HostHomepageData> {
+  const url = chain ? `${baseUrl}${HOMEPAGE_PATH}?chain=${chain}` : `${baseUrl}${HOMEPAGE_PATH}`
+  const res = await fetch(url)
   if (!res.ok) {
     throw new Error(`Host homepage HTTP ${res.status}`)
   }

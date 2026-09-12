@@ -50,5 +50,11 @@ function RemoteSessionGate({ session }: { readonly session: string }) {
     )
   }
 
-  return <RemoteConsole />
+  // body is `overflow: hidden` (app-shell), so each route owns its scroll container (cf. index.tsx).
+  // Without this the console clips everything below the fold (board, revealed functions) with no scroll.
+  return (
+    <div style={{ height: '100vh', overflowY: 'auto' }}>
+      <RemoteConsole />
+    </div>
+  )
 }

@@ -26,6 +26,15 @@ export type TxId = string & { readonly __brand: "TxId" };
 
 export const asTxId = (hash: string): TxId => hash as TxId;
 
+/** A creator-seed funding lane's depletion boundary for one vault side — the instant its Drips stream
+ *  runs dry (`maxEndMs`) and the `rate` it contributed until then. Lets the live-pool projection cap
+ *  the pool at what was actually funded instead of extrapolating the seed rate forever. */
+export interface SeedBoundary {
+  readonly side: OptionsVaultSide;
+  readonly maxEndMs: number;
+  readonly rate: bigint;
+}
+
 export type MintNftInput = {
   readonly marketId: MarketId;
   readonly to: UserAddress;
@@ -126,6 +135,11 @@ export type AdvanceInput = {
 export interface OptionsReader {
   readMarket(marketId: MarketId): Promise<OptionsMarket>;
   readStreamState(marketId: MarketId): Promise<OptionsStreamState>;
+  // Enumerate every registered market off the on-chain registry. The host indexer uses this
+  // to discover markets without an in-memory store or env seed. Optional: the EVM registry
+  // exposes marketCount + marketIdAt; the Sui registry does not enumerate, so its reader omits
+  // this and the host falls back to the discovery store for that leg.
+  listMarketIds?(): Promise<readonly MarketId[]>;
   listMarketVaults(marketId: MarketId): Promise<readonly VaultId[]>;
   readVault(vaultId: VaultId): Promise<OptionsVault>;
   readVaultShareTotals(vaultId: VaultId): Promise<OptionsVaultShareTotals>;
@@ -152,6 +166,10 @@ export interface OptionsReader {
   readOwnerOf(tokenId: TokenId): Promise<UserAddress>;
   readApproved(tokenId: TokenId): Promise<UserAddress | undefined>;
   readIsApprovedForAll(owner: UserAddress, operator: UserAddress): Promise<boolean>;
+  // The creator-seed boundary (maxEnd + rate) for live-pool capping. EVM derives it from
+  // VaultDriver.seedAccount + Vault.getPosition; Sui has no equivalent yet and omits it (the
+  // projection then falls back to the uncapped path for that leg).
+  readSeedBoundary?(vaultId: VaultId, creator: UserAddress): Promise<SeedBoundary | undefined>;
   readProtocolSummary?(): Promise<OptionsProtocolSummary>;
 }
 

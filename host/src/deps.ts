@@ -107,6 +107,14 @@ export const bootstrapHostRouteDeps = async (
   // idempotent sync DDL) so the bookkeeping table reflects reality.
   await migrateToLatest(catalogStack.db.db);
 
+  // Dev reset: local chains (anvil + sui localnet) are wiped on every dev.sh run, but the SQLite
+  // discovery projection persists — so the homepage would show vaults from a previous boot that no
+  // longer exist on-chain. When dev.sh sets this flag, wipe the projection so the indexer rebuilds
+  // from the fresh chain state. Production (persistent chains) leaves it unset.
+  if (process.env.LIVESTREAK_RESET_CATALOG === "1" || process.env.LIVESTREAK_RESET_CATALOG === "true") {
+    await catalogStack.repo.clearAll();
+  }
+
   return {
     config,
     media: {

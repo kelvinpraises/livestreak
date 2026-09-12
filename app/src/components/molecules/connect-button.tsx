@@ -21,6 +21,7 @@ import { useWalletContext } from '#/providers/wallet-provider.tsx'
 import { useOptionsContext } from '#/providers/options-provider'
 import { formatUSDCFull } from '#/utils/format.ts'
 import { testOptionsSeed } from '#/utils/env'
+import { ChainSelector } from '#/components/molecules/chain-selector'
 
 const iconSwap = {
   initial: { opacity: 0, scale: 0.8, filter: 'blur(4px)' },
@@ -28,8 +29,6 @@ const iconSwap = {
   exit: { opacity: 0, scale: 0.8, filter: 'blur(4px)' },
   transition: { duration: 0.15 },
 }
-
-const CHAIN_LABEL: Record<string, string> = { evm: 'EVM', sui: 'Sui' }
 
 export function ConnectButton() {
   const {
@@ -41,7 +40,7 @@ export function ConnectButton() {
     connect,
     disconnect,
   } = useWalletContext()
-  const { chain, derivationStep } = useOptionsContext()
+  const { derivationStep } = useOptionsContext()
 
   const [modalOpen, setModalOpen] = useState(false)
   // Test-only: pre-fill from `VITE_OPTIONS_SEED` so the deterministic E2E wallet derives without
@@ -175,6 +174,15 @@ export function ConnectButton() {
             </div>
           )}
 
+          {/* Pick the chain BEFORE connecting — selecting a pill sets chainRef so `connect` derives the
+              right (EVM Safe vs Sui) address from the same password. Disabled mid-derivation. */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.3)', fontWeight: 600, marginBottom: 8 }}>
+              Network
+            </div>
+            <ChainSelector />
+          </div>
+
           <input
             data-testid="connect-password"
             type="password"
@@ -300,11 +308,10 @@ export function ConnectButton() {
             {formatUSDCFull(legacyWallet.usdcBalance)}
           </span>
         </div>
-        <div data-testid="wallet-chain" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px' }}>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Network</span>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', color: '#00ff87' }}>
-            {CHAIN_LABEL[chain] ?? chain}
-          </span>
+        {/* Switchable post-connect: re-derives this chain's wallet from the same seed (no re-login). */}
+        <div data-testid="wallet-chain" style={{ padding: '6px 10px' }}>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', marginBottom: 8 }}>Network</div>
+          <ChainSelector />
         </div>
 
         <DropdownMenuSeparator style={{ background: 'rgba(255,255,255,0.06)' }} />

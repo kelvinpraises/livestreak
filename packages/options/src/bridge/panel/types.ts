@@ -53,6 +53,11 @@ export interface OptionsVaultPanel {
     readonly settledPoolUSDC: string;
     /** Board-replayed pool at read time (pool + sideRate × Δt). */
     readonly livePoolUSDC: string;
+    /** Current growth rate of livePoolUSDC in USDC base units per second: the on-chain side rate
+     *  (yes + no) net of funder lanes whose runway has already ended. 0 once resolved/frozen. This is
+     *  the exact slope of segMath (pool += sideRate × Δt), so the UI ticks the pool forward between
+     *  polls and lands on the next poll's value rather than estimating the rate from poll deltas. */
+    readonly poolRatePerSecUSDC: string;
     readonly sharePriceYes: string;
     readonly sharePriceNo: string;
   };
@@ -95,6 +100,8 @@ export interface OptionsMarketPanel {
     readonly totalPooledUSDC: string;
     /** Sum of vault livePoolUSDC (board-replayed). */
     readonly livePooledUSDC: string;
+    /** Sum of vault poolRatePerSecUSDC — the market pool's current per-second growth (USDC base units). */
+    readonly livePooledRatePerSecUSDC: string;
     readonly activeVaults: number;
     readonly resolvedVaults: number;
   };

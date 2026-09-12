@@ -11,7 +11,7 @@ export const localhostDeployment: EvmDeployOutput = {
   scopes: {
     "aa": {
       "status": "completed",
-      "deployedAt": "2026-06-22T00:48:39.673Z",
+      "deployedAt": "2026-06-26T01:38:44.226Z",
       "contracts": {
         "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
         "safeSingleton": "0x31ea225b4289bcf8d16764b86af6a699faa31c45",
@@ -28,7 +28,7 @@ export const localhostDeployment: EvmDeployOutput = {
     },
     "streaming": {
       "status": "completed",
-      "deployedAt": "2026-06-22T00:48:39.675Z",
+      "deployedAt": "2026-06-26T01:38:44.227Z",
       "contracts": {
         "dripsStreaming": "0xc20641edde8cecf5a6530a3edbd7fbbffe0bf3d5",
         "dripsProxy": "0xbf1f98e88faecf0fb3c8bea93cbdfbeef4aa57d4",
@@ -37,7 +37,7 @@ export const localhostDeployment: EvmDeployOutput = {
     },
     "protocol": {
       "status": "completed",
-      "deployedAt": "2026-06-22T00:49:27.976Z",
+      "deployedAt": "2026-06-26T01:38:44.311Z",
       "contracts": {
         "protocol": "0xfe7b1de3c0b7a330b04d854c91fb762886aeb69e",
         "marketRegistry": "0x24599b53386dbe94dc7acb48dd5815ff51416683",
@@ -50,7 +50,7 @@ export const localhostDeployment: EvmDeployOutput = {
     },
     "wire": {
       "status": "completed",
-      "deployedAt": "2026-06-22T00:50:56.405Z",
+      "deployedAt": "2026-06-26T01:38:44.405Z",
       "contracts": {
         "vaultDriver": "0x5d10a013887b7bfccbd571a56b11307d0c323703",
         "marketDriverLogic": "0xfceff8892bf6f25aba4e53b1c25cb149239deb2c",
@@ -59,7 +59,7 @@ export const localhostDeployment: EvmDeployOutput = {
     },
     "paymaster": {
       "status": "completed",
-      "deployedAt": "2026-06-22T00:51:08.467Z",
+      "deployedAt": "2026-06-26T01:38:44.422Z",
       "contracts": {
         "verifyingPaymaster": "0x547f60b6c453178c851d529bf36e9bccc57ba844",
         "verifyingSigner": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"

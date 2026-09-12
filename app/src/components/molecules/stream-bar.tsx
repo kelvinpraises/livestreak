@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react'
-import { formatUSDCFull } from '#/utils/format'
 import type { WSFrame } from '#/utils/mock'
+import { ScoreUSD } from '#/components/atoms/score-usd'
 
 interface Props {
   frame: WSFrame
   streamTitle: string
   totalPooled: number
+  totalPooledRatePerSec?: number
 }
 
-export function StreamBar({ frame, streamTitle, totalPooled }: Props) {
+export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerSec }: Props) {
   const [minute, setMinute] = useState(frame.min)
   useEffect(() => { setMinute(frame.min) }, [frame.min])
 
@@ -45,7 +46,7 @@ export function StreamBar({ frame, streamTitle, totalPooled }: Props) {
       {/* Pooled total */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.05em' }}>POOLED</span>
-        <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }}>{formatUSDCFull(totalPooled)}</span>
+        <ScoreUSD value={totalPooled} live ratePerSec={totalPooledRatePerSec} className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }} />
       </div>
     </header>
   )

@@ -73,6 +73,8 @@ export interface StreamMeta {
   category: string
   activeVaults: number
   totalPooled: number
+  /** Live pool's current growth (USDC/sec) from the SDK sideRate — lets the header tick between polls. */
+  totalPooledRatePerSec?: number
   elapsed: string
   isLive: boolean
 }

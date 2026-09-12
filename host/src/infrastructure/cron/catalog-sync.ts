@@ -49,14 +49,41 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
     }
   };
 
+  // The full (chain, marketId) set to index = explicit/discovery registrations UNION every market
+  // enumerated live off each chain's on-chain registry (EVM: marketCount + marketIdAt). The
+  // enumeration is why an observe-registered market shows on the homepage without anyone calling
+  // /discovery — the host reads the registry directly. A chain whose reader can't enumerate (Sui)
+  // simply contributes nothing here and still surfaces via the discovery store.
+  const resolveMarkets = async (): Promise<readonly CatalogMarketRef[]> => {
+    const out = new Map<string, CatalogMarketRef>();
+    for (const ref of config.knownMarkets()) {
+      out.set(`${ref.chain}:${ref.marketId}`, ref);
+    }
+    await Promise.all(
+      config.readers.availableChains.map(async (chain) => {
+        const reader = config.readers.reader(chain);
+        if (reader?.listMarketIds === undefined) return;
+        try {
+          for (const marketId of await reader.listMarketIds()) {
+            const ref: CatalogMarketRef = { chain, marketId: String(marketId) };
+            out.set(`${chain}:${ref.marketId}`, ref);
+          }
+        } catch (error) {
+          console.warn(`[catalog-sync]: enumerate ${chain} markets failed — ${String(error)}`);
+        }
+      })
+    );
+    return [...out.values()];
+  };
+
   const syncAll = async (): Promise<{ indexed: number; failed: number }> => {
-    const results = await Promise.all(config.knownMarkets().map(syncMarket));
+    const results = await Promise.all((await resolveMarkets()).map(syncMarket));
     const indexed = results.filter(Boolean).length;
     return { indexed, failed: results.length - indexed };
   };
 
   const ensureFresh = async (routeId: string): Promise<boolean> => {
-    const ref = config.knownMarkets().find((r) => r.marketId === routeId);
+    const ref = (await resolveMarkets()).find((r) => r.marketId === routeId);
     if (ref === undefined) {
       // Unknown to the registry but may already be cached from a prior boot — serve if so.
       return (await config.repo.marketByRoute(routeId)) !== undefined;
@@ -74,7 +101,7 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
     const freshAt = new Map(markets.map((m) => [m.route_id, m.updated_at]));
     const nowMs = now();
     await Promise.all(
-      config.knownMarkets().map(async (ref) => {
+      (await resolveMarkets()).map(async (ref) => {
         const at = freshAt.get(ref.marketId);
         if (at === undefined || nowMs - at >= stalenessMs) {
           await syncMarket(ref);

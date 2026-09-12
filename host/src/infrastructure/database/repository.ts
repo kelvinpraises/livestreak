@@ -1,5 +1,5 @@
 import type { Kysely } from "kysely";
-import type { DB } from "./schema.js";
+import type { ChainTag, DB } from "./schema.js";
 import type { Market, Resolution, Vault } from "./models.js";
 import type { MarketRows } from "../../services/catalog/mapper.js";
 
@@ -25,13 +25,17 @@ export interface ProtocolStatsRow {
   readonly activeStreams: number;
 }
 
+// Discovery reads accept an optional `chain` filter (the per-chain router): omit it for the
+// cross-chain aggregate (back-compat), or pass "evm"/"sui" to scope to the UI's selected chain.
 export interface CatalogRepository {
   syncMarket(rows: MarketRows): Promise<void>;
-  allMarkets(): Promise<readonly Market[]>;
+  allMarkets(chain?: ChainTag): Promise<readonly Market[]>;
   marketByRoute(routeId: string): Promise<Market | undefined>;
-  liveVaults(): Promise<readonly LiveVaultRow[]>;
-  lifetimeVaults(): Promise<readonly LifetimeRow[]>;
-  protocolStats(): Promise<ProtocolStatsRow>;
+  liveVaults(chain?: ChainTag): Promise<readonly LiveVaultRow[]>;
+  lifetimeVaults(chain?: ChainTag): Promise<readonly LifetimeRow[]>;
+  protocolStats(chain?: ChainTag): Promise<ProtocolStatsRow>;
+  /** Wipe the whole discovery projection — used on a dev reset when local chains are wiped. */
+  clearAll(): Promise<void>;
 }
 
 export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
@@ -62,8 +66,11 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
     });
   };
 
-  const allMarkets = async (): Promise<readonly Market[]> =>
-    db.selectFrom("markets").selectAll().orderBy("updated_at", "desc").execute();
+  const allMarkets = async (chain?: ChainTag): Promise<readonly Market[]> => {
+    let q = db.selectFrom("markets");
+    if (chain !== undefined) q = q.where("chain", "=", chain);
+    return q.selectAll().orderBy("updated_at", "desc").execute();
+  };
 
   const marketByRoute = async (routeId: string): Promise<Market | undefined> =>
     db
@@ -72,11 +79,13 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
       .where("route_id", "=", routeId)
       .executeTakeFirst();
 
-  const liveVaults = async (): Promise<readonly LiveVaultRow[]> => {
-    const rows = await db
+  const liveVaults = async (chain?: ChainTag): Promise<readonly LiveVaultRow[]> => {
+    let q = db
       .selectFrom("vaults")
       .innerJoin("markets", "markets.id", "vaults.market_id")
-      .where("vaults.status", "in", ["open", "hot"])
+      .where("vaults.status", "in", ["open", "hot"]);
+    if (chain !== undefined) q = q.where("vaults.chain", "=", chain);
+    const rows = await q
       .orderBy("vaults.expires_at_ms", "asc")
       .selectAll("vaults")
       .select("markets.title as stream_title")
@@ -87,11 +96,13 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
     }));
   };
 
-  const lifetimeVaults = async (): Promise<readonly LifetimeRow[]> => {
-    const rows = await db
+  const lifetimeVaults = async (chain?: ChainTag): Promise<readonly LifetimeRow[]> => {
+    let q = db
       .selectFrom("resolutions")
       .innerJoin("vaults", "vaults.id", "resolutions.vault_id")
-      .innerJoin("markets", "markets.id", "resolutions.market_id")
+      .innerJoin("markets", "markets.id", "resolutions.market_id");
+    if (chain !== undefined) q = q.where("resolutions.chain", "=", chain);
+    const rows = await q
       .orderBy("resolutions.resolved_at", "desc")
       .selectAll("resolutions")
       .select(["vaults.question as question", "markets.title as stream_title"])
@@ -103,25 +114,32 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
     }));
   };
 
-  const protocolStats = async (): Promise<ProtocolStatsRow> => {
-    const vaultCount = await db
-      .selectFrom("vaults")
-      .select((eb) => eb.fn.countAll<number>().as("n"))
-      .executeTakeFirst();
-    const volume = await db
-      .selectFrom("markets")
-      .select((eb) => eb.fn.sum<number>("total_pooled").as("v"))
-      .executeTakeFirst();
-    const live = await db
-      .selectFrom("markets")
-      .select((eb) => eb.fn.countAll<number>().as("n"))
-      .where("is_live", "=", 1)
-      .executeTakeFirst();
+  const protocolStats = async (chain?: ChainTag): Promise<ProtocolStatsRow> => {
+    let vq = db.selectFrom("vaults");
+    if (chain !== undefined) vq = vq.where("chain", "=", chain);
+    const vaultCount = await vq.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst();
+    let volq = db.selectFrom("markets");
+    if (chain !== undefined) volq = volq.where("chain", "=", chain);
+    const volume = await volq.select((eb) => eb.fn.sum<number>("total_pooled").as("v")).executeTakeFirst();
+    let lq = db.selectFrom("markets").where("is_live", "=", 1);
+    if (chain !== undefined) lq = lq.where("chain", "=", chain);
+    const live = await lq.select((eb) => eb.fn.countAll<number>().as("n")).executeTakeFirst();
     return {
       totalVaults: Number(vaultCount?.n ?? 0),
       totalVolume: Math.round(Number(volume?.v ?? 0) * 100) / 100,
       activeStreams: Number(live?.n ?? 0)
     };
+  };
+
+  // Stale rows from a previous boot outlive a local-chain wipe (anvil/sui localnet reset on each dev
+  // run), so the projection would show vaults that no longer exist on-chain. Clearing on a dev reset
+  // lets the indexer rebuild from the fresh chain state. Order respects FK direction.
+  const clearAll = async (): Promise<void> => {
+    await db.transaction().execute(async (tx) => {
+      await tx.deleteFrom("resolutions").execute();
+      await tx.deleteFrom("vaults").execute();
+      await tx.deleteFrom("markets").execute();
+    });
   };
 
   return {
@@ -130,6 +148,7 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
     marketByRoute,
     liveVaults,
     lifetimeVaults,
-    protocolStats
+    protocolStats,
+    clearAll
   };
 };

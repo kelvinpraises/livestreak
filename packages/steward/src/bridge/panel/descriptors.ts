@@ -5,17 +5,14 @@
 // withDescriptorIdentity.
 
 import type { CapabilityScope, FunctionDescriptor, JsonSchema } from "@livestreak/schema";
-import { withDescriptorIdentity } from "@livestreak/schema";
+import { bridgeActionScope, withDescriptorIdentity } from "@livestreak/schema";
 
-import {
-  stewardConfigCloseScope,
-  stewardConfigScope,
-  bridgeControlsReadScope
-} from "../types.js";
+import { bridgeControlsReadScope } from "../types.js";
 import { projectStewardFunctions } from "./project.js";
 import type { StewardFunctionView, StewardPanelInput, StewardStateSnapshot } from "./types.js";
 
 const PACKAGE = "steward" as const;
+const ROOT_ID = "steward.root";
 const CONFIG_ID = "steward.config.configure";
 const CLOSE_ID = "steward.config.close";
 
@@ -38,14 +35,36 @@ export const projectStewardDescriptors = (
 
 // --- tree nodes ---
 
+// Single root pane: configure/close + per-subject groups all nest under one "Steward" group, so the
+// configure FORM stays a card (it must NOT itself be the parent, or it renders as a header and the
+// form vanishes). Uniform shape across packages.
+const pushRoot = (descriptors: FunctionDescriptor[]): void => {
+  descriptors.push(
+    withDescriptorIdentity(
+      {
+        id: ROOT_ID,
+        name: "steward",
+        label: "Steward",
+        scope: bridgeControlsReadScope,
+        nodeKind: "group",
+        order: 0,
+        disabled: false,
+        visible: true
+      },
+      { package: PACKAGE, idPrefix: "root" }
+    )
+  );
+};
+
 const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
   descriptors.push(
     withDescriptorIdentity(
       {
         id: CONFIG_ID,
+        parentId: ROOT_ID,
         name: "configure",
         label: "Configure steward",
-        scope: stewardConfigScope,
+        scope: `${bridgeActionScope}:configure` as CapabilityScope,
         nodeKind: "action",
         order: 0,
         disabled: false,
@@ -60,9 +79,10 @@ const pushConfigurator = (descriptors: FunctionDescriptor[]): void => {
     withDescriptorIdentity(
       {
         id: CLOSE_ID,
+        parentId: ROOT_ID,
         name: "close",
         label: "Close",
-        scope: stewardConfigCloseScope,
+        scope: `${bridgeActionScope}:close` as CapabilityScope,
         nodeKind: "action",
         order: 1,
         disabled: false,
@@ -88,7 +108,7 @@ const pushSubjectGroups = (
       withDescriptorIdentity(
         {
           id: groupId,
-          parentId: CONFIG_ID,
+          parentId: ROOT_ID,
           name: "subject",
           label: subjectLabel(subject),
           scope: bridgeControlsReadScope,
@@ -116,7 +136,7 @@ const toActionDescriptor = (view: StewardFunctionView): FunctionDescriptor => {
       parentId,
       name: view.name,
       label: view.label,
-      scope: view.scope as CapabilityScope,
+      scope: `${bridgeActionScope}:${view.name}` as CapabilityScope,
       ...(target === undefined ? {} : { target }),
       nodeKind: "action",
       order: 20,

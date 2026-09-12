@@ -9,11 +9,6 @@ import { OptionsActionButton } from '#/components/atoms/options-action-button'
 import { usdcStringToNumber } from '#/utils/options'
 import { formatUSDC, formatCountdown } from '#/utils/format'
 
-// The setLanes top-up arg shape (SetLanesInput) is not yet published by options, so the button stays
-// gated. Once options surfaces a `setLanes` function descriptor with its inputSchema, this disabled
-// placeholder is replaced by the real action.
-const SETLANES_GATED_REASON = 'Top-up unavailable — pending options setLanes arg shape'
-
 function invalidAddressFn(): OptionsFunctionView {
   return { name: '', scope: '', label: '', disabled: true, disabledReason: 'Enter a valid address' }
 }
@@ -54,6 +49,7 @@ export function NftPanel() {
               : undefined}
             onTransfer={(to) => options.transferNft(nft.tokenId, to)}
             onApprove={(operator) => options.approveNft(nft.tokenId, operator)}
+            onTopUp={(depositUsd) => options.topUpNft(nft.tokenId, nft.lanes, depositUsd)}
           />
         ))
       )}
@@ -112,6 +108,7 @@ function NftRow({
   approveFn,
   onTransfer,
   onApprove,
+  onTopUp,
 }: {
   nft: OptionsNftPanel
   chain: OptionsChainKind
@@ -119,12 +116,24 @@ function NftRow({
   approveFn?: OptionsFunctionView
   onTransfer: (to: string) => Promise<unknown>
   onApprove: (operator: string) => Promise<unknown>
+  onTopUp: (depositUsd: number) => Promise<unknown>
 }) {
   const [transferTo, setTransferTo] = useState('')
   const [approveOperator, setApproveOperator] = useState('')
+  const [topUpAmount, setTopUpAmount] = useState('')
   const transferValid = isValidRecipientAddress(chain, transferTo)
   const approveValid = isAddress(approveOperator)
   const showApprove = chain === 'evm' && approveFn !== undefined
+
+  const topUpUsd = parseFloat(topUpAmount)
+  const hasFundableLane = nft.lanes.some((lane) => {
+    try { return BigInt(lane.rate) > 0n } catch { return false }
+  })
+  const topUpFn: OptionsFunctionView = !hasFundableLane
+    ? { name: '', scope: '', label: '', disabled: true, disabledReason: 'No active lane to top up — open a position first' }
+    : !(topUpUsd > 0)
+      ? { name: '', scope: '', label: '', disabled: true, disabledReason: 'Enter an amount' }
+      : { name: '', scope: '', label: '', disabled: false }
 
   return (
     <div style={{
@@ -160,11 +169,19 @@ function NftRow({
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <div style={{ flex: 1, fontSize: 9, color: 'rgba(255,255,255,0.3)' }}>Top up lane funding</div>
+          <input
+            type="number"
+            min="0"
+            step="1"
+            value={topUpAmount}
+            onChange={e => setTopUpAmount(e.target.value)}
+            placeholder="Top up lane funding (USDC)"
+            style={addressInputStyle}
+          />
           <OptionsActionButton
             label="Top up"
-            fn={{ name: '', scope: '', label: '', disabled: true, disabledReason: SETLANES_GATED_REASON }}
-            onAction={async () => {}}
+            fn={topUpFn}
+            onAction={async () => { await onTopUp(topUpUsd); setTopUpAmount('') }}
             variant="ghost"
             compact
           />

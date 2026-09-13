@@ -280,7 +280,7 @@ describe("options bridge", () => {
     expect(mint?.disabledReason).toBe("Already entered this market");
   });
 
-  it("callAction dispatches mint to the writer", async () => {
+  it("callAction dispatches mint (enter market) and returns the full MintResult", async () => {
     const writer = createFakeChainWriter();
     const rt = createOptionsRuntime({
       config: {
@@ -293,14 +293,23 @@ describe("options bridge", () => {
     });
     const bridge = createOptionsBridge({ runtime: rt });
 
-    const txId = await bridge.callAction(grantedCaller, {
+    const result = await bridge.callAction(grantedCaller, {
       scope: bridgeActionScope,
       action: "mint",
       args: { marketId: asMarketId("market_01"), to: fixtureUser() }
     });
 
-    expect(txId).toBeTruthy();
+    // The console's "Enter market" feedback rides on this: the tokenId must come back, not just a txId.
+    expect(result).toEqual({ txId: "0xfake_user_op_hash", tokenId: asTokenId(1n) });
     expect(writer.requests[0]?.action).toBe("mint");
+
+    const withSalt = await bridge.callAction(grantedCaller, {
+      scope: bridgeActionScope,
+      action: "mintWithSalt",
+      args: { marketId: asMarketId("market_01"), salt: 7n, to: fixtureUser() }
+    });
+    expect(withSalt).toEqual({ txId: "0xfake_user_op_hash", tokenId: asTokenId(1n) });
+    expect(writer.requests[1]?.action).toBe("mintWithSalt");
   });
 
   it("readControls enables fund on an unfunded open vault when the user holds the NFT", async () => {

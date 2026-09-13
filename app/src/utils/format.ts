@@ -33,7 +33,8 @@ export function formatRunway(ms: number): string {
   return `${m}m`
 }
 export function formatRate(usdcPerMin: number): string {
-  if (usdcPerMin < 0.01) return '—'
+  // Guard undefined/NaN (e.g. a position with no active lane) — a formatter must never throw.
+  if (!isFinite(usdcPerMin) || usdcPerMin < 0.01) return '—'
   return '$' + usdcPerMin.toFixed(2) + '/min'
 }
 // Human share count. Shares are SECONDARY to "% of side" on the card, so stay compact: exact when small,

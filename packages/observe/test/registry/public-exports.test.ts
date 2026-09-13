@@ -88,7 +88,7 @@ describe("observe public exports", () => {
     expect(publicExport("defaultControlTick")).toBeUndefined();
     expect(publicExport("createSystemRunSurface")).toBeUndefined();
     expect(publicExport("createSystemPauseSurface")).toBeUndefined();
-    expect(publicExport("failIfActiveHandleExists")).toBeUndefined();
+    expect(publicExport("reclaimTerminalRunHandle")).toBeUndefined();
     expect(publicExport("assertCatalogFunctionAdvertised")).toBeUndefined();
   });
 

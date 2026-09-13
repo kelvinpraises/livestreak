@@ -66,6 +66,31 @@ describe("bookmaker bridge createVault wiring", () => {
     expect(second).toEqual(first);
   });
 
+  it("records the completed creation on the panel so the console board confirms it", async () => {
+    const runtime = createTestRuntime(
+      createFakeBookmakerChain(() => ({
+        txId: `0x${"aa".repeat(32)}` as const,
+        vaultId: `0x${"22".repeat(32)}` as const
+      }))
+    );
+    const bridge = createBookmakerBridge({ runtime });
+
+    // Before: nothing completed.
+    expect(runtime.readPanel().completedVaultCreations).toHaveLength(0);
+
+    await bridge.callAction(
+      actionCaller([actionGrant]),
+      { scope: bridgeActionScope, action: "createVault", args: createArgs },
+      nowMs
+    );
+
+    // After: the vault landed AND the panel reflects it. Previously createVaultOnce returned the id but
+    // never published a snapshot, so completedVaultCreations stayed empty and the console showed no success.
+    const panel = runtime.readPanel();
+    expect(panel.completedVaultCreations).toHaveLength(1);
+    expect(panel.completedVaultCreations[0]?.result.vaultId).toBe(`0x${"22".repeat(32)}`);
+  });
+
   it("coerces numeric-string creatorStake/seedRate and creates the vault", async () => {
     let createCalls = 0;
     const runtime = createTestRuntime(

@@ -123,17 +123,61 @@ export const createHostMediatedSinkSignaling = (
 
   const base = trimBase(input.baseUrl);
   const key = encodeURIComponent(input.streamId);
-  const offerUrl = `${base}/webrtc/signal/${key}/offer`;
-  const answerUrl = `${base}/webrtc/signal/${key}/answer`;
+  const viewersUrl = `${base}/webrtc/signal/${key}/viewers`;
+  const offerUrlFor = (viewerId: string): string =>
+    `${viewersUrl}/${encodeURIComponent(viewerId)}/offer`;
+  const answerUrlFor = (viewerId: string): string =>
+    `${viewersUrl}/${encodeURIComponent(viewerId)}/answer`;
   const pollIntervalMs = input.pollIntervalMs ?? defaultPollIntervalMs;
   const answerTimeoutMs = input.answerTimeoutMs ?? defaultAnswerTimeoutMs;
 
-  const publishOffer = (offer: RtcSessionDescription): Effect.Effect<void, LiveStreakError> =>
+  // Poll the viewers registered for this stream — the producer spins a peer per new id.
+  const listViewers: Effect.Effect<readonly string[], LiveStreakError> = Effect.gen(function* () {
+    const fetchImpl = yield* resolveFetch(input.fetch);
+    const response = yield* Effect.tryPromise({
+      try: () => fetchImpl(viewersUrl, { method: "GET" }),
+      catch: (cause) =>
+        new LiveStreakRuntimeError({
+          message: "Failed to GET viewers from the host relay",
+          metadata: { details: cause instanceof Error ? cause.message : String(cause) }
+        })
+    });
+    if (!response.ok) {
+      return yield* Effect.fail(
+        new LiveStreakRuntimeError({
+          message: `Host relay viewers poll failed (status ${response.status})`
+        })
+      );
+    }
+    const raw = yield* Effect.tryPromise({
+      try: () => response.text(),
+      catch: (cause) =>
+        new LiveStreakRuntimeError({
+          message: "Failed to read the host relay viewers body",
+          metadata: { details: cause instanceof Error ? cause.message : String(cause) }
+        })
+    });
+    return yield* Effect.try({
+      try: () => {
+        const parsed = JSON.parse(raw) as { viewers?: unknown };
+        return Array.isArray(parsed.viewers)
+          ? parsed.viewers.filter((v): v is string => typeof v === "string")
+          : [];
+      },
+      catch: () =>
+        new LiveStreakRuntimeError({ message: "Host relay returned a malformed viewers list" })
+    });
+  });
+
+  const publishOfferFor = (
+    viewerId: string,
+    offer: RtcSessionDescription
+  ): Effect.Effect<void, LiveStreakError> =>
     Effect.gen(function* () {
       const fetchImpl = yield* resolveFetch(input.fetch);
       const response = yield* Effect.tryPromise({
         try: () =>
-          fetchImpl(offerUrl, {
+          fetchImpl(offerUrlFor(viewerId), {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ type: offer.type, sdp: offer.sdp })
@@ -153,12 +197,13 @@ export const createHostMediatedSinkSignaling = (
       }
     });
 
-  const pollOnce = (
-    fetchImpl: SignalingFetch
+  const pollAnswerOnce = (
+    fetchImpl: SignalingFetch,
+    viewerId: string
   ): Effect.Effect<RtcSessionDescription | undefined, LiveStreakError> =>
     Effect.gen(function* () {
       const response = yield* Effect.tryPromise({
-        try: () => fetchImpl(answerUrl, { method: "GET" }),
+        try: () => fetchImpl(answerUrlFor(viewerId), { method: "GET" }),
         catch: (cause) =>
           new LiveStreakRuntimeError({
             message: "Failed to GET WebRTC answer from the host relay",
@@ -189,11 +234,13 @@ export const createHostMediatedSinkSignaling = (
       return yield* parseDescription(raw, "answer");
     });
 
-  const awaitAnswer: Effect.Effect<RtcSessionDescription, LiveStreakError> = Effect.gen(
-    function* () {
+  const awaitAnswerFor = (
+    viewerId: string
+  ): Effect.Effect<RtcSessionDescription, LiveStreakError> =>
+    Effect.gen(function* () {
       const fetchImpl = yield* resolveFetch(input.fetch);
       const poll: Effect.Effect<RtcSessionDescription, LiveStreakError> = Effect.gen(function* () {
-        const answer = yield* pollOnce(fetchImpl);
+        const answer = yield* pollAnswerOnce(fetchImpl, viewerId);
         if (answer !== undefined) {
           return answer;
         }
@@ -201,16 +248,15 @@ export const createHostMediatedSinkSignaling = (
         return yield* poll;
       });
       return yield* poll;
-    }
-  ).pipe(
-    Effect.timeoutFail({
-      duration: `${answerTimeoutMs} millis`,
-      onTimeout: () =>
-        new LiveStreakRuntimeError({
-          message: `Timed out waiting ${answerTimeoutMs}ms for the browser's WebRTC answer`
-        })
-    })
-  );
+    }).pipe(
+      Effect.timeoutFail({
+        duration: `${answerTimeoutMs} millis`,
+        onTimeout: () =>
+          new LiveStreakRuntimeError({
+            message: `Timed out waiting ${answerTimeoutMs}ms for viewer ${viewerId}'s WebRTC answer`
+          })
+      })
+    );
 
-  return { publishOffer, awaitAnswer };
+  return { listViewers, publishOfferFor, awaitAnswerFor };
 };

@@ -72,8 +72,11 @@ describe("worker loop", () => {
       sourceId: "capture:synthetic",
       frameCount: frameCount
     });
-    expect(result.snapshot.trackDepths["capture.video.raw"]).toBe(frameCount + 1);
+    // Consumed video payloads are pruned (bounded memory); the retained depth is markers only (EOS).
+    expect(result.snapshot.trackDepths["capture.video.raw"]).toBe(1);
     expect(delivered).toHaveLength(frameCount);
+    // Lockstep pumping never triggers the latest-frame-wins bound — recording sinks stay lossless.
+    expect(result.state.tracks["capture.video.raw"]?.droppedVideoItems).toBe(0);
     expect(result.snapshot.sinks[sinkId]?.deliveredItems).toBe(frameCount);
     expect(result.snapshot.sinks[sinkId]?.finalized).toBe(true);
     expect(result.snapshot.sinks[sinkId]?.finalizeResult?.output?.kind).toBe("memory");

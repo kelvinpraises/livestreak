@@ -48,6 +48,9 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
   // Open per-runtime scratch space for bridge/edge callers — not vault idempotency state.
   private readonly memory = new Map<string, unknown>();
   private readonly memoryWatchers = new Map<string, Set<(value: unknown) => void>>();
+  // Last published snapshot — lets incremental updates (recording a completed vault, surfacing a
+  // failure) preserve prior panel state (watchSource, marketContext, pending intents) instead of clobbering it.
+  private lastSnapshot: BookmakerPanelSnapshot;
 
   constructor(input: BookmakerRuntimeInput) {
     const validated = validateBookmakerRuntimeConfig(input.config);
@@ -70,6 +73,7 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
           ...(this.config.readRpcUrl === undefined ? {} : { readRpcUrl: this.config.readRpcUrl })
         })
       );
+    this.lastSnapshot = this.emptyPanelSnapshot();
   }
 
   readSnapshot(): BookmakerRuntimeState {
@@ -86,6 +90,7 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
   }
 
   publishSnapshot(snapshot: BookmakerPanelSnapshot): BookmakerRuntimeState {
+    this.lastSnapshot = snapshot;
     const panel = projectBookmakerPanel(snapshot);
     const state = this.store.publish({
       panel,
@@ -133,13 +138,35 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
     };
   }
 
-  createVaultOnce(intent: CreateVaultIntent, nowMs: number): Promise<CreateVaultOnceResult> {
-    return createVaultOnce({
-      store: this.idempotencyStore,
-      chain: this.chain,
-      intent,
-      nowMs
-    });
+  async createVaultOnce(intent: CreateVaultIntent, nowMs: number): Promise<CreateVaultOnceResult> {
+    try {
+      const res = await createVaultOnce({
+        store: this.idempotencyStore,
+        chain: this.chain,
+        intent,
+        nowMs
+      });
+      // Record the completed creation into the panel so the console board confirms it. Previously the
+      // vault landed on-chain but completedVaultCreations stayed empty and no snapshot was published, so
+      // the console showed no success. Publishing here also notifies board subscribers (the console).
+      const prev = this.lastSnapshot.completedVaultCreations ?? [];
+      const already = prev.some((c) => c.result.vaultId === res.result.vaultId);
+      this.publishSnapshot({
+        ...this.lastSnapshot,
+        completedVaultCreations: already ? prev : [...prev, { intent, result: res.result }],
+        lastError: undefined,
+        updatedAtMs: nowMs
+      });
+      return res;
+    } catch (error) {
+      // Surface the failure on the panel so the console shows why, instead of a silent no-op.
+      this.publishSnapshot({
+        ...this.lastSnapshot,
+        lastError: error instanceof Error ? error.message : String(error),
+        updatedAtMs: nowMs
+      });
+      throw error;
+    }
   }
 
   private emptyPanelSnapshot(): BookmakerPanelSnapshot {

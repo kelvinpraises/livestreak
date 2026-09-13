@@ -152,7 +152,12 @@ export class HostWssTransport implements RemoteTransport {
         const resolve = this.pending.get(f.callId)
         if (resolve) {
           this.pending.delete(f.callId)
-          resolve(f.ok ? { ok: true } : { ok: false, error: f.error?.message ?? 'call failed' })
+          resolve(
+            f.ok
+              ? // Keep the gateway's outcome ({txId, tokenId}) — mint feedback depends on it.
+                { ok: true, ...(f.result === undefined ? {} : { result: f.result }) }
+              : { ok: false, error: f.error?.message ?? 'call failed' },
+          )
         }
         return
       }

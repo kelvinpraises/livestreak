@@ -228,14 +228,6 @@ export {
 } from "./pipeline/publish/sinks/local/driver.js";
 
 export {
-  streamFileToWebRtcEffect,
-  type StreamFileToWebRtcInput,
-  type StreamFileToWebRtcResult
-} from "./pipeline/publish/sinks/local/file-stream.js";
-
-export { streamFileToWebRtc } from "./adapters/stream-file-webrtc.js";
-
-export {
   createHostMediatedConsumerSignaling,
   type HostMediatedConsumerSignalingInput
 } from "./pipeline/publish/sinks/local/host-consumer-signaling.js";
@@ -256,13 +248,13 @@ export {
   type ConsumerSignalingChannel,
   type SinkSignalingChannel,
   type LoopbackNetwork,
-  type RtcDataChannelLike,
   type RtcPeerConnectionLike,
   type RtcPeerConnectionFactory,
   type RtcSessionDescription,
   type RtcSdpType,
-  type RtcDataChannelEvent,
-  type RtcMessageEvent
+  type RtcVideoFrame,
+  type RtcVideoTrackHandle,
+  type RtcTrackEvent
 } from "./pipeline/publish/sinks/local/signaling.js";
 
 // --- Per-stream feed resolution (issue 7) ---

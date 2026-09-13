@@ -14,7 +14,22 @@ import type { RawFrame, RawFrameCadence } from "#pipeline/capture/types.js";
 
 export interface FileReplayConfig {
   readonly path: string;
+  /**
+   * ffmpeg output pixel format for the decoded raw frames. Defaults to `rgb24` (downstream CV / the
+   * legacy paths). The real-time WebRTC media-track sink asks for `yuv420p` (I420) so frames feed
+   * `RTCVideoSource.onFrame` with no JS color conversion.
+   */
+  readonly pixelFormat?: RawVideoPixelFormat;
+  /**
+   * Decode at the source's native frame rate (ffmpeg `-re`) instead of as-fast-as-possible. Required
+   * for real-time streaming: it paces frames at wall-clock FPS so the media track sends live, and the
+   * sliding capture buffer never has a backlog to drop. Defaults to false (batch decode).
+   */
+  readonly realtime?: boolean;
 }
+
+/** ffmpeg `-pix_fmt` values the raw-video decoder supports, mapped to a RawFrame byteFormat + byte size. */
+export type RawVideoPixelFormat = "rgb24" | "rgba" | "yuv420p";
 
 export interface FileDecodeStats {
   frameCount: number;
@@ -29,10 +44,25 @@ interface RawVideoProcessResource {
   readonly stop: () => void;
 }
 
-export const makeFfmpegRawVideoDecodeArguments = (path: string): readonly string[] => [
+/** Bytes per decoded frame for a given pixel format at width×height. */
+export const rawVideoFrameByteSize = (
+  format: RawVideoPixelFormat,
+  width: number,
+  height: number
+): number => (format === "yuv420p" ? (width * height * 3) / 2 : format === "rgba" ? width * height * 4 : width * height * 3);
+
+const pixelFormatToByteFormat = (format: RawVideoPixelFormat): RawFrame["payload"]["byteFormat"] =>
+  format === "yuv420p" ? "yuv420p" : format === "rgba" ? "rgba" : "rgb";
+
+export const makeFfmpegRawVideoDecodeArguments = (
+  path: string,
+  options: { readonly pixelFormat?: RawVideoPixelFormat; readonly realtime?: boolean } = {}
+): readonly string[] => [
   "-hide_banner",
   "-loglevel",
   "error",
+  // `-re` before `-i` paces the read at the file's native frame rate (real-time streaming).
+  ...(options.realtime === true ? ["-re"] : []),
   "-i",
   path,
   "-an",
@@ -41,7 +71,7 @@ export const makeFfmpegRawVideoDecodeArguments = (path: string): readonly string
   "-f",
   "rawvideo",
   "-pix_fmt",
-  "rgb24",
+  options.pixelFormat ?? "rgb24",
   "pipe:1"
 ];
 
@@ -52,15 +82,27 @@ export const rawVideoFrameStream = (options: {
   readonly binaries?: FfmpegBinaries;
   readonly stats: FileDecodeStats;
 }): Stream.Stream<RawFrame, LiveStreakError> => {
-  const frameSize = options.probe.width * options.probe.height * 3;
+  const pixelFormat: RawVideoPixelFormat = options.config.pixelFormat ?? "rgb24";
+  const byteFormat = pixelFormatToByteFormat(pixelFormat);
+  const frameSize = rawVideoFrameByteSize(pixelFormat, options.probe.width, options.probe.height);
   const effectiveFps = options.probe.fps;
   const ffmpeg = options.binaries?.ffmpegPath ?? "ffmpeg";
 
   return Stream.asyncPush<RawFrame, LiveStreakError>(
     (emit) =>
       Effect.acquireRelease(
-        Effect.flatMap(spawnChild(ffmpeg, makeFfmpegRawVideoDecodeArguments(options.config.path)), (child) =>
-          Effect.sync(() => startRawVideoDecodeChild(emit, child, options, frameSize, effectiveFps, ffmpeg))
+        Effect.flatMap(
+          spawnChild(
+            ffmpeg,
+            makeFfmpegRawVideoDecodeArguments(options.config.path, {
+              pixelFormat,
+              realtime: options.config.realtime
+            })
+          ),
+          (child) =>
+            Effect.sync(() =>
+              startRawVideoDecodeChild(emit, child, options, frameSize, effectiveFps, byteFormat, ffmpeg)
+            )
         ),
         (resource: RawVideoProcessResource) =>
           Effect.sync(() => {
@@ -90,6 +132,7 @@ const startRawVideoDecodeChild = (
   },
   frameSize: number,
   effectiveFps: number,
+  byteFormat: RawFrame["payload"]["byteFormat"],
   ffmpeg: string
 ): RawVideoProcessResource => {
   const stderr: Uint8Array[] = [];
@@ -149,7 +192,15 @@ const startRawVideoDecodeChild = (
         droppedFrames: options.stats.droppedFrames
       };
 
-      const frame = makeRawFrame(options.sourceId, options.probe, frameIndex, effectiveFps, cadence, data);
+      const frame = makeRawFrame(
+        options.sourceId,
+        options.probe,
+        frameIndex,
+        effectiveFps,
+        cadence,
+        byteFormat,
+        data
+      );
       const accepted = emit.single(frame);
 
       options.stats.frameCount = frameIndex + 1;
@@ -201,6 +252,7 @@ const makeRawFrame = (
   frameIndex: number,
   effectiveFps: number,
   cadence: RawFrameCadence,
+  byteFormat: RawFrame["payload"]["byteFormat"],
   data: Uint8Array
 ): RawFrame => ({
   id: `${sourceId}:frame:${frameIndex}`,
@@ -215,7 +267,7 @@ const makeRawFrame = (
   payload: {
     width: probe.width,
     height: probe.height,
-    byteFormat: "rgb",
+    byteFormat,
     encoding: "raw",
     expectedFps: effectiveFps,
     data

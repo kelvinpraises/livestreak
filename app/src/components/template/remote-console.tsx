@@ -14,6 +14,7 @@ import { bridgeActionScope } from '@livestreak/schema'
 import { AutoForm } from '#/components/organisms/auto-form'
 import { FunctionTree } from '#/components/organisms/function-tree'
 import { useRemote } from '#/providers/remote-provider'
+import type { CallResult } from '#/utils/remote-transport'
 
 const PACKAGE_TABS: readonly { id: ConsolePackage; label: string }[] = [
   { id: 'observe', label: 'Observe' },
@@ -214,12 +215,24 @@ function ConsoleBody() {
   )
 }
 
+// Badge text for a call outcome: a mint's tokenId is the confirmation the operator needs (it keys
+// every follow-up fund/withdraw), so surface it; otherwise a plain sent/failed cue.
+export const callResultBadge = (res: CallResult): { text: string; ok: boolean } => {
+  if (!res.ok) {
+    return { text: `✗ ${res.error ?? 'failed'}`, ok: false }
+  }
+  if (res.result?.tokenId !== undefined) {
+    return { text: `✓ token #${res.result.tokenId}`, ok: true }
+  }
+  return { text: '✓ sent', ok: true }
+}
+
 function FunctionCard({
   fn,
   onCall,
 }: {
   fn: FunctionDescriptor
-  onCall: (envelope: CallActionEnvelope) => Promise<{ ok: boolean; error?: string }>
+  onCall: (envelope: CallActionEnvelope) => Promise<CallResult>
 }) {
   const [result, setResult] = useState<{ text: string; ok: boolean } | undefined>(undefined)
   const prefilled = useMemo(() => prefilledFor(fn), [fn])
@@ -231,11 +244,11 @@ function FunctionCard({
     // functions across cells — observe's per-cell configure/close — route to the right cell).
     const envelope: CallActionEnvelope = { scope: bridgeActionScope, action: fn.name, id: fn.id, args }
     const res = await onCall(envelope)
-    setResult(res.ok ? { text: '✓ sent', ok: true } : { text: `✗ ${res.error ?? 'failed'}`, ok: false })
-    // Auto-dismiss after 3s. The row below is ALWAYS rendered (opacity toggles, not mount/unmount), so
-    // showing and hiding the result never shifts the card's layout.
+    setResult(callResultBadge(res))
+    // Auto-dismiss. The badge is absolute (opacity toggles, not mount/unmount) so it never shifts the
+    // card's layout. A tokenId is worth reading/noting — hold it longer than a plain sent cue.
     clearTimeout(resultTimer.current)
-    resultTimer.current = setTimeout(() => setResult(undefined), 3000)
+    resultTimer.current = setTimeout(() => setResult(undefined), res.result?.tokenId !== undefined ? 8000 : 3000)
   }
 
   return (

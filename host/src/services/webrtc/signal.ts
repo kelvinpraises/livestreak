@@ -1,21 +1,20 @@
-// SEAM-WEBRTC — host-mediated SDP signaling relay (issue 10).
+// SEAM-WEBRTC — host-mediated SDP signaling relay, PER-VIEWER (multi-viewer).
 //
-// The CLI file->WebRTC sink (agent-4) is the OFFERER; the browser peer (agent-1) is the
-// ANSWERER. They live in different processes, so they need a rendezvous to swap SDP. This
-// host relays that swap and nothing else — media then flows peer-to-peer, all local. No
-// TURN/SFU. Non-trickle ICE: candidates are bundled in the SDP, so a single offer + single
-// answer completes the exchange.
+// The CLI producer is the OFFERER; each browser viewer is an ANSWERER. One producer serves MANY viewers
+// directly (a peer connection + encode per viewer — bounded by the producer's CPU/bandwidth, before any
+// SFU). So signaling is keyed by (streamId, viewerId): a viewer registers, the producer discovers it,
+// mints a per-viewer offer, and swaps SDP for that one viewer. Media then flows producer->viewer over the
+// host's TURN relay (see turn.ts).
 //
-// PUBLISHED WIRE SHAPE (agent-4 offerer + agent-1 answerer build to this):
-//
-//   POST /webrtc/signal/:streamId/offer    body: SignalPayload(type:"offer")   -> 201 {ok:true}
-//   GET  /webrtc/signal/:streamId/offer                                        -> 200 SignalPayload | 404
-//   POST /webrtc/signal/:streamId/answer   body: SignalPayload(type:"answer")  -> 201 {ok:true}
-//   GET  /webrtc/signal/:streamId/answer                                       -> 200 SignalPayload | 404
-//   DELETE /webrtc/signal/:streamId                                            -> 200 {ok:true}
-//
-// `:streamId` is the stream/market id the offer is keyed by. `sdp` is the full RTCSession-
-// Description sdp string. `candidates` is optional (bundled trickle); omit for non-trickle.
+// PUBLISHED WIRE SHAPE:
+//   POST /webrtc/signal/:streamId/viewers/:viewerId              -> 201  (viewer registers intent)
+//   GET  /webrtc/signal/:streamId/viewers                        -> 200 { viewers: string[] }  (producer polls)
+//   POST /webrtc/signal/:streamId/viewers/:viewerId/offer        -> 201  (producer posts that viewer's offer)
+//   GET  /webrtc/signal/:streamId/viewers/:viewerId/offer        -> 200 SignalPayload | 404
+//   POST /webrtc/signal/:streamId/viewers/:viewerId/answer       -> 201  (viewer posts its answer)
+//   GET  /webrtc/signal/:streamId/viewers/:viewerId/answer       -> 200 SignalPayload | 404
+//   DELETE /webrtc/signal/:streamId/viewers/:viewerId            -> 200  (viewer leaves / producer reaps)
+//   DELETE /webrtc/signal/:streamId                              -> 200  (tear the whole stream down)
 
 export interface SignalPayload {
   readonly type: "offer" | "answer";
@@ -24,45 +23,77 @@ export interface SignalPayload {
   readonly createdAtMs?: number;
 }
 
-interface SignalSlot {
+interface ViewerSlot {
   offer?: SignalPayload;
   answer?: SignalPayload;
+  createdAtMs: number;
 }
 
 export interface SignalingStore {
-  setOffer(streamId: string, payload: SignalPayload): void;
-  getOffer(streamId: string): SignalPayload | null;
-  setAnswer(streamId: string, payload: SignalPayload): void;
-  getAnswer(streamId: string): SignalPayload | null;
+  /** A viewer announces intent to watch (idempotent) — the producer discovers it via listViewers. */
+  registerViewer(streamId: string, viewerId: string, nowMs?: number): void;
+  /** Viewer ids currently registered for a stream (the producer polls this to mint per-viewer offers). */
+  listViewers(streamId: string): string[];
+  setViewerOffer(streamId: string, viewerId: string, payload: SignalPayload): void;
+  getViewerOffer(streamId: string, viewerId: string): SignalPayload | null;
+  setViewerAnswer(streamId: string, viewerId: string, payload: SignalPayload): void;
+  getViewerAnswer(streamId: string, viewerId: string): SignalPayload | null;
+  /** Drop one viewer (left / reaped). */
+  removeViewer(streamId: string, viewerId: string): void;
+  /** Drop the whole stream and all its viewers. */
   clear(streamId: string): void;
 }
 
-export const createSignalingStore = (): SignalingStore => {
-  const slots = new Map<string, SignalSlot>();
-  const slot = (streamId: string): SignalSlot => {
-    let s = slots.get(streamId);
+export const createSignalingStore = (clock: () => number = () => Date.now()): SignalingStore => {
+  const streams = new Map<string, Map<string, ViewerSlot>>();
+
+  const viewers = (streamId: string): Map<string, ViewerSlot> => {
+    let m = streams.get(streamId);
+    if (m === undefined) {
+      m = new Map();
+      streams.set(streamId, m);
+    }
+    return m;
+  };
+
+  const slot = (streamId: string, viewerId: string): ViewerSlot => {
+    const m = viewers(streamId);
+    let s = m.get(viewerId);
     if (s === undefined) {
-      s = {};
-      slots.set(streamId, s);
+      s = { createdAtMs: clock() };
+      m.set(viewerId, s);
     }
     return s;
   };
+
   return {
-    setOffer(streamId, payload) {
-      // A fresh offer supersedes any prior session for this stream id.
-      slots.set(streamId, { offer: { ...payload, createdAtMs: payload.createdAtMs ?? Date.now() } });
+    registerViewer(streamId, viewerId) {
+      slot(streamId, viewerId);
     },
-    getOffer(streamId) {
-      return slots.get(streamId)?.offer ?? null;
+    listViewers(streamId) {
+      return [...(streams.get(streamId)?.keys() ?? [])];
     },
-    setAnswer(streamId, payload) {
-      slot(streamId).answer = { ...payload, createdAtMs: payload.createdAtMs ?? Date.now() };
+    setViewerOffer(streamId, viewerId, payload) {
+      // A fresh offer supersedes any prior session for this viewer (clears the stale answer).
+      viewers(streamId).set(viewerId, {
+        offer: { ...payload, createdAtMs: payload.createdAtMs ?? clock() },
+        createdAtMs: clock()
+      });
     },
-    getAnswer(streamId) {
-      return slots.get(streamId)?.answer ?? null;
+    getViewerOffer(streamId, viewerId) {
+      return streams.get(streamId)?.get(viewerId)?.offer ?? null;
+    },
+    setViewerAnswer(streamId, viewerId, payload) {
+      slot(streamId, viewerId).answer = { ...payload, createdAtMs: payload.createdAtMs ?? clock() };
+    },
+    getViewerAnswer(streamId, viewerId) {
+      return streams.get(streamId)?.get(viewerId)?.answer ?? null;
+    },
+    removeViewer(streamId, viewerId) {
+      streams.get(streamId)?.delete(viewerId);
     },
     clear(streamId) {
-      slots.delete(streamId);
+      streams.delete(streamId);
     }
   };
 };

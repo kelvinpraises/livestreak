@@ -50,8 +50,8 @@ export function NikoNikoCard({ vault, index, total, onClickCard }: Props) {
     const jitter = (Math.random() - 0.5) * 20
     const y = Math.min(Math.max(8, baseY + jitter), ph - CARD_H - 8)
 
-    // Start from random x spread across the video
-    const x = pw * 0.3 + Math.random() * pw * 0.6
+    // Start spread across the video, but clamped so the whole card is visible (never spawn clipped)
+    const x = Math.max(8, Math.min(pw * 0.3 + Math.random() * pw * 0.6, pw - CARD_W - 8))
 
     posRef.current = {
       x,
@@ -82,12 +82,10 @@ export function NikoNikoCard({ vault, index, total, onClickCard }: Props) {
         pos.x += pos.dx
         pos.y += pos.dy
 
-        // Wrap horizontally: when it goes fully off left, respawn from right
-        if (pos.x < -CARD_W - 10) {
-          pos.x = pw + 10
-          const slotH = Math.max(CARD_H + 16, (ph - 40) / Math.max(total, 1))
-          pos.y = 20 + index * slotH + (Math.random() - 0.5) * 20
-          pos.y = Math.min(Math.max(8, pos.y), ph - CARD_H - 8)
+        // Bounce horizontally off both edges so the card stays fully visible (never clips at the pane edge)
+        if (pos.x < 4 || pos.x > pw - CARD_W - 4) {
+          pos.dx = -pos.dx
+          pos.x = Math.min(Math.max(4, pos.x), pw - CARD_W - 4)
         }
 
         // Bounce vertically

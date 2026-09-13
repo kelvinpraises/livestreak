@@ -3,7 +3,12 @@
 // The console never talks to a bridge directly and holds NO seed: it speaks to the
 // host over WSS leg B, which relays to the CLI gateway → owning package bridge.
 
-import type { CallActionEnvelope, CapabilityGrant, FunctionDescriptor } from '@livestreak/schema'
+import type {
+  CallActionEnvelope,
+  CapabilityGrant,
+  FunctionDescriptor,
+  RemoteCallOutcome,
+} from '@livestreak/schema'
 
 export type RemoteStatus = 'idle' | 'redeeming' | 'connecting' | 'open' | 'closed' | 'error'
 
@@ -20,6 +25,8 @@ export interface CallResult {
   readonly ok: boolean
   readonly error?: string
   readonly board?: RemoteBoard
+  // The gateway's call outcome (e.g. mint's {txId, tokenId}) — surfaced so the console can confirm.
+  readonly result?: RemoteCallOutcome
 }
 
 export interface RemoteTransport {

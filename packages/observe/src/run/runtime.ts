@@ -19,14 +19,18 @@ import {
 import { makeObserveRun, type ObserveRun, type ObserveRunConfig } from "./run.js";
 import { runConfigFromBoard } from "./board-run-config.js";
 import { createLocalSinkDriver } from "#pipeline/publish/sinks/local/driver.js";
-import { resolveNodePeerConnectionFactory } from "#pipeline/publish/sinks/local/node-peer.js";
+import {
+  fetchHostIceConfig,
+  resolveNodePeerConnectionFactory,
+  type NodeIceConfig
+} from "#pipeline/publish/sinks/local/node-peer.js";
 import {
   callStoredRunFunction,
   createRunStore,
-  failIfActiveHandleExists,
   getStoredRunArtifact,
   readStoredRunBoard,
   readStoredRunPanel,
+  reclaimTerminalRunHandle,
   subscribeStoredRunArtifacts,
   subscribeStoredRunBoard,
   type ObserveRunHandle,
@@ -125,10 +129,12 @@ const buildObserveRuntime = (
 
   // The Node WebRTC sink driver (peer factory via @roamhq/wrtc) — built once, reused for prepare + start.
   let cachedLocalSink: LocalSinkDriver | undefined;
-  const ensureLocalSink = (): Effect.Effect<LocalSinkDriver, LiveStreakError> =>
+  const ensureLocalSink = (
+    iceConfig?: NodeIceConfig
+  ): Effect.Effect<LocalSinkDriver, LiveStreakError> =>
     Effect.gen(function* () {
       if (cachedLocalSink === undefined) {
-        const peerConnectionFactory = yield* resolveNodePeerConnectionFactory();
+        const peerConnectionFactory = yield* resolveNodePeerConnectionFactory(iceConfig);
         cachedLocalSink = createLocalSinkDriver({ peerConnectionFactory });
       }
       return cachedLocalSink;
@@ -174,12 +180,16 @@ const buildObserveRuntime = (
     prepareConfiguredRun: (runId, options) =>
       Effect.gen(function* () {
         const run = yield* store.require(runId);
+        // Re-preparing a finished run reclaims its terminal handle (so reads route to the fresh bus,
+        // not the dead run's); an ACTIVE run refuses re-prepare.
+        yield* reclaimTerminalRunHandle(store, runId);
         const config = yield* runConfigFromBoard({
           runId,
           board: run.board,
           hostBaseUrl: options.hostBaseUrl
         });
-        const sinkDriver = yield* ensureLocalSink();
+        const iceConfig = yield* fetchHostIceConfig(options.hostBaseUrl);
+        const sinkDriver = yield* ensureLocalSink(iceConfig);
         const prepared = yield* prepareObserveRun(
           { ...run, config, manifest: run.manifest, prepared: false },
           mergeKernelOptions(defaultKernelOptions, { sinkDriver, sessionInit, runHooks })
@@ -190,16 +200,23 @@ const buildObserveRuntime = (
 
     startRun: (runId, options) =>
       Effect.gen(function* () {
-        // A board-configured local-sink run needs its injected sink driver re-supplied at start (the kernel
-        // re-resolves it); the runtime owns that wiring so callers don't have to.
+        // Re-supply the injected local WebRTC sink for a board-configured local-sink run (the kernel
+        // re-resolves the driver at start). For every other sink, leave sinkDriver unset — writing an
+        // `undefined` key into the overrides would clobber defaultKernelOptions.sinkDriver, so the kernel
+        // fails to resolve the driver (e.g. the in-memory test sink) and the worker hangs.
         const run = yield* store.require(runId);
-        const sinkDriver =
-          run.config.sink.driverId === "local" ? yield* ensureLocalSink() : options?.sinkDriver;
+        const localSink =
+          run.config.sink.driverId === "local" ? yield* ensureLocalSink() : undefined;
         return yield* startRunEffect(
           store,
           scope,
           runId,
-          mergeKernelOptions(defaultKernelOptions, { ...options, sinkDriver, sessionInit, runHooks })
+          mergeKernelOptions(defaultKernelOptions, {
+            ...options,
+            ...(localSink === undefined ? {} : { sinkDriver: localSink }),
+            sessionInit,
+            runHooks
+          })
         );
       }),
 
@@ -238,7 +255,7 @@ const startRunEffect = (
   options: RuntimeKernelOptions
 ) =>
   Effect.gen(function* () {
-    yield* failIfActiveHandleExists(store, runId);
+    yield* reclaimTerminalRunHandle(store, runId);
     const run = yield* store.require(runId);
     const handle = yield* startObserveRunAsync({
       run,

@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { applyDeploySnapshotEnv } from "./config/aa/deploy-env.js";
 import { bootstrapHostServer } from "./server.js";
 import { attachRemoteWss } from "./infrastructure/ws/server.js";
+import { readTurnConfig, startTurnServer } from "./services/webrtc/turn.js";
 
 const HOST_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..");
 const DEFAULT_DEPLOY_SNAPSHOT = resolve(
@@ -38,11 +39,29 @@ const { config, deps, app } = await bootstrapHostServer();
 const httpServer = createServer(app);
 attachRemoteWss(httpServer, deps);
 
+// The host IS the WebRTC media relay: embed a STUN/TURN server so producers/viewers behind NAT route media
+// through us (no separate coturn). `GET /webrtc/ice` advertises how to reach it. Disable with LIVESTREAK_TURN_ENABLED=0.
+const turnConfig = readTurnConfig();
+const turn = startTurnServer(turnConfig);
+
 httpServer.listen(config.bindPort, config.bindHost, () => {
   console.log(`[host]: listening on http://${config.bindHost}:${config.bindPort}`);
+  if (turn !== null) {
+    console.log(
+      `  turn/relay listening on 0.0.0.0:${turnConfig.port} relay-ip=${turnConfig.relayIp} realm=${turnConfig.realm} (advertised at GET /webrtc/ice)`
+    );
+  } else {
+    console.log("  turn/relay DISABLED (LIVESTREAK_TURN_ENABLED=0)");
+  }
   for (const chain of deps.aa.aa.chains) {
     console.log(
       `  aa/${chain.routeKey} chainId=${chain.chainId} bundler=/aa/bundler/${chain.routeKey} paymaster=/aa/paymaster/${chain.routeKey}`
     );
   }
 });
+
+const shutdownTurn = (): void => {
+  if (turn !== null) turn.stop();
+};
+process.once("SIGINT", shutdownTurn);
+process.once("SIGTERM", shutdownTurn);

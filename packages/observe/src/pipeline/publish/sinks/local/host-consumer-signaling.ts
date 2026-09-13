@@ -12,6 +12,8 @@ import type { SignalingFetch } from "./host-signaling.js";
 export interface HostMediatedConsumerSignalingInput {
   readonly baseUrl: string;
   readonly streamId: string;
+  /** Unique id for THIS viewer — the producer mints a dedicated offer/peer per viewer. */
+  readonly viewerId: string;
   readonly fetch?: SignalingFetch;
   readonly pollIntervalMs?: number;
   readonly offerTimeoutMs?: number;
@@ -86,11 +88,16 @@ export const createHostMediatedConsumerSignaling = (
   if (typeof input.streamId !== "string" || input.streamId.trim().length === 0) {
     throw new LiveStreakConfigError({ message: "Host-mediated consumer signaling requires a streamId" });
   }
+  if (typeof input.viewerId !== "string" || input.viewerId.trim().length === 0) {
+    throw new LiveStreakConfigError({ message: "Host-mediated consumer signaling requires a viewerId" });
+  }
 
   const base = trimBase(input.baseUrl);
   const key = encodeURIComponent(input.streamId);
-  const offerUrl = `${base}/webrtc/signal/${key}/offer`;
-  const answerUrl = `${base}/webrtc/signal/${key}/answer`;
+  const vid = encodeURIComponent(input.viewerId);
+  const registerUrl = `${base}/webrtc/signal/${key}/viewers/${vid}`;
+  const offerUrl = `${registerUrl}/offer`;
+  const answerUrl = `${registerUrl}/answer`;
   const pollIntervalMs = input.pollIntervalMs ?? defaultPollIntervalMs;
   const offerTimeoutMs = input.offerTimeoutMs ?? defaultOfferTimeoutMs;
 
@@ -176,5 +183,29 @@ export const createHostMediatedConsumerSignaling = (
       }
     });
 
-  return { awaitOffer, publishAnswer };
+  const register: Effect.Effect<void, LiveStreakError> = Effect.gen(function* () {
+    const fetchImpl = yield* resolveFetch(input.fetch);
+    const response = yield* Effect.tryPromise({
+      try: () =>
+        fetchImpl(registerUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}"
+        }),
+      catch: (cause) =>
+        new LiveStreakRuntimeError({
+          message: "Failed to register viewer with the host relay",
+          metadata: { details: cause instanceof Error ? cause.message : String(cause) }
+        })
+    });
+    if (!response.ok) {
+      return yield* Effect.fail(
+        new LiveStreakRuntimeError({
+          message: `Host relay rejected viewer registration (status ${response.status})`
+        })
+      );
+    }
+  });
+
+  return { register, awaitOffer, publishAnswer };
 };

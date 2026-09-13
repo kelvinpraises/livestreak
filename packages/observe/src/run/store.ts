@@ -15,6 +15,8 @@ export interface ObserveRunHandle {
   readonly startedAtMs: number;
   readonly awaitResult: () => Effect.Effect<ObserveRunResult, LiveStreakError>;
   readonly interrupt: Effect.Effect<void, LiveStreakError>;
+  /** True once the run fiber reached a terminal state (completed, failed, or interrupted). */
+  readonly isDone: Effect.Effect<boolean>;
 }
 
 const activeHandleExistsError = (runId: string) =>
@@ -22,15 +24,22 @@ const activeHandleExistsError = (runId: string) =>
     message: `Active handle for run ${runId} already exists in store`
   });
 
-export const failIfActiveHandleExists = (
+// A handle is "active" only while its fiber runs; it lingers after completion as the result cache
+// (awaitResult stays answerable). Prepare/start reclaim a terminal handle so the run can restart —
+// only a genuinely running run blocks.
+export const reclaimTerminalRunHandle = (
   store: RunStore,
   runId: string
 ): Effect.Effect<void, LiveStreakConfigError> =>
   Effect.gen(function* () {
     const existing = yield* store.getHandle(runId);
-    if (existing !== undefined) {
-      return yield* Effect.fail(activeHandleExistsError(runId));
+    if (existing === undefined) {
+      return;
     }
+    if (yield* existing.isDone) {
+      return yield* store.removeHandle(runId);
+    }
+    return yield* Effect.fail(activeHandleExistsError(runId));
   });
 
 export interface RunStore {

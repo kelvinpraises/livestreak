@@ -82,6 +82,34 @@ describe("ObserveRuntime", () => {
     }
   });
 
+  // Regression: startRun must NOT write an `undefined` sinkDriver key into the kernel-option
+  // overrides for a non-local run — doing so clobbers defaultKernelOptions.sinkDriver, the kernel
+  // then fails to resolve the injected sink, and the worker hangs until the stop timeout interrupts
+  // it. Proven by the injected memory sink actually receiving frames (delivered > 0) on a run started
+  // with no per-call options.
+  it("startRun preserves the injected default sink driver for a non-local run", async () => {
+    const { options, delivered } = createSyntheticKernelOptions(4);
+
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* createObserveRuntime({ defaultKernelOptions: options });
+          yield* runtime.prepareRun(
+            makeSyntheticObserveRun("run_sink_preserved", "/tmp/run_sink_preserved.mp4").config
+          );
+          yield* runtime.startRun("run_sink_preserved");
+          return yield* runtime.awaitRun("run_sink_preserved");
+        })
+      )
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.outcome).toBe("stopped");
+      expect(delivered.length).toBeGreaterThan(0);
+    }
+  });
+
   it("awaitRun returns stopped result for finite synthetic run", async () => {
     const { options } = createSyntheticKernelOptions(4);
 

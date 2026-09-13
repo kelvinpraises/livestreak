@@ -10,10 +10,14 @@ import type {
   RegistryFlagDescriptor
 } from "#pipeline/capture/types.js";
 import type { DescribeControlContext, ControlCellDefinition } from "#run/control/bus/types.js";
-import { rawVideoFrameStream, type FileDecodeStats } from "./decode.js";
+import { rawVideoFrameStream, type FileDecodeStats, type RawVideoPixelFormat } from "./decode.js";
 
 export interface FileCaptureConfig {
   readonly path: string;
+  /** Decoded pixel format (see {@link FileReplayConfig.pixelFormat}). Defaults to `rgb24`. */
+  readonly pixelFormat?: RawVideoPixelFormat;
+  /** Decode at native frame rate for real-time streaming (see {@link FileReplayConfig.realtime}). */
+  readonly realtime?: boolean;
 }
 
 export interface FileCaptureDriverOptions {
@@ -99,7 +103,9 @@ export const validateFileCaptureConfig = (
     });
 
     return {
-      path: config.path
+      path: config.path,
+      ...(config.pixelFormat === undefined ? {} : { pixelFormat: config.pixelFormat }),
+      ...(config.realtime === undefined ? {} : { realtime: config.realtime })
     };
   });
 

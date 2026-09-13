@@ -5,29 +5,37 @@ import {
   type WebRtcConsumerStatus,
 } from '#/utils/webrtc-consumer'
 
+/**
+ * Subscribe to a live host-mediated WebRTC feed and expose its inbound `MediaStream` for `<video>.srcObject`.
+ * The stream is real-time (RTP media track); the peer is held OPEN while enabled and torn down on cleanup.
+ */
 export function useWebRtcStreamFeed(input: {
   enabled: boolean
   baseUrl: string
   streamId: string
 }): {
-  blobUrl: string | undefined
+  stream: MediaStream | undefined
   status: WebRtcConsumerStatus
   error: string | null
 } {
-  const [blobUrl, setBlobUrl] = useState<string | undefined>(undefined)
+  const [stream, setStream] = useState<MediaStream | undefined>(undefined)
   const [status, setStatus] = useState<WebRtcConsumerStatus>('idle')
   const [error, setError] = useState<string | null>(null)
-  const blobRef = useRef<string | undefined>(undefined)
+  const closeRef = useRef<(() => void) | undefined>(undefined)
 
   useEffect(() => {
+    const teardown = () => {
+      if (closeRef.current) {
+        closeRef.current()
+        closeRef.current = undefined
+      }
+    }
+
     if (!input.enabled) {
       setStatus('idle')
       setError(null)
-      if (blobRef.current) {
-        URL.revokeObjectURL(blobRef.current)
-        blobRef.current = undefined
-      }
-      setBlobUrl(undefined)
+      teardown()
+      setStream(undefined)
       return
     }
 
@@ -36,11 +44,8 @@ export function useWebRtcStreamFeed(input: {
 
     setStatus('connecting')
     setError(null)
-    if (blobRef.current) {
-      URL.revokeObjectURL(blobRef.current)
-      blobRef.current = undefined
-    }
-    setBlobUrl(undefined)
+    teardown()
+    setStream(undefined)
 
     void consumeHostWebRtcFeed({
       baseUrl: input.baseUrl,
@@ -49,11 +54,11 @@ export function useWebRtcStreamFeed(input: {
     })
       .then((result) => {
         if (cancelled) {
-          URL.revokeObjectURL(result.blobUrl)
+          result.close()
           return
         }
-        blobRef.current = result.blobUrl
-        setBlobUrl(result.blobUrl)
+        closeRef.current = result.close
+        setStream(result.stream)
         setStatus('ready')
       })
       .catch((err) => {
@@ -65,12 +70,9 @@ export function useWebRtcStreamFeed(input: {
     return () => {
       cancelled = true
       controller.abort()
-      if (blobRef.current) {
-        URL.revokeObjectURL(blobRef.current)
-        blobRef.current = undefined
-      }
+      teardown()
     }
   }, [input.enabled, input.baseUrl, input.streamId])
 
-  return { blobUrl, status, error }
+  return { stream, status, error }
 }

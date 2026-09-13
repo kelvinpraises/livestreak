@@ -85,14 +85,14 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
   })
   const streamMedia = useMemo(() => {
     const resolved = resolveStreamFeed(streamPointer, hostDetail)
-    // Not live → the recording / watchUrl (replay). Live → the realtime WebRTC feed; only fall back to the
-    // recording if the live connection actually errors (the watchUrl is the post-stream archive, not a
-    // substitute while broadcasting).
+    // Not live → the recording / watchUrl (replay). Live → the realtime WebRTC media stream; only fall back
+    // to the recording if the live connection actually errors (the watchUrl is the post-stream archive, not
+    // a substitute while broadcasting).
     if (!webrtcEnabled) return resolved
-    if (webrtcFeed.blobUrl) return { kind: 'live' as const, src: webrtcFeed.blobUrl }
+    if (webrtcFeed.stream) return { kind: 'live' as const, stream: webrtcFeed.stream }
     if (webrtcFeed.status !== 'error') return { kind: 'live' as const }
     return resolved
-  }, [streamPointer, hostDetail, webrtcFeed.blobUrl, webrtcFeed.status, webrtcEnabled])
+  }, [streamPointer, hostDetail, webrtcFeed.stream, webrtcFeed.status, webrtcEnabled])
 
   const floatingVaults = vaults.filter(v => v.status === 'open' || v.status === 'hot')
 

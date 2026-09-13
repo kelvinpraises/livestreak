@@ -93,6 +93,16 @@ export const createOptionsConsoleEdge = (input: CreateOptionsConsoleEdgeInput): 
         args: coercedArgs
       };
       const result = await bridge.callAction(caller, bridgeEnvelope);
+      // Reflect the write on the board immediately (mint/fund/setLanes/withdraw/…) so the console shows
+      // the new position + lanes. Previously only configure/close refreshed, so a bet landed on-chain but
+      // the console board stayed stale — no confirmation, no visible position.
+      if (configuredMarketId !== undefined) {
+        try {
+          await runtime.refreshUser(input.userAddress, configuredMarketId);
+        } catch {
+          /* board refresh is best-effort; the write already succeeded */
+        }
+      }
       if (typeof result === "object" && result !== null) {
         const r = result as { txId?: unknown; tokenId?: unknown };
         return {

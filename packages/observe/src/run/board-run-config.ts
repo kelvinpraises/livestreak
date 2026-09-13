@@ -4,6 +4,12 @@ import { createHostMediatedSinkSignaling } from "#pipeline/publish/sinks/local/h
 import type { Board } from "./control/board/index.js";
 import type { ObserveRunConfig } from "./run.js";
 
+// A live producer streams continuously and waits for a viewer to join: the WebRTC answer arrives whenever a
+// viewer opens the stream page (seconds to minutes after go-live), not within a tight window of `start`. Keep
+// the answer-wait generous so that handshake completes regardless of when the viewer shows up; the answer
+// fiber is background/forked and interrupted when the run stops.
+const liveViewerAnswerTimeoutMs = 10 * 60_000;
+
 // Read a board cell's settings/readonly maps with safe defaults — the only place that knows the board's
 // cell-id / field-path schema for deriving a run config.
 const cellRecord = (
@@ -64,16 +70,24 @@ export const runConfigFromBoard = (
 
     return {
       runId,
-      capture: { driverId: "file", config: { path: capturePath } },
+      // Decode straight to I420 at real time (`-re`) so frames feed the local sink's WebRTC video track with
+      // no color conversion and stream paced at wall-clock FPS (see the local sink + file capture).
+      capture: {
+        driverId: "file",
+        config: { path: capturePath, pixelFormat: "yuv420p", realtime: true }
+      },
       sink: {
         driverId: "local",
         instanceId: "local",
-        // The capture decodes to raw RGB24, which `<video>` cannot play — encode the frames into an MP4 the
-        // browser consumer can render. `streamId` keys the temp file; signaling is keyed to the same market.
+        // Real-time media-track preview keyed to the registered market (the id the viewer consumes under).
         config: {
           streamId: marketId,
-          deliverAs: "mp4",
-          signaling: createHostMediatedSinkSignaling({ baseUrl: hostBaseUrl, streamId: marketId })
+          answerTimeoutMs: liveViewerAnswerTimeoutMs,
+          signaling: createHostMediatedSinkSignaling({
+            baseUrl: hostBaseUrl,
+            streamId: marketId,
+            answerTimeoutMs: liveViewerAnswerTimeoutMs
+          })
         }
       },
       process: null

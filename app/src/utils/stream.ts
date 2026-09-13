@@ -13,6 +13,8 @@ export interface StreamMedia {
   kind: StreamMediaKind
   /** Playable URL when resolvable (live watch URL, or a stored-blob aggregator URL for VOD). */
   src?: string
+  /** Live real-time WebRTC feed as a `MediaStream` for `<video>.srcObject` (takes precedence over `src`). */
+  stream?: MediaStream
 }
 
 /**

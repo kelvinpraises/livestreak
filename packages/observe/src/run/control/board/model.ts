@@ -79,6 +79,27 @@ export const setBoardRunStatus = (
   });
 };
 
+/** Consume a stale stop request so a restarted run does not inherit the previous cycle's stop command. */
+export const clearBoardRunStopRequest = (board: Board): Board => {
+  const runCell = board.cells["system:run"];
+  if (runCell?.settings?.stopRequested !== true) {
+    return board;
+  }
+
+  const { stopReason: _stopReason, ...settings } = runCell.settings;
+
+  return incrementBoardRevision({
+    ...board,
+    cells: {
+      ...board.cells,
+      "system:run": {
+        ...runCell,
+        settings: { ...settings, stopRequested: false }
+      }
+    }
+  });
+};
+
 export const setBoardRunPrepared = (
   board: Board,
   prepared: boolean,

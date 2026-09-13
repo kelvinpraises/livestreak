@@ -4,14 +4,12 @@ import { LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 /**
  * Minimal WebRTC abstractions for the local sink.
  *
- * These mirror the subset of the browser `RTCPeerConnection` / `RTCDataChannel`
- * surface the sink relies on, expressed as plain structural types so that:
- *  - production code can wrap a real `RTCPeerConnection` (browser / runtime), and
- *  - tests can drive a fully in-process loopback peer with no native modules.
+ * These mirror the subset of the browser `RTCPeerConnection` surface the sink relies on, expressed as plain
+ * structural types so production code can wrap a real `RTCPeerConnection` (browser / @roamhq/wrtc) while
+ * tests drive an in-process fake. Video rides a real media TRACK (RTCVideoSource → RTP), not a data channel.
  *
- * Signaling is intentionally the SIMPLEST a test peer can drive: a local SDP
- * exchange where the sink emits an offer and a consumer answers (see
- * `LocalSignalingHub`). Host-mediated signaling is a later option.
+ * Signaling is intentionally the SIMPLEST a test peer can drive: a local SDP exchange where the sink emits
+ * an offer and a consumer answers (see `LocalSignalingHub`). Host-mediated signaling relays the same SDP.
  */
 
 export type RtcSdpType = "offer" | "answer";
@@ -21,32 +19,34 @@ export interface RtcSessionDescription {
   readonly sdp: string;
 }
 
-export type RtcDataChannelState = "connecting" | "open" | "closing" | "closed";
-
-export interface RtcMessageEvent {
+/** One I420 (yuv420p) video frame pushed into an outbound track. `data` is width*height*3/2 bytes. */
+export interface RtcVideoFrame {
+  readonly width: number;
+  readonly height: number;
   readonly data: Uint8Array;
 }
 
-export interface RtcDataChannelLike {
-  readonly label: string;
-  readonly readyState: RtcDataChannelState;
-  /** Bytes queued by `send` but not yet handed to the network. Drives the sink's backpressure +
-   *  drain-before-close (a synchronous loopback channel reports 0). Optional so a transport that
-   *  does not expose it degrades to "no buffering". */
-  readonly bufferedAmount?: number;
-  send: (data: Uint8Array) => void;
-  close: () => void;
-  onopen: (() => void) | null;
-  onclose: (() => void) | null;
-  onmessage: ((event: RtcMessageEvent) => void) | null;
+/**
+ * Producer-side handle to an outbound WebRTC VIDEO TRACK — real RTP media, not a data channel. The sink
+ * pushes each decoded frame with {@link pushFrame} and the transport (RTCVideoSource → RTP) sends it live
+ * to the viewer, who receives it as a normal `MediaStreamTrack`. This is what makes streaming real-time.
+ */
+export interface RtcVideoTrackHandle {
+  readonly pushFrame: (frame: RtcVideoFrame) => void;
+  readonly stop: () => void;
 }
 
-export interface RtcDataChannelEvent {
-  readonly channel: RtcDataChannelLike;
+/**
+ * Consumer-side inbound track event. `streams[0]` is the real browser `MediaStream` the app assigns to
+ * `<video>.srcObject` (opaque here — observe never touches the DOM); `track` is the raw `MediaStreamTrack`,
+ * used to synthesize a stream when the producer added the track without a stream. Mirrors `RTCTrackEvent`.
+ */
+export interface RtcTrackEvent {
+  readonly streams: readonly unknown[];
+  readonly track?: unknown;
 }
 
 export interface RtcPeerConnectionLike {
-  createDataChannel: (label: string) => RtcDataChannelLike;
   createOffer: () => Promise<RtcSessionDescription>;
   createAnswer: () => Promise<RtcSessionDescription>;
   setLocalDescription: (description: RtcSessionDescription) => Promise<void>;
@@ -57,7 +57,14 @@ export interface RtcPeerConnectionLike {
    *  returned when the impl exposes no gathered description (the loopback test peer). */
   localDescriptionWithCandidates: (fallback: RtcSessionDescription) => Promise<RtcSessionDescription>;
   close: () => void;
-  ondatachannel: ((event: RtcDataChannelEvent) => void) | null;
+  /**
+   * Add an outbound video track (PRODUCER). Must be called BEFORE `createOffer` so the offer carries the
+   * video m-line. Present only on transports with media support (the Node @roamhq/wrtc producer); undefined
+   * on the signaling-only loopback test transport.
+   */
+  addVideoTrack?: () => RtcVideoTrackHandle;
+  /** Inbound remote track handler (CONSUMER): fires with the remote `MediaStream` once media negotiates. */
+  ontrack?: ((event: RtcTrackEvent) => void) | null;
 }
 
 /**
@@ -80,17 +87,26 @@ export const gatheredLocalDescription = async (
 export type RtcPeerConnectionFactory = () => RtcPeerConnectionLike;
 
 /**
- * Sink-side signaling: publish the local offer, await the consumer's answer.
+ * Sink-side (producer) signaling — MULTI-VIEWER. One producer serves many viewers: it polls for viewers
+ * that want in, mints a per-viewer offer, and awaits that viewer's answer. Each viewer id ⇒ its own peer +
+ * encode on the producer (bounded by the producer's CPU/bandwidth, before any SFU).
  */
 export interface SinkSignalingChannel {
-  readonly publishOffer: (offer: RtcSessionDescription) => Effect.Effect<void, LiveStreakError>;
-  readonly awaitAnswer: Effect.Effect<RtcSessionDescription, LiveStreakError>;
+  /** Viewer ids currently wanting to watch (the producer polls this and spins a peer per new id). */
+  readonly listViewers: Effect.Effect<readonly string[], LiveStreakError>;
+  readonly publishOfferFor: (
+    viewerId: string,
+    offer: RtcSessionDescription
+  ) => Effect.Effect<void, LiveStreakError>;
+  readonly awaitAnswerFor: (viewerId: string) => Effect.Effect<RtcSessionDescription, LiveStreakError>;
 }
 
 /**
- * Consumer-side signaling: await the sink's offer, publish an answer.
+ * Consumer-side (viewer) signaling: announce intent (register), await THIS viewer's offer, publish an answer.
+ * The viewer id is baked into the channel instance.
  */
 export interface ConsumerSignalingChannel {
+  readonly register: Effect.Effect<void, LiveStreakError>;
   readonly awaitOffer: Effect.Effect<RtcSessionDescription, LiveStreakError>;
   readonly publishAnswer: (answer: RtcSessionDescription) => Effect.Effect<void, LiveStreakError>;
 }
@@ -116,16 +132,31 @@ const deferred = <Value>(): Deferred<Value> => {
 export class LocalSignalingHub {
   private readonly offerSlot = deferred<RtcSessionDescription>();
   private readonly answerSlot = deferred<RtcSessionDescription>();
+  private readonly registeredSlot = deferred<void>();
+  private registered = false;
+  // A loopback hub carries exactly one viewer (the in-process consumer) — enough to exercise the SDP
+  // rendezvous and media path in tests. Multi-viewer fan-out is exercised by the host relay + live tests.
+  static readonly viewerId = "loopback-viewer";
 
   readonly sink: SinkSignalingChannel = {
-    publishOffer: (offer) =>
+    // Blocks until the consumer registers, then reports the one viewer on every poll (the accept loop dedupes).
+    listViewers: Effect.promise(() =>
+      this.registeredSlot.promise.then(() => [LocalSignalingHub.viewerId] as readonly string[])
+    ),
+    publishOfferFor: (_viewerId, offer) =>
       Effect.sync(() => {
         this.offerSlot.resolve(offer);
       }),
-    awaitAnswer: Effect.promise(() => this.answerSlot.promise)
+    awaitAnswerFor: (_viewerId) => Effect.promise(() => this.answerSlot.promise)
   };
 
   readonly consumer: ConsumerSignalingChannel = {
+    register: Effect.sync(() => {
+      if (!this.registered) {
+        this.registered = true;
+        this.registeredSlot.resolve();
+      }
+    }),
     awaitOffer: Effect.promise(() => this.offerSlot.promise),
     publishAnswer: (answer) =>
       Effect.sync(() => {
@@ -136,74 +167,12 @@ export class LocalSignalingHub {
 
 export const createLocalSignalingHub = (): LocalSignalingHub => new LocalSignalingHub();
 
-// --- in-process loopback peers (verify path, zero native deps) ---
-
-class LoopbackDataChannel implements RtcDataChannelLike {
-  onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onmessage: ((event: RtcMessageEvent) => void) | null = null;
-  // Loopback delivers synchronously (queueMicrotask), so nothing is ever queued — the drain wait is a no-op.
-  readonly bufferedAmount = 0;
-  private state: RtcDataChannelState = "connecting";
-  partner: LoopbackDataChannel | undefined;
-
-  constructor(readonly label: string) {}
-
-  get readyState(): RtcDataChannelState {
-    return this.state;
-  }
-
-  open(): void {
-    if (this.state === "open") {
-      return;
-    }
-    this.state = "open";
-    this.onopen?.();
-  }
-
-  send(data: Uint8Array): void {
-    if (this.state !== "open") {
-      throw new Error("loopback data channel is not open");
-    }
-    const partner = this.partner;
-    if (partner === undefined) {
-      return;
-    }
-    // Copy to avoid aliasing the caller's buffer, mirroring real transport.
-    const copy = data.slice();
-    queueMicrotask(() => partner.onmessage?.({ data: copy }));
-  }
-
-  close(): void {
-    if (this.state === "closed") {
-      return;
-    }
-    this.state = "closed";
-    this.onclose?.();
-  }
-}
-
-interface LoopbackLink {
-  offererChannel?: LoopbackDataChannel;
-}
+// --- in-process signaling-only loopback peer (drives the SDP exchange in tests, zero native deps) ---
 
 class LoopbackPeerConnection implements RtcPeerConnectionLike {
-  ondatachannel: ((event: RtcDataChannelEvent) => void) | null = null;
-  private readonly channels: LoopbackDataChannel[] = [];
+  ontrack: ((event: RtcTrackEvent) => void) | null = null;
 
-  constructor(
-    private readonly link: LoopbackLink,
-    private readonly role: "offerer" | "answerer"
-  ) {}
-
-  createDataChannel(label: string): RtcDataChannelLike {
-    const channel = new LoopbackDataChannel(label);
-    this.channels.push(channel);
-    if (this.role === "offerer") {
-      this.link.offererChannel = channel;
-    }
-    return channel;
-  }
+  constructor(private readonly role: "offerer" | "answerer") {}
 
   async createOffer(): Promise<RtcSessionDescription> {
     return { type: "offer", sdp: "loopback-offer" };
@@ -217,20 +186,9 @@ class LoopbackPeerConnection implements RtcPeerConnectionLike {
     // No-op for the loopback transport.
   }
 
-  async setRemoteDescription(description: RtcSessionDescription): Promise<void> {
-    if (this.role !== "answerer" || description.type !== "offer") {
-      return;
-    }
-    const offererChannel = this.link.offererChannel;
-    const answererChannel = new LoopbackDataChannel(offererChannel?.label ?? "loopback");
-    this.channels.push(answererChannel);
-    if (offererChannel !== undefined) {
-      offererChannel.partner = answererChannel;
-      answererChannel.partner = offererChannel;
-    }
-    this.ondatachannel?.({ channel: answererChannel });
-    answererChannel.open();
-    offererChannel?.open();
+  async setRemoteDescription(): Promise<void> {
+    // No media exchange in the loopback — this transport only exercises the SDP rendezvous.
+    void this.role;
   }
 
   async localDescriptionWithCandidates(fallback: RtcSessionDescription): Promise<RtcSessionDescription> {
@@ -238,46 +196,28 @@ class LoopbackPeerConnection implements RtcPeerConnectionLike {
   }
 
   close(): void {
-    for (const channel of this.channels) {
-      channel.close();
-    }
+    // Nothing to tear down.
   }
 }
 
-/**
- * A loopback "network": the first peer it mints is the offerer (the sink), the
- * second is the answerer (the consumer). Their data channels are cross-wired so
- * frames sent by the sink arrive at the consumer in-process.
- */
+/** A loopback "network": the first peer it mints is the offerer (the sink), the second the answerer. */
 export interface LoopbackNetwork {
   readonly factory: RtcPeerConnectionFactory;
 }
 
 export const createLoopbackNetwork = (): LoopbackNetwork => {
-  const link: LoopbackLink = {};
   let minted = 0;
   const factory: RtcPeerConnectionFactory = () => {
     const role = minted === 0 ? "offerer" : "answerer";
     minted += 1;
-    return new LoopbackPeerConnection(link, role);
+    return new LoopbackPeerConnection(role);
   };
   return { factory };
 };
 
 // --- default factory backed by a real RTCPeerConnection when available ---
 
-interface BrowserRtcDataChannel {
-  readonly label: string;
-  readyState: string;
-  readonly bufferedAmount: number;
-  binaryType: string;
-  send: (data: ArrayBufferView) => void;
-  close: () => void;
-  addEventListener: (type: string, listener: (event: unknown) => void) => void;
-}
-
 interface BrowserRtcPeerConnection {
-  createDataChannel: (label: string) => BrowserRtcDataChannel;
   createOffer: () => Promise<RtcSessionDescription>;
   createAnswer: () => Promise<RtcSessionDescription>;
   setLocalDescription: (description: RtcSessionDescription) => Promise<void>;
@@ -290,59 +230,20 @@ interface BrowserRtcPeerConnection {
 
 type BrowserRtcConstructor = new () => BrowserRtcPeerConnection;
 
-const toUint8Array = (data: unknown): Uint8Array => {
-  if (data instanceof Uint8Array) {
-    return data;
-  }
-  if (data instanceof ArrayBuffer) {
-    return new Uint8Array(data);
-  }
-  if (ArrayBuffer.isView(data)) {
-    const view = data as ArrayBufferView;
-    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
-  }
-  return new Uint8Array(0);
-};
-
-const adaptBrowserChannel = (channel: BrowserRtcDataChannel): RtcDataChannelLike => {
-  channel.binaryType = "arraybuffer";
-  const adapter: RtcDataChannelLike = {
-    label: channel.label,
-    get readyState(): RtcDataChannelState {
-      return channel.readyState as RtcDataChannelState;
-    },
-    get bufferedAmount(): number {
-      return channel.bufferedAmount;
-    },
-    send: (data) => channel.send(data),
-    close: () => channel.close(),
-    onopen: null,
-    onclose: null,
-    onmessage: null
-  };
-  channel.addEventListener("open", () => adapter.onopen?.());
-  channel.addEventListener("close", () => adapter.onclose?.());
-  channel.addEventListener("message", (event) => {
-    const data = toUint8Array((event as { data?: unknown }).data);
-    adapter.onmessage?.({ data });
-  });
-  return adapter;
-};
-
 const adaptBrowserPeer = (peer: BrowserRtcPeerConnection): RtcPeerConnectionLike => {
   const adapter: RtcPeerConnectionLike = {
-    createDataChannel: (label) => adaptBrowserChannel(peer.createDataChannel(label)),
     createOffer: () => peer.createOffer(),
     createAnswer: () => peer.createAnswer(),
     setLocalDescription: (description) => peer.setLocalDescription(description),
     setRemoteDescription: (description) => peer.setRemoteDescription(description),
     localDescriptionWithCandidates: (fallback) => gatheredLocalDescription(peer, fallback),
     close: () => peer.close(),
-    ondatachannel: null
+    ontrack: null
   };
-  peer.addEventListener("datachannel", (event) => {
-    const channel = (event as { channel: BrowserRtcDataChannel }).channel;
-    adapter.ondatachannel?.({ channel: adaptBrowserChannel(channel) });
+  // Inbound video track (consumer): surface the remote MediaStream for `<video>.srcObject`.
+  peer.addEventListener("track", (event) => {
+    const typed = event as { streams?: readonly unknown[]; track?: unknown };
+    adapter.ontrack?.({ streams: typed.streams ?? [], track: typed.track });
   });
   return adapter;
 };

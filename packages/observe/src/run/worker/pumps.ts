@@ -127,7 +127,7 @@ export const pumpSinks = (
             item
           );
           yield* sinkState.attachment.deliver(deliveryItem);
-          commitTrackCursor(state, sourceTrackId, cursorId);
+          commitTrackCursor(state, sourceTrackId, cursorId, item.sequence);
           didWork = true;
           continue;
         }
@@ -140,7 +140,7 @@ export const pumpSinks = (
 
         yield* sinkState.attachment.deliver(deliveryItem);
         sinkState.deliveredItems += 1;
-        commitTrackCursor(state, sourceTrackId, cursorId);
+        commitTrackCursor(state, sourceTrackId, cursorId, item.sequence);
         didWork = true;
       }
     }

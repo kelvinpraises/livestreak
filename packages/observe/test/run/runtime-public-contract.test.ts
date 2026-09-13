@@ -179,7 +179,8 @@ describe("ObserveRuntime public contract", () => {
             bus: handleBus,
             startedAtMs: Date.now(),
             awaitResult: () => Effect.die("awaitResult not used in handle-bus preference test"),
-            interrupt: Effect.void
+            interrupt: Effect.void,
+            isDone: Effect.succeed(false)
           });
 
           const missingOnPreparedBus = yield* prepared.bus!.getArtifact(artifactId);

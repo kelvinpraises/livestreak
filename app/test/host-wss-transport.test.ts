@@ -64,7 +64,14 @@ describe('HostWssTransport (leg B) against an in-process canonical host', () => 
           if (frame.type === 'ui.hello') {
             ws.send(JSON.stringify({ type: 'ready', sessionId: frame.sessionId, functions: FUNCTIONS }))
           } else if (frame.type === 'call') {
-            ws.send(JSON.stringify({ type: 'call_result', callId: frame.callId, ok: true, result: { txId: '0x1' } }))
+            ws.send(
+              JSON.stringify({
+                type: 'call_result',
+                callId: frame.callId,
+                ok: true,
+                result: { txId: '0x1', tokenId: '42' },
+              }),
+            )
             ws.send(JSON.stringify({ type: 'board_patch', board: { calls: 1 } }))
           }
         })
@@ -102,6 +109,8 @@ describe('HostWssTransport (leg B) against an in-process canonical host', () => 
 
     const result = await t.send({ scope: bridgeActionScope, action: 'fund', args: { deposit: '1' } })
     expect(result.ok).toBe(true)
+    // The gateway's call outcome must survive the transport — mint's tokenId is the console's confirmation.
+    expect(result.result).toEqual({ txId: '0x1', tokenId: '42' })
     await new Promise((r) => setTimeout(r, 20))
     expect(boards.length).toBeGreaterThan(0)
 

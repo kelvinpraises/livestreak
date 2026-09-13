@@ -1,11 +1,15 @@
-import { Effect, Exit, Fiber, type Scope } from "effect";
+import { Effect, Exit, Fiber, Option, type Scope } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import { getBuiltInCaptureDriver, getBuiltInSinkDriver } from "#builtins.js";
 import type { CaptureDriver } from "#pipeline/capture/index.js";
 import type { SinkDriver } from "#pipeline/publish/index.js";
 import type { Board } from "./control/board/index.js";
-import { setBoardRunPrepared, setBoardRunStatus } from "./control/board/index.js";
+import {
+  clearBoardRunStopRequest,
+  setBoardRunPrepared,
+  setBoardRunStatus
+} from "./control/board/index.js";
 import { buildControlCatalog } from "./control/catalog.js";
 import { createControlBus, stageCellSurface } from "./control/bus/index.js";
 import { applyWorkerSnapshotToBoard } from "./control/board/index.js";
@@ -195,6 +199,15 @@ export const startObserveRunAsync = (
       );
     }
 
+    // A stop request is a one-shot command for the PREVIOUS execution. Consume any stale one BEFORE
+    // forking — sequenced with the caller — so a restarted run does not drain on its first worker turn,
+    // while a stop issued after start returns is never eaten by the run fiber.
+    const board = yield* run.bus.readBoard();
+    const cleared = clearBoardRunStopRequest(board);
+    if (cleared !== board) {
+      yield* run.bus.commitBoard(cleared);
+    }
+
     const fiber = yield* Effect.forkScoped(startObserveRun(run, options ?? {}));
     let interrupted = false;
 
@@ -204,6 +217,7 @@ export const startObserveRunAsync = (
       bus: run.bus,
       startedAtMs: Date.now(),
       awaitResult: () => Fiber.join(fiber),
+      isDone: Fiber.poll(fiber).pipe(Effect.map(Option.isSome)),
       interrupt: Effect.gen(function* () {
         if (interrupted) {
           return;

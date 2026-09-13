@@ -16,13 +16,15 @@ export interface ConsumeHostWebRtcInput {
   readonly peerConnectionFactory?: RtcPeerConnectionFactory
   readonly pollIntervalMs?: number
   readonly offerTimeoutMs?: number
-  readonly mimeType?: string
   readonly signal?: AbortSignal
 }
 
 export interface ConsumeHostWebRtcResult {
-  readonly blobUrl: string
-  readonly totalBytes: number
+  /** The live inbound `MediaStream` to assign to `<video>.srcObject`. */
+  readonly stream: MediaStream
+  /** Tear down the peer connection. MUST be called when the viewer is done — a live stream keeps the
+   *  peer open to receive media, so (unlike the old blob) it is not self-contained. */
+  readonly close: () => void
 }
 
 /**
@@ -73,34 +75,11 @@ export function resolveWebRtcEnabled(
   return !ended && ((latch.streamId === streamId && latch.enabled) || eligible)
 }
 
-const toUint8Array = (data: unknown): Uint8Array => {
-  if (data instanceof Uint8Array) return data
-  if (data instanceof ArrayBuffer) return new Uint8Array(data)
-  if (ArrayBuffer.isView(data)) {
-    const view = data as ArrayBufferView
-    return new Uint8Array(view.buffer, view.byteOffset, view.byteLength)
-  }
-  return new Uint8Array(0)
-}
-
-export const assembleChunksToBlobUrl = (
-  chunks: readonly Uint8Array[],
-  mimeType = 'video/mp4',
-): { blobUrl: string; totalBytes: number } => {
-  const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0)
-  const assembled = new Uint8Array(totalBytes)
-  let offset = 0
-  for (const chunk of chunks) {
-    assembled.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  const blob = new Blob([assembled], { type: mimeType })
-  return { blobUrl: URL.createObjectURL(blob), totalBytes }
-}
-
 /**
- * Host-mediated browser consumer: poll relay for sink offer, answer, collect data-channel
- * chunks, reassemble into a blob URL for `<video src>`.
+ * Host-mediated browser consumer: poll the relay for the producer's offer, answer it, and surface the live
+ * inbound video track as a `MediaStream` for `<video>.srcObject`. This is real-time — frames render as they
+ * arrive over the RTP media track; there is no file to assemble. The peer stays OPEN to keep receiving media
+ * (the caller closes it via the returned `close`).
  */
 export async function consumeHostWebRtcFeed(
   input: ConsumeHostWebRtcInput,
@@ -109,15 +88,20 @@ export async function consumeHostWebRtcFeed(
     throw new DOMException('Aborted', 'AbortError')
   }
 
+  // A unique id for THIS viewer — the producer serves many viewers, minting a dedicated offer/peer per id.
+  const viewerId =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `v-${Math.random().toString(36).slice(2)}`
+
   const signaling = createHostMediatedConsumerSignaling({
     baseUrl: input.baseUrl,
     streamId: input.streamId,
+    viewerId,
     fetch: input.fetch,
     pollIntervalMs: input.pollIntervalMs,
     offerTimeoutMs: input.offerTimeoutMs,
   })
-
-  const chunks: Uint8Array[] = []
 
   const abortPromise = input.signal
     ? new Promise<never>((_, reject) => {
@@ -133,73 +117,108 @@ export async function consumeHostWebRtcFeed(
   let peer: ReturnType<RtcPeerConnectionFactory> | undefined
 
   try {
+    // Announce this viewer so the producer's accept loop mints a dedicated offer for us.
+    await Promise.race([
+      Effect.runPromise(signaling.register),
+      ...(abortPromise ? [abortPromise] : []),
+    ])
     const offer = await Promise.race([
       Effect.runPromise(signaling.awaitOffer),
       ...(abortPromise ? [abortPromise] : []),
     ])
 
-    const factory = input.peerConnectionFactory ?? resolveBrowserPeerFactory()
+    // Discover the host's ICE (its embedded TURN) so the viewer relays over a reachable server with no
+    // build-time env. Only when we build the browser peer ourselves (an injected factory brings its own).
+    const hostIce = input.peerConnectionFactory ? undefined : await fetchHostIce(input.baseUrl)
+    const factory = input.peerConnectionFactory ?? resolveBrowserPeerFactory(hostIce)
     peer = factory()
 
-    let resolveTransfer!: () => void
-    const transferComplete = new Promise<void>((resolve) => {
-      resolveTransfer = resolve
+    let resolveStream!: (stream: MediaStream) => void
+    const streamReady = new Promise<MediaStream>((resolve) => {
+      resolveStream = resolve
     })
-    let idleTimer: ReturnType<typeof setTimeout> | undefined
-    const finishTransfer = () => {
-      if (idleTimer !== undefined) clearTimeout(idleTimer)
-      resolveTransfer()
-    }
-    // The producer drains its send buffer fully and then closes, so `onclose` is the authoritative
-    // completion signal. The idle timer is only a fallback for a lost close — give it real margin so a
-    // producer-side backpressure pause (large MP4) can't prematurely finalize a partial, undecodable blob.
-    const bumpIdle = () => {
-      if (chunks.length === 0) return
-      if (idleTimer !== undefined) clearTimeout(idleTimer)
-      idleTimer = setTimeout(finishTransfer, 3000)
-    }
-
-    peer.ondatachannel = (event) => {
-      const channel = event.channel
-      // A native RTCDataChannel may default `binaryType` to "blob"; our reassembly only handles
-      // ArrayBuffer/typed-array, so Blobs would be dropped to zero-length and the feed would be empty.
-      ;(channel as unknown as { binaryType?: string }).binaryType = 'arraybuffer'
-      channel.onmessage = (message) => {
-        const bytes = toUint8Array(message.data)
-        if (bytes.byteLength > 0) {
-          chunks.push(bytes)
-          bumpIdle()
-        }
-      }
-      channel.onclose = finishTransfer
+    // The inbound video track arrives as the remote description is applied. Prefer the sender's stream;
+    // fall back to a fresh MediaStream around the raw track (the producer adds the track without a stream).
+    peer.ontrack = (event) => {
+      const provided = event.streams[0] as MediaStream | undefined
+      const stream = provided ?? new MediaStream([event.track as MediaStreamTrack])
+      resolveStream(stream)
     }
 
     await peer.setRemoteDescription(offer)
     const answer = await peer.createAnswer()
     await peer.setLocalDescription(answer)
     // Non-trickle ICE: publish the answer WITH its gathered candidates (the relay carries only the SDP, so
-    // the producer never learns our address otherwise and the data channel never opens).
+    // the producer never learns our address otherwise and media never flows).
     const localAnswer = await peer.localDescriptionWithCandidates(answer)
     await Promise.race([
       Effect.runPromise(signaling.publishAnswer(localAnswer)),
       ...(abortPromise ? [abortPromise] : []),
     ])
-    await Promise.race([
-      transferComplete,
+
+    const stream = await Promise.race([
+      streamReady,
       ...(abortPromise ? [abortPromise] : []),
     ])
 
-    if (chunks.length === 0) {
-      throw new Error('WebRTC consumer received no data-channel chunks')
-    }
-
-    return assembleChunksToBlobUrl(chunks, input.mimeType)
-  } finally {
+    const activePeer = peer
+    return { stream, close: () => activePeer.close() }
+  } catch (error) {
     peer?.close()
+    throw error
   }
 }
 
-const resolveBrowserPeerFactory = (): RtcPeerConnectionFactory => {
+export type HostIceConfig = { readonly iceServers?: RTCIceServer[]; readonly relayOnly?: boolean }
+
+// Fetch the host's self-described ICE (GET /webrtc/ice → bare {iceServers, relayOnly}) so the viewer
+// uses a reachable relay with zero build-time env. Best-effort — any failure (network, non-OK status,
+// malformed JSON) falls back to env/STUN in resolveViewerIce. Build-time env still wins there.
+export async function fetchHostIce(
+  baseUrl: string,
+  fetchImpl: typeof globalThis.fetch = fetch,
+): Promise<HostIceConfig | undefined> {
+  try {
+    const res = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/webrtc/ice`)
+    if (!res.ok) return undefined
+    return (await res.json()) as HostIceConfig
+  } catch {
+    return undefined
+  }
+}
+
+const readViteIceEnv = (): { iceServersJson?: string; relayOnly?: string } => {
+  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+  return {
+    iceServersJson: env?.VITE_LIVESTREAK_ICE_SERVERS,
+    relayOnly: env?.VITE_LIVESTREAK_ICE_RELAY_ONLY,
+  }
+}
+
+// Precedence: build-time env (operator override) → host-described ICE → STUN-only default. STUN
+// (symmetric with the producer) yields a server-reflexive candidate; without it the browser offers only
+// an mDNS-obfuscated host candidate the non-browser producer cannot resolve. relayOnly can be forced on
+// by env; the host advises it whenever its embedded TURN is up.
+export const resolveViewerIce = (
+  hostIce?: HostIceConfig,
+  env: { readonly iceServersJson?: string; readonly relayOnly?: string } = readViteIceEnv(),
+): { iceServers: RTCIceServer[]; relayOnly: boolean } => {
+  const iceServers = (() => {
+    if (env.iceServersJson !== undefined && env.iceServersJson.trim() !== '') {
+      try {
+        return JSON.parse(env.iceServersJson) as RTCIceServer[]
+      } catch {
+        /* malformed → fall through */
+      }
+    }
+    if (hostIce?.iceServers && hostIce.iceServers.length > 0) return hostIce.iceServers
+    return [{ urls: 'stun:stun.l.google.com:19302' }]
+  })()
+
+  return { iceServers, relayOnly: env.relayOnly === '1' || (hostIce?.relayOnly ?? false) }
+}
+
+const resolveBrowserPeerFactory = (hostIce?: HostIceConfig): RtcPeerConnectionFactory => {
   const Ctor = (globalThis as { RTCPeerConnection?: new (config?: RTCConfiguration) => RTCPeerConnection })
     .RTCPeerConnection
   if (Ctor === undefined) {
@@ -207,26 +226,9 @@ const resolveBrowserPeerFactory = (): RtcPeerConnectionFactory => {
   }
   // The native peer is structurally an RtcPeerConnectionLike; wrap it to add the non-trickle gather step —
   // wait for ICE gathering, then return the candidate-rich local description so the answer carries them.
-  // STUN (symmetric with the producer) yields a server-reflexive candidate; without it the browser offers
-  // only an mDNS-obfuscated host candidate (`<uuid>.local`) the non-browser producer cannot resolve. Across
-  // real networks/NAT a TURN relay is still required for the strict-NAT minority.
-  // ICE servers are build-time overridable (VITE_LIVESTREAK_ICE_SERVERS = JSON
-  // array) so the viewer can use a TURN relay for a Dockerized/remote producer.
-  const iceServers: RTCIceServer[] = (() => {
-    const raw = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-      ?.VITE_LIVESTREAK_ICE_SERVERS
-    if (raw !== undefined && raw.trim() !== '') {
-      try {
-        return JSON.parse(raw) as RTCIceServer[]
-      } catch {
-        /* malformed → STUN default */
-      }
-    }
-    return [{ urls: 'stun:stun.l.google.com:19302' }]
-  })()
+  // Across real networks/NAT a TURN relay is still required for the strict-NAT minority.
+  const { iceServers, relayOnly } = resolveViewerIce(hostIce)
   return () => {
-    const relayOnly = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-      ?.VITE_LIVESTREAK_ICE_RELAY_ONLY === '1'
     const peer = new Ctor(relayOnly ? { iceServers, iceTransportPolicy: 'relay' } : { iceServers })
     const like = peer as unknown as ReturnType<RtcPeerConnectionFactory>
     like.localDescriptionWithCandidates = async (fallback) => {

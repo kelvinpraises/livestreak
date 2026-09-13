@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+
 import type { StreamMedia } from '#/utils/stream'
 
 interface Props {
@@ -14,14 +16,30 @@ const POSTER =
 export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
   const kind = media?.kind ?? 'none'
   const src = media?.src
+  const stream = media?.stream
   const isLive = kind === 'live'
   const isVod = kind === 'vod'
+  const videoRef = useRef<HTMLVideoElement>(null)
+
+  // A live WebRTC feed arrives as a MediaStream — attach it via `srcObject` (it cannot be set as an
+  // attribute). Clearing on absence lets the src/poster path take over for VOD/offline.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    if (stream) {
+      if (video.srcObject !== stream) video.srcObject = stream
+      void video.play().catch(() => undefined)
+    } else if (video.srcObject) {
+      video.srcObject = null
+    }
+  }, [stream])
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>
       <video
-        key={src ?? 'offline'}
-        src={src}
+        ref={videoRef}
+        key={stream ? 'live-stream' : (src ?? 'offline')}
+        src={stream ? undefined : src}
         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', background: '#000' }}
         muted autoPlay loop playsInline
         controls={isVod}

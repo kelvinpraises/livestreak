@@ -54,7 +54,7 @@ const forbiddenInternalSymbols = [
   "createBrowserCaptureFrameSource",
   "describeBrowserCaptureCell",
   "createSyntheticCaptureDriver",
-  "failIfActiveHandleExists"
+  "reclaimTerminalRunHandle"
 ];
 
 describe("public API barrel", () => {

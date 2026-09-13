@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { bridgeActionScope, type FunctionDescriptor } from '@livestreak/schema'
 import { coerceArgs, coerceField } from '../src/utils/auto-form-schema'
 import { buildTree } from '../src/components/organisms/function-tree'
+import { callResultBadge } from '../src/components/template/remote-console'
 
 describe('auto-form coercion', () => {
   it('coerces scalars and reports required errors', () => {
@@ -23,6 +24,25 @@ describe('auto-form coercion', () => {
     const res = coerceArgs(schema, { amountUSDC: '100' }, { vaultId: 'vault-01' })
     expect(res.ok).toBe(true)
     expect(res.values).toEqual({ vaultId: 'vault-01', amountUSDC: 100 })
+  })
+})
+
+describe('call result badge', () => {
+  it('surfaces the minted tokenId as the confirmation', () => {
+    expect(callResultBadge({ ok: true, result: { txId: '0xabc', tokenId: '7' } })).toEqual({
+      text: '✓ token #7',
+      ok: true,
+    })
+  })
+
+  it('falls back to a plain sent cue when there is no outcome payload', () => {
+    expect(callResultBadge({ ok: true })).toEqual({ text: '✓ sent', ok: true })
+    expect(callResultBadge({ ok: true, result: { txId: '0xabc' } })).toEqual({ text: '✓ sent', ok: true })
+  })
+
+  it('shows the relay error on failure', () => {
+    expect(callResultBadge({ ok: false, error: 'denied' })).toEqual({ text: '✗ denied', ok: false })
+    expect(callResultBadge({ ok: false })).toEqual({ text: '✗ failed', ok: false })
   })
 })
 

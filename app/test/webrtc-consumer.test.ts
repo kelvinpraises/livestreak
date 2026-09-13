@@ -2,19 +2,20 @@ import { describe, expect, it } from 'vitest'
 import { Effect } from 'effect'
 import {
   createHostMediatedConsumerSignaling,
-  createHostMediatedSinkSignaling,
   createLoopbackNetwork,
-  streamFileToWebRtc,
+  type RtcPeerConnectionFactory,
   type RtcSessionDescription,
   type SignalingFetch,
 } from '@livestreak/observe'
 
 import {
-  assembleChunksToBlobUrl,
   consumeHostWebRtcFeed,
+  fetchHostIce,
   nextWebRtcLatch,
+  resolveViewerIce,
   resolveWebRtcEnabled,
   shouldUseHostWebRtcFeed,
+  type HostIceConfig,
   type WebRtcLatch,
 } from '../src/utils/webrtc-consumer'
 import { resolveStreamFeed } from '../src/utils/stream'
@@ -149,76 +150,135 @@ describe('webrtc enabled latch', () => {
   })
 })
 
-describe('assembleChunksToBlobUrl', () => {
-  it('concatenates chunks into one blob URL', () => {
-    const chunks = [new Uint8Array([1, 2]), new Uint8Array([3, 4, 5])]
-    const { blobUrl, totalBytes } = assembleChunksToBlobUrl(chunks, 'application/octet-stream')
-    expect(totalBytes).toBe(5)
-    expect(blobUrl.startsWith('blob:')).toBe(true)
-    URL.revokeObjectURL(blobUrl)
+describe('host ICE discovery (turnkey /webrtc/ice)', () => {
+  // The host's wire contract (getIce via sendRouteResult) is the BARE payload — no envelope.
+  const hostIce: HostIceConfig = {
+    iceServers: [
+      { urls: 'stun:192.168.1.7:3478' },
+      { urls: 'turn:192.168.1.7:3478?transport=udp', username: 'livestreak', credential: 'streampass' },
+    ],
+    relayOnly: true,
+  }
+
+  it('fetches GET {base}/webrtc/ice and parses {iceServers, relayOnly}', async () => {
+    const urls: string[] = []
+    const fetchImpl = (async (url: unknown) => {
+      urls.push(String(url))
+      return { ok: true, json: async () => hostIce }
+    }) as unknown as typeof globalThis.fetch
+
+    const config = await fetchHostIce('http://127.0.0.1:8787/', fetchImpl)
+
+    expect(urls).toEqual(['http://127.0.0.1:8787/webrtc/ice'])
+    expect(config).toEqual(hostIce)
+  })
+
+  it('degrades to undefined on non-OK, malformed JSON, or network failure', async () => {
+    const notOk = (async () => ({ ok: false, json: async () => ({}) })) as unknown as typeof globalThis.fetch
+    const badJson = (async () => ({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError('bad json')
+      },
+    })) as unknown as typeof globalThis.fetch
+    const netFail = (async () => {
+      throw new TypeError('fetch failed')
+    }) as unknown as typeof globalThis.fetch
+
+    expect(await fetchHostIce('http://h', notOk)).toBeUndefined()
+    expect(await fetchHostIce('http://h', badJson)).toBeUndefined()
+    expect(await fetchHostIce('http://h', netFail)).toBeUndefined()
+  })
+
+  it('resolves host-described ICE (servers + advised relayOnly) when no env is set', () => {
+    expect(resolveViewerIce(hostIce, {})).toEqual({
+      iceServers: hostIce.iceServers,
+      relayOnly: true,
+    })
+  })
+
+  it('falls back to the STUN default when the host fetch degraded', () => {
+    expect(resolveViewerIce(undefined, {})).toEqual({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      relayOnly: false,
+    })
+  })
+
+  it('build-time env (VITE_LIVESTREAK_ICE_SERVERS) wins over the host ICE; malformed env falls through', () => {
+    const envServers = [{ urls: 'turn:relay.example:3478', username: 'u', credential: 'c' }]
+    expect(
+      resolveViewerIce(hostIce, { iceServersJson: JSON.stringify(envServers) }).iceServers,
+    ).toEqual(envServers)
+    expect(resolveViewerIce(hostIce, { iceServersJson: '{nope' }).iceServers).toEqual(hostIce.iceServers)
+  })
+
+  it('env VITE_LIVESTREAK_ICE_RELAY_ONLY=1 forces relay even when the host does not advise it', () => {
+    expect(resolveViewerIce({ iceServers: [], relayOnly: false }, { relayOnly: '1' }).relayOnly).toBe(true)
+    expect(resolveViewerIce(undefined, { relayOnly: '0' }).relayOnly).toBe(false)
   })
 })
 
 describe('consumeHostWebRtcFeed (mock relay)', () => {
-  it(
-    'answers a sink offer and reassembles file bytes byte-identical',
-    async () => {
-    const source = new Uint8Array(32_768)
-    for (let i = 0; i < source.length; i += 1) {
-      source[i] = (i * 3 + 5) & 0xff
+  // A media peer whose setRemoteDescription synchronously fires `ontrack` with a fake stream — models the
+  // real transport where the inbound video track arrives as the remote description is applied.
+  const mockMediaPeerFactory = (fakeStream: unknown): { factory: RtcPeerConnectionFactory; isClosed: () => boolean } => {
+    let closed = false
+    const factory: RtcPeerConnectionFactory = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const peer: any = {
+        ontrack: null,
+        createOffer: async () => ({ type: 'offer', sdp: '' }),
+        createAnswer: async () => ({ type: 'answer', sdp: 'mock-answer' }),
+        setLocalDescription: async () => {},
+        setRemoteDescription: async () => {
+          peer.ontrack?.({ streams: [fakeStream], track: fakeStream })
+        },
+        localDescriptionWithCandidates: async (fb: RtcSessionDescription) => fb,
+        close: () => {
+          closed = true
+        },
+      }
+      return peer
     }
+    return { factory, isClosed: () => closed }
+  }
 
-    const streamId = '0xconsumer-stream'
+  it('resolves the inbound MediaStream from ontrack and returns a close handle', async () => {
+    const streamId = '0xmedia-track-stream'
     const baseUrl = 'http://relay.test'
     const relay = makeRelay()
-    const network = createLoopbackNetwork()
+    // Pre-post the producer's offer so the consumer's awaitOffer resolves immediately.
+    await relay.fetchImpl(`${baseUrl}/webrtc/signal/${encodeURIComponent(streamId)}/offer`, {
+      method: 'POST',
+      body: JSON.stringify({ type: 'offer', sdp: 'sink-offer' }),
+    })
 
-    const consumer = consumeHostWebRtcFeed({
+    const fakeStream = { id: 'fake-media-stream' }
+    const mock = mockMediaPeerFactory(fakeStream)
+
+    const result = await consumeHostWebRtcFeed({
       baseUrl,
       streamId,
       fetch: relay.fetchImpl,
-      peerConnectionFactory: network.factory,
+      peerConnectionFactory: mock.factory,
       pollIntervalMs: 5,
       offerTimeoutMs: 5_000,
-      mimeType: 'application/octet-stream',
     })
 
-    const sinkSignaling = createHostMediatedSinkSignaling({
-      baseUrl,
-      streamId,
-      fetch: relay.fetchImpl,
-      pollIntervalMs: 5,
-    })
+    // The consumer surfaces the exact inbound stream (no blob), and the answer is posted to the relay.
+    expect(result.stream as unknown).toBe(fakeStream)
+    const answerResp = await relay.fetchImpl(
+      `${baseUrl}/webrtc/signal/${encodeURIComponent(streamId)}/answer`,
+      { method: 'GET' },
+    )
+    expect(answerResp.ok).toBe(true)
+    expect(JSON.parse(await answerResp.text()).sdp).toBe('mock-answer')
 
-    const dir = await import('node:os').then((os) => import('node:fs/promises').then((fs) =>
-      fs.mkdtemp(`${os.tmpdir()}/livestreak-app-webrtc-`).then(async (path) => {
-        const filePath = `${path}/clip.bin`
-        await fs.writeFile(filePath, source)
-        return { dir: path, filePath, fs }
-      }),
-    ))
-
-    try {
-      await streamFileToWebRtc({
-        filePath: dir.filePath,
-        streamId,
-        signaling: sinkSignaling,
-        peerConnectionFactory: network.factory,
-      })
-
-      const { blobUrl, totalBytes } = await consumer
-      expect(totalBytes).toBe(source.length)
-
-      const response = await fetch(blobUrl)
-      const body = new Uint8Array(await response.arrayBuffer())
-      expect(Array.from(body)).toEqual(Array.from(source))
-      URL.revokeObjectURL(blobUrl)
-    } finally {
-      await dir.fs.rm(dir.dir, { recursive: true, force: true })
-    }
-  },
-    15_000,
-  )
+    // close() tears down the peer (a live stream keeps it open until the viewer is done).
+    expect(mock.isClosed()).toBe(false)
+    result.close()
+    expect(mock.isClosed()).toBe(true)
+  })
 
   it('posts an answer to the relay after receiving the offer', async () => {
     const streamId = 'relay-answer-check'
@@ -235,12 +295,12 @@ describe('consumeHostWebRtcFeed (mock relay)', () => {
     const consumerSignaling = createHostMediatedConsumerSignaling({
       baseUrl,
       streamId,
+      viewerId: 'viewer-x',
       fetch: relay.fetchImpl,
       pollIntervalMs: 5,
     })
 
     const peer = network.factory()
-    peer.ondatachannel = () => {}
 
     const remoteOffer = await Effect.runPromise(consumerSignaling.awaitOffer)
     await peer.setRemoteDescription(remoteOffer)

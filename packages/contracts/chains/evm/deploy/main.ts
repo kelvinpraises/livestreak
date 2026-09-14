@@ -53,7 +53,8 @@ Options:
 const deployerKey = (process.env.DEPLOYER_PRIVATE_KEY ??
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") as Hex;
 
-async function deployToChain(chainName: string, rpc: string) {
+/** Returns false when any scope failed or the snapshot promotion failed — the process must exit 1. */
+async function deployToChain(chainName: string, rpc: string): Promise<boolean> {
   console.log(`\n========== Deploying to ${chainName} ==========`);
   console.log(`RPC: ${rpc}\n`);
 
@@ -126,20 +127,41 @@ async function deployToChain(chainName: string, rpc: string) {
     }
   }
 
+  const anyFailed = scopesToRun.some(({ key }) => state.scopes[key]?.status === "failed");
+  if (anyFailed) {
+    console.error(`\nDeploy to ${chainName} FAILED — see the scope errors above.`);
+    return false;
+  }
+
   const allCompleted = SCOPES.every(({ key }) => state.scopes[key]?.status === "completed");
   if (allCompleted) {
+    // Promotion writes deployments/<name>.json + .ts — what cli/app/host actually read. A deploy
+    // whose promotion failed leaves consumers on STALE addresses, so it is fatal, not a warning.
     try {
       promoteDeployment(chainName);
     } catch (error) {
-      console.warn(`  Warning: could not promote deployment snapshot: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(
+        `\nDeploy to ${chainName} FAILED: contracts landed but the deployment snapshot was NOT promoted ` +
+          `(consumers would read stale addresses): ${error instanceof Error ? error.message : String(error)}`
+      );
+      return false;
     }
   }
+
+  return true;
 }
 
 async function main() {
+  // --all attempts EVERY chain (a failure on one must not hide the others' results), then the
+  // process exits 1 if ANY failed.
   if (values.all) {
+    let anyFailed = false;
     for (const chain of defaultChains) {
-      await deployToChain(chain.name, chain.rpc);
+      const ok = await deployToChain(chain.name, chain.rpc);
+      anyFailed = anyFailed || !ok;
+    }
+    if (anyFailed) {
+      process.exitCode = 1;
     }
     return;
   }
@@ -156,7 +178,10 @@ async function main() {
     process.exit(1);
   }
 
-  await deployToChain(values.name, rpc);
+  const ok = await deployToChain(values.name, rpc);
+  if (!ok) {
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {

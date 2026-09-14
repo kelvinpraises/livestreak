@@ -30,7 +30,7 @@ describe("remote console gateway integration", () => {
     const sessionWallet = await buildSessionWallet(settings, seed);
     const runId = "remote-e2e-test";
 
-    const edges = createConsoleEdges({ settings, sessionWallet, runId });
+    const edges = await createConsoleEdges({ settings, sessionWallet, runId });
     expect(edges.map((e) => e.package)).toEqual(["options", "bookmaker", "observe", "steward"]);
 
     const merged = await mergeConsoleDescriptors(edges);

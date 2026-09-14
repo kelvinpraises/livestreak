@@ -179,4 +179,53 @@ describe("local sink media-track delivery", () => {
     expect(offersFor.sort()).toEqual(["v1", "v2"]);
     expect(pushedWidths).toEqual([W, W]); // one frame fanned out to two viewers
   }, 5000);
+
+  it("refuses viewers beyond maxViewers without degrading the accepted one", async () => {
+    // maxViewers=1: two viewers register, only the first is accepted (one offer, one track). The refusal is
+    // surfaced on the health path; the accepted viewer keeps receiving delivered frames.
+    const offersFor: string[] = [];
+    const pushedWidths: number[] = [];
+    const fakePeer = (): RtcPeerConnectionLike => ({
+      createOffer: () => Promise.resolve({ type: "offer", sdp: "v=0\r\n" }),
+      createAnswer: () => Promise.resolve({ type: "answer", sdp: "v=0\r\n" }),
+      setLocalDescription: () => Promise.resolve(),
+      setRemoteDescription: () => Promise.resolve(),
+      localDescriptionWithCandidates: (offer) => Promise.resolve(offer),
+      close: () => {},
+      ontrack: null,
+      addVideoTrack: () => ({ pushFrame: (frame) => pushedWidths.push(frame.width), stop: () => {} })
+    });
+    const signaling: SinkSignalingChannel = {
+      listViewers: Effect.succeed(["v1", "v2"] as readonly string[]),
+      publishOfferFor: (viewerId) =>
+        Effect.sync(() => {
+          offersFor.push(viewerId);
+        }),
+      awaitAnswerFor: () => Effect.never
+    };
+
+    const health = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const attachment = yield* createLocalSinkDriver().attach({
+            signaling,
+            streamId: "capacity",
+            peerConnectionFactory: fakePeer,
+            maxViewers: 1
+          });
+          // Let the accept loop cycle: it should accept exactly one viewer and keep refusing the other.
+          for (let i = 0; i < 100 && offersFor.length < 1; i += 1) yield* Effect.sleep("20 millis");
+          yield* Effect.sleep("60 millis"); // give the loop a couple more polls to attempt the second viewer
+          yield* attachment.deliver(makeI420Item(0, grayI420()));
+          const h = yield* attachment.health;
+          yield* attachment.finalize;
+          return h;
+        })
+      )
+    );
+
+    expect(offersFor.length).toBe(1); // only one viewer admitted
+    expect(pushedWidths).toEqual([W]); // the accepted viewer still receives the frame
+    expect(health.message).toContain("at capacity");
+  }, 5000);
 });

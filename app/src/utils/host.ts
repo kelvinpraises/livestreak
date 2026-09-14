@@ -18,10 +18,6 @@ const HOMEPAGE_PATH = '/homepage'
 const AGENTS_PATH = '/agents'
 const STREAM_PATH = '/stream'
 
-/** Host may emit optional settled-pool legs before `@livestreak/host` schema catches up. */
-type HostLiveVault = HostHomepageData['liveVaults'][number] & { settledPool?: number }
-type HostStreamSummary = HostHomepageData['streams'][number] & { settledPooled?: number }
-
 export async function fetchHostCatalog(baseUrl: string): Promise<HostCatalog> {
   const res = await fetch(`${baseUrl}${CATALOG_PATH}`)
   if (!res.ok) {
@@ -74,36 +70,30 @@ export function hostHomepageToCards(d: HostHomepageData): HomepageData {
   const resolved = d.lifetimeVaults.length
   const yesWins = d.lifetimeVaults.filter(v => v.outcome === 'yes').length
   return {
-    streams: d.streams.map(s => {
-      const stream = s as HostStreamSummary
-      return {
-        id: stream.routeId,
-        marketId: stream.marketId,
-        title: stream.title,
-        category: stream.category,
-        activeVaults: stream.activeVaults ?? 0,
-        totalPooled: stream.totalPooled ?? 0,
-        ...(stream.settledPooled !== undefined ? { settledPooled: stream.settledPooled } : {}),
-        elapsed: stream.elapsed ?? '',
-        isLive: stream.isLive,
-        ...(stream.chain ? { chain: stream.chain } : {}),
-      }
-    }),
-    liveVaults: d.liveVaults.map(v => {
-      const vault = v as HostLiveVault
-      return {
-        vaultId: vault.id,
-        streamId: vault.streamId,
-        streamTitle: vault.streamTitle,
-        option: vault.option,
-        multiplier: vault.multiplier,
-        totalPool: vault.totalPool,
-        ...(vault.settledPool !== undefined ? { settledPool: vault.settledPool } : {}),
-        status: vault.status,
-        expiresInSec: vault.expiresIn,
-        ...(vault.chain ? { chain: vault.chain } : {}),
-      }
-    }),
+    streams: d.streams.map(stream => ({
+      id: stream.routeId,
+      marketId: stream.marketId,
+      title: stream.title,
+      category: stream.category,
+      activeVaults: stream.activeVaults ?? 0,
+      totalPooled: stream.totalPooled ?? 0,
+      ...(stream.settledPooled !== undefined ? { settledPooled: stream.settledPooled } : {}),
+      elapsed: stream.elapsed ?? '',
+      isLive: stream.isLive,
+      ...(stream.chain ? { chain: stream.chain } : {}),
+    })),
+    liveVaults: d.liveVaults.map(vault => ({
+      vaultId: vault.id,
+      streamId: vault.streamId,
+      streamTitle: vault.streamTitle,
+      option: vault.option,
+      multiplier: vault.multiplier,
+      totalPool: vault.totalPool,
+      ...(vault.settledPool !== undefined ? { settledPool: vault.settledPool } : {}),
+      status: vault.status,
+      expiresInSec: vault.expiresIn,
+      ...(vault.chain ? { chain: vault.chain } : {}),
+    })),
     lifetimeVaults: d.lifetimeVaults.map(v => ({
       vaultId: v.id,
       option: v.option,

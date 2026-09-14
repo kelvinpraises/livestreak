@@ -48,6 +48,12 @@ export interface LocalSinkConfig {
   readonly peerConnectionFactory?: RtcPeerConnectionFactory;
   /** Milliseconds to wait for the consumer's answer before failing the handshake; defaults to 30000. */
   readonly answerTimeoutMs?: number;
+  /**
+   * Max concurrent viewers this local sink will encode for; defaults to {@link defaultMaxViewers}. Each
+   * viewer costs a full peer + encode, so the producer caps its OWN capacity here — viewer N+1 is refused
+   * cleanly (surfaced on the attach/health path) without degrading existing viewers.
+   */
+  readonly maxViewers?: number;
 }
 
 export interface LocalSinkDriverOptions {
@@ -55,6 +61,8 @@ export interface LocalSinkDriverOptions {
   readonly peerConnectionFactory?: RtcPeerConnectionFactory;
   /** Default answer timeout in milliseconds. */
   readonly answerTimeoutMs?: number;
+  /** Default max concurrent viewers when the config does not supply one. */
+  readonly maxViewers?: number;
 }
 
 import {
@@ -64,6 +72,9 @@ import {
 
 const attachmentId = "local-preview";
 const defaultAnswerTimeoutMs = 30_000;
+// Default cap on concurrent viewers: each is a full encode, so the producer refuses beyond this rather
+// than let a new viewer starve the ones already streaming.
+const defaultMaxViewers = 4;
 // How often the producer polls the host for newly-registered viewers (to spin a peer per viewer).
 const viewerPollIntervalMs = 500;
 
@@ -131,6 +142,14 @@ export const validateLocalSinkConfig = (
         configError("Local sink answerTimeoutMs must be a positive number")
       );
     }
+    if (
+      config.maxViewers !== undefined &&
+      (!Number.isInteger(config.maxViewers) || config.maxViewers <= 0)
+    ) {
+      return yield* Effect.fail(
+        configError("Local sink maxViewers must be a positive integer")
+      );
+    }
 
     return config;
   });
@@ -147,6 +166,7 @@ export const createLocalSinkDriver = (
     Effect.gen(function* () {
       const answerTimeoutMs =
         config.answerTimeoutMs ?? options.answerTimeoutMs ?? defaultAnswerTimeoutMs;
+      const maxViewers = config.maxViewers ?? options.maxViewers ?? defaultMaxViewers;
 
       const factory =
         config.peerConnectionFactory ??
@@ -186,6 +206,15 @@ export const createLocalSinkDriver = (
       // answer-apply. A viewer that never answers is dropped without touching the stream or other viewers.
       const acceptViewer = (viewerId: string): Effect.Effect<void, LiveStreakError, Scope.Scope> =>
         Effect.gen(function* () {
+          // Refuse at capacity BEFORE allocating a peer/track — existing viewers keep streaming untouched.
+          // The acceptLoop catches this into stats.message, so the refusal surfaces on the health/console path.
+          if (viewers.size >= maxViewers) {
+            return yield* Effect.fail(
+              new LiveStreakRuntimeError({
+                message: `Local sink at capacity (${maxViewers} viewers) — refusing viewer ${viewerId}`
+              })
+            );
+          }
           const peer = factory();
           if (peer.addVideoTrack === undefined) {
             return yield* Effect.fail(

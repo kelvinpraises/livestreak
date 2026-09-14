@@ -83,6 +83,29 @@ class OptionsRuntimeStoreInMemory implements OptionsRuntimeStore {
     this.markets.set(copy.market.marketId, copy);
 
     for (const vault of copy.vaults) {
+      const existing = this.vaults.get(vault.vaultId);
+      if (existing !== undefined) {
+        // MERGE, never clobber: a market-level read genuinely carries only the vault entity (fresh
+        // status/outcome/pools/steward). PRESERVE the richer accrual state a full vault read stored
+        // (shareTotals, boards, pendingBoundaries, boundaries, resolved enrichment) — zeroing it
+        // collapsed g/sideRate/percentOfSide on the live board until the next user refresh. Boards
+        // stay verbatim: (pool, lastAdvanceMs, sideRate, g) is one consistent contract tuple, and
+        // grafting the newer settled pool onto the old lastAdvanceMs would double-count the streamed
+        // interval in the live-pool projection.
+        this.vaults.set(vault.vaultId, {
+          ...existing,
+          vault,
+          pools: vault.pools,
+          hot: vault.steward,
+          dispute: {
+            active: vault.steward.disputeId !== undefined,
+            disputeId: vault.steward.disputeId
+          }
+        });
+        continue;
+      }
+
+      // Never-seen vault: synthesize a zeroed baseline until a full vault read enriches it.
       this.vaults.set(vault.vaultId, {
         vault,
         pools: vault.pools,

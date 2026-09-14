@@ -1,28 +1,17 @@
 // --- exports ---
 
+// Bookmaker's throw-based authorize wrappers (explicit nowMs, matching this package's call sites)
+// around the CANONICAL depth-guarded capability kit in @livestreak/schema — the loose local matcher
+// (no depth guard) is gone. Schema's hasScope/hasAnyScope take now as an optional third arg, so the
+// explicit-nowMs style threads straight through.
+
 import { LiveStreakCapabilityError } from "@livestreak/core";
+import { hasAnyScope } from "@livestreak/schema";
 
 import type { BridgeCaller, CapabilityGrant, CapabilityScope } from "./types.js";
 
 export type { CapabilityGrant, CapabilityScope } from "./types.js";
-
-export const hasScope = (
-  grant: CapabilityGrant,
-  requiredScope: CapabilityScope,
-  nowMs: number
-): boolean => {
-  if (grant.revoked || grantIsExpired(grant.expiresAt, nowMs)) {
-    return false;
-  }
-
-  return grant.scopes.some((grantScope) => scopeMatchesGrant(grantScope, requiredScope));
-};
-
-export const hasAnyScope = (
-  grants: readonly CapabilityGrant[],
-  requiredScope: CapabilityScope,
-  nowMs: number
-): boolean => grants.some((grant) => hasScope(grant, requiredScope, nowMs));
+export { hasAnyScope, hasScope } from "@livestreak/schema";
 
 export const requireAnyScope = (
   grants: readonly CapabilityGrant[],
@@ -62,27 +51,4 @@ const validateBridgeCaller = (caller: BridgeCaller): void => {
       requiredScope: "*"
     });
   }
-};
-
-const grantIsExpired = (expiresAt: number | undefined, now: number): boolean =>
-  expiresAt !== undefined && expiresAt <= now;
-
-const scopeMatchesGrant = (
-  grantScope: CapabilityScope,
-  requiredScope: CapabilityScope
-): boolean => {
-  if (grantScope === "*") {
-    return true;
-  }
-
-  if (grantScope === requiredScope) {
-    return true;
-  }
-
-  if (grantScope.endsWith(":*")) {
-    const prefix = grantScope.slice(0, -1);
-    return requiredScope.startsWith(prefix);
-  }
-
-  return false;
 };

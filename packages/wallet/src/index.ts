@@ -67,6 +67,8 @@ export {
   pollUntilUserOperationIncluded,
   readUserOperationSuccess,
   assertUserOperationSucceeded,
+  isPaymasterSideFailure,
+  UserOperationPollTimeoutError,
 } from './poller.js'
 export type {
   UserOperationReceiptReader,

@@ -278,9 +278,12 @@ evm_start() {
 }
 
 evm_deploy() {
-  # Deploy, then rebuild dist so the Node roles import this run's fresh addresses (a stale dist would
-  # silently send writes to a dead vaultDriver). build:ts is a SEPARATE step on purpose: `npm run deploy --`
-  # forwards args to the tail of the script, so folding the build inside `deploy` would steal --name from main.ts.
+  # Deploy, then rebuild dist so the BROWSER app picks up this run's fresh addresses: the app imports
+  # the compiled deployments/localhost.js, so its addresses only refresh on rebuild. Node roles no
+  # longer need this — they read chains/evm/deployments/localhost.json from disk at runtime via
+  # loadDeploymentOutput (chains/evm/addresses.ts), so a redeploy is live without a rebuild.
+  # build:ts is a SEPARATE step on purpose: `npm run deploy --` forwards args to the tail of the
+  # script, so folding the build inside `deploy` would steal --name from main.ts.
   log "Deploying EVM contracts (force)..."
   ( cd "$ROOT/packages/contracts" \
       && DEPLOYER_PRIVATE_KEY="$ANVIL_KEY" npm run deploy -- --name localhost --force \

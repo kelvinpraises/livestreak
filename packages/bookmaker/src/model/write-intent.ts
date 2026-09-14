@@ -33,6 +33,24 @@ export const buildCreateVaultIntent = (draft: VaultDraft): CreateVaultIntent => 
   resolutionWindowExpiresAtMs: draft.resolutionWindow.expiresAtMs
 });
 
+// Inverse of buildCreateVaultIntent: the minimal honest VaultDraft an intent carries (the console
+// path has no detection/evidence). fundingToken comes from the runtime config, not the intent.
+export const vaultDraftFromCreateIntent = (
+  intent: CreateVaultIntent,
+  fundingToken: string
+): VaultDraft => ({
+  marketId: intent.marketId,
+  question: intent.question,
+  outcomeKind: "binary",
+  sides: ["yes", "no"],
+  resolutionSource: intent.resolutionSource,
+  resolutionWindow: { expiresAtMs: intent.resolutionWindowExpiresAtMs },
+  fundingToken,
+  creatorSide: intent.creatorSide,
+  creatorStake: intent.creatorStake,
+  seedRate: intent.seedRate
+});
+
 export const buildWriteIntentsFromDecision = (
   decision: BookmakerDecision
 ): readonly BookmakerWriteIntent[] => {

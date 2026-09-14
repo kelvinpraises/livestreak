@@ -10,8 +10,8 @@
 // @livestreak/schema + a createWalletManager case in @livestreak/wallet. Zero edits to call sites.
 
 import type { ChainAaSettings, EvmWalletInitConfig, WalletChain, WalletInit } from "@livestreak/schema";
-import { localhostDeployment } from "@livestreak/contracts/evm/deployments/localhost";
-import { localnetDeployment } from "@livestreak/contracts/sui/deployments/localnet";
+import { loadDeploymentOutput } from "@livestreak/contracts/evm/node";
+import { loadDeployment as loadSuiDeployment } from "@livestreak/contracts/sui/node";
 
 // What the registry needs to assemble a chain's runtime config. Everything here is a "float" — read
 // from settings.json or the host at load, never a pre-baked wallet/contracts blob.
@@ -41,7 +41,8 @@ const namespaceOf = (caip2: string): string => caip2.split(":")[0] ?? "";
 // --- EVM adapter (eip155:*) — Safe 4337 AA over the deployed ERC-4337 stack ---
 
 const flattenEvmDeployment = (): Record<string, string> => {
-  const s = localhostDeployment.scopes;
+  // Read fresh from the promoted JSON at call time so a redeploy is picked up without a rebuild.
+  const s = loadDeploymentOutput("localhost").scopes;
   const aa = s.aa.contracts;
   const protocol = s.protocol.contracts;
   const streaming = s.streaming.contracts;
@@ -114,16 +115,20 @@ const evmChainAdapter: ChainAdapter = {
 
 // --- Sui adapter (sui:*) — Ed25519 native signing, no AA apparatus, just RPC ---
 
-const flattenSuiDeployment = (): Record<string, string> => ({
-  ...localnetDeployment.objects,
-  packageId: localnetDeployment.packageId,
-  // observe's Sui market registrar consumes the registry as ONE JSON-encoded contract key
-  // (control.ts parses contracts.suiMarketRegistry -> { packageId, marketRegistryObjectId }).
-  suiMarketRegistry: JSON.stringify({
-    packageId: localnetDeployment.packageId,
-    marketRegistryObjectId: localnetDeployment.objects.marketRegistry
-  })
-});
+const flattenSuiDeployment = (): Record<string, string> => {
+  // Read fresh from the promoted JSON at call time so a redeploy is picked up without a rebuild.
+  const d = loadSuiDeployment("localnet");
+  return {
+    ...d.objects,
+    packageId: d.packageId,
+    // observe's Sui market registrar consumes the registry as ONE JSON-encoded contract key
+    // (control.ts parses contracts.suiMarketRegistry -> { packageId, marketRegistryObjectId }).
+    suiMarketRegistry: JSON.stringify({
+      packageId: d.packageId,
+      marketRegistryObjectId: d.objects.marketRegistry
+    })
+  };
+};
 
 const suiChainAdapter: ChainAdapter = {
   kind: "sui",

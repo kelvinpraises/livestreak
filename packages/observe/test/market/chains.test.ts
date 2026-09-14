@@ -5,8 +5,8 @@ import { evm } from "@livestreak/contracts";
 import { Address } from "@livestreak/schema";
 
 const { marketRegistryAbi } = evm;
+import { assertUserOperationSucceeded } from "@livestreak/wallet";
 import {
-  assertUserOperationSucceeded,
   computeMarketId,
   observeRunStreamId
 } from "#market/chains/evm.js";
@@ -63,7 +63,10 @@ vi.mock("viem", async (importOriginal) => {
   };
 });
 
-vi.mock("@livestreak/wallet", () => ({
+vi.mock("@livestreak/wallet", async (importOriginal) => ({
+  // Keep the real exports (assertUserOperationSucceeded, isPaymasterSideFailure, …) and override only
+  // the wallet-manager + poller the registrar drives against fakes.
+  ...(await importOriginal<typeof import("@livestreak/wallet")>()),
   createWalletManager: () => ({
     getAccount: async () => evmWalletMocks.account
   }),
@@ -126,33 +129,26 @@ describe("market chain seam", () => {
     expect(computeMarketId(GOLDEN_OBSERVER, GOLDEN_STREAM_ID)).toBe(GOLDEN_MARKET_ID);
   });
 
-  it("assertUserOperationSucceeded reads only success (ignores empty logs)", async () => {
-    const exit = await Effect.runPromiseExit(
+  it("assertUserOperationSucceeded reads only success (ignores empty logs)", () => {
+    expect(() =>
       assertUserOperationSucceeded({
         success: true,
         logs: [],
         userOpHash: "0xdead",
         sender: GOLDEN_OBSERVER
       })
-    );
-
-    expect(Exit.isSuccess(exit)).toBe(true);
+    ).not.toThrow();
   });
 
-  it("assertUserOperationSucceeded fails when success is false", async () => {
-    const exit = await Effect.runPromiseExit(
+  it("assertUserOperationSucceeded fails when success is false", () => {
+    expect(() =>
       assertUserOperationSucceeded({
         success: false,
         logs: [{ address: "0x1", topics: [], data: "0x" }],
         userOpHash: "0xdead",
         sender: GOLDEN_OBSERVER
       })
-    );
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      expect(String(exit.cause)).toContain("reverted");
-    }
+    ).toThrow(/reverted/);
   });
 
   it("registers with canonical streamId and marketId when receipt logs are empty", async () => {

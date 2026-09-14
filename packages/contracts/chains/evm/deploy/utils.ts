@@ -95,18 +95,61 @@ export function artifactExists(artifactPath: string): boolean {
   return existsSync(join(CONTRACTS_ROOT, artifactPath));
 }
 
+type LinkReferences = Record<string, Record<string, readonly { start: number; length: number }[]>>;
+
+// Foundry's unlinked-library placeholder: `__$<hex34>$__` where hex34 is the first 34 hex chars of
+// keccak256 of the fully qualified library name ("src/Lib.sol:LibName").
+const libraryPlaceholder = (fullyQualifiedName: string): string =>
+  `__$${keccak256(toHex(fullyQualifiedName)).slice(2, 36)}$__`;
+
+// Link each placeholder with ITS OWN library's address, driven by the artifact's linkReferences
+// (which name the libraries the bytecode actually wants). A blanket replace-all with each address in
+// turn would stamp the FIRST address over every placeholder when 2+ libraries are involved.
+const linkLibraries = (
+  bytecode: Hex,
+  linkReferences: LinkReferences | undefined,
+  libraries: Record<string, Address>
+): Hex => {
+  let linked: string = bytecode;
+
+  for (const [file, libs] of Object.entries(linkReferences ?? {})) {
+    for (const libName of Object.keys(libs)) {
+      const fullyQualified = `${file}:${libName}`;
+      const address = libraries[fullyQualified] ?? libraries[libName];
+      if (address === undefined) {
+        throw new Error(
+          `Artifact requires library "${fullyQualified}" but no address was provided for it`
+        );
+      }
+      linked = linked.split(libraryPlaceholder(fullyQualified)).join(address.slice(2).toLowerCase());
+    }
+  }
+
+  return linked as Hex;
+};
+
 function buildInitcode(
-  artifact: { bytecode: { object: Hex }; abi: readonly { type: string; inputs?: readonly unknown[] }[] },
+  artifact: {
+    bytecode: { object: Hex; linkReferences?: LinkReferences };
+    abi: readonly { type: string; inputs?: readonly unknown[] }[];
+  },
   constructorArgs?: readonly unknown[],
   libraries?: Record<string, Address>
 ): Hex {
   let bytecode: Hex = artifact.bytecode.object;
 
   if (libraries) {
-    for (const addr of Object.values(libraries)) {
-      const clean = addr.slice(2).toLowerCase();
-      bytecode = bytecode.replace(new RegExp(`__\\$[a-f0-9]{34}\\$__`, "g"), clean) as Hex;
-    }
+    bytecode = linkLibraries(bytecode, artifact.bytecode.linkReferences, libraries);
+  }
+
+  // Any residual placeholder means an unlinked library — deploying it would put garbage on chain.
+  if (bytecode.includes("__$")) {
+    const wanted = Object.entries(artifact.bytecode.linkReferences ?? {})
+      .flatMap(([file, libs]) => Object.keys(libs).map((lib) => `${file}:${lib}`))
+      .join(", ");
+    throw new Error(
+      `Bytecode still contains unlinked library placeholders${wanted.length > 0 ? ` (requires: ${wanted})` : ""}`
+    );
   }
 
   if (!constructorArgs || constructorArgs.length === 0) {

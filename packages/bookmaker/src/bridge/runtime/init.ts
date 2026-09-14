@@ -8,6 +8,8 @@ import type { BookmakerChainConfig } from "../../chains/types.js";
 import type { BookmakerMarketContext } from "../../model/market-context.js";
 import type { BookmakerWatchSource } from "../../model/watch-source.js";
 import type { BookmakerVaultPolicy } from "../../pipeline/decision/choose.js";
+import type { BookmakerSimilarityClient } from "../../pipeline/similarity/client.js";
+import { createHostDiscoveryClient } from "../../pipeline/similarity/host-client.js";
 import type { BookmakerRuntimeConfig } from "../../runtime/config.js";
 
 export type { PackageRuntimeInit, SessionWallet };
@@ -100,6 +102,7 @@ export const bookmakerRuntimeConfigFromPackageInit = (
     readonly readRpcUrl?: string;
     readonly policy?: BookmakerVaultPolicy;
     readonly watchSource?: BookmakerWatchSource;
+    readonly similarityClient?: BookmakerSimilarityClient;
   }
 ): BookmakerRuntimeConfig => {
   const marketId = options?.marketId ?? "";
@@ -111,6 +114,13 @@ export const bookmakerRuntimeConfigFromPackageInit = (
   };
   const watchSource: BookmakerWatchSource =
     options?.watchSource ?? { marketId, watchUrl: "", webrtcUrl: "" };
+  // The host IS the discovery index — every gateway-injected runtime gets a client against it, so
+  // console-created vaults land in the index (register-on-create in runtime.createVaultOnce).
+  const similarityClient =
+    options?.similarityClient ??
+    (init.hostUrl.trim().length > 0
+      ? createHostDiscoveryClient({ baseUrl: init.hostUrl })
+      : undefined);
 
   return {
     runtimeId: options?.runtimeId ?? `bookmaker-${init.package}`,
@@ -118,6 +128,7 @@ export const bookmakerRuntimeConfigFromPackageInit = (
     watchSource,
     policy: options?.policy ?? defaultRemotePolicy(),
     fundingToken: bookmakerFundingTokenFromInit(init),
+    ...(similarityClient === undefined ? {} : { similarityClient }),
     walletInit: init.wallet.walletInit,
     seed: init.wallet.seed,
     addresses: bookmakerAddressesFromInit(init),
@@ -134,6 +145,7 @@ export const createBookmakerRuntimeBootstrap = (
     readonly observeRunId?: string;
     readonly policy?: BookmakerVaultPolicy;
     readonly watchSource?: BookmakerWatchSource;
+    readonly similarityClient?: BookmakerSimilarityClient;
   }
 ): {
   readonly chainConfig: BookmakerChainConfig;
@@ -148,6 +160,7 @@ export const createBookmakerRuntimeBootstrap = (
     ...(options?.observeRunId === undefined ? {} : { observeRunId: options.observeRunId }),
     ...(options?.readRpcUrl === undefined ? {} : { readRpcUrl: options.readRpcUrl }),
     ...(options?.policy === undefined ? {} : { policy: options.policy }),
-    ...(options?.watchSource === undefined ? {} : { watchSource: options.watchSource })
+    ...(options?.watchSource === undefined ? {} : { watchSource: options.watchSource }),
+    ...(options?.similarityClient === undefined ? {} : { similarityClient: options.similarityClient })
   })
 });

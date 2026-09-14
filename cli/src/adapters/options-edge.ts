@@ -11,6 +11,7 @@ import {
   projectOptionsPanel,
   readUserOptionsSnapshot
 } from "@livestreak/options";
+import type { PausedLanesPort } from "@livestreak/options";
 import { localOperatorCaller } from "../gateway/auth/caller.js";
 import type { ConsoleEdge } from "../gateway/console/edge.js";
 
@@ -18,6 +19,8 @@ export interface CreateOptionsConsoleEdgeInput {
   readonly packageInit: PackageRuntimeInit;
   readonly readRpcUrl: string;
   readonly userAddress: UserAddress;
+  /** File-backed persistence for the paused-lane registry (survives a gateway restart). */
+  readonly pausedLanes?: PausedLanesPort;
 }
 
 export const createOptionsConsoleEdge = (input: CreateOptionsConsoleEdgeInput): ConsoleEdge => {
@@ -31,7 +34,14 @@ export const createOptionsConsoleEdge = (input: CreateOptionsConsoleEdgeInput): 
   });
 
   const chain = createOptionsChain(chainConfig);
-  const runtime = createOptionsRuntime({ chain, chainConfig, config: runtimeConfig });
+  const runtime = createOptionsRuntime({
+    chain,
+    chainConfig,
+    config: {
+      ...runtimeConfig,
+      ...(input.pausedLanes === undefined ? {} : { pausedLanes: input.pausedLanes })
+    }
+  });
   const bridge = createOptionsBridge({ runtime });
   const caller = localOperatorCaller();
   // Remember the configured market so describeFunctions re-projects WITH it (board-first reveal). Without

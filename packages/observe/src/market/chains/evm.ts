@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 import {
   createWalletManager,
+  isPaymasterSideFailure,
   pollUntilUserOperationIncluded as pollUntilUserOperationIncludedShared
 } from "@livestreak/wallet";
 import { evm } from "@livestreak/contracts";
@@ -68,6 +69,26 @@ export const createEvmMarketRegistrar = (
   // Shared wallet/account plumbing for the creator-gated lifecycle writes. The
   // registrar derives the SAME operator Safe as registerMarket, so the on-chain
   // `onlyMarketCreator` gate lines up (golden-vector / keccak invariant protected).
+  //
+  // OPT.rederive: derive account + read-only ONCE per registrar (deterministic Safe) and reuse across
+  // registerMarket / goLive / setEnded. Memoize the underlying promise; each Effect call awaits it.
+  const deriveAccount = async () => {
+    const manager = createWalletManager(
+      "evm",
+      config.seed,
+      config.walletInit.config as import("@livestreak/wallet").EvmErc4337WalletConfig
+    );
+    const account = await manager.getAccount();
+    const readOnly = await account.toReadOnlyAccount();
+    return { account, readOnly };
+  };
+  let accountPromise: ReturnType<typeof deriveAccount> | undefined;
+  const openAccount = () =>
+    Effect.tryPromise({
+      try: () => (accountPromise ??= deriveAccount()),
+      catch: (error) => toRuntimeError("Failed to open wallet account", error)
+    });
+
   const sendLifecycleCall = (
     functionName: "goLive" | "setEnded",
     input: MarketLifecycleInput
@@ -83,15 +104,7 @@ export const createEvmMarketRegistrar = (
 
       const validated = yield* validateLifecycleInput(input);
 
-      const manager = createWalletManager(
-        "evm",
-        config.seed,
-        config.walletInit.config as import("@livestreak/wallet").EvmErc4337WalletConfig
-      );
-      const account = yield* Effect.tryPromise({
-        try: () => manager.getAccount(),
-        catch: (error) => toRuntimeError("Failed to open wallet account", error)
-      });
+      const { account, readOnly } = yield* openAccount();
 
       const data = encodeFunctionData({
         abi: marketRegistryAbi,
@@ -107,11 +120,6 @@ export const createEvmMarketRegistrar = (
             value: 0n
           }),
         catch: (error) => classifySendFailure(error)
-      });
-
-      const readOnly = yield* Effect.tryPromise({
-        try: () => account.toReadOnlyAccount(),
-        catch: (error) => toRuntimeError("Failed to open read-only wallet account", error)
       });
 
       yield* pollUntilUserOperationIncluded(readOnly, sendResult.hash);
@@ -132,20 +140,7 @@ export const createEvmMarketRegistrar = (
 
       const runId = yield* validateMarketRunId(input.runId);
 
-      const manager = createWalletManager(
-        "evm",
-        config.seed,
-        config.walletInit.config as import("@livestreak/wallet").EvmErc4337WalletConfig
-      );
-      const account = yield* Effect.tryPromise({
-        try: () => manager.getAccount(),
-        catch: (error) => toRuntimeError("Failed to open wallet account", error)
-      });
-
-      const readOnly = yield* Effect.tryPromise({
-        try: () => account.toReadOnlyAccount(),
-        catch: (error) => toRuntimeError("Failed to open read-only wallet account", error)
-      });
+      const { account, readOnly } = yield* openAccount();
 
       const observer = yield* Effect.tryPromise({
         try: () => readOnly.getAddress(),
@@ -175,7 +170,8 @@ export const createEvmMarketRegistrar = (
             userOpHash: `0x${"0".repeat(64)}`,
             marketId,
             streamId,
-            title: input.title
+            title: input.title,
+            alreadyRegistered: true
           } satisfies MarketRegisterResult;
         }
       }
@@ -210,27 +206,6 @@ export const createEvmMarketRegistrar = (
   };
 };
 
-export const assertUserOperationSucceeded = (
-  receipt: unknown
-): Effect.Effect<void, LiveStreakRuntimeError> => {
-  if (!isRecord(receipt)) {
-    return Effect.fail(
-      receiptFailure("UserOperation receipt payload is not an object")
-    );
-  }
-
-  const success = readUserOperationSuccess(receipt);
-  if (success === undefined) {
-    return Effect.fail(receiptFailure("UserOperation receipt is missing success"));
-  }
-
-  if (success === false) {
-    return Effect.fail(receiptFailure("UserOperation included but reverted"));
-  }
-
-  return Effect.void;
-};
-
 // --- helpers ---
 
 // Delegate to the shared wallet poller (60s budget + exponential backoff, and the canonical
@@ -249,30 +224,9 @@ const pollUntilUserOperationIncluded = (
     catch: (error) => toRuntimeError("UserOperation inclusion failed", error)
   });
 
-const readUserOperationSuccess = (receipt: Record<string, unknown>): boolean | undefined => {
-  const direct = receipt["success"];
-  if (typeof direct === "boolean") {
-    return direct;
-  }
-
-  return undefined;
-};
-
-const receiptFailure = (message: string): LiveStreakRuntimeError =>
-  new LiveStreakRuntimeError({
-    message
-  });
-
 const classifySendFailure = (error: unknown): LiveStreakRuntimeError => {
-  const message = error instanceof Error ? error.message : String(error);
-  const lower = message.toLowerCase();
-
-  if (
-    lower.includes("paymaster") ||
-    lower.includes("sponsor") ||
-    lower.includes("validuntil") ||
-    lower.includes("validafter")
-  ) {
+  if (isPaymasterSideFailure(error)) {
+    const message = error instanceof Error ? error.message : String(error);
     return new LiveStreakRuntimeError({
       message: `Paymaster-side registration failure: ${message}`
     });
@@ -285,6 +239,3 @@ const toRuntimeError = (prefix: string, error: unknown): LiveStreakRuntimeError 
   new LiveStreakRuntimeError({
     message: `${prefix}: ${error instanceof Error ? error.message : String(error)}`
   });
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;

@@ -3,6 +3,7 @@
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
 import {
   createWalletManager,
+  isPaymasterSideFailure,
   pollUntilUserOperationIncluded,
   type EvmErc4337WalletConfig
 } from "@livestreak/wallet";
@@ -456,14 +457,8 @@ const requireNonNegativeBigInt = (value: bigint, field: string): bigint => {
 
 const classifySendFailure = (error: unknown): LiveStreakRuntimeError => {
   const message = error instanceof Error ? error.message : String(error);
-  const lower = message.toLowerCase();
 
-  if (
-    lower.includes("paymaster") ||
-    lower.includes("sponsor") ||
-    lower.includes("validuntil") ||
-    lower.includes("validafter")
-  ) {
+  if (isPaymasterSideFailure(error)) {
     return new LiveStreakRuntimeError({
       message: `Paymaster-side write failure: ${message}`
     });

@@ -1,17 +1,16 @@
 // --- exports ---
 
 import { LiveStreakConfigError } from "@livestreak/core";
+import { isSuiBytes32Id } from "@livestreak/contracts/sui";
 
 // 0x + 64 hex chars — Sui object IDs are 32-byte hashes, unlike EVM's 20-byte addresses.
 const SUI_OBJECT_ID_RE = /^0x[0-9a-fA-F]{64}$/;
 
-// bytes32 market/vault id — 32 bytes of hex, with or without the 0x prefix.
-const SUI_BYTES32_RE = /^(0x)?[0-9a-fA-F]{64}$/;
-
 // OPT.sui-validate: guard market/vault ids before turning them into 32-byte vectors. Mirrors the EVM
 // `validateBytes32Id`; without it `parseInt(... || "0")` silently zero-pads malformed/short ids.
+// The bytes32 shape check itself is canonical in @livestreak/contracts/sui.
 export const validateSuiBytes32Id = (value: string, field: string): string => {
-  if (!SUI_BYTES32_RE.test(value)) {
+  if (!isSuiBytes32Id(value)) {
     throw new LiveStreakConfigError({
       message: `Invalid bytes32 id for ${field}`,
       metadata: { details: value }

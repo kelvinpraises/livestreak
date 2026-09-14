@@ -12,6 +12,18 @@ export interface UserOperationReceiptReader {
   getUserOperationReceipt(hash: string): Promise<unknown>;
 }
 
+// Thrown when inclusion polling exhausts its deadline. Carries the userOpHash so callers can
+// recognize the timeout via `instanceof` (bookmaker keys its pending-recovery path on this) rather
+// than string-matching the message. Message text is unchanged from the previous plain Error.
+export class UserOperationPollTimeoutError extends Error {
+  readonly userOpHash: string;
+  constructor(userOpHash: string, message: string) {
+    super(message);
+    this.name = "UserOperationPollTimeoutError";
+    this.userOpHash = userOpHash;
+  }
+}
+
 export interface PollUserOperationOptions {
   readonly timeoutMs?: number; // default 60_000 (was effectively 2_000 — the bug)
   readonly intervalMs?: number; // default 1_000 (first delay)
@@ -86,6 +98,19 @@ export const readUserOperationSuccess = (receipt: unknown): boolean | undefined 
   return undefined;
 };
 
+// Heuristic: does a userOp send failure originate on the paymaster/sponsor side (rather than being a
+// plain send/transport failure)? Sniffs the message for paymaster/sponsor/validity-window markers.
+// Effect-free — each caller keeps its own error wrapper + wording; this only decides the branch.
+export const isPaymasterSideFailure = (error: unknown): boolean => {
+  const lower = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return (
+    lower.includes("paymaster") ||
+    lower.includes("sponsor") ||
+    lower.includes("validuntil") ||
+    lower.includes("validafter")
+  );
+};
+
 // Throws on a present-but-reverted receipt or a receipt missing a readable success field.
 export const assertUserOperationSucceeded = (receipt: unknown): void => {
   if (!isRecord(receipt)) {
@@ -144,7 +169,8 @@ export const pollUntilUserOperationIncluded = async (
 
     if (Date.now() >= deadline) {
       const base = `Timed out waiting for UserOperation receipt for ${userOpHash}`;
-      throw new Error(
+      throw new UserOperationPollTimeoutError(
+        userOpHash,
         lastError instanceof Error ? `${base} (last error: ${lastError.message})` : base
       );
     }

@@ -23,6 +23,8 @@ export const HostStreamSummary = Schema.Struct({
   elapsed: Schema.optional(Schema.String),
   activeVaults: Schema.optional(Schema.Number),
   totalPooled: Schema.optional(Schema.Number),
+  // Settled on-chain aggregate; present only when it diverges from the effective totalPooled.
+  settledPooled: Schema.optional(Schema.Number),
   chain: CatalogChain
 });
 export type HostStreamSummary = Schema.Schema.Type<typeof HostStreamSummary>;
@@ -58,6 +60,8 @@ export const HomepageLiveVaultRaw = Schema.Struct({
   totalPool: Schema.Number,
   status: Schema.Literal("open", "hot"),
   expiresIn: Schema.Number,
+  // Settled on-chain pool; present only when it diverges from the effective totalPool.
+  settledPool: Schema.optional(Schema.Number),
   chain: CatalogChain
 });
 export type HomepageLiveVaultRaw = Schema.Schema.Type<typeof HomepageLiveVaultRaw>;

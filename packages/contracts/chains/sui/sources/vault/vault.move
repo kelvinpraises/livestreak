@@ -215,6 +215,16 @@ public fun get_vault<T>(registry: &VaultRegistry<T>, vault_id: &vector<u8>): Vau
     *table::borrow(&registry.vaults, *vault_id)
 }
 
+/// Append-only set of vault ids `account` has ever funded (dedup via account_in_vault). Mirrors EVM
+/// Vault.getAccountVaultIds — the options reader derives positions from this × both sides, so Sui
+/// reaches EVM parity. Empty for an account that never funded.
+public fun get_account_vault_ids<T>(registry: &VaultRegistry<T>, account: u256): vector<vector<u8>> {
+    if (!table::contains(&registry.account_vaults, account)) {
+        return vector[]
+    };
+    *table::borrow(&registry.account_vaults, account)
+}
+
 public fun vault_status(data: &VaultData): u8 {
     data.status
 }

@@ -233,7 +233,8 @@ describe("detectOpportunity", () => {
     expect(result).toEqual({
       action: "detected",
       detection: detection({ detectorId: "valid", confidence: 0.9 }),
-      detectorId: "valid"
+      detectorId: "valid",
+      detectorFailures: [{ detectorId: "throws", message: "detector failed" }]
     });
   });
 
@@ -253,7 +254,8 @@ describe("detectOpportunity", () => {
     expect(result).toEqual({
       action: "skip",
       reason: "no_detection",
-      detectorCount: 1
+      detectorCount: 1,
+      detectorFailures: [{ detectorId: "throws", message: "detector failed" }]
     });
   });
 
@@ -281,7 +283,8 @@ describe("detectOpportunity", () => {
     expect(result).toEqual({
       action: "detected",
       detection: detection({ detectorId: "first", confidence: 0.85 }),
-      detectorId: "first"
+      detectorId: "first",
+      detectorFailures: [{ detectorId: "throws", message: "detector failed" }]
     });
   });
 });

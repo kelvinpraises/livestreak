@@ -16,10 +16,22 @@ import {
 } from "@livestreak/steward";
 import type { FunctionDescriptor, PackageRuntimeInit } from "@livestreak/schema";
 import type { ConsoleEdge } from "../gateway/console/edge.js";
+import { localOperatorCaller } from "../gateway/auth/caller.js";
 
 const noopFacts = async () => [] as readonly unknown[];
 const noopMemorySink = { remember: () => {} };
-const CONSOLE_CALLER: BridgeCaller = { id: "remote-console", trusted: true };
+
+// The steward forum (host) client is not wired into the CLI edge yet, so host actions
+// (openThread/appendMessage/annotate) are DROPPED. Make that observable — warn once per action
+// kind on the gateway channel (matches commands/remote.ts) instead of vanishing silently.
+const warnedHostKinds = new Set<string>();
+const dropHostAction = (kind: string): void => {
+  if (warnedHostKinds.has(kind)) return;
+  warnedHostKinds.add(kind);
+  console.error(
+    `[gateway] steward host action "${kind}" dropped — forum client unwired in the CLI edge`
+  );
+};
 
 export interface CreateStewardConsoleEdgeInput {
   readonly packageInit: PackageRuntimeInit;
@@ -42,13 +54,15 @@ const readConfigure = (args: unknown): { marketId?: string; vaultId?: string } =
 
 export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): ConsoleEdge => {
   const stewardId = input.packageInit.wallet.operatorAddress ?? "remote-console";
+  // Canonical trusted admission for internal board reads/subscriptions (shared with every other edge).
+  const caller = localOperatorCaller();
 
   // The on-chain executor + sink are stable for the session; only the watched subjects change on
   // configure, so the runtime/bridge are rebuilt over the new subjects (executor reused).
   const executor = createStewardContractExecutor(stewardChainConfigFromPackageInit(input.packageInit));
   const actionPlanSink: StewardActionPlanSink = createActionPlanSink({
     contract: executor,
-    host: { runHostAction: () => {} }
+    host: { runHostAction: (action) => dropHostAction(action.kind) }
   });
 
   let watched: { marketId?: string; vaultId?: string } = {};
@@ -91,7 +105,7 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
 
   const resubscribeBoard = (): void => {
     boardUnsub?.();
-    boardUnsub = bridge.subscribeBoard(CONSOLE_CALLER, (board) => {
+    boardUnsub = bridge.subscribeBoard(caller, (board) => {
       for (const listener of boardListeners) {
         listener(board);
       }
@@ -115,7 +129,7 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
     } catch {
       // best-effort: the emit below still re-projects the catalog.
     }
-    const board = await bridge.readBoard(CONSOLE_CALLER);
+    const board = await bridge.readBoard(caller);
     for (const listener of boardListeners) {
       listener(board);
     }
@@ -169,6 +183,6 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
       };
     },
 
-    readBoard: async () => bridge.readBoard(CONSOLE_CALLER)
+    readBoard: async () => bridge.readBoard(caller)
   };
 };

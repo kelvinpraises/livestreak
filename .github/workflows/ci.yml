@@ -1,0 +1,63 @@
+name: CI
+
+# Offline typecheck + unit tests on every PR and every push to main. One job,
+# fail-fast: build the workspace dist chain in dependency order, then typecheck and
+# run the vitest suites for every package + cli + app.
+#
+# NOT covered here (intentionally): the on-chain contract suites — `sui move test`
+# (needs the Sui CLI toolchain) and `forge test` (needs Foundry). Both require extra
+# runner setup that isn't trivial, and neither runs offline against npm alone, so they
+# stay out of this lane. Run them locally / in a dedicated chain-CI:
+#   packages/contracts: `sui move test --build-env testnet` (chains/sui)
+#                       `forge test`                        (chains/evm)
+# The contracts package is still typechecked and DIST-built here (its ts bindings),
+# just not its Solidity/Move test suites.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+jobs:
+  build-check-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm install`, NOT `npm ci`: the committed package-lock.json is macOS-generated,
+      # so `npm ci` would try to install darwin-only native binaries (rollup / esbuild /
+      # lightningcss / better-sqlite3) and fail on the Linux runner. This matches the
+      # Dockerfiles, which install the same way for the same reason.
+      - name: Install
+        run: npm install --no-audit --no-fund
+
+      # Build the dist chain in dependency order so every workspace can resolve its
+      # @livestreak/* deps (dist/ is gitignored, no prepare scripts). contracts uses
+      # build:ts (ts bindings only) to keep this lane forge-free.
+      - name: Build workspace dist chain
+        run: |
+          npm run build -w @livestreak/core -w @livestreak/schema -w @livestreak/wallet
+          npm run build:ts -w @livestreak/contracts
+          npm run build \
+            -w @livestreak/host -w @livestreak/options \
+            -w @livestreak/observe -w @livestreak/bookmaker -w @livestreak/steward
+          npm run build -w @livestreak/host-server
+
+      # Typecheck everything (`check` = tsc --noEmit across the workspaces).
+      - name: Typecheck
+        run: npm run check --workspaces --if-present
+
+      # Unit suites. Run per-workspace and skip @livestreak/contracts, whose `test`
+      # script is `forge test` (excluded above). Everything else runs offline.
+      - name: Unit tests
+        run: |
+          npm run test \
+            -w @livestreak/core -w @livestreak/schema -w @livestreak/wallet \
+            -w @livestreak/host -w @livestreak/options \
+            -w @livestreak/observe -w @livestreak/bookmaker -w @livestreak/steward \
+            -w @livestreak/host-server -w @livestreak/cli -w app

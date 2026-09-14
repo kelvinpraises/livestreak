@@ -1,6 +1,6 @@
 // --- exports ---
 
-import { LiveStreakConfigError } from "@livestreak/core";
+import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
 
 import type {
   MarketId,
@@ -198,11 +198,13 @@ const readOrThrow = async <T>(
   try {
     return await read();
   } catch (error) {
+    // Config errors (bad ids/chain misconfig) pass through untouched; everything else is a
+    // transport/runtime failure, not a configuration problem.
     if (error instanceof LiveStreakConfigError) {
       throw error;
     }
 
-    throw new LiveStreakConfigError({
+    throw new LiveStreakRuntimeError({
       message: `Failed to read ${entity}`,
       metadata: {
         details: id,

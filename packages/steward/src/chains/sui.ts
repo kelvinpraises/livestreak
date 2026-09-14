@@ -3,25 +3,23 @@
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
 // Multichain-hygiene: build PTBs VIA @livestreak/wallet (the single @mysten/sui v2 owner).
 import { Transaction, bcs, createWalletManager, type SuiWalletConfig } from "@livestreak/wallet";
-import { target } from "@livestreak/contracts/sui";
+import { isSuiBytes32Id, suiBytes32IdBytes, target } from "@livestreak/contracts/sui";
 
 import type { StewardContractCall } from "../model/action-plan.js";
 import type { StewardContractExecutor } from "../runtime/adapters/action-plan-sink.js";
 import { validateStewardSuiObjectIds, type StewardChainConfig } from "./types.js";
 
 const SUI_CLOCK_OBJECT_ID = "0x6";
-const SUI_BYTES32_RE = /^(0x)?[0-9a-fA-F]{64}$/;
 
+// Canonical bytes32 handling lives in @livestreak/contracts/sui; steward only adds its typed error.
 const vaultIdBytes = (id: string): Uint8Array => {
-  if (!SUI_BYTES32_RE.test(id)) {
+  if (!isSuiBytes32Id(id)) {
     throw new LiveStreakConfigError({
       message: "Steward Sui resolve requires a bytes32 vaultId",
       metadata: { details: id }
     });
   }
-  const hex = id.startsWith("0x") ? id.slice(2) : id;
-  const bytes = Array.from({ length: 32 }, (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16));
-  return bcs.vector(bcs.u8()).serialize(bytes).toBytes();
+  return bcs.vector(bcs.u8()).serialize(suiBytes32IdBytes(id)).toBytes();
 };
 
 export const createSuiStewardExecutor = (config: StewardChainConfig): StewardContractExecutor => {
@@ -32,6 +30,15 @@ export const createSuiStewardExecutor = (config: StewardChainConfig): StewardCon
   const ids = validateStewardSuiObjectIds(config.addresses);
   // The VaultRegistry<T> type parameter is the USDC coin type.
   const coinType = `${ids.packageId}::mock_usdc::MOCK_USDC`;
+
+  // OPT.rederive: derive the wallet account ONCE per executor (deterministic), reuse across calls.
+  let accountPromise:
+    | Promise<{ sendTransaction(tx: Transaction): Promise<{ hash: string }> }>
+    | undefined;
+  const getAccount = () =>
+    (accountPromise ??= createWalletManager("sui", config.seed, suiConfig).getAccount() as Promise<{
+      sendTransaction(tx: Transaction): Promise<{ hash: string }>;
+    }>);
 
   return {
     chain: "sui",
@@ -56,10 +63,7 @@ export const createSuiStewardExecutor = (config: StewardChainConfig): StewardCon
         ]
       });
 
-      const manager = createWalletManager("sui", config.seed, suiConfig);
-      const account = (await manager.getAccount()) as {
-        sendTransaction(tx: Transaction): Promise<{ hash: string }>;
-      };
+      const account = await getAccount();
       tx.setGasBudgetIfNotSet(100_000_000);
       try {
         const result = await account.sendTransaction(tx);

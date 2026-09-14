@@ -11,6 +11,7 @@ import type { VaultDraft } from "../model/vault-draft.js";
 import { buildCreateVaultIntent, type CreateVaultIntent } from "../model/write-intent.js";
 import type { BookmakerSimilarityClient } from "../pipeline/similarity/client.js";
 import { findSimilar } from "../pipeline/similarity/find.js";
+import { registerCreatedVaultFailOpen } from "../pipeline/similarity/register.js";
 import type { CreateVaultOnceResult } from "../runtime/create-vault-once.js";
 import { validateVaultDraftForCreate } from "../model/validate.js";
 
@@ -61,6 +62,9 @@ export type OriginateVaultResult =
       readonly idempotencyKey: string;
     };
 
+// NOTE: the autonomous detect→similarity→decide→create pipeline is currently UNWIRED (no live
+// callers — the console path goes bridge → runtime.createVaultOnce, which shares
+// registerCreatedVaultFailOpen for index registration). Parked, not dead.
 export const originateVault = async (input: OriginateVaultInput): Promise<OriginateVaultResult> => {
   if (input.evaluation.action !== "detected") {
     throw new LiveStreakConfigError({
@@ -124,13 +128,15 @@ const finalizeOriginateDecision = async (
     input.nowMs
   );
 
-  // B2: register the just-created vault in the host discovery index so the next
-  // origination for the same opportunity FINDS it (the real duplicate-vault fix)
-  // — carrying the precomputed `vaultKey` (= idempotencyKey) so the deterministic
-  // exact-match (B1) fires too. Fail-OPEN: a discovery hiccup must never fail or
-  // roll back a created vault. Skip idempotent re-creates (already indexed).
+  // Skip idempotent re-creates (already indexed).
   if (idempotent === false) {
-    await registerCreatedVaultFailOpen(input, draftValidated.value, result.vaultId, idempotencyKey);
+    await registerCreatedVaultFailOpen({
+      similarityClient: input.similarityClient,
+      draft: draftValidated.value,
+      vaultId: result.vaultId,
+      vaultKey: idempotencyKey,
+      ...(input.onIndexError === undefined ? {} : { onIndexError: input.onIndexError })
+    });
   }
 
   return {
@@ -142,28 +148,4 @@ const finalizeOriginateDecision = async (
     idempotent,
     idempotencyKey
   };
-};
-
-const registerCreatedVaultFailOpen = async (
-  input: OriginateVaultInput,
-  draft: VaultDraft,
-  vaultId: string,
-  vaultKey: string
-): Promise<void> => {
-  const indexVault = input.similarityClient.indexVault;
-  if (indexVault === undefined) {
-    return;
-  }
-
-  try {
-    await indexVault({
-      vaultId,
-      marketId: draft.marketId,
-      draft,
-      vaultKey
-    });
-  } catch (error) {
-    // Fail-open: swallow so a discovery-index failure never fails the create.
-    input.onIndexError?.(error);
-  }
 };

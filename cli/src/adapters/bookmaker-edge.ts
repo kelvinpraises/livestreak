@@ -7,6 +7,7 @@ import {
   type BridgeCaller,
   type CallActionEnvelope
 } from "@livestreak/bookmaker";
+import type { IdempotencyPersistencePort } from "@livestreak/bookmaker";
 import type { FunctionDescriptor, PackageRuntimeInit } from "@livestreak/schema";
 import { localOperatorCaller } from "../gateway/auth/caller.js";
 import type { ConsoleEdge } from "../gateway/console/edge.js";
@@ -16,6 +17,8 @@ export interface CreateBookmakerEdgeInput {
   readonly readRpcUrl: string;
   readonly userAddress: string;
   readonly usdcAddress: `0x${string}`;
+  /** File-backed persistence for settled + pending-userOp state (survives a gateway restart). */
+  readonly idempotencyPersistence?: IdempotencyPersistencePort;
 }
 
 // The bookmaker runtime REQUIRES a non-empty marketId, so we seed this sentinel just to construct it.
@@ -80,7 +83,10 @@ export const createBookmakerEdge = (input: CreateBookmakerEdgeInput): ConsoleEdg
             watchUrl: "http://127.0.0.1/remote",
             webrtcUrl: "http://127.0.0.1/remote"
           }
-        }).runtimeConfig
+        }).runtimeConfig,
+        ...(input.idempotencyPersistence === undefined
+          ? {}
+          : { idempotencyPersistence: input.idempotencyPersistence })
       })
     });
 

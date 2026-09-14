@@ -30,15 +30,24 @@ export interface BookmakerDetectionInput {
   readonly nowMs: number;
 }
 
+// A detector that threw during detect(): recorded so a broken detector is visible
+// rather than looking like "nothing detected".
+export interface DetectorFailure {
+  readonly detectorId: string;
+  readonly message: string;
+}
+
 export type BookmakerDetectionEvaluation =
   | {
       readonly action: "detected";
       readonly detection: Detection;
       readonly detectorId: string;
+      readonly detectorFailures?: readonly DetectorFailure[];
     }
   | {
       readonly action: "skip";
       readonly reason: "no_detectors" | "no_detection" | "below_confidence_threshold";
       readonly detectorCount: number;
       readonly bestDetection?: Detection;
+      readonly detectorFailures?: readonly DetectorFailure[];
     };

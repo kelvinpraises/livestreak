@@ -324,7 +324,9 @@ export type SuiContractsReadEntity =
   | "USDC address"
   | "USDC balance"
   | "NFT balance"
-  | "stream state";
+  | "stream state"
+  | "treasury lvst_staked"
+  | "treasury pending_dividends";
 
 export const suiReadNotFound = (
   entity: SuiContractsReadEntity,

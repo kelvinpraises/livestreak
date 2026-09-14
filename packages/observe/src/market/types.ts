@@ -110,6 +110,12 @@ export interface MarketRegisterResult {
   readonly marketId: StreamId;
   readonly streamId: StreamId;
   readonly title: string;
+  /**
+   * True when the market already existed on-chain, so no transaction was sent
+   * (userOpHash is the zero sentinel). Consumers should prefer this flag over
+   * comparing the hash against 0x0…0.
+   */
+  readonly alreadyRegistered?: boolean;
 }
 
 /** Input to goLive/setEnded: the marketId plus the storage pointer (scheme + id). */

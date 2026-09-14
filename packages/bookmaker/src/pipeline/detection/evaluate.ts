@@ -4,6 +4,7 @@ import { validateDetection } from "../../model/validate.js";
 import type {
   BookmakerDetectionEvaluation,
   BookmakerDetectionInput,
+  DetectorFailure,
   PatternDetectionInput,
   PatternDetector
 } from "./types.js";
@@ -29,13 +30,15 @@ export const detectOpportunity = (input: BookmakerDetectionInput): BookmakerDete
     nowMs: input.nowMs
   };
 
-  const detections = collectValidDetections(detectors, patternInput);
+  const { detections, failures } = collectValidDetections(detectors, patternInput);
+  const withFailures = failures.length > 0 ? { detectorFailures: failures } : {};
 
   if (detections.length === 0) {
     return {
       action: "skip",
       reason: "no_detection",
-      detectorCount: detectors.length
+      detectorCount: detectors.length,
+      ...withFailures
     };
   }
 
@@ -46,14 +49,16 @@ export const detectOpportunity = (input: BookmakerDetectionInput): BookmakerDete
       action: "skip",
       reason: "below_confidence_threshold",
       detectorCount: detectors.length,
-      bestDetection: best.detection
+      bestDetection: best.detection,
+      ...withFailures
     };
   }
 
   return {
     action: "detected",
     detection: best.detection,
-    detectorId: best.detectorId
+    detectorId: best.detectorId,
+    ...withFailures
   };
 };
 
@@ -102,15 +107,25 @@ const isPatternDetector = (detector: unknown): detector is PatternDetector =>
 const collectValidDetections = (
   detectors: readonly PatternDetector[],
   input: PatternDetectionInput
-): readonly { readonly detection: Detection; readonly detectorId: string }[] => {
+): {
+  readonly detections: readonly { readonly detection: Detection; readonly detectorId: string }[];
+  readonly failures: readonly DetectorFailure[];
+} => {
   const detections: { detection: Detection; detectorId: string }[] = [];
+  const failures: DetectorFailure[] = [];
 
   for (const detector of detectors) {
     let raw: Detection | null;
 
     try {
       raw = detector.detect(input);
-    } catch {
+    } catch (error) {
+      // A broken detector must be visible, not silently indistinguishable from "no detection".
+      // Record its failure and keep evaluating the other detectors.
+      failures.push({
+        detectorId: detector.id,
+        message: error instanceof Error ? error.message : String(error)
+      });
       continue;
     }
 
@@ -134,7 +149,7 @@ const collectValidDetections = (
     }
   }
 
-  return detections;
+  return { detections, failures };
 };
 
 const selectBestDetection = (

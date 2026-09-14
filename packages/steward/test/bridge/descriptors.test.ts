@@ -37,13 +37,29 @@ describe("projectStewardDescriptors — canonical FunctionDescriptors", () => {
     expect(JSON.parse(JSON.stringify(descriptors))).toEqual(descriptors);
   });
 
-  it("emits the steward:config configure root with tree identity fields", () => {
+  it("emits the steward.root group that every child's parentId points at (sibling contract)", () => {
+    const descriptors = projectStewardDescriptors(snapshot);
+    const root = descriptors.find((descriptor) => descriptor.id === "steward.root");
+
+    expect(root).toMatchObject({
+      id: "steward.root",
+      package: "steward",
+      nodeKind: "group",
+      visible: true
+    });
+    // Every steward.root-parented child now points at a node that is actually emitted.
+    const children = descriptors.filter((descriptor) => descriptor.parentId === "steward.root");
+    expect(children.length).toBeGreaterThan(0);
+  });
+
+  it("emits the configure action under the root with tree identity fields", () => {
     const configure = byName(projectStewardDescriptors(snapshot), "configure");
 
     expect(configure).toMatchObject({
       id: "steward.config.configure",
       package: "steward",
-      scope: "steward:config",
+      parentId: "steward.root",
+      scope: "bridge:action:configure",
       nodeKind: "action",
       visible: true
     });
@@ -53,13 +69,14 @@ describe("projectStewardDescriptors — canonical FunctionDescriptors", () => {
     ]);
   });
 
-  it("emits configure + close configurator roots", () => {
+  it("emits close as an always-visible configurator action", () => {
     const close = byName(projectStewardDescriptors(snapshot), "close");
 
     expect(close).toMatchObject({
       id: "steward.config.close",
       package: "steward",
-      scope: "steward:config:close",
+      parentId: "steward.root",
+      scope: "bridge:action:close",
       nodeKind: "action",
       visible: true
     });
@@ -71,7 +88,7 @@ describe("projectStewardDescriptors — canonical FunctionDescriptors", () => {
     const vaultGroup = groups.find((group) => group.id === "steward.subject.vault_1");
     const stewardGroup = groups.find((group) => group.id === "steward.subject.steward_bad");
 
-    expect(vaultGroup?.parentId).toBe("steward.config.configure");
+    expect(vaultGroup?.parentId).toBe("steward.root");
     expect(vaultGroup?.visible).toBe(true);
     expect(stewardGroup?.visible).toBe(false);
     for (const group of groups) {
@@ -79,7 +96,7 @@ describe("projectStewardDescriptors — canonical FunctionDescriptors", () => {
     }
   });
 
-  it("emits action children with identity + scopes; reveals the enabled vault resolve action", () => {
+  it("emits action children with identity + granular console scopes; reveals the enabled vault resolve action", () => {
     const descriptors = projectStewardDescriptors(snapshot);
     const actions = descriptors.filter(
       (descriptor) => descriptor.nodeKind === "action" && descriptor.name !== "configure" && descriptor.name !== "close"
@@ -90,7 +107,7 @@ describe("projectStewardDescriptors — canonical FunctionDescriptors", () => {
       expect(action.id.length).toBeGreaterThan(0);
       expect(action.package).toBe("steward");
       expect(action.parentId).toBeDefined();
-      expect(action.scope.startsWith("steward:")).toBe(true);
+      expect(action.scope).toBe(`bridge:action:${action.name}`);
     }
 
     // The watched vault subject's resolve action is revealed (board-first) and enabled.

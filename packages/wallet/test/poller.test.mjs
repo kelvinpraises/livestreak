@@ -5,6 +5,7 @@ import {
   pollUntilUserOperationIncluded,
   readUserOperationSuccess,
   assertUserOperationSucceeded,
+  UserOperationPollTimeoutError,
 } from '@livestreak/wallet'
 
 const readerFrom = (sequence) => {
@@ -61,6 +62,18 @@ describe('pollUntilUserOperationIncluded', () => {
     await assert.rejects(
       () => pollUntilUserOperationIncluded(readerFrom([null]), '0xh', { timeoutMs: 30, intervalMs: 5, maxIntervalMs: 5 }),
       /Timed out/,
+    )
+  })
+
+  // Callers (bookmaker) key their pending-recovery path off the error TYPE, not the message text.
+  it('throws a typed UserOperationPollTimeoutError carrying the hash on timeout', async () => {
+    await assert.rejects(
+      () => pollUntilUserOperationIncluded(readerFrom([null]), '0xhash', { timeoutMs: 30, intervalMs: 5, maxIntervalMs: 5 }),
+      (error) => {
+        assert.ok(error instanceof UserOperationPollTimeoutError)
+        assert.equal(error.userOpHash, '0xhash')
+        return true
+      },
     )
   })
 

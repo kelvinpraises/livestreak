@@ -10,31 +10,54 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const deploymentsDir = join(dirname(fileURLToPath(import.meta.url)), "deployments");
+import { packageRootFrom } from "../package-root.js";
+
+// Always resolve to the committed SOURCE snapshot (chains/evm/deployments), never a dist copy — so a
+// redeploy is picked up at runtime without a package rebuild. Works whether this module runs from
+// source (tsx) or compiled dist, since both walk up to the same package root.
+const deploymentsDir = join(
+  packageRootFrom(dirname(fileURLToPath(import.meta.url))),
+  "chains",
+  "evm",
+  "deployments",
+);
 
 const KNOWN_DEPLOYMENTS = ["localhost"] as const satisfies readonly DeploymentName[];
 
-const readDeploymentFile = (name: string): EvmDeployOutput | undefined => {
+// A missing or corrupt snapshot for a SPECIFICALLY requested deployment is fatal-with-instructions
+// (mirrors chains/sui/addresses.ts): silently returning {} handed consumers empty addresses that
+// only failed far downstream (dead-vaultDriver class of bugs).
+const readDeploymentFile = (name: string): EvmDeployOutput => {
   const path = join(deploymentsDir, `${name}.json`);
   if (!existsSync(path)) {
-    return undefined;
+    throw new Error(
+      `Missing EVM deployment snapshot ${path}. Run: npm run deploy -- --name ${name}`,
+    );
   }
 
   try {
     return JSON.parse(readFileSync(path, "utf-8")) as EvmDeployOutput;
-  } catch {
-    return undefined;
+  } catch (error) {
+    throw new Error(
+      `Unparseable EVM deployment snapshot ${path} (${
+        error instanceof Error ? error.message : String(error)
+      }). Re-run: npm run deploy -- --name ${name}`,
+    );
   }
 };
 
-const loadDeployment = (name: DeploymentName): EvmDeploymentAddresses => {
-  const output = readDeploymentFile(name);
-  if (output === undefined) {
-    return {};
-  }
-  return flattenDeploymentScopes(output);
-};
+const loadDeployment = (name: DeploymentName): EvmDeploymentAddresses =>
+  flattenDeploymentScopes(readDeploymentFile(name));
 
+/** Raw deployment snapshot (rpc + full scopes) read fresh from disk — Node consumers that need the
+ * un-flattened AA/protocol scopes or rpc read this at runtime so stale compiled .ts can never serve
+ * dead addresses (the generated .ts stays browser-only). */
+export const loadDeploymentOutput = (
+  name: DeploymentName = "localhost",
+): EvmDeployOutput => readDeploymentFile(name);
+
+// Directory-listing stays lenient: an absent deployments dir (or none of the known snapshots on
+// disk) just lists the known names — the throw belongs to LOADING a specific deployment.
 const discoverDeployments = (): DeploymentName[] => {
   if (!existsSync(deploymentsDir)) {
     return [...KNOWN_DEPLOYMENTS];
@@ -50,13 +73,23 @@ const discoverDeployments = (): DeploymentName[] => {
   return fromDisk.length > 0 ? fromDisk : [...KNOWN_DEPLOYMENTS];
 };
 
+// Lazy per-deployment accessors: this module is imported eagerly, so an absent snapshot must not
+// break consumers that never touch that deployment — the load (and its actionable throw) happens on
+// FIRST ACCESS of addresses[name], then caches.
 const buildAddresses = (): EvmAddresses => {
   const result = {} as EvmAddresses;
   for (const name of discoverDeployments()) {
-    result[name] = loadDeployment(name);
+    let cached: EvmDeploymentAddresses | undefined;
+    Object.defineProperty(result, name, {
+      enumerable: true,
+      get: (): EvmDeploymentAddresses => {
+        cached ??= loadDeployment(name);
+        return cached;
+      },
+    });
   }
   return result;
 };
 
-/** Typed contract addresses per committed deployment snapshot. */
+/** Typed contract addresses per committed deployment snapshot (loaded lazily, throws on access if absent). */
 export const addresses: EvmAddresses = buildAddresses();

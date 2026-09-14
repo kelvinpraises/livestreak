@@ -24,6 +24,7 @@ export const projectStewardDescriptors = (
   const descriptors: FunctionDescriptor[] = [];
   const views = projectStewardFunctions(snapshot as StewardStateSnapshot);
 
+  pushRoot(descriptors);
   pushConfigurator(descriptors);
   pushSubjectGroups(descriptors, snapshot);
   for (const view of views) {

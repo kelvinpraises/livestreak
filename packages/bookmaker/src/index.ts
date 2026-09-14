@@ -92,7 +92,9 @@ export { originateVault, snapshotBookmakerPanel } from "./flows/index.js";
 export type {
   BookmakerRuntimeConfig,
   BookmakerRuntime,
-  BookmakerRuntimeInput
+  BookmakerRuntimeInput,
+  IdempotencyPersistencePort,
+  IdempotencyPersistedState
 } from "./runtime/index.js";
 export {
   createBookmakerRuntime,

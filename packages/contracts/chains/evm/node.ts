@@ -1,2 +1,2 @@
 /** Node/deploy only — discovers deployments from disk via `node:fs`. */
-export { addresses as loadAddressesFromDisk } from "./addresses.js";
+export { addresses as loadAddressesFromDisk, loadDeploymentOutput } from "./addresses.js";

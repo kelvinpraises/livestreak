@@ -102,7 +102,7 @@ export const runRemoteOpen = async (input: {
   await persist();
 
   const runId = `remote-${record.sessionId}`;
-  const consoleEdges: ConsoleEdge[] = createConsoleEdges({
+  const consoleEdges: ConsoleEdge[] = await createConsoleEdges({
     settings,
     sessionWallet,
     runId

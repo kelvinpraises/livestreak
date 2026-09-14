@@ -1,0 +1,145 @@
+name: Deploy host
+
+# Push-to-deploy for the LiveStreak host server (the provider node: HTTP/WSS API +
+# embedded TURN media relay). Mirrors deploy-app.yml: build the image in CI, push to
+# ghcr.io, then SSH into the SAME VPS and pull+run it. You only touch the PEM once
+# (DEPLOY_KEY secret).
+#
+# Required repo secrets (Settings → Secrets and variables → Actions) — shared with
+# deploy-app.yml:
+#   DEPLOY_HOST        108.130.99.99
+#   DEPLOY_USER        ubuntu
+#   DEPLOY_KEY         <contents of uburu-key-pair.pem>
+#
+# Host RUNTIME config is NOT baked into the image and is NOT a CI secret. It lives in
+# a VPS-side env file (never committed) that `docker run --env-file` reads:
+#   /home/ubuntu/livestreak-host.env
+# Variables the host reads at runtime (host/src/config/*, host/src/services/*):
+#   Server / bind
+#     LIVESTREAK_HOST_ID, LIVESTREAK_HOST_BASE_URL,
+#     LIVESTREAK_HOST_BIND_HOST (default 0.0.0.0 in-image), LIVESTREAK_HOST_BIND_PORT (8787)
+#   Account-abstraction (EVM RPC + executor keys + paymaster)
+#     LIVESTREAK_AA_CHAINS_FILE (path to a per-chain JSON, mounted separately) — OR the
+#     single-chain env form:
+#     LIVESTREAK_AA_CHAIN_ID, LIVESTREAK_AA_RPC_URL, LIVESTREAK_AA_BUNDLER_URL,
+#     LIVESTREAK_AA_ENTRY_POINT, LIVESTREAK_AA_PAYMASTER_ADDRESS,
+#     LIVESTREAK_AA_SAFE_MODULE, LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY,
+#     LIVESTREAK_AA_OPERATOR_KEY, LIVESTREAK_AA_PAYMASTER_AUTH_TOKEN
+#     (LIVESTREAK_AA_ALLOW_DEV_KEY is DEV-ONLY — do NOT set in prod)
+#   Sui (memory/content sponsor + reads)
+#     LIVESTREAK_SUI_NETWORK, LIVESTREAK_SUI_RPC_URL, LIVESTREAK_SUI_DEPLOYMENT,
+#     LIVESTREAK_SUI_SPONSOR_MNEMONIC
+#   Walrus (content blobs + memory relayer)
+#     LIVESTREAK_WALRUS_NETWORK, LIVESTREAK_WALRUS_MEMORY_RELAYER_URL_OVERRIDE,
+#     LIVESTREAK_WALRUS_REGISTRY_ID_OVERRIDE, LIVESTREAK_MEMORY_OWNER_KEY (or
+#     LIVESTREAK_MEMORY_OWNER_SEED), LIVESTREAK_WALLET_SEED
+#   WebRTC / embedded TURN (usually leave defaults; RELAY_IP auto-detects under --network host)
+#     LIVESTREAK_TURN_ENABLED, LIVESTREAK_TURN_PORT, LIVESTREAK_TURN_RELAY_IP,
+#     LIVESTREAK_TURN_MIN_PORT, LIVESTREAK_TURN_MAX_PORT,
+#     LIVESTREAK_TURN_USER, LIVESTREAK_TURN_PASS, LIVESTREAK_TURN_REALM
+#   Remote Bridge Console (P4) + LiveKit
+#     LIVESTREAK_APP_ORIGIN, LIVESTREAK_REMOTE_GATEWAY_TOKEN,
+#     LIVESTREAK_REMOTE_GRANT_KEY, LIVESTREAK_REMOTE_SESSION_TTL_MS, LIVEKIT_API_KEY
+#
+# One-time after the first run: make the ghcr package PUBLIC
+#   (github.com/users/<you>/packages/container/livestreak-host/settings → Change visibility)
+#   so the VPS can `docker pull` anonymously.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/livestreak-host
+
+jobs:
+  # dorny/paths-filter so host/** auto-covers new files while !**/*.md skips doc-only
+  # commits. Inputs = host/ + the workspace packages host imports + its Dockerfile +
+  # this workflow. Kept in lockstep with host/Dockerfile's COPY list.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      host: ${{ steps.filter.outputs.host }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            host:
+              - 'host/**'
+              - 'packages/core/**'
+              - 'packages/schema/**'
+              - 'packages/wallet/**'
+              - 'packages/contracts/**'
+              - 'packages/host/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.base.json'
+              - '.dockerignore'
+              - '.github/workflows/deploy-host.yml'
+              - '!**/*.md'
+
+  build-and-deploy:
+    needs: changes
+    # Always build on a manual run; on push, only when host-relevant files changed.
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.changes.outputs.host == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: host/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -e
+            IMAGE=ghcr.io/${{ github.repository_owner }}/livestreak-host:latest
+            docker pull "$IMAGE"
+            docker stop livestreak-host 2>/dev/null || true
+            docker rm livestreak-host 2>/dev/null || true
+            # --network host: the embedded TURN allocates UDP relay ports and advertises
+            # the box IP in its ICE candidates; bridge NAT would rewrite the relay source
+            # port and break them. Host networking also lets TURN auto-detect the box IP.
+            # Runtime config comes from the VPS-side env file, never from the image.
+            docker run -d \
+              --name livestreak-host \
+              --restart unless-stopped \
+              --network host \
+              --env-file /home/ubuntu/livestreak-host.env \
+              "$IMAGE"
+            docker image prune -f
+            echo "--- waiting for health ---"
+            sleep 5
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8787/health || echo 000)
+            echo "GET /health -> $code"
+            docker logs --tail 20 livestreak-host || true

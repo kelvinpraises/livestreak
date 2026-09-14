@@ -11,7 +11,7 @@ import {
   createWalletManager,
   type SuiWalletConfig
 } from "@livestreak/wallet";
-import { MODULES, target } from "@livestreak/contracts/sui";
+import { MODULES, suiBytes32IdBytes, target } from "@livestreak/contracts/sui";
 
 import { validateOptionsVaultSide } from "../../model/vault.js";
 import { asTokenId, type TokenId } from "../../model/ids.js";
@@ -45,12 +45,9 @@ import { validateSuiUserAddress } from "./account.js";
 const SUI_CLOCK_OBJECT_ID = "0x6";
 
 // Build the raw 32-byte array from a hex vault/market ID string (validated — OPT.sui-validate; a
-// malformed/short id used to silently zero-pad).
-const vaultIdByteArray = (id: string, field = "vaultId"): number[] => {
-  const validated = validateSuiBytes32Id(id, field);
-  const hex = validated.startsWith("0x") ? validated.slice(2) : validated;
-  return Array.from({ length: 32 }, (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16));
-};
+// malformed/short id used to silently zero-pad). Byte building is canonical in @livestreak/contracts.
+const vaultIdByteArray = (id: string, field = "vaultId"): number[] =>
+  suiBytes32IdBytes(validateSuiBytes32Id(id, field));
 
 // Build a pure bytes32 vector argument from a hex vault/market ID string.
 const vaultIdBytes = (id: string): Uint8Array =>

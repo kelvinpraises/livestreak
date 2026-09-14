@@ -15,6 +15,22 @@ export type IdempotencySnapshotEntry = {
   readonly result: CreateVaultResult;
 };
 
+/** The durable slice of the store: settled results + pending userOp hashes keyed by idempotency
+ *  key. Fully JSON-serializable (branded strings). in-flight promises and the exclusive chains are
+ *  intentionally NOT persisted — a restart re-derives them from settled/pending. */
+export type IdempotencyPersistedState = {
+  readonly settled: Readonly<Record<string, CreateVaultResult>>;
+  readonly pending: Readonly<Record<string, TxId>>;
+};
+
+/** Optional persistence port (mirrors options' PausedLanesPort): `initial` rehydrates settled +
+ *  pending on boot so pending-userOp recovery survives a gateway restart; `onChange` fires after any
+ *  mutation to the durable slice. The package stays port-only; a file adapter is injected at the CLI edge. */
+export interface IdempotencyPersistencePort {
+  readonly initial?: IdempotencyPersistedState;
+  readonly onChange?: (state: IdempotencyPersistedState) => void;
+}
+
 export interface IdempotencyStore {
   readonly run: (
     key: string,
@@ -30,12 +46,25 @@ export interface IdempotencyStore {
   readonly failureSnapshot: () => ReadonlyMap<string, readonly IdempotencyFailureRecord[]>;
 }
 
-export const createIdempotencyStore = (): IdempotencyStore => {
-  const settled = new Map<string, CreateVaultResult>();
-  const pending = new Map<string, TxId>();
+export const createIdempotencyStore = (
+  persistence?: IdempotencyPersistencePort
+): IdempotencyStore => {
+  const settled = new Map<string, CreateVaultResult>(
+    Object.entries(persistence?.initial?.settled ?? {})
+  );
+  const pending = new Map<string, TxId>(
+    Object.entries(persistence?.initial?.pending ?? {})
+  );
   const inFlight = new Map<string, Promise<CreateVaultResult>>();
   const failures = new Map<string, IdempotencyFailureRecord[]>();
   const exclusiveChains = new Map<string, Promise<unknown>>();
+
+  const persist = (): void => {
+    persistence?.onChange?.({
+      settled: Object.fromEntries(settled),
+      pending: Object.fromEntries(pending)
+    });
+  };
 
   const recordFailure = (key: string, error: unknown): void => {
     const message = error instanceof Error ? error.message : String(error);
@@ -60,6 +89,7 @@ export const createIdempotencyStore = (): IdempotencyStore => {
         try {
           const result = await exec();
           settled.set(key, result);
+          persist();
           return result;
         } catch (error) {
           inFlight.delete(key);
@@ -85,11 +115,13 @@ export const createIdempotencyStore = (): IdempotencyStore => {
       settled.set(key, result);
       pending.delete(key);
       inFlight.delete(key);
+      persist();
     },
 
     markPending: (key, userOpHash) => {
       pending.set(key, userOpHash);
       inFlight.delete(key);
+      persist();
     },
 
     recordFailure,

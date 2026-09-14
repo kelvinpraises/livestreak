@@ -345,7 +345,7 @@ export const vaultRowToLiveRaw = (
   v: Vault,
   streamTitle: string,
   nowMs: number
-): HomepageLiveVaultRaw & { readonly settledPool?: number } => {
+): HomepageLiveVaultRaw => {
   const liveYes = toBaseUnits(v.live_yes_pool);
   const liveNo = toBaseUnits(v.live_no_pool);
   const settledYes = toBaseUnits(v.yes_pool);

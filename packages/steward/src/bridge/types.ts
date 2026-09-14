@@ -1,42 +1,25 @@
 // --- exports ---
 
-import { LiveStreakCapabilityError, LiveStreakConfigError } from "@livestreak/core";
+// Capability types + bridge scope constants are the CANONICAL ones from @livestreak/schema
+// (re-exported so downstream imports from bridge/types.js keep compiling unchanged).
+import type { BridgeCaller, CallActionEnvelope } from "@livestreak/schema";
 
-export type CapabilityScope =
-  | `${string}:${string}`
-  | `${string}:${string}:${string}`
-  | "*";
+export type {
+  BridgeCaller,
+  CallActionEnvelope,
+  CapabilityGrant,
+  CapabilityScope
+} from "@livestreak/schema";
+export {
+  bridgeActionScope,
+  bridgeBoardReadScope,
+  bridgeBoardSubscribeScope,
+  bridgeControlsReadScope
+} from "@livestreak/schema";
 
-export interface CapabilityGrant {
-  readonly id: string;
-  readonly sessionId: string;
-  readonly holder: string;
-  readonly scopes: readonly CapabilityScope[];
-  readonly expiresAt?: number;
-  readonly revoked: boolean;
-}
-
-export const bridgeBoardReadScope = "bridge:board:read" as const;
-export const bridgeControlsReadScope = "bridge:controls:read" as const;
-export const bridgeActionScope = "bridge:action" as const;
-export const bridgeBoardSubscribeScope = "bridge:board:subscribe" as const;
 /** Configurator scope — operator supplies watched subjects before the action tree becomes visible. */
 export const stewardConfigScope = "steward:config" as const;
 export const stewardConfigCloseScope = "steward:config:close" as const;
-
-export interface BridgeCaller {
-  readonly id: string;
-  readonly label?: string;
-  readonly trusted?: boolean;
-  readonly grants?: readonly CapabilityGrant[];
-}
-
-export interface CallActionEnvelope {
-  readonly scope: typeof bridgeActionScope;
-  readonly action: string;
-  readonly id?: string;
-  readonly args: unknown;
-}
 
 export interface CreateStewardBridgeInput {
   readonly runtime: import("../runtime/runtime.js").StewardRuntime;

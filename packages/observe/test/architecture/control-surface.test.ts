@@ -218,13 +218,16 @@ describe("control surface architecture guards", () => {
     expect(existsSync(path.join(packageRoot, "src/gateway"))).toBe(false);
   });
 
-  it("defines CapabilityScope in scope, not pipeline shared", () => {
+  it("sources CapabilityScope from scope (canonical schema re-export), not pipeline shared", () => {
     const scopeSource = readFileSync(path.join(packageRoot, "src/scope/scopes.ts"), "utf8");
     const sharedSource = readFileSync(path.join(packageRoot, "src/pipeline/shared.ts"), "utf8");
 
-    expect(scopeSource).toMatch(/export type CapabilityScope/);
+    // The type is the CANONICAL one from @livestreak/schema, re-exported through scope/scopes.ts —
+    // never a local re-declaration here or in pipeline/shared.
+    expect(scopeSource).toMatch(/CapabilityScope[\s\S]*?from "@livestreak\/schema"/);
+    expect(scopeSource).not.toMatch(/^export type CapabilityScope =/m);
     expect(scopeSource).not.toMatch(/#pipeline\//);
-    expect(sharedSource).not.toMatch(/^export type CapabilityScope/m);
+    expect(sharedSource).not.toMatch(/^export type CapabilityScope =/m);
     expect(sharedSource).toMatch(/from "#scope\/scopes\.js"/);
   });
 });

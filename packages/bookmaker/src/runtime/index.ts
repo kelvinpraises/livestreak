@@ -8,7 +8,9 @@ export type {
   IdempotencyStore,
   IdempotencyRunResult,
   IdempotencySnapshotEntry,
-  IdempotencyFailureRecord
+  IdempotencyFailureRecord,
+  IdempotencyPersistencePort,
+  IdempotencyPersistedState
 } from "./idempotency.js";
 export { createIdempotencyStore } from "./idempotency.js";
 export type { CreateVaultOnceResult } from "./create-vault-once.js";

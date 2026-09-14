@@ -1,10 +1,17 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { packageRootFrom } from "../package-root.js";
 import type { SuiDeployment, SuiDeploymentName } from "./types.js";
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
-const deploymentsDir = join(ROOT, "deployments");
+// Resolve to the committed SOURCE snapshot (chains/sui/deployments), never a dist copy — a redeploy
+// is picked up at runtime without a package rebuild. See chains/package-root.ts.
+const deploymentsDir = join(
+  packageRootFrom(dirname(fileURLToPath(import.meta.url))),
+  "chains",
+  "sui",
+  "deployments",
+);
 
 export const DEFAULT_SUI_DEPLOYMENT: SuiDeploymentName = "localnet";
 

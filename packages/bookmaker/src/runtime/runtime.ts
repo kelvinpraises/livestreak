@@ -5,11 +5,16 @@ import type { BookmakerPanelView } from "../model/watch-source.js";
 import { createBookmakerChain, type BookmakerChain } from "../chains/index.js";
 import { validateBookmakerChainConfig } from "../chains/config.js";
 import type { BookmakerRuntimeConfig } from "./config.js";
-import { createIdempotencyStore, type IdempotencyStore } from "./idempotency.js";
+import {
+  createIdempotencyStore,
+  type IdempotencyPersistencePort,
+  type IdempotencyStore
+} from "./idempotency.js";
 import { createVaultOnce, type CreateVaultOnceResult } from "./create-vault-once.js";
 import { createSnapshotSubscriptionRegistry } from "./subscriptions.js";
 import { createBookmakerRuntimeStore, type BookmakerRuntimeState, type BookmakerRuntimeStore } from "./store.js";
-import type { CreateVaultIntent } from "../model/write-intent.js";
+import { vaultDraftFromCreateIntent, type CreateVaultIntent } from "../model/write-intent.js";
+import { registerCreatedVaultFailOpen } from "../pipeline/similarity/register.js";
 import { validateBookmakerRuntimeConfig } from "../runtime/validate.js";
 
 // --- exports ---
@@ -17,6 +22,9 @@ import { validateBookmakerRuntimeConfig } from "../runtime/validate.js";
 export interface BookmakerRuntimeInput {
   readonly config: BookmakerRuntimeConfig;
   readonly chain?: BookmakerChain;
+  /** Optional file/store adapter (injected at the CLI edge) so settled + pending-userOp state
+   *  survives a gateway restart. Package stays port-only. */
+  readonly idempotencyPersistence?: IdempotencyPersistencePort;
 }
 
 export interface BookmakerRuntime {
@@ -62,7 +70,7 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
 
     this.config = validated.value;
     this.store = createBookmakerRuntimeStore(this.config.runtimeId);
-    this.idempotencyStore = createIdempotencyStore();
+    this.idempotencyStore = createIdempotencyStore(input.idempotencyPersistence);
     this.chain =
       input.chain ??
       createBookmakerChain(
@@ -146,6 +154,24 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
         intent,
         nowMs
       });
+      // Console-path parity with the originate flow (B2): a created vault must enter the host
+      // discovery index or future originations/similarity queries can never find it. Fail-open —
+      // an index failure never fails the create; it is surfaced on the panel instead. Idempotent
+      // re-creates are already indexed.
+      let indexError: string | undefined;
+      if (res.idempotent === false && this.config.similarityClient !== undefined) {
+        await registerCreatedVaultFailOpen({
+          similarityClient: this.config.similarityClient,
+          draft: vaultDraftFromCreateIntent(intent, this.config.fundingToken),
+          vaultId: res.result.vaultId,
+          vaultKey: res.idempotencyKey,
+          onIndexError: (error) => {
+            indexError = `vault created; discovery index registration failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`;
+          }
+        });
+      }
       // Record the completed creation into the panel so the console board confirms it. Previously the
       // vault landed on-chain but completedVaultCreations stayed empty and no snapshot was published, so
       // the console showed no success. Publishing here also notifies board subscribers (the console).
@@ -154,7 +180,7 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
       this.publishSnapshot({
         ...this.lastSnapshot,
         completedVaultCreations: already ? prev : [...prev, { intent, result: res.result }],
-        lastError: undefined,
+        lastError: indexError,
         updatedAtMs: nowMs
       });
       return res;

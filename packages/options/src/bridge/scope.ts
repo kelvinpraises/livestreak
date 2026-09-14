@@ -1,28 +1,15 @@
 // --- exports ---
 
+// Options' throw-based authorize wrappers around the CANONICAL depth-guarded capability kit in
+// @livestreak/schema — the loose local matcher (no depth guard) is gone.
+
 import { LiveStreakCapabilityError } from "@livestreak/core";
+import { hasAnyScope } from "@livestreak/schema";
 
 import type { BridgeCaller, CapabilityGrant, CapabilityScope } from "./types.js";
 
 export type { CapabilityGrant, CapabilityScope } from "./types.js";
-
-export const hasScope = (
-  grant: CapabilityGrant,
-  requiredScope: CapabilityScope,
-  now = Date.now()
-): boolean => {
-  if (grant.revoked || grantIsExpired(grant.expiresAt, now)) {
-    return false;
-  }
-
-  return grant.scopes.some((grantScope) => scopeMatchesGrant(grantScope, requiredScope));
-};
-
-export const hasAnyScope = (
-  grants: readonly CapabilityGrant[],
-  requiredScope: CapabilityScope,
-  now = Date.now()
-): boolean => grants.some((grant) => hasScope(grant, requiredScope, now));
+export { hasAnyScope, hasScope } from "@livestreak/schema";
 
 export const requireAnyScope = (
   grants: readonly CapabilityGrant[],
@@ -58,27 +45,4 @@ const validateBridgeCaller = (caller: BridgeCaller): void => {
       requiredScope: "*"
     });
   }
-};
-
-const grantIsExpired = (expiresAt: number | undefined, now: number): boolean =>
-  expiresAt !== undefined && expiresAt <= now;
-
-const scopeMatchesGrant = (
-  grantScope: CapabilityScope,
-  requiredScope: CapabilityScope
-): boolean => {
-  if (grantScope === "*") {
-    return true;
-  }
-
-  if (grantScope === requiredScope) {
-    return true;
-  }
-
-  if (grantScope.endsWith(":*")) {
-    const prefix = grantScope.slice(0, -1);
-    return requiredScope.startsWith(prefix);
-  }
-
-  return false;
 };

@@ -1,5 +1,6 @@
-# Docker build context for ./Dockerfile (context = repo root).
-# Only app/ and packages/wallet/ are COPYed; everything else just bloats/leaks.
+# Shared Docker build context (context = repo root) for both ./Dockerfile (app) and
+# ./host/Dockerfile (host server). Each Dockerfile COPYs only the paths it needs, so
+# this list just trims bloat/secrets that neither image should ever pull in.
 
 **/node_modules
 **/.output
@@ -9,19 +10,27 @@
 **/.DS_Store
 **/*.log
 
-# secrets / local env never go into the image (frontend config is public build-args)
+# host catalog sqlite projection (materialized from chain; multi-MB; never in an image)
+**/*.db
+**/*.db-shm
+**/*.db-wal
+
+# secrets / local env never go into an image (frontend config is public build-args;
+# host runtime config is injected via `docker run --env-file`)
 **/.env
 **/.env.*
 !**/.env.example
+host/aa.chains.json
+host/aa.chains.*.json
+!host/aa.chains.example.json
 
-# reference + non-app workspaces (not needed to build the frontend)
+# reference + workspaces neither image builds from
 context
-host
 cli
 packages/observe
 packages/bookmaker
 packages/steward
 
-# keep: app/** + the workspace packages app needs:
-#   packages/wallet, packages/options, packages/schema, packages/contracts,
-#   packages/core, packages/host
+# keep, shared by both images: packages/{core,schema,wallet,contracts,host}
+#   app image also copies app/ + packages/options
+#   host image also copies host/

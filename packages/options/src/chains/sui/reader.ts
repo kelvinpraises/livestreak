@@ -695,32 +695,30 @@ const readCollected = async (ctx: ReaderContext, vaultId: VaultId): Promise<bool
   }
 };
 
+// Parity with EVM readAccountVaultIds: the APPEND-ONLY share ledger (Move vault::get_account_vault_ids),
+// NOT the active marketDriver lanes. The account key is the tokenId (u256), mirroring EVM where the NFT
+// tokenId IS the vault account. Deriving from lanes dropped vaults the account funded then fully exited
+// (held positions), so the position model was Sui-incomplete — see project_position_model.
 const readAccountVaultIds = async (
   ctx: ReaderContext,
   tokenId: TokenId
 ): Promise<readonly VaultId[]> => {
-  const laneCount = await readLaneCount(ctx, tokenId);
-  const vaultIds: VaultId[] = [];
-
-  for (let i = 0; i < laneCount; i += 1) {
+  try {
     const tx = new Transaction();
     tx.moveCall({
-      target: target(ctx.packageId, MODULES.marketDriver, "lane_vault_at"),
-      arguments: [
-        tx.object(ctx.ids.marketDriverRegistry),
-        tx.pure.u256(tokenId),
-        tx.pure.u64(i)
-      ]
+      target: target(ctx.packageId, MODULES.vault, "get_account_vault_ids"),
+      typeArguments: [ctx.coinType],
+      arguments: [tx.object(ctx.ids.vaultRegistry), tx.pure.u256(tokenId)]
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
-    if (val !== undefined) {
-      const rawBytes = bcs.vector(bcs.u8()).parse(Uint8Array.from(val[0])) as number[];
-      vaultIds.push(asVaultId(bytesVecToHex(rawBytes)));
-    }
+    if (val === undefined) return [];
+    // Returns vector<vector<u8>> — the same shape as market get_vault_ids.
+    return decodeVaultIdsList(val);
+  } catch (error) {
+    if (error instanceof LiveStreakConfigError) throw error;
+    throw suiReadFailed("account vault ids", error);
   }
-
-  return vaultIds;
 };
 
 const readLaneCount = async (ctx: ReaderContext, tokenId: TokenId): Promise<number> => {
@@ -854,54 +852,49 @@ const readNft = async (
     let marketId = asMarketId(`0x${"0".repeat(64)}`);
     if (lanes.length > 0) {
       const firstVaultId = lanes[0]!.vaultId;
-      try {
-        const vaultHex2 = firstVaultId.startsWith("0x") ? firstVaultId.slice(2) : firstVaultId;
-        const vaultBytes2 = Array.from({ length: 32 }, (_, j) =>
-          parseInt(vaultHex2.slice(j * 2, j * 2 + 2) || "0", 16)
-        );
-        const mktTx = new Transaction();
-        mktTx.moveCall({
-          target: target(ctx.packageId, MODULES.vault, "market_id"),
-          typeArguments: [ctx.coinType],
-          arguments: [
-            mktTx.object(ctx.ids.vaultRegistry),
-            mktTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes2).toBytes())
-          ]
-        });
-        const mktResults = await inspect(ctx, mktTx);
-        const mktVal = mktResults[0]?.[0];
-        if (mktVal !== undefined) {
-          const rawMktBytes = bcs.vector(bcs.u8()).parse(Uint8Array.from(mktVal[0])) as number[];
-          marketId = asMarketId(bytesVecToHex(rawMktBytes));
-        }
-      } catch {
-        // leave as zero-id if vault lookup fails
+      // A Move-level no-value (mktVal undefined) leaves the zero-id; a transport failure propagates
+      // to readNft's outer handler rather than silently filtering the NFT out of the snapshot.
+      const vaultHex2 = firstVaultId.startsWith("0x") ? firstVaultId.slice(2) : firstVaultId;
+      const vaultBytes2 = Array.from({ length: 32 }, (_, j) =>
+        parseInt(vaultHex2.slice(j * 2, j * 2 + 2) || "0", 16)
+      );
+      const mktTx = new Transaction();
+      mktTx.moveCall({
+        target: target(ctx.packageId, MODULES.vault, "market_id"),
+        typeArguments: [ctx.coinType],
+        arguments: [
+          mktTx.object(ctx.ids.vaultRegistry),
+          mktTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes2).toBytes())
+        ]
+      });
+      const mktResults = await inspect(ctx, mktTx);
+      const mktVal = mktResults[0]?.[0];
+      if (mktVal !== undefined) {
+        const rawMktBytes = bcs.vector(bcs.u8()).parse(Uint8Array.from(mktVal[0])) as number[];
+        marketId = asMarketId(bytesVecToHex(rawMktBytes));
       }
     } else {
       // O6: a laneless NFT has no lane[0] to derive the market from. Read the NFT object's OWN
       // market_id field (the MarketPositionNFT struct carries it) so the NFT isn't dropped from the
-      // snapshot (snapshot filters by marketId === 0x000…).
-      try {
-        const nftType = `${ctx.packageId}::market_driver::MarketPositionNFT`;
-        const owned = await ctx.client.getOwnedObjects({
-          owner,
-          filter: { StructType: nftType },
-          options: { showContent: true }
-        });
-        for (const obj of owned.data) {
-          if (obj.data?.content?.dataType === "moveObject") {
-            const fields = obj.data.content.fields as Record<string, unknown>;
-            if (BigInt(String(fields["token_id"])) === tokenId) {
-              const raw = fields["market_id"];
-              if (Array.isArray(raw)) {
-                marketId = asMarketId(bytesVecToHex(raw as number[]));
-              }
-              break;
+      // snapshot (snapshot filters by marketId === 0x000…). Transport failure propagates to readNft's
+      // outer handler; a Move-level no-value still leaves the zero-id.
+      const nftType = `${ctx.packageId}::market_driver::MarketPositionNFT`;
+      const owned = await ctx.client.getOwnedObjects({
+        owner,
+        filter: { StructType: nftType },
+        options: { showContent: true }
+      });
+      for (const obj of owned.data) {
+        if (obj.data?.content?.dataType === "moveObject") {
+          const fields = obj.data.content.fields as Record<string, unknown>;
+          if (BigInt(String(fields["token_id"])) === tokenId) {
+            const raw = fields["market_id"];
+            if (Array.isArray(raw)) {
+              marketId = asMarketId(bytesVecToHex(raw as number[]));
             }
+            break;
           }
         }
-      } catch {
-        // leave as zero-id if the owned-object scan fails
       }
     }
 
@@ -933,11 +926,9 @@ const readLvstAccount = async (
     throw suiReadFailed("LVST account", error);
   }
 
-  // Staked + pending-dividends are treasury devInspect reads. RESILIENCE: a treasury read that
-  // reverts (e.g. the user has never interacted with the treasury, so no per-user entry exists yet)
-  // must NOT block Sui connect/board — default to 0 and keep the resolved wallet balance. Without
-  // this, the FIRST read in readUserOptionsSnapshot threw and the entire Sui connect failed
-  // ("Failed to read LVST account").
+  // Staked + pending-dividends are treasury devInspect reads. A user with no per-user treasury entry
+  // yet yields an empty result (real 0, non-fatal); a transport failure propagates as suiReadFailed
+  // rather than being fabricated as a 0.
   const staked = await readTreasuryU128(ctx, account, "lvst_staked");
   const pendingDividends = await readTreasuryU128(ctx, account, "pending_dividends");
 
@@ -954,8 +945,9 @@ const normalizeSuiUserAddress = (user: UserAddress): string => {
   return `0x${hex.padStart(64, "0")}`;
 };
 
-// Read a single-u128 treasury accessor by name; treat a per-user revert as a non-fatal 0 so one
-// missing treasury entry can't fail the whole Sui user snapshot (board resolve).
+// Read a single-u128 treasury accessor by name. An EMPTY devInspect result (val undefined) is a real
+// 0 for a fresh user with no treasury entry and stays non-fatal; a THROWN error is transport failure
+// and must propagate so we don't fabricate a 0 for a broken read.
 const readTreasuryU128 = async (
   ctx: ReaderContext,
   account: string,
@@ -971,8 +963,10 @@ const readTreasuryU128 = async (
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
     return val !== undefined ? readU128(val) : 0n;
-  } catch {
-    return 0n;
+  } catch (error) {
+    if (error instanceof LiveStreakConfigError) throw error;
+    const entity = fn === "lvst_staked" ? "treasury lvst_staked" : "treasury pending_dividends";
+    throw suiReadFailed(entity, error);
   }
 };
 

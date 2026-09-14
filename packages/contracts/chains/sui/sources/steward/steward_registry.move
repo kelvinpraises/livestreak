@@ -12,6 +12,7 @@ const E_ZERO_STEWARD: u64 = 1;
 const E_UNREGISTERED: u64 = 2;
 const E_NO_STEWARD: u64 = 3;
 const E_NOT_STEWARD: u64 = 4;
+const E_INVALID_OUTCOME: u64 = 5;
 
 const SEVERITY_WARM: u8 = 0;
 const SEVERITY_HOT: u8 = 1;
@@ -171,7 +172,7 @@ public fun resolve_vault<T>(
     clock: &Clock,
     ctx: &TxContext,
 ) {
-    assert!(outcome == OUTCOME_YES || outcome == OUTCOME_NO, 0);
+    assert!(outcome == OUTCOME_YES || outcome == OUTCOME_NO, E_INVALID_OUTCOME);
     let market_id = vault::market_id(vault_registry, &vault_id);
     require_market_steward(registry, &market_id, ctx);
     let side = if (outcome == OUTCOME_YES) { side::yes() } else { side::no() };

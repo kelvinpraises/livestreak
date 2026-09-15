@@ -58,7 +58,10 @@ export type EvmWalletInitConfig = Schema.Schema.Type<typeof EvmWalletInitConfig>
 // entryPoint / Safe apparatus — only RPC connectivity.
 export const SuiWalletInitConfig = Schema.Struct({
   rpcUrl: Schema.Union(Schema.String, Schema.Array(Schema.String)), // one endpoint or a failover list
-  retries: Schema.optional(Schema.Number)
+  retries: Schema.optional(Schema.Number),
+  // Which @mysten/sui v2 network the rpcUrl targets. Filled by the composition root (host/cli read it
+  // at their env edge); @livestreak/wallet defaults to 'localnet' when absent.
+  network: Schema.optional(Schema.Literal("mainnet", "testnet", "devnet", "localnet"))
 });
 export type SuiWalletInitConfig = Schema.Schema.Type<typeof SuiWalletInitConfig>;
 

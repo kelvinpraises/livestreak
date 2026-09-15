@@ -79,7 +79,7 @@ export const createSuiBookmakerWriter = (config: BookmakerChainConfig): Bookmake
         const account = (await manager.getAccount()) as SuiContext["account"];
         const owner = await account.getAddress();
         const rpcUrl = Array.isArray(suiConfig.rpcUrl) ? suiConfig.rpcUrl[0] : (suiConfig.rpcUrl ?? "");
-        const client = createSuiReadClient(rpcUrl as string);
+        const client = createSuiReadClient(rpcUrl as string, suiConfig.network);
         return { account, owner, client };
       })();
     }

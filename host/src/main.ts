@@ -9,29 +9,12 @@
  */
 
 import { createServer } from "node:http";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { applyDeploySnapshotEnv } from "./config/aa/deploy-env.js";
 import { bootstrapHostServer } from "./server.js";
 import { attachRemoteWss } from "./infrastructure/ws/server.js";
 import { readTurnConfig, startTurnServer } from "./services/webrtc/turn.js";
 
-const HOST_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..");
-const DEFAULT_DEPLOY_SNAPSHOT = resolve(
-  HOST_ROOT,
-  "../packages/contracts/chains/evm/deployments/localhost.json"
-);
-
-if (process.env.LIVESTREAK_AA_FROM_DEPLOY !== "0") {
-  const snapshotPath = process.env.LIVESTREAK_DEPLOY_SNAPSHOT ?? DEFAULT_DEPLOY_SNAPSHOT;
-  try {
-    applyDeploySnapshotEnv(snapshotPath);
-    console.log(`[host]: AA env from deploy snapshot ${snapshotPath}`);
-  } catch (error) {
-    console.warn(`[host]: deploy snapshot not loaded (${String(error)}) — set AA env manually`);
-  }
-}
-
+// The AA config assembly loads the deploy snapshot as read-only INPUT (config/aa/deploy-env.ts) —
+// env is never mutated here. LIVESTREAK_AA_FROM_DEPLOY=0 / LIVESTREAK_DEPLOY_SNAPSHOT are honored there.
 const { config, deps, app } = await bootstrapHostServer();
 
 // Explicit http.Server so the Remote Bridge Console WSS legs can share the port

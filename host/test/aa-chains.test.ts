@@ -3,9 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readChainsFromFile } from "#config/aa/chains-file.js";
-import { applyDeploySnapshotEnv } from "#config/aa/deploy-env.js";
+import type { DeploySnapshotConfig } from "#config/aa/deploy-env.js";
 import { readAaServerConfig } from "#services/aa/chains.js";
 import { defaultHostServerConfig } from "#config/host.js";
+
+const localChain = (aa: ReturnType<typeof readAaServerConfig>) =>
+  aa.chains.find((c) => c.routeKey === "local");
 
 describe("aa chains file", () => {
   const envSnapshot = { ...process.env };
@@ -72,49 +75,70 @@ describe("aa chains file", () => {
   });
 });
 
-describe("aa deploy env", () => {
+describe("aa deploy env merge", () => {
   const envSnapshot = { ...process.env };
+  const cleanAaEnv = () => {
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("LIVESTREAK_AA_")) delete process.env[key];
+    }
+  };
 
   afterEach(() => {
     process.env = { ...envSnapshot };
   });
 
-  it("does not inject dev executor key unless opt-in", () => {
-    const dir = mkdtempSync(join(tmpdir(), "aa-deploy-"));
-    const snapshotPath = join(dir, "localhost.json");
-    writeFileSync(
-      snapshotPath,
-      JSON.stringify({
-        chainId: 31337,
-        rpcUrl: "http://127.0.0.1:8545",
-        entryPoint: "0x0000000000000000000000000000000000000001"
-      })
-    );
+  const snapshot: DeploySnapshotConfig = {
+    chainId: 31337,
+    rpcUrl: "http://snapshot-rpc.example",
+    entryPoint: "0x00000000000000000000000000000000000000e1",
+    safeModule: "0x00000000000000000000000000000000000000a1",
+    paymasterAddress: "0x00000000000000000000000000000000000000b1"
+  };
 
-    delete process.env.LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY;
-    delete process.env.LIVESTREAK_AA_ALLOW_DEV_KEY;
-    applyDeploySnapshotEnv(snapshotPath);
-    expect(process.env.LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY).toBeUndefined();
+  it("fills gaps from the snapshot when the env is unset", () => {
+    cleanAaEnv();
+    const aa = readAaServerConfig(defaultHostServerConfig(), snapshot);
+    const chain = localChain(aa);
+    expect(chain?.rpcUrl).toBe(snapshot.rpcUrl);
+    expect(chain?.entryPoint).toBe(snapshot.entryPoint);
+    expect(chain?.safeModule).toBe(snapshot.safeModule);
+    expect(chain?.paymasterAddress).toBe(snapshot.paymasterAddress);
+    expect(chain?.chainId).toBe(31337);
   });
 
-  it("injects dev executor key only when chainId 31337 and opt-in", () => {
-    const dir = mkdtempSync(join(tmpdir(), "aa-deploy-"));
-    const snapshotPath = join(dir, "localhost.json");
-    writeFileSync(
-      snapshotPath,
-      JSON.stringify({
-        chainId: 31337,
-        rpcUrl: "http://127.0.0.1:8545"
-      })
-    );
+  it("lets env win over the snapshot", () => {
+    cleanAaEnv();
+    process.env.LIVESTREAK_AA_RPC_URL = "http://env-rpc.example";
+    process.env.LIVESTREAK_AA_ENTRY_POINT = "0x00000000000000000000000000000000000000ff";
+    const aa = readAaServerConfig(defaultHostServerConfig(), snapshot);
+    const chain = localChain(aa);
+    expect(chain?.rpcUrl).toBe("http://env-rpc.example");
+    expect(chain?.entryPoint).toBe("0x00000000000000000000000000000000000000ff");
+    // still fills the untouched fields from the snapshot
+    expect(chain?.safeModule).toBe(snapshot.safeModule);
+  });
 
-    delete process.env.LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY;
+  it("does not inject the dev executor key unless opted in", () => {
+    cleanAaEnv();
+    const aa = readAaServerConfig(defaultHostServerConfig(), snapshot);
+    expect(localChain(aa)?.executorPrivateKey).toBeUndefined();
+  });
+
+  it("injects the dev executor key only when chainId 31337 and opt-in", () => {
+    cleanAaEnv();
     process.env.LIVESTREAK_AA_ALLOW_DEV_KEY = "1";
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    applyDeploySnapshotEnv(snapshotPath);
-    expect(process.env.LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY).toMatch(/^0x[a-fA-F0-9]{64}$/);
+    const aa = readAaServerConfig(defaultHostServerConfig(), snapshot);
+    expect(localChain(aa)?.executorPrivateKey).toMatch(/^0x[a-fA-F0-9]{64}$/);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+
+  it("does not inject the dev key on a non-31337 chain even when opted in", () => {
+    cleanAaEnv();
+    process.env.LIVESTREAK_AA_ALLOW_DEV_KEY = "1";
+    const aa = readAaServerConfig(defaultHostServerConfig(), { ...snapshot, chainId: 1 });
+    expect(localChain(aa)?.executorPrivateKey).toBeUndefined();
   });
 });
 

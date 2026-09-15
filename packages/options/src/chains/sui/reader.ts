@@ -1,7 +1,7 @@
 // --- exports ---
 
 // Multichain-hygiene: read VIA @livestreak/wallet (the single @mysten/sui v2 owner).
-import { bcs, SuiJsonRpcClient, Transaction, createSuiReadClient } from "@livestreak/wallet";
+import { bcs, SuiJsonRpcClient, Transaction, createSuiReadClient, type SuiNetwork } from "@livestreak/wallet";
 import { LiveStreakConfigError } from "@livestreak/core";
 import { MODULES, target } from "@livestreak/contracts/sui";
 
@@ -68,9 +68,10 @@ type ReaderContext = {
 
 export const createSuiOptionsReader = (
   ids: OptionsSuiObjectIds,
-  rpcUrl: string
+  rpcUrl: string,
+  network?: SuiNetwork
 ): OptionsReader => {
-  const client = createSuiReadClient(rpcUrl);
+  const client = createSuiReadClient(rpcUrl, network);
   const ctx: ReaderContext = {
     client,
     ids,

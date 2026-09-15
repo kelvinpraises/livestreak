@@ -8,6 +8,7 @@ export type { SuiTransaction } from '#vendor/sui/wallet-account-read-only-sui.js
 export type {
   LiveStreakSuiWalletConfig,
   SuiGasCoinRef,
+  SuiNetwork,
 } from './config.js'
 export type { LiveStreakSuiWalletConfig as SuiWalletConfig } from './config.js'
 export { isSponsoredSuiConfig } from './config.js'

@@ -1,6 +1,7 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import { createWalletManager } from "@livestreak/wallet";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { readOptionalEnv } from "../../config/env.js";
 import type { HostServerConfig } from "../../config/host.js";
 import { resolveHostWalletSeed } from "./index.js";
 
@@ -22,7 +23,7 @@ export const resolveSuiSponsorSeed = (
   resolveHostWalletSeed(config);
 
 export const resolveSuiSponsorRpcUrl = (): string | null =>
-  readOptionalEnv("LIVESTREAK_SUI_RPC_URL") ?? readOptionalEnv("SUI_RPC");
+  readOptionalEnv("LIVESTREAK_SUI_RPC_URL");
 
 export const resolveSuiSponsorWallet = async (
   config: Pick<HostServerConfig, "walletSeed" | "memoryOwnerSeed"> = {
@@ -99,9 +100,3 @@ export const resolveSuiOwnerPrivateKey = async (
   return Ed25519Keypair.fromSecretKey(privateKey).getSecretKey();
 };
 
-// --- helpers ---
-
-const readOptionalEnv = (name: string): string | null => {
-  const value = process.env[name];
-  return value === undefined || value.length === 0 ? null : value;
-};

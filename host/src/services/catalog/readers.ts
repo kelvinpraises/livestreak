@@ -14,17 +14,26 @@ import {
   type OptionsVaultSnapshot
 } from "@livestreak/options";
 import type { WalletInit } from "@livestreak/schema";
+import type { SuiNetwork } from "@livestreak/wallet";
+import { readDeploymentOutputFromPath } from "@livestreak/contracts/evm/node";
+import type { EvmDeployOutput } from "@livestreak/contracts/evm";
+import { DEFAULT_DEPLOY_SNAPSHOT } from "../../config/aa/deploy-env.js";
 import type { CatalogChain } from "./types.js";
 import type { CatalogReaderProvider } from "./catalog.js";
+
+// Normalize the Sui network from the host's canonical env var at this edge (localnet default).
+const resolveSuiNetworkFromEnv = (): SuiNetwork => {
+  const value = process.env.LIVESTREAK_SUI_NETWORK;
+  if (value === "mainnet" || value === "testnet" || value === "devnet" || value === "localnet") {
+    return value;
+  }
+  return "localnet";
+};
 
 // host/src/services/catalog -> host root is three levels up.
 const CATALOG_DIR = resolve(fileURLToPath(import.meta.url), "..");
 const HOST_ROOT = resolve(CATALOG_DIR, "..", "..", "..");
 
-const DEFAULT_EVM_SNAPSHOT = resolve(
-  HOST_ROOT,
-  "../packages/contracts/chains/evm/deployments/localhost.json"
-);
 const DEFAULT_SUI_DEPLOYMENT = resolve(
   HOST_ROOT,
   "../packages/contracts/chains/sui/deployments/localnet.json"
@@ -36,16 +45,6 @@ const DEFAULT_SUI_DEPLOYMENT = resolve(
 const READONLY_EVM_SEED =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
-interface EvmDeploySnapshot {
-  readonly rpc?: string;
-  readonly chainId?: number | string;
-  readonly scopes?: {
-    readonly protocol?: { readonly contracts?: Record<string, string> };
-    readonly streaming?: { readonly contracts?: Record<string, string> };
-    readonly wire?: { readonly contracts?: Record<string, string> };
-  };
-}
-
 const readJsonFile = <T>(path: string): T | null => {
   try {
     return JSON.parse(readFileSync(path, "utf8")) as T;
@@ -54,9 +53,19 @@ const readJsonFile = <T>(path: string): T | null => {
   }
 };
 
+// Parse the EVM deploy snapshot through the single contracts parser (no local JSON.parse of the AA
+// snapshot), degrading to null so an absent/unparseable snapshot just omits the EVM reader.
+const readEvmSnapshot = (path: string): EvmDeployOutput | null => {
+  try {
+    return readDeploymentOutputFromPath(path);
+  } catch {
+    return null;
+  }
+};
+
 // Map the EVM deploy snapshot scopes onto the options contract address set.
 const evmAddressesFromSnapshot = (
-  snap: EvmDeploySnapshot
+  snap: EvmDeployOutput
 ): OptionsContractAddresses | null => {
   const protocol = snap.scopes?.protocol?.contracts;
   const streaming = snap.scopes?.streaming?.contracts;
@@ -91,8 +100,8 @@ const evmAddressesFromSnapshot = (
 };
 
 const buildEvmReader = (): OptionsReader | null => {
-  const snapshotPath = process.env.LIVESTREAK_DEPLOY_SNAPSHOT ?? DEFAULT_EVM_SNAPSHOT;
-  const snap = readJsonFile<EvmDeploySnapshot>(snapshotPath);
+  const snapshotPath = process.env.LIVESTREAK_DEPLOY_SNAPSHOT ?? DEFAULT_DEPLOY_SNAPSHOT;
+  const snap = readEvmSnapshot(snapshotPath);
   if (snap === null) return null;
   const addresses = evmAddressesFromSnapshot(snap);
   if (addresses === null) return null;
@@ -132,8 +141,11 @@ const buildSuiReader = (): OptionsReader | null => {
   const seed =
     process.env.LIVESTREAK_SUI_SPONSOR_MNEMONIC ??
     "cargo town galaxy wonder animal digital buddy member object detect home chapter";
+  // Host reads the Sui network at its env edge and passes it IN — @livestreak/wallet no longer
+  // reads it ambiently. Defaults to localnet when unset/invalid.
+  const network = resolveSuiNetworkFromEnv();
   try {
-    const config = createOptionsSuiConfig({ deployment, seed, rpcUrl });
+    const config = createOptionsSuiConfig({ deployment, seed, rpcUrl, network });
     return createOptionsChain(config).reader;
   } catch (error) {
     console.warn(`[catalog]: Sui reader unavailable — ${String(error)}`);

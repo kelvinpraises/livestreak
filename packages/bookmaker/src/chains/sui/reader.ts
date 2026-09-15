@@ -1,7 +1,7 @@
 // --- exports ---
 
 // Multichain-hygiene: read VIA @livestreak/wallet (the single @mysten/sui v2 owner).
-import { Transaction, SuiJsonRpcClient, bcs, createSuiReadClient } from "@livestreak/wallet";
+import { Transaction, SuiJsonRpcClient, bcs, createSuiReadClient, type SuiNetwork } from "@livestreak/wallet";
 import { target } from "@livestreak/contracts/sui";
 
 import type { BookmakerChainReader } from "../types.js";
@@ -17,9 +17,10 @@ const bytes32ByteArray = (id: string): number[] => {
 
 export const createSuiBookmakerReader = (
   ids: BookmakerSuiObjectIds,
-  rpcUrl: string
+  rpcUrl: string,
+  network?: SuiNetwork
 ): BookmakerChainReader => {
-  const client: SuiJsonRpcClient = createSuiReadClient(rpcUrl);
+  const client: SuiJsonRpcClient = createSuiReadClient(rpcUrl, network);
 
   return {
     // Read-only existence check via devInspect (zero-address sender). Best-effort: a malformed id or a

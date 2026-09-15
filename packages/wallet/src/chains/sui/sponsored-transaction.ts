@@ -9,7 +9,7 @@ import { ConfigurationError } from '#vendor/evm-erc-4337/errors.js'
 import type { SuiTransaction } from '#vendor/sui/wallet-account-read-only-sui.js'
 import type VendorWalletAccountSui from '#vendor/sui/wallet-account-sui.js'
 
-import type { LiveStreakSuiWalletConfig, SuiGasCoinRef } from './config.js'
+import type { LiveStreakSuiWalletConfig, SuiGasCoinRef, SuiNetwork } from './config.js'
 
 export type SuiGasStationSponsorInput = {
   txKindBytes: Uint8Array
@@ -88,24 +88,24 @@ export function resolveSuiClient(config: LiveStreakSuiWalletConfig): SuiJsonRpcC
     return config.provider as SuiJsonRpcClient
   }
   if (typeof config.rpcUrl === 'string') {
-    return new SuiJsonRpcClient({ url: config.rpcUrl, network: resolveSuiNetwork() })
+    return new SuiJsonRpcClient({ url: config.rpcUrl, network: resolveSuiNetwork(config.network) })
   }
   throw new Error('The wallet must be connected to a provider to send transactions.')
 }
 
 // Build a read/RPC client from a bare rpcUrl, applying the required v2 `network`. Sui executors
 // (options reader/writer) read VIA this instead of constructing @mysten/sui clients directly.
-export function createSuiReadClient(rpcUrl: string): SuiJsonRpcClient {
-  return new SuiJsonRpcClient({ url: rpcUrl, network: resolveSuiNetwork() })
+// The network flows IN from the caller's config; defaults to 'localnet' when omitted.
+export function createSuiReadClient(rpcUrl: string, network?: SuiNetwork): SuiJsonRpcClient {
+  return new SuiJsonRpcClient({ url: rpcUrl, network: resolveSuiNetwork(network) })
 }
 
-// v2 SuiJsonRpcClient requires an explicit `network`. Mirror host's resolution (env-driven,
-// localnet default) so the hackathon Sui loop keeps working unchanged. Browser-safe: guards process.
-function resolveSuiNetwork(): 'mainnet' | 'testnet' | 'devnet' | 'localnet' {
-  const env = typeof process !== 'undefined' ? process.env : undefined
-  const value = env?.LIVESTREAK_SUI_NETWORK ?? env?.SUI_NETWORK ?? 'localnet'
-  if (value === 'mainnet' || value === 'testnet' || value === 'devnet' || value === 'localnet') {
-    return value
+// v2 SuiJsonRpcClient requires an explicit `network`. Pure normalizer: no environment read — the
+// network is supplied by the caller (host/cli at the edge, executors from their runtime config).
+// Defaults to 'localnet' so the hackathon Sui loop keeps working unchanged.
+function resolveSuiNetwork(network?: SuiNetwork): SuiNetwork {
+  if (network === 'mainnet' || network === 'testnet' || network === 'devnet' || network === 'localnet') {
+    return network
   }
   return 'localnet'
 }

@@ -2,6 +2,7 @@ import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import type { SuiGasCoinRef } from "@livestreak/wallet";
 import { defaultHostServerConfig, type HostServerConfig } from "./config/host.js";
 import { readAaServerConfig, buildPaymasterSigners, type AaServerConfig } from "./services/aa/chains.js";
+import { loadDefaultDeploySnapshotConfig } from "./config/aa/deploy-env.js";
 import type { PaymasterSigner } from "./services/aa/paymaster.js";
 import {
   createSuiGasStation,
@@ -68,12 +69,15 @@ export interface CreateAaRouteDepsOptions {
 export const createAaRouteDeps = (
   config: HostServerConfig,
   options: CreateAaRouteDepsOptions = {}
-): AaRouteDeps => ({
-  config,
-  aa: readAaServerConfig(config),
-  paymasterSigners: options.paymasterSigners ?? buildPaymasterSigners(readAaServerConfig(config)),
-  suiGasStation: options.suiGasStation ?? createSuiGasStation({ config: null })
-});
+): AaRouteDeps => {
+  const aa = readAaServerConfig(config, loadDefaultDeploySnapshotConfig());
+  return {
+    config,
+    aa,
+    paymasterSigners: options.paymasterSigners ?? buildPaymasterSigners(aa),
+    suiGasStation: options.suiGasStation ?? createSuiGasStation({ config: null })
+  };
+};
 
 export const bootstrapAaRouteDeps = async (
   config: HostServerConfig,
@@ -374,7 +378,7 @@ const buildWalrusDeps = (
 };
 
 const readSuiNetwork = (): "mainnet" | "testnet" | "devnet" | "localnet" => {
-  const value = process.env.LIVESTREAK_SUI_NETWORK ?? process.env.SUI_NETWORK ?? "localnet";
+  const value = process.env.LIVESTREAK_SUI_NETWORK ?? "localnet";
   if (value === "mainnet" || value === "testnet" || value === "devnet" || value === "localnet") {
     return value;
   }

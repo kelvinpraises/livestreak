@@ -5,6 +5,7 @@ import {
   type SignalingFetch,
 } from '@livestreak/observe'
 
+import { env } from '#/utils/env'
 import type { StreamFeedDetail, StreamPointer } from '#/utils/stream'
 
 export type WebRtcConsumerStatus = 'idle' | 'connecting' | 'ready' | 'error'
@@ -187,13 +188,12 @@ export async function fetchHostIce(
   }
 }
 
-const readViteIceEnv = (): { iceServersJson?: string; relayOnly?: string } => {
-  const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env
-  return {
-    iceServersJson: env?.VITE_LIVESTREAK_ICE_SERVERS,
-    relayOnly: env?.VITE_LIVESTREAK_ICE_RELAY_ONLY,
-  }
-}
+// The VITE ICE override now flows through utils/env.ts (the single place for import.meta.env reads);
+// resolveViewerIce still takes an injectable env param so its unit tests can pass values directly.
+const readViteIceEnv = (): { iceServersJson?: string; relayOnly?: string } => ({
+  iceServersJson: env.iceServersJson,
+  relayOnly: env.iceRelayOnly,
+})
 
 // Precedence: build-time env (operator override) → host-described ICE → STUN-only default. STUN
 // (symmetric with the producer) yields a server-reflexive candidate; without it the browser offers only

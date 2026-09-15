@@ -1,5 +1,6 @@
 import express, { type Express } from "express";
 import { bootstrapAaFromConfig, readAaServerConfig } from "./services/aa/chains.js";
+import { loadDefaultDeploySnapshotConfig } from "./config/aa/deploy-env.js";
 import { bootstrapHostServerConfig, defaultHostServerConfig, isModuleEnabled } from "./config/host.js";
 import { bootstrapHostRouteDeps, createHostRouteDeps, type HostRouteDeps } from "./deps.js";
 import {
@@ -115,7 +116,7 @@ export const bootstrapHostServer = async (
   config: ReturnType<typeof defaultHostServerConfig> = defaultHostServerConfig()
 ): Promise<BootstrappedHost> => {
   const resolved = await bootstrapHostServerConfig(config);
-  const aa = readAaServerConfig(resolved);
+  const aa = readAaServerConfig(resolved, loadDefaultDeploySnapshotConfig());
   await bootstrapAaFromConfig(aa);
   const deps = await bootstrapHostRouteDeps(resolved);
   const app = createApp(deps);

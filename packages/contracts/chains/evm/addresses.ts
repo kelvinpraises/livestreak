@@ -24,6 +24,24 @@ const deploymentsDir = join(
 
 const KNOWN_DEPLOYMENTS = ["localhost"] as const satisfies readonly DeploymentName[];
 
+// Parse a snapshot JSON from an explicit path. THE single EVM snapshot parser: both the name-based
+// loader and any host/path override read through this so no consumer hand-rolls its own JSON.parse.
+export const readDeploymentOutputFromPath = (path: string): EvmDeployOutput => {
+  if (!existsSync(path)) {
+    throw new Error(`Missing EVM deployment snapshot ${path}. Run: npm run deploy`);
+  }
+
+  try {
+    return JSON.parse(readFileSync(path, "utf-8")) as EvmDeployOutput;
+  } catch (error) {
+    throw new Error(
+      `Unparseable EVM deployment snapshot ${path} (${
+        error instanceof Error ? error.message : String(error)
+      }). Re-run: npm run deploy`,
+    );
+  }
+};
+
 // A missing or corrupt snapshot for a SPECIFICALLY requested deployment is fatal-with-instructions
 // (mirrors chains/sui/addresses.ts): silently returning {} handed consumers empty addresses that
 // only failed far downstream (dead-vaultDriver class of bugs).
@@ -34,20 +52,15 @@ const readDeploymentFile = (name: string): EvmDeployOutput => {
       `Missing EVM deployment snapshot ${path}. Run: npm run deploy -- --name ${name}`,
     );
   }
-
-  try {
-    return JSON.parse(readFileSync(path, "utf-8")) as EvmDeployOutput;
-  } catch (error) {
-    throw new Error(
-      `Unparseable EVM deployment snapshot ${path} (${
-        error instanceof Error ? error.message : String(error)
-      }). Re-run: npm run deploy -- --name ${name}`,
-    );
-  }
+  return readDeploymentOutputFromPath(path);
 };
 
 const loadDeployment = (name: DeploymentName): EvmDeploymentAddresses =>
   flattenDeploymentScopes(readDeploymentFile(name));
+
+// The committed localhost snapshot's on-disk path — host uses this as the default snapshot path so
+// there is exactly ONE source of truth for "where the localhost deployment lives".
+export const localhostDeploymentPath = (): string => join(deploymentsDir, "localhost.json");
 
 /** Raw deployment snapshot (rpc + full scopes) read fresh from disk — Node consumers that need the
  * un-flattened AA/protocol scopes or rpc read this at runtime so stale compiled .ts can never serve

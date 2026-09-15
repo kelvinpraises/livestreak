@@ -13,8 +13,16 @@ export const env = {
     const seed = import.meta.env.VITE_OPTIONS_SEED as string | undefined
     return seed?.trim() || undefined
   })(),
+  // WebRTC viewer ICE override (operator build-time). Contract var names are a tested cross-surface
+  // contract with the host/producer — do NOT rename. Consumed as the DEFAULT env source in
+  // webrtc-consumer.ts's resolveViewerIce (which still accepts an injectable env for its tests).
+  iceServersJson: import.meta.env.VITE_LIVESTREAK_ICE_SERVERS as string | undefined,
+  iceRelayOnly: import.meta.env.VITE_LIVESTREAK_ICE_RELAY_ONLY as string | undefined,
   localChainId: 31337,
 } as const
+
+// import.meta.env.DEV is a Vite BUILD-TIME boolean (not runtime config), so it is read directly at
+// its use sites (e.g. use-wallet-actions.ts) rather than routed through this module.
 
 export const HOST_BASE_URL = env.hostBaseUrl
 export const LOCAL_CHAIN_ID = env.localChainId

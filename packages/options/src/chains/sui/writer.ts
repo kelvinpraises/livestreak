@@ -82,7 +82,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         const rpcUrl = Array.isArray(suiConfig.rpcUrl)
           ? suiConfig.rpcUrl[0]
           : (suiConfig.rpcUrl ?? "");
-        const client = createSuiReadClient(rpcUrl as string);
+        const client = createSuiReadClient(rpcUrl as string, suiConfig.network);
         return { account, owner, client };
       })();
     }

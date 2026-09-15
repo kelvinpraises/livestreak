@@ -61,7 +61,7 @@ const streamId = (salt: string, label: string): Uint8Array => {
 
 async function main(): Promise<void> {
   const name = (process.env.SUI_DEPLOYMENT ?? "localnet") as SuiDeploymentName;
-  const rpc = process.env.SUI_RPC ?? DEFAULT_RPC;
+  const rpc = process.env.LIVESTREAK_SUI_RPC_URL ?? DEFAULT_RPC;
   const salt = randomBytes(16).toString("hex");
 
   console.log(`\n${c.bold}🎪 AI Labs Live Demo Day — Sui localnet e2e${c.reset}`);

@@ -13,6 +13,7 @@ import {
   walrusNetworkProfiles,
   type ResolvedWalrus
 } from "../infrastructure/walrus/network.js";
+import { readOptionalEnv } from "./env.js";
 
 // --- exports ---
 
@@ -152,11 +153,6 @@ export const bootstrapHostServerConfig = async (
 ): Promise<HostServerConfig> => bootstrapWalrus(config, fetchImpl);
 
 // --- helpers ---
-
-const readOptionalEnv = (key: string): string | null => {
-  const value = process.env[key];
-  return value === undefined || value.length === 0 ? null : value;
-};
 
 const readPositiveIntEnv = (key: string, fallback: number): number => {
   const raw = readOptionalEnv(key);

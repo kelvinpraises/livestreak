@@ -1,5 +1,7 @@
 // --- exports ---
 
+import type { SuiNetwork } from "@livestreak/wallet";
+
 import type { OptionsChainConfig } from "../types.js";
 import type { OptionsSuiObjectIds } from "./addresses.js";
 
@@ -31,12 +33,15 @@ type CreateOptionsSuiConfigInput = {
   readonly deployment: SuiDeploymentData;
   readonly seed: string | Uint8Array;
   readonly rpcUrl?: string;
+  // Which Sui network the rpcUrl targets. Supplied by the caller's edge (host reads it from env);
+  // the reader/writer default to 'localnet' when omitted.
+  readonly network?: SuiNetwork;
 };
 
 export const createOptionsSuiConfig = (
   input: CreateOptionsSuiConfigInput
 ): OptionsChainConfig => {
-  const { deployment, seed, rpcUrl } = input;
+  const { deployment, seed, rpcUrl, network } = input;
   const effectiveRpc = rpcUrl ?? deployment.rpc;
   const obj = deployment.objects;
 
@@ -59,7 +64,7 @@ export const createOptionsSuiConfig = (
     walletInit: {
       chain: "sui",
       seedSource: "raw",
-      config: { rpcUrl: effectiveRpc }
+      config: { rpcUrl: effectiveRpc, ...(network === undefined ? {} : { network }) }
     },
     seed,
     addresses,

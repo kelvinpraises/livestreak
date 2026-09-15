@@ -29,6 +29,10 @@ import { runRemoteDrive as executeRemoteDrive } from "../gateway/remote/driver.j
 import { ensureSettings, defaultSettingsPath } from "../prefs/settings.js";
 import { passwordOpt } from "./args.js";
 
+// LIVESTREAK_HOST_WSS is an OPERATOR-set CLI override for the host WebSocket base (e.g. when the WSS
+// endpoint is fronted separately from the HTTP host). Nothing sets it for you — the operator running
+// `livestreak remote …` exports it if the default (derive ws(s):// from the HTTP host URL) is wrong.
+// It is CLI-side, not a host runtime var, so it is intentionally absent from deploy-host.yml.
 const deriveHostWss = (hostUrl: string, sessionId: string, override?: string): string => {
   const base =
     override ??

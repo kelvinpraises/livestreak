@@ -42,6 +42,7 @@ export type {
   LiveStreakSuiWalletConfig,
   SuiGasStation,
   SuiGasCoinRef,
+  SuiNetwork,
 } from '#chains/sui/index.js'
 
 // Multichain-hygiene: @livestreak/wallet is the SINGLE @mysten/sui (v2) owner. Sui executors

@@ -212,10 +212,9 @@ sui_fund_sponsor() {
 }
 
 sui_leg_env() {
+  # One canonical name per Sui fact — no bare SUI_RPC / SUI_NETWORK aliases.
   export LIVESTREAK_SUI_RPC_URL="$SUI_RPC_LOCAL"
-  export SUI_RPC="$SUI_RPC_LOCAL"
   export LIVESTREAK_SUI_NETWORK="localnet"
-  export SUI_NETWORK="localnet"
   export LIVESTREAK_SUI_SPONSOR_MNEMONIC="$DEV_SUI_MNEMONIC"
 }
 

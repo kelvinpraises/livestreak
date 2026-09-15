@@ -18,11 +18,11 @@ export const TESTNET_RPC = "https://fullnode.testnet.sui.io:443";
 export const LOCALNET_FAUCET = "http://127.0.0.1:9123/gas";
 export const TESTNET_FAUCET = "https://faucet.testnet.sui.io/gas";
 
-export const DEFAULT_RPC = process.env.SUI_RPC ?? LOCALNET_RPC;
+export const DEFAULT_RPC = process.env.LIVESTREAK_SUI_RPC_URL ?? LOCALNET_RPC;
 export const DEFAULT_FAUCET = process.env.SUI_FAUCET ?? LOCALNET_FAUCET;
 
 export function rpcForDeployment(name: SuiDeploymentName): string {
-  if (process.env.SUI_RPC) return process.env.SUI_RPC;
+  if (process.env.LIVESTREAK_SUI_RPC_URL) return process.env.LIVESTREAK_SUI_RPC_URL;
   if (name === "testnet") return TESTNET_RPC;
   if (name === "mainnet") return "https://fullnode.mainnet.sui.io:443";
   return LOCALNET_RPC;

@@ -23,7 +23,7 @@ export const createSuiBookmakerChain = (config: BookmakerChainConfig): Bookmaker
   const ids = config.addresses as BookmakerSuiObjectIds;
 
   return {
-    reader: createSuiBookmakerReader(ids, rpcUrl),
+    reader: createSuiBookmakerReader(ids, rpcUrl, suiConfig.network),
     writer: createSuiBookmakerWriter(config)
   };
 };

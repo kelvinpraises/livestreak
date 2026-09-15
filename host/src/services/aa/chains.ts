@@ -2,9 +2,15 @@ import type { AaOperationKind, AaSponsorshipMode } from "@livestreak/host";
 import type { Hex } from "viem";
 import { assertPaymasterSignerMatchesChain } from "../../config/aa/boot-assert.js";
 import { readChainsFromFile } from "../../config/aa/chains-file.js";
+import type { DeploySnapshotConfig } from "../../config/aa/deploy-env.js";
 import type { HostServerConfig } from "../../config/host.js";
 import { startAlto } from "../../infrastructure/bundler/alto.js";
 import { createPaymasterSigner, type PaymasterSigner } from "./paymaster.js";
+
+// World-known anvil dev key. Injected ONLY under chainId 31337 + LIVESTREAK_AA_ALLOW_DEV_KEY=1 so
+// the local dev stack can sponsor without an operator key in the environment.
+const ANVIL_DEV_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 // --- exports ---
 
@@ -35,11 +41,14 @@ export interface AaServerConfig {
   readonly paymasterAuthToken?: string;
 }
 
-export const readAaServerConfig = (config: HostServerConfig): AaServerConfig => {
+export const readAaServerConfig = (
+  config: HostServerConfig,
+  snapshot: DeploySnapshotConfig = {}
+): AaServerConfig => {
   const loopback = isLoopbackBind(config.bindHost);
   const authToken = readPaymasterAuthToken();
   const fileChains = readFileChains();
-  const envChain = buildEnvChain();
+  const envChain = buildEnvChain(snapshot);
   const chains = mergeChains(fileChains, envChain);
 
   // H1 posture: `dev_open` (open sponsorship) is only safe on a loopback bind.
@@ -134,27 +143,43 @@ const readFileChains = (): AaChainConfig[] => {
   return readChainsFromFile(filePath);
 };
 
-const buildEnvChain = (): AaChainConfig | null => {
-  const rpcUrl = process.env.LIVESTREAK_AA_RPC_URL;
+// Assemble the single "local" env chain with an EXPLICIT merge: ENV > snapshot > defaults. The
+// snapshot is a plain partial-config object (never process.env mutation); env values still win.
+const buildEnvChain = (snapshot: DeploySnapshotConfig): AaChainConfig | null => {
+  const rpcUrl = readEnv("LIVESTREAK_AA_RPC_URL") ?? snapshot.rpcUrl;
   if (rpcUrl === undefined || rpcUrl.length === 0) {
     return null;
   }
 
-  const executorPrivateKey = readExecutorPrivateKey();
-  const paymasterAddress = readPaymasterAddress();
+  const chainId = resolveChainId(snapshot.chainId);
+  const entryPoint =
+    readEnv("LIVESTREAK_AA_ENTRY_POINT") ??
+    snapshot.entryPoint ??
+    "0x0000000000000000000000000000000000000000";
+  const safeModule = readEnv("LIVESTREAK_AA_SAFE_MODULE") ?? snapshot.safeModule;
+  const paymasterAddress = readPaymasterAddress(snapshot.paymasterAddress);
+  const executorPrivateKey = resolveExecutorPrivateKey(chainId);
 
   return {
     routeKey: "local",
-    chainId: Number.parseInt(process.env.LIVESTREAK_AA_CHAIN_ID ?? "31337", 10),
+    chainId,
     name: "local",
-    entryPoint:
-      process.env.LIVESTREAK_AA_ENTRY_POINT ?? "0x0000000000000000000000000000000000000000",
-    safeModule: process.env.LIVESTREAK_AA_SAFE_MODULE,
+    entryPoint,
+    ...(safeModule === undefined ? {} : { safeModule }),
     bundlerUrl: process.env.LIVESTREAK_AA_BUNDLER_URL,
     rpcUrl,
     ...(executorPrivateKey === undefined ? {} : { executorPrivateKey }),
     ...(paymasterAddress === undefined ? {} : { paymasterAddress })
   };
+};
+
+// ENV > snapshot > 31337 default.
+const resolveChainId = (snapshotChainId: number | undefined): number => {
+  const envValue = readEnv("LIVESTREAK_AA_CHAIN_ID");
+  if (envValue !== undefined) {
+    return Number.parseInt(envValue, 10);
+  }
+  return snapshotChainId ?? 31337;
 };
 
 const mergeChains = (
@@ -185,13 +210,30 @@ const mergeChains = (
   return [...byRouteKey.values()];
 };
 
-const readExecutorPrivateKey = (): Hex | undefined => {
-  const value =
-    process.env.LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY ?? process.env.LIVESTREAK_AA_OPERATOR_KEY;
-  return value === undefined || value.length === 0 ? undefined : (value as Hex);
+// A present-but-empty env var reads as "unset" here so a blank export never shadows a snapshot value.
+const readEnv = (key: string): string | undefined => {
+  const value = process.env[key];
+  return value === undefined || value.length === 0 ? undefined : value;
 };
 
-const readPaymasterAddress = (): Hex | undefined => {
-  const value = process.env.LIVESTREAK_AA_PAYMASTER_ADDRESS;
+// Executor key precedence: explicit env keys first. Only when none is set AND we are on the anvil
+// dev chain (31337) with LIVESTREAK_AA_ALLOW_DEV_KEY=1 do we fall back to the world-known dev key.
+const resolveExecutorPrivateKey = (chainId: number): Hex | undefined => {
+  const explicit =
+    readEnv("LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY") ?? readEnv("LIVESTREAK_AA_OPERATOR_KEY");
+  if (explicit !== undefined) {
+    return explicit as Hex;
+  }
+  if (chainId === 31337 && process.env.LIVESTREAK_AA_ALLOW_DEV_KEY === "1") {
+    console.warn(
+      "[host]: LIVESTREAK_AA_ALLOW_DEV_KEY=1 — using world-known anvil dev executor key"
+    );
+    return ANVIL_DEV_KEY as Hex;
+  }
+  return undefined;
+};
+
+const readPaymasterAddress = (snapshotAddress: string | undefined): Hex | undefined => {
+  const value = readEnv("LIVESTREAK_AA_PAYMASTER_ADDRESS") ?? snapshotAddress;
   return value === undefined || value.length === 0 ? undefined : (value as Hex);
 };

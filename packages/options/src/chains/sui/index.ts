@@ -1,6 +1,7 @@
 // --- exports ---
 
 import { LiveStreakConfigError } from "@livestreak/core";
+import type { SuiNetwork } from "@livestreak/wallet";
 
 import type { OptionsChain, OptionsChainConfig, OptionsReader, OptionsWriter } from "../types.js";
 import type { OptionsSuiObjectIds } from "./addresses.js";
@@ -21,7 +22,7 @@ export const createSuiOptionsChain = (config?: OptionsChainConfig): OptionsChain
     });
   }
 
-  const suiConfig = config.walletInit.config as { rpcUrl?: string | string[] };
+  const suiConfig = config.walletInit.config as { rpcUrl?: string | string[]; network?: SuiNetwork };
   const rpcUrl =
     config.readRpcUrl ??
     (Array.isArray(suiConfig.rpcUrl) ? suiConfig.rpcUrl[0] : suiConfig.rpcUrl) ??
@@ -30,7 +31,7 @@ export const createSuiOptionsChain = (config?: OptionsChainConfig): OptionsChain
   const ids = config.addresses as OptionsSuiObjectIds;
 
   return {
-    reader: createSuiOptionsReader(ids, rpcUrl),
+    reader: createSuiOptionsReader(ids, rpcUrl, suiConfig.network),
     writer: createSuiOptionsWriter(config)
   };
 };

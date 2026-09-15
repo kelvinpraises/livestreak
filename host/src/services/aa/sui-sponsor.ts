@@ -1,6 +1,7 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import { Transaction } from "@mysten/sui/transactions";
 import { normalizeSuiAddress } from "@mysten/sui/utils";
+import { readOptionalEnv } from "../../config/env.js";
 import type { HostServerConfig } from "../../config/host.js";
 import {
   resolveSuiSponsorRpcUrl,
@@ -208,8 +209,8 @@ const mapConfigErrorStatus = (error: LiveStreakConfigError): number => {
 };
 
 const readIntEnv = (name: string, fallback: number): number => {
-  const raw = process.env[name];
-  if (raw === undefined || raw.length === 0) {
+  const raw = readOptionalEnv(name);
+  if (raw === null) {
     return fallback;
   }
 
@@ -218,8 +219,8 @@ const readIntEnv = (name: string, fallback: number): number => {
 };
 
 const readBigIntEnv = (name: string, fallback: bigint): bigint => {
-  const raw = process.env[name];
-  if (raw === undefined || raw.length === 0) {
+  const raw = readOptionalEnv(name);
+  if (raw === null) {
     return fallback;
   }
 

@@ -46,6 +46,6 @@
     "vitest": "^4.1.8"
   },
   "optionalDependencies": {
-    "@roamhq/wrtc": "^0.8.0"
+    "ws": "^8.18.0"
   }
 }

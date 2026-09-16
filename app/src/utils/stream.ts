@@ -15,6 +15,12 @@ export interface StreamMedia {
   src?: string
   /** Live real-time WebRTC feed as a `MediaStream` for `<video>.srcObject` (takes precedence over `src`). */
   stream?: MediaStream
+  /**
+   * Live fMP4 fan-out descriptor: when set and `kind === 'live'`, the player opens an MSE stream against
+   * the host viewer endpoint (`ws /live/watch/:streamId`) instead of a MediaStream/URL. This is the
+   * encode-once byte fan-out path — the single source of live playback.
+   */
+  live?: { streamId: string; baseUrl: string }
 }
 
 /**

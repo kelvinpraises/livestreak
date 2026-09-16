@@ -156,8 +156,8 @@ const configureCall = (
           },
           [publishId]: {
             create: {
-              label: payload.publish === "local" ? "Local Preview" : "File Export",
-              catalog: payload.publish === "local" ? "sink:local" : "sink:file",
+              label: payload.publish === "live" ? "Live Stream" : "File Export",
+              catalog: payload.publish === "live" ? "sink:live" : "sink:file",
               status: ["idle", null, nowMs],
               settings: {
                 subscribe: ["publish.video.rendered"],
@@ -289,10 +289,10 @@ export const systemConfigCatalogFunctions = (): Readonly<
           value: {
             type: "enum",
             description: "Publish sink instance id.",
-            values: ["file-export", "local"],
+            values: ["file-export", "live"],
             required: true
           },
-          help: "file-export writes MP4; local delivers over WebRTC."
+          help: "file-export writes MP4; live streams the fMP4 feed to viewers via the host."
         }
       ]
     }

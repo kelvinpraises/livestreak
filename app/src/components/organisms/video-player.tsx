@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 
 import type { StreamMedia } from '#/utils/stream'
+import { useLiveStreamFeed } from '#/hooks/use-live-stream-feed'
 
 interface Props {
   streamTitle?: string
@@ -17,12 +18,23 @@ export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
   const kind = media?.kind ?? 'none'
   const src = media?.src
   const stream = media?.stream
+  const live = media?.live
   const isLive = kind === 'live'
   const isVod = kind === 'vod'
   const videoRef = useRef<HTMLVideoElement>(null)
 
-  // A live WebRTC feed arrives as a MediaStream — attach it via `srcObject` (it cannot be set as an
-  // attribute). Clearing on absence lets the src/poster path take over for VOD/offline.
+  // Live fMP4 fan-out: when the media carries a `live` descriptor, open the MSE player against THIS video
+  // element (init + fragments from the host viewer endpoint). Recording plays as a native <video src>. One
+  // element, two source modes — the live-vs-recording split collapses here.
+  useLiveStreamFeed({
+    enabled: isLive && live !== undefined,
+    baseUrl: live?.baseUrl ?? '',
+    streamId: live?.streamId ?? '',
+    videoRef,
+  })
+
+  // A live WebRTC feed (legacy) arrives as a MediaStream — attach it via `srcObject`. Clearing on absence
+  // lets the src/poster path take over for VOD/offline. (MSE live sets `.src` itself via the player.)
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -34,12 +46,16 @@ export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
     }
   }, [stream])
 
+  // The MSE player owns `.src` when live; only bind the `src` attribute for the recording/URL path so we
+  // don't clobber the MediaSource object URL.
+  const attributeSrc = live ? undefined : stream ? undefined : src
+
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>
       <video
         ref={videoRef}
-        key={stream ? 'live-stream' : (src ?? 'offline')}
-        src={stream ? undefined : src}
+        key={live ? `live-mse:${live.streamId}` : stream ? 'live-stream' : (src ?? 'offline')}
+        src={attributeSrc}
         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', background: '#000' }}
         muted autoPlay loop playsInline
         controls={isVod}

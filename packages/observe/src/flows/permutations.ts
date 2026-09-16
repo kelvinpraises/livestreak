@@ -11,7 +11,7 @@ export interface FlowPermutation {
 
 export const flowPermutationsV0: readonly FlowPermutation[] = [
   { capture: "file", publish: "file-export", process: null },
-  { capture: "file", publish: "local", process: null }
+  { capture: "file", publish: "live", process: null }
 ] as const;
 
 export interface FlowPermutationInput {

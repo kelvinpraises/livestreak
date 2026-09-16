@@ -13,11 +13,6 @@ export const env = {
     const seed = import.meta.env.VITE_OPTIONS_SEED as string | undefined
     return seed?.trim() || undefined
   })(),
-  // WebRTC viewer ICE override (operator build-time). Contract var names are a tested cross-surface
-  // contract with the host/producer — do NOT rename. Consumed as the DEFAULT env source in
-  // webrtc-consumer.ts's resolveViewerIce (which still accepts an injectable env for its tests).
-  iceServersJson: import.meta.env.VITE_LIVESTREAK_ICE_SERVERS as string | undefined,
-  iceRelayOnly: import.meta.env.VITE_LIVESTREAK_ICE_RELAY_ONLY as string | undefined,
   localChainId: 31337,
 } as const
 

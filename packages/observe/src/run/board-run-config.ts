@@ -1,14 +1,8 @@
 import { Effect } from "effect";
 import { LiveStreakConfigError, type LiveStreakError } from "@livestreak/core";
-import { createHostMediatedSinkSignaling } from "#pipeline/publish/sinks/local/host-signaling.js";
+import { createHostFmp4IngestTransport } from "#pipeline/publish/sinks/live/transport.js";
 import type { Board } from "./control/board/index.js";
 import type { ObserveRunConfig } from "./run.js";
-
-// A live producer streams continuously and waits for a viewer to join: the WebRTC answer arrives whenever a
-// viewer opens the stream page (seconds to minutes after go-live), not within a tight window of `start`. Keep
-// the answer-wait generous so that handshake completes regardless of when the viewer shows up; the answer
-// fiber is background/forked and interrupted when the run stops.
-const liveViewerAnswerTimeoutMs = 10 * 60_000;
 
 // Read a board cell's settings/readonly maps with safe defaults — the only place that knows the board's
 // cell-id / field-path schema for deriving a run config.
@@ -32,10 +26,13 @@ export interface RunConfigFromBoardInput {
 
 /**
  * Derive the LIVE run config from the console-configured board: capture path from the `capture:file` cell,
- * a local WebRTC sink whose signaling is keyed to the registered marketId (the id the viewer consumes
- * under). Going live streams to the local sink, so `publish` must be "local" — the file-export recording
- * sink is a separate, non-live concern. Fails with an operator-facing message when a prerequisite is
- * missing. Kept Node-free on purpose: observe's barrel is bundled into the browser (consumer) app too.
+ * and the encode-once fMP4 `live` sink whose ingest transport is keyed to the registered marketId (the id
+ * the viewer consumes under, over the host `/live/watch/:streamId` endpoint). Going live means streaming to
+ * viewers, so the board's live publish selector (`publish === "live"`, the go-live path) maps to the
+ * `live` sink here — the file-export recording sink is a separate, non-live concern. Fails with an
+ * operator-facing message when a prerequisite is missing. Kept Node-free on purpose: observe's barrel is
+ * bundled into the browser (consumer) app too — `createHostFmp4IngestTransport` only builds the transport
+ * object (its `ws` import is lazy/Node-only, evaluated when a fragment is first sent).
  */
 export const runConfigFromBoard = (
   input: RunConfigFromBoardInput
@@ -53,10 +50,10 @@ export const runConfigFromBoard = (
     }
 
     const publish = cellRecord(board, "system:config").readonly.publish;
-    if (publish !== "local") {
+    if (publish !== "live") {
       return yield* Effect.fail(
         new LiveStreakConfigError({
-          message: "Going live streams to the local WebRTC sink — set the publish sink to 'local'."
+          message: "Going live streams to viewers — set the publish sink to 'live' (the go-live path)."
         })
       );
     }
@@ -70,24 +67,20 @@ export const runConfigFromBoard = (
 
     return {
       runId,
-      // Decode straight to I420 at real time (`-re`) so frames feed the local sink's WebRTC video track with
-      // no color conversion and stream paced at wall-clock FPS (see the local sink + file capture).
+      // Decode straight to I420 at real time (`-re`) so frames feed the fMP4 encode with no color conversion
+      // and stream paced at wall-clock FPS (see the live sink + file capture).
       capture: {
         driverId: "file",
         config: { path: capturePath, pixelFormat: "yuv420p", realtime: true }
       },
       sink: {
-        driverId: "local",
-        instanceId: "local",
-        // Real-time media-track preview keyed to the registered market (the id the viewer consumes under).
+        driverId: "live",
+        instanceId: "live",
+        // Encode-once fMP4 fan-out keyed to the registered market (the id the viewer consumes under, over
+        // the host `/live/watch/:streamId` endpoint).
         config: {
           streamId: marketId,
-          answerTimeoutMs: liveViewerAnswerTimeoutMs,
-          signaling: createHostMediatedSinkSignaling({
-            baseUrl: hostBaseUrl,
-            streamId: marketId,
-            answerTimeoutMs: liveViewerAnswerTimeoutMs
-          })
+          transport: createHostFmp4IngestTransport({ baseUrl: hostBaseUrl, streamId: marketId })
         }
       },
       process: null

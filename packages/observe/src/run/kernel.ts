@@ -284,8 +284,8 @@ const resolveSinkInstanceId = (config: ObserveRun["config"]): string => {
     return "memory-sink";
   }
 
-  if (config.sink.driverId === "local") {
-    return "local";
+  if (config.sink.driverId === "live") {
+    return "live";
   }
 
   return "file-export";

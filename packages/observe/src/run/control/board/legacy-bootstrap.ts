@@ -26,10 +26,6 @@ const publishConfiguratorKey = (config: ObserveRunConfig): string => {
     return "file-export";
   }
 
-  if (config.sink.driverId === "local") {
-    return "local";
-  }
-
   if (config.sink.driverId === "memory") {
     return "memory-sink";
   }

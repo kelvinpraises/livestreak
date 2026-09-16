@@ -16,16 +16,15 @@ import { useFlow } from '#/hooks/use-flow.ts'
 import { useWalletContext } from '#/providers/wallet-provider.tsx'
 import { useOptionsContext } from '#/providers/options-provider.tsx'
 import { useHostStream } from '#/hooks/use-host-stream.ts'
-import { useWebRtcStreamFeed } from '#/hooks/use-webrtc-stream-feed.ts'
 import { env, isOptionsModeEnabled } from '#/utils/env.ts'
 import { panelToStream } from '#/utils/options'
 import { resolveStreamFeed } from '#/utils/stream'
 import {
-  shouldUseHostWebRtcFeed,
-  nextWebRtcLatch,
-  resolveWebRtcEnabled,
-  type WebRtcLatch,
-} from '#/utils/webrtc-consumer'
+  shouldUseLiveFeed,
+  nextLiveFeedLatch,
+  resolveLiveFeedEnabled,
+  type LiveFeedLatch,
+} from '#/utils/live-feed'
 
 interface StreamLayoutProps {
   streamTitle: string
@@ -64,35 +63,28 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
 
   // Recomputed every ~3s board poll, so it FLICKERS — between polls the board can momentarily drop
   // this market or report a non-'live' status, flipping eligibility false→true.
-  const webrtcEligible =
-    hostStream.ready && shouldUseHostWebRtcFeed(streamPointer, hostDetail)
+  const liveEligible =
+    hostStream.ready && shouldUseLiveFeed(streamPointer, hostDetail)
   const streamEnded = streamPointer?.status === 'ended'
 
-  // The consumer downloads a FINITE MP4 in one transfer; a transient flip would abort it mid-flight
-  // (truncated/black blob) AND remount the src-keyed <video>. So LATCH eligibility sticky per streamId
-  // (see nextWebRtcLatch): once live it stays enabled until the pointer reports 'ended'.
-  const [webrtcLatch, setWebrtcLatch] = useState<WebRtcLatch>({ streamId, enabled: false })
+  // A transient flip would tear down the live MSE session AND remount the keyed <video>. So LATCH
+  // eligibility sticky per streamId (see nextLiveFeedLatch): once live it stays enabled until the pointer
+  // reports 'ended'.
+  const [liveLatch, setLiveLatch] = useState<LiveFeedLatch>({ streamId, enabled: false })
   useEffect(() => {
-    setWebrtcLatch(prev => nextWebRtcLatch(prev, streamId, webrtcEligible, streamEnded))
-  }, [streamId, webrtcEligible, streamEnded])
-  const webrtcEnabled = resolveWebRtcEnabled(webrtcLatch, streamId, webrtcEligible, streamEnded)
+    setLiveLatch(prev => nextLiveFeedLatch(prev, streamId, liveEligible, streamEnded))
+  }, [streamId, liveEligible, streamEnded])
+  const liveEnabled = resolveLiveFeedEnabled(liveLatch, streamId, liveEligible, streamEnded)
 
-  const relayStreamId = hostDetail?.marketId ?? streamId
-  const webrtcFeed = useWebRtcStreamFeed({
-    enabled: webrtcEnabled,
-    baseUrl: env.hostBaseUrl,
-    streamId: relayStreamId,
-  })
+  const liveStreamId = hostDetail?.marketId ?? streamId
   const streamMedia = useMemo(() => {
     const resolved = resolveStreamFeed(streamPointer, hostDetail)
-    // Not live → the recording / watchUrl (replay). Live → the realtime WebRTC media stream; only fall back
-    // to the recording if the live connection actually errors (the watchUrl is the post-stream archive, not
-    // a substitute while broadcasting).
-    if (!webrtcEnabled) return resolved
-    if (webrtcFeed.stream) return { kind: 'live' as const, stream: webrtcFeed.stream }
-    if (webrtcFeed.status !== 'error') return { kind: 'live' as const }
-    return resolved
-  }, [streamPointer, hostDetail, webrtcFeed.stream, webrtcFeed.status, webrtcEnabled])
+    // Not live → the recording / watchUrl (replay, native <video src>). Live → the encode-once fMP4
+    // fan-out over MSE, keyed to the host viewer endpoint. The player opens the host viewer socket; if it
+    // errors it falls back to the recording via VideoPlayer's own state.
+    if (!liveEnabled) return resolved
+    return { kind: 'live' as const, live: { streamId: liveStreamId, baseUrl: env.hostBaseUrl } }
+  }, [streamPointer, hostDetail, liveEnabled, liveStreamId])
 
   const floatingVaults = vaults.filter(v => v.status === 'open' || v.status === 'hot')
 

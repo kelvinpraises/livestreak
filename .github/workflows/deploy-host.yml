@@ -1,9 +1,9 @@
 name: Deploy host
 
-# Push-to-deploy for the LiveStreak host server (the provider node: HTTP/WSS API +
-# embedded TURN media relay). Mirrors deploy-app.yml: build the image in CI, push to
-# ghcr.io, then SSH into the SAME VPS and pull+run it. You only touch the PEM once
-# (DEPLOY_KEY secret).
+# Push-to-deploy for the LiveStreak host server (the provider node: HTTP/WSS API,
+# including the live fMP4 video fan-out over WS — no media relay). Mirrors deploy-app.yml:
+# build the image in CI, push to ghcr.io, then SSH into the SAME VPS and pull+run it.
+# You only touch the PEM once (DEPLOY_KEY secret).
 #
 # Required repo secrets (Settings → Secrets and variables → Actions) — shared with
 # deploy-app.yml:
@@ -33,10 +33,6 @@ name: Deploy host
 #     LIVESTREAK_WALRUS_NETWORK, LIVESTREAK_WALRUS_MEMORY_RELAYER_URL_OVERRIDE,
 #     LIVESTREAK_WALRUS_REGISTRY_ID_OVERRIDE, LIVESTREAK_MEMORY_OWNER_KEY (or
 #     LIVESTREAK_MEMORY_OWNER_SEED), LIVESTREAK_WALLET_SEED
-#   WebRTC / embedded TURN (usually leave defaults; RELAY_IP auto-detects under --network host)
-#     LIVESTREAK_TURN_ENABLED, LIVESTREAK_TURN_PORT, LIVESTREAK_TURN_RELAY_IP,
-#     LIVESTREAK_TURN_MIN_PORT, LIVESTREAK_TURN_MAX_PORT,
-#     LIVESTREAK_TURN_USER, LIVESTREAK_TURN_PASS, LIVESTREAK_TURN_REALM
 #   Remote Bridge Console (P4) + LiveKit
 #     LIVESTREAK_APP_ORIGIN, LIVESTREAK_REMOTE_GATEWAY_TOKEN,
 #     LIVESTREAK_REMOTE_GRANT_KEY, LIVESTREAK_REMOTE_SESSION_TTL_MS, LIVEKIT_API_KEY
@@ -127,14 +123,15 @@ jobs:
             docker pull "$IMAGE"
             docker stop livestreak-host 2>/dev/null || true
             docker rm livestreak-host 2>/dev/null || true
-            # --network host: the embedded TURN allocates UDP relay ports and advertises
-            # the box IP in its ICE candidates; bridge NAT would rewrite the relay source
-            # port and break them. Host networking also lets TURN auto-detect the box IP.
-            # Runtime config comes from the VPS-side env file, never from the image.
+            # Plain port mapping (no --network host): the live video path is now an
+            # encode-once fMP4 byte fan-out over WS on the single HTTP port (8787) — there
+            # is no UDP media relay to allocate, so host networking is no longer needed and
+            # a bridge with an explicit port map is the safer default. Runtime config comes
+            # from the VPS-side env file, never from the image.
             docker run -d \
               --name livestreak-host \
               --restart unless-stopped \
-              --network host \
+              -p 8787:8787 \
               --env-file /home/ubuntu/livestreak-host.env \
               "$IMAGE"
             docker image prune -f

@@ -2,7 +2,7 @@ import express, { type Express } from "express";
 import { bootstrapAaFromConfig, readAaServerConfig } from "./services/aa/chains.js";
 import { loadDefaultDeploySnapshotConfig } from "./config/aa/deploy-env.js";
 import { bootstrapHostServerConfig, defaultHostServerConfig, isModuleEnabled } from "./config/host.js";
-import { bootstrapHostRouteDeps, createHostRouteDeps, type HostRouteDeps } from "./deps.js";
+import { bootstrapHostRouteDeps, type HostRouteDeps } from "./deps.js";
 import {
   errorHandler,
   malformedJsonHandler,
@@ -12,7 +12,6 @@ import {
 import { createAaRouter } from "./api/routes/aa.js";
 import { createCatalogRouter } from "./api/routes/catalog.js";
 import { createPagesRouter } from "./api/routes/pages.js";
-import { createWebrtcRouter } from "./api/routes/webrtc.js";
 import { createContentRouter } from "./api/routes/content.js";
 import { createDescriptorRouter } from "./api/routes/descriptor.js";
 import { createDiscoveryRouter } from "./api/routes/discovery.js";
@@ -58,13 +57,13 @@ export const createApp = (deps: HostRouteDeps): Express => {
 
   app.use(createDescriptorRouter(deps));
 
-  // SEAM-CATALOG + SEAM-WEBRTC are always-on (no module token): the UI's live source and
-  // the local file->WebRTC signaling relay must work on the plain dev stack.
+  // SEAM-CATALOG is always-on (no module token): the UI's live source must work on the plain dev stack.
+  // (The live video fan-out is a WS transport — /live/ingest + /live/watch — attached to the http.Server
+  // in main.ts, not an Express router.)
   app.use(createCatalogRouter(deps));
   // Page-shaped discovery endpoints (/homepage, /agents, /stream/:id) served from the DB
   // read-model — always-on, one fetch per page.
   app.use(createPagesRouter(deps));
-  app.use(createWebrtcRouter(deps));
 
   // Part C: per-IP rate limit on the money / auth surfaces (paymaster, bundler,
   // content uploads) to bound free-gas drain and brute force.

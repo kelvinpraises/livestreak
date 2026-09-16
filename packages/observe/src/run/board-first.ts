@@ -31,13 +31,13 @@ export const defaultFileExportConfigure = (
   ...overrides
 });
 
-export const defaultFileLocalConfigure = (
+export const defaultFileLiveConfigure = (
   overrides: Partial<SystemConfigConfigurePayload> = {}
 ): SystemConfigConfigurePayload => ({
   chain: "eip155:31337",
   capture: "file",
   process: null,
-  publish: "local",
+  publish: "live",
   ...overrides
 });
 

@@ -38,7 +38,7 @@ import {
   type CatalogIndexer
 } from "./infrastructure/cron/catalog-sync.js";
 import { registerCronJobs, type CronHandle } from "./infrastructure/cron/index.js";
-import { createSignalingStore, type SignalingStore } from "./services/webrtc/signal.js";
+import { createLiveRingStore, type LiveRingStore } from "./services/live/ring.js";
 import { createRemoteService, type RemoteService } from "./services/remote/index.js";
 import { createEvidenceStore } from "./services/media/evidence.js";
 import { createManifestStore } from "./services/media/manifest.js";
@@ -133,7 +133,7 @@ export const bootstrapHostRouteDeps = async (
     aa,
     remote: buildRemoteService(config),
     ...stackToDeps(catalogStack),
-    signaling: createSignalingStore()
+    live: createLiveRingStore()
   };
 };
 
@@ -151,7 +151,7 @@ export interface HostRouteDeps {
   readonly catalogReadModel: CatalogReadModel;
   readonly catalogIndexer: CatalogIndexer;
   readonly catalogCron: CronHandle;
-  readonly signaling: SignalingStore;
+  readonly live: LiveRingStore;
 }
 
 export interface CatalogStack {
@@ -286,7 +286,7 @@ export const createHostRouteDeps = (
     aa: createAaRouteDeps(config, options),
     remote: buildRemoteService(config),
     ...stackToDeps(buildCatalogStack(config, discoveryStore, options)),
-    signaling: createSignalingStore()
+    live: createLiveRingStore()
   };
 };
 

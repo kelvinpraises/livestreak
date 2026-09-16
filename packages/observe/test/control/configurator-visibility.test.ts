@@ -18,15 +18,15 @@ describe("board-first configurator visibility", () => {
     expect(controls.cells[0]?.functions.map((fn) => fn.name)).toEqual(["configure", "close"]);
   });
 
-  it("v0 permutation table accepts file×file-export and file×local only", () => {
+  it("v0 permutation table accepts file×file-export and file×live only", () => {
     expect(isValidFlowPermutation({ capture: "file", publish: "file-export", process: null })).toBe(
       true
     );
-    expect(isValidFlowPermutation({ capture: "file", publish: "local", process: null })).toBe(true);
-    expect(isValidFlowPermutation({ capture: "browser", publish: "local", process: null })).toBe(
+    expect(isValidFlowPermutation({ capture: "file", publish: "live", process: null })).toBe(true);
+    expect(isValidFlowPermutation({ capture: "browser", publish: "live", process: null })).toBe(
       false
     );
-    expect(isValidFlowPermutation({ capture: "file", publish: "local", process: "transcode" })).toBe(
+    expect(isValidFlowPermutation({ capture: "file", publish: "live", process: "transcode" })).toBe(
       false
     );
   });

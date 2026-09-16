@@ -18,12 +18,7 @@ import {
 } from "./kernel.js";
 import { makeObserveRun, type ObserveRun, type ObserveRunConfig } from "./run.js";
 import { runConfigFromBoard } from "./board-run-config.js";
-import { createLocalSinkDriver } from "#pipeline/publish/sinks/local/driver.js";
-import {
-  fetchHostIceConfig,
-  resolveNodePeerConnectionFactory,
-  type NodeIceConfig
-} from "#pipeline/publish/sinks/local/node-peer.js";
+import { createLiveSinkDriver } from "#pipeline/publish/sinks/live/driver.js";
 import {
   callStoredRunFunction,
   createRunStore,
@@ -37,7 +32,7 @@ import {
   type RunStore
 } from "./store.js";
 
-type LocalSinkDriver = ReturnType<typeof createLocalSinkDriver>;
+type LiveSinkDriver = ReturnType<typeof createLiveSinkDriver>;
 
 export type { StopRunOptions } from "./kernel.js";
 export { defaultStopTimeoutMs } from "./kernel.js";
@@ -59,10 +54,10 @@ export interface ObserveRuntime {
   ) => Effect.Effect<ObserveRun, LiveStreakError>;
 
   /**
-   * Prepare the run from its CONSOLE-configured board: derive the run config (capture/sink/market) from
-   * the board and, for the local WebRTC sink, wire the Node peer factory + host signaling. The caller
-   * passes only the host base URL it owns; observe owns the board→config mapping and the sink wiring.
-   * Prepares in place so the board's market registration / live state survives.
+   * Prepare the run from its CONSOLE-configured board: derive the run config (capture/sink/market) from the
+   * board, wiring the encode-once fMP4 `live` sink (its host ingest transport is built by
+   * runConfigFromBoard). The caller passes only the host base URL it owns; observe owns the board→config
+   * mapping and the sink wiring. Prepares in place so the board's market registration / live state survives.
    */
   readonly prepareConfiguredRun: (
     runId: string,
@@ -127,18 +122,15 @@ const buildObserveRuntime = (
   const defaultKernelOptions = input.defaultKernelOptions;
   const sessionInit = input.sessionInit;
 
-  // The Node WebRTC sink driver (peer factory via @roamhq/wrtc) — built once, reused for prepare + start.
-  let cachedLocalSink: LocalSinkDriver | undefined;
-  const ensureLocalSink = (
-    iceConfig?: NodeIceConfig
-  ): Effect.Effect<LocalSinkDriver, LiveStreakError> =>
-    Effect.gen(function* () {
-      if (cachedLocalSink === undefined) {
-        const peerConnectionFactory = yield* resolveNodePeerConnectionFactory(iceConfig);
-        cachedLocalSink = createLocalSinkDriver({ peerConnectionFactory });
-      }
-      return cachedLocalSink;
-    });
+  // The encode-once fMP4 live sink driver — built once, reused for prepare + start. The ingest transport
+  // rides on the run config (built by runConfigFromBoard), so the driver itself is stateless here.
+  let cachedLiveSink: LiveSinkDriver | undefined;
+  const ensureLiveSink = (): LiveSinkDriver => {
+    if (cachedLiveSink === undefined) {
+      cachedLiveSink = createLiveSinkDriver();
+    }
+    return cachedLiveSink;
+  };
 
   const runHooks: import("./control/system/run.js").SystemRunHooks = {
     prepare: (runId: string) =>
@@ -188,8 +180,7 @@ const buildObserveRuntime = (
           board: run.board,
           hostBaseUrl: options.hostBaseUrl
         });
-        const iceConfig = yield* fetchHostIceConfig(options.hostBaseUrl);
-        const sinkDriver = yield* ensureLocalSink(iceConfig);
+        const sinkDriver = ensureLiveSink();
         const prepared = yield* prepareObserveRun(
           { ...run, config, manifest: run.manifest, prepared: false },
           mergeKernelOptions(defaultKernelOptions, { sinkDriver, sessionInit, runHooks })
@@ -200,20 +191,19 @@ const buildObserveRuntime = (
 
     startRun: (runId, options) =>
       Effect.gen(function* () {
-        // Re-supply the injected local WebRTC sink for a board-configured local-sink run (the kernel
-        // re-resolves the driver at start). For every other sink, leave sinkDriver unset — writing an
-        // `undefined` key into the overrides would clobber defaultKernelOptions.sinkDriver, so the kernel
-        // fails to resolve the driver (e.g. the in-memory test sink) and the worker hangs.
+        // Re-supply the injected fMP4 live sink for a board-configured live run (the kernel re-resolves the
+        // driver at start). For every other sink, leave sinkDriver unset — writing an `undefined` key into
+        // the overrides would clobber defaultKernelOptions.sinkDriver, so the kernel fails to resolve the
+        // driver (e.g. the in-memory test sink) and the worker hangs.
         const run = yield* store.require(runId);
-        const localSink =
-          run.config.sink.driverId === "local" ? yield* ensureLocalSink() : undefined;
+        const liveSink = run.config.sink.driverId === "live" ? ensureLiveSink() : undefined;
         return yield* startRunEffect(
           store,
           scope,
           runId,
           mergeKernelOptions(defaultKernelOptions, {
             ...options,
-            ...(localSink === undefined ? {} : { sinkDriver: localSink }),
+            ...(liveSink === undefined ? {} : { sinkDriver: liveSink }),
             sessionInit,
             runHooks
           })

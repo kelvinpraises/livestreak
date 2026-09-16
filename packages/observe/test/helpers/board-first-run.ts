@@ -1,7 +1,7 @@
 export {
   configureObserveBoard,
   defaultFileExportConfigure,
-  defaultFileLocalConfigure,
+  defaultFileLiveConfigure,
   prepareObserveRunBoardFirst,
   startObserveRunBoardFirst,
   type SystemConfigConfigurePayload

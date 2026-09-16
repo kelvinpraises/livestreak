@@ -32,10 +32,10 @@ export const attachRemoteWss = (server: HttpServer, deps: HostRouteDeps): Remote
       return;
     }
     const route = parseRemotePath(req.url ?? "");
-    if (route === null) {
-      rejectUpgrade(socket, 404, "not a remote ws path");
-      return;
-    }
+    // Not a /remote path → leave the socket for another upgrade listener (e.g. the live fMP4 WSS). The
+    // shared final rejecter (main.ts) 404s a truly unmatched upgrade; destroying it here would kill a
+    // valid peer of the other transport.
+    if (route === null) return;
     // Leg B is rejected early if no live session exists; leg A is authed at register.
     if (route.leg === "ui" && store.getLive(route.sessionId) === undefined) {
       rejectUpgrade(socket, 404, "no live session");

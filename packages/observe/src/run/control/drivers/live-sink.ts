@@ -9,16 +9,16 @@ import type {
 } from "#run/control/bus/types.js";
 import { readLiveConfigurators } from "#run/control/board/visibility.js";
 import {
-  localSinkCloseScope,
-  localSinkConfigureScope
-} from "#pipeline/publish/sinks/local/commands.js";
+  liveSinkCloseScope,
+  liveSinkConfigureScope
+} from "#pipeline/publish/sinks/live/commands.js";
 
-export const createLocalSinkControlSurface = (): ControlSurface => ({
+export const createLiveSinkControlSurface = (): ControlSurface => ({
   cell: {
-    id: "sink:local",
+    id: "sink:live",
     cell: {
-      label: "Local Preview",
-      catalog: "sink:local",
+      label: "Live Stream",
+      catalog: "sink:live",
       status: ["idle", null, Date.now()],
       settings: { subscribe: ["publish.video.rendered"], required: true },
       readonly: { configured: false },
@@ -30,13 +30,13 @@ export const createLocalSinkControlSurface = (): ControlSurface => ({
 
 const configureEntry = (): ControlFunctionEntry => ({
   name: "configure",
-  scope: localSinkConfigureScope,
+  scope: liveSinkConfigureScope,
   call: (envelope, context) => configureCall(envelope, context)
 });
 
 const closeEntry = (): ControlFunctionEntry => ({
   name: "close",
-  scope: localSinkCloseScope,
+  scope: liveSinkCloseScope,
   call: (_envelope, context) => closeCall(context)
 });
 
@@ -55,7 +55,7 @@ const configureCall = (
     return {
       boardPatch: {
         cells: {
-          "sink:local": {
+          "sink:live": {
             settings: {
               set: {
                 streamId,
@@ -77,13 +77,13 @@ const closeCall = (
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.sync(() => {
     const live = readLiveConfigurators(context.board).filter(
-      (id) => id !== "observe.sink.local"
+      (id) => id !== "observe.sink.live"
     );
 
     return {
       boardPatch: {
         cells: {
-          "sink:local": { remove: true },
+          "sink:live": { remove: true },
           "system:config": {
             readonly: { set: { liveConfigurators: live } }
           }
@@ -96,7 +96,7 @@ const decodeStreamIdPayload = (payload: unknown): Effect.Effect<string, LiveStre
   Effect.gen(function* () {
     if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
       return yield* Effect.fail(
-        new LiveStreakConfigError({ message: "sink:local:configure payload must be an object" })
+        new LiveStreakConfigError({ message: "sink:live:configure payload must be an object" })
       );
     }
 
@@ -104,7 +104,7 @@ const decodeStreamIdPayload = (payload: unknown): Effect.Effect<string, LiveStre
     if (typeof streamId !== "string" || streamId.trim().length === 0) {
       return yield* Effect.fail(
         new LiveStreakConfigError({
-          message: "sink:local:configure streamId must be a non-empty string"
+          message: "sink:live:configure streamId must be a non-empty string"
         })
       );
     }

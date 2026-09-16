@@ -1,7 +1,7 @@
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import { createFileCaptureControlSurface } from "./drivers/file-capture.js";
 import { createFileSinkControlSurface } from "./drivers/file-sink.js";
-import { createLocalSinkControlSurface } from "./drivers/local-sink.js";
+import { createLiveSinkControlSurface } from "./drivers/live-sink.js";
 import { createMarketControlSurface, type MarketControlDeps } from "#market/control.js";
 import { createSystemConfigSurface } from "./system/config.js";
 import { createSystemPauseSurface } from "./system/pause.js";
@@ -26,5 +26,5 @@ export const createObserveControlSurfaces = (
   }),
   createFileCaptureControlSurface(),
   createFileSinkControlSurface("file-export"),
-  createLocalSinkControlSurface()
+  createLiveSinkControlSurface()
 ];

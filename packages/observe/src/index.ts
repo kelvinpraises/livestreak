@@ -52,7 +52,7 @@ export {
 export {
   configureObserveBoard,
   defaultFileExportConfigure,
-  defaultFileLocalConfigure,
+  defaultFileLiveConfigure,
   mountObserveT0Bus,
   prepareObserveRunBoardFirst,
   startObserveRunBoardFirst,
@@ -218,44 +218,35 @@ export * from "./pipeline/publish/index.js";
 export * from "./pipeline/registry.js";
 export * from "./pipeline/shared.js";
 
-// --- Local WebRTC preview sink + file→WebRTC streaming (SEAM-WEBRTC) ---
+// --- Live fMP4 publisher sink (encode-once byte fan-out) ---
 export {
-  createLocalSinkDriver,
-  localSinkDescriptor,
-  validateLocalSinkConfig,
-  type LocalSinkConfig,
-  type LocalSinkDriverOptions
-} from "./pipeline/publish/sinks/local/driver.js";
+  createLiveSinkDriver,
+  liveSinkDescriptor,
+  validateLiveSinkConfig,
+  type LiveSinkConfig,
+  type LiveSinkDriverOptions
+} from "./pipeline/publish/sinks/live/driver.js";
 
 export {
-  createHostMediatedConsumerSignaling,
-  type HostMediatedConsumerSignalingInput
-} from "./pipeline/publish/sinks/local/host-consumer-signaling.js";
-
-export { resolveNodePeerConnectionFactory } from "./pipeline/publish/sinks/local/node-peer.js";
-
-export {
-  createHostMediatedSinkSignaling,
-  type HostMediatedSinkSignalingInput,
-  type SignalingFetch,
-  type SignalingResponse
-} from "./pipeline/publish/sinks/local/host-signaling.js";
+  createHostFmp4IngestTransport,
+  frameFmp4,
+  FMP4_FRAME_INIT,
+  FMP4_FRAME_FRAGMENT,
+  FMP4_FRAME_END,
+  type Fmp4IngestTransport,
+  type HostFmp4IngestInput,
+  type WebSocketLike,
+  type WebSocketFactory
+} from "./pipeline/publish/sinks/live/transport.js";
 
 export {
-  createLocalSignalingHub,
-  createLoopbackNetwork,
-  LocalSignalingHub,
-  type ConsumerSignalingChannel,
-  type SinkSignalingChannel,
-  type LoopbackNetwork,
-  type RtcPeerConnectionLike,
-  type RtcPeerConnectionFactory,
-  type RtcSessionDescription,
-  type RtcSdpType,
-  type RtcVideoFrame,
-  type RtcVideoTrackHandle,
-  type RtcTrackEvent
-} from "./pipeline/publish/sinks/local/signaling.js";
+  createFmp4Encoder,
+  makeFfmpegFmp4Arguments,
+  type Fmp4Encoder,
+  type Fmp4EncoderConfig
+} from "./pipeline/publish/encoder/fmp4.js";
+
+export { createFmp4Chunker, type Fmp4Chunk, type Fmp4Chunker } from "./pipeline/publish/encoder/fmp4-boxes.js";
 
 // --- Per-stream feed resolution (issue 7) ---
 export {

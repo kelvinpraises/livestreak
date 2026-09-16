@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 #
 # LiveStreak host server (@livestreak/host-server) — the provider node: HTTP/WSS API
-# on :8787 (Express 5 + Remote Bridge Console WSS) PLUS an embedded STUN/TURN media
-# relay (node-turn) on :3478/udp with relay allocations in 49160-49200/udp.
+# on :8787 (Express 5 + Remote Bridge Console WSS + live fMP4 video fan-out over WS).
+# All traffic — including live video (/live/ingest producer + /live/watch viewers) — is
+# TCP on the single :8787 port; there is NO UDP media relay.
 #
 # Build context = repo root (same as ./Dockerfile), so this mirrors the app image's
 # monorepo-prune pattern: manifests first for a cached install, a single root
@@ -13,13 +14,8 @@
 # (better-sqlite3, sodium-* from the wallet SDK) must resolve for THIS platform; the
 # committed lock is macOS-generated and `npm ci` would install darwin binaries.
 #
-# --- RUN with `--network host` on the VPS (see deploy-host.yml). ---
-# The embedded TURN allocates UDP relay ports (49160-49200) and advertises the box's
-# reachable IP via `GET /webrtc/ice`. Docker's default bridge NAT rewrites the source
-# port of relayed UDP, which breaks the ICE candidates node-turn hands out, so the
-# container must share the host network namespace rather than publish a port range.
-# `--network host` also lets LIVESTREAK_TURN_RELAY_IP auto-detect the box's LAN/public
-# IP the same way it does on bare metal.
+# RUN with a plain port map (`-p 8787:8787`, see deploy-host.yml): the live video path
+# is TCP-only, so host networking / a UDP relay port range is no longer needed.
 
 FROM node:22-slim
 
@@ -75,6 +71,5 @@ ENV LIVESTREAK_HOST_BIND_PORT=8787
 # skip the localhost snapshot auto-load.
 ENV LIVESTREAK_AA_FROM_DEPLOY=0
 EXPOSE 8787
-EXPOSE 3478/udp
 WORKDIR /repo/host
 CMD ["node", "dist/main.js"]

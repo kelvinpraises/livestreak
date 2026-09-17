@@ -17,4 +17,5 @@ export * from "./media/evidence.js";
 export * from "./aa.js";
 export * from "./discovery.js";
 export * from "./memory.js";
+export * from "./forum.js";
 export * from "./validation.js";

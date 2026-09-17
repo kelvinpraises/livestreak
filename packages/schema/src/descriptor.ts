@@ -24,6 +24,9 @@ export interface JsonSchema {
   readonly description?: string;
   readonly required?: boolean;
   readonly default?: unknown;
+  /** Wire-format refinement. "bigint": JSON carries a decimal string/number; bridges coerce to
+   *  a real bigint at their boundary via coerceArgsBySchema — no hand-kept field tables. */
+  readonly format?: "bigint";
   readonly values?: readonly string[]; // enum members
   readonly properties?: readonly JsonSchemaProperty[]; // object fields
   readonly items?: JsonSchema; // array element

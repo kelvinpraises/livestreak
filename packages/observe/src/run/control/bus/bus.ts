@@ -79,8 +79,12 @@ export const createControlBus = (
           return board;
         }
 
+        // Shape-only on live writes: the ≥1-sink-policy COMPLETENESS rule is a go-live prerequisite, not a
+        // per-write invariant. Enforcing it here would trap the operator configuring cells one at a time
+        // (configure capture before sink → "At least one sink policy is required"). Prepare/kernel re-run
+        // this with the completeness check (requireComplete defaults true).
         if (validateSettings && boardSettingsChanged(board, nextBoard)) {
-          yield* validateBoardSettings(nextBoard);
+          yield* validateBoardSettings(nextBoard, { requireComplete: false });
         }
 
         board = nextBoard;

@@ -124,7 +124,8 @@ export type ApproveNftInput = {
 };
 
 export type SetApprovalForAllInput = {
-  readonly operator: UserAddress;
+  /** Defaults to the MarketDriver (the protocol operator) when omitted. */
+  readonly operator?: UserAddress;
   readonly approved: boolean;
 };
 

@@ -13,10 +13,12 @@ set -euo pipefail
 
 OWNER="${GHCR_OWNER:-kelvinpraises}"
 IMAGE="ghcr.io/${OWNER}/livestreak-app:latest"
-HOST="${DEPLOY_HOST:-108.130.99.99}"
+HOST="${DEPLOY_HOST:-108.129.133.48}"
 SSH_USER="${DEPLOY_USER:-ubuntu}"
 KEY="${DEPLOY_KEY:-$HOME/.ssh/uburu-key-pair.pem}"
-PORT="${APP_PORT:-3000}"
+# Caddy on the box reverse-proxies livestreak.online -> localhost:3002, so the
+# container must publish 3002 (matches .github/workflows/deploy-app.yml).
+PORT="${APP_PORT:-3002}"
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"   # repo root (this script lives at the root)
 

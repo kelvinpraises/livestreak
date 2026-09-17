@@ -101,7 +101,8 @@ describe("steward runtime", () => {
     expect(snapshot.latestFindings).toEqual([]);
     expect(snapshot.latestDecisions).toEqual([]);
     expect(sink.plans).toEqual([]);
-    expect(memory.memorySink.remembered).toHaveLength(1);
+    // Nothing to remember → no write (a polling refresh must not spam empty memory rows).
+    expect(memory.memorySink.remembered).toHaveLength(0);
   });
 
   it("notifies subscribers when the snapshot changes", async () => {

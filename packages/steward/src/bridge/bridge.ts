@@ -5,6 +5,7 @@ import { LiveStreakConfigError, LiveStreakCapabilityError } from "@livestreak/co
 import { actionScopeFor } from "./action-scope.js";
 import { projectStewardControls } from "./panel/project.js";
 import type { StewardControlsView } from "./panel/types.js";
+import { stewardWatchSubjects } from "../model/subject.js";
 import { authorizeBridgeCaller, hasAnyScope, requireAnyScope } from "./scope.js";
 import type {
   BridgeCaller,
@@ -67,6 +68,31 @@ export const createStewardBridge = (input: CreateStewardBridgeInput): StewardBri
         });
       }
 
+      // Configure/close are runtime lens verbs: swap the watched subjects, refresh best-effort
+      // (fact-source failures land on the board as lastError, not on the caller).
+      if (envelope.action === "configure") {
+        const args = readConfigureArgs(envelope.args);
+        const subjects = stewardWatchSubjects({
+          stewardId: stewardSelfId(runtime),
+          ...(args.marketId === undefined ? {} : { marketId: args.marketId }),
+          ...(args.vaultId === undefined ? {} : { vaultId: args.vaultId })
+        });
+        try {
+          await runtime.configure(subjects);
+        } catch {
+          /* lastError is on the board */
+        }
+        return { txId: `configured-${args.vaultId ?? args.marketId ?? "steward"}` };
+      }
+      if (envelope.action === "close") {
+        try {
+          await runtime.close();
+        } catch {
+          /* lastError is on the board */
+        }
+        return { txId: "closed" };
+      }
+
       // S2: a non-trusted caller must ALSO hold the GRANULAR per-action scope the bridge advertises —
       // holding only the broad `bridge:action` permission is no longer enough to veto/penalise/resolve.
       // Remote console grants use the unified `bridge:action:<name>` scope; accept either that or the
@@ -94,6 +120,26 @@ export const createStewardBridge = (input: CreateStewardBridgeInput): StewardBri
       authorizeBridgeCaller(caller, bridgeBoardSubscribeScope);
       return runtime.subscribeBoard(listener);
     }
+  };
+};
+
+// --- helpers ---
+
+const stewardSelfId = (runtime: CreateStewardBridgeInput["runtime"]): string =>
+  runtime.config.watchedSubjects.find((subject) => subject.kind === "steward")?.id ?? "steward";
+
+const readConfigureArgs = (args: unknown): { marketId?: string; vaultId?: string } => {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) {
+    return {};
+  }
+  const record = args as Record<string, unknown>;
+  return {
+    ...(typeof record.marketId === "string" && record.marketId.trim().length > 0
+      ? { marketId: record.marketId.trim() }
+      : {}),
+    ...(typeof record.vaultId === "string" && record.vaultId.trim().length > 0
+      ? { vaultId: record.vaultId.trim() }
+      : {})
   };
 };
 

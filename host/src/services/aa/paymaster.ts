@@ -94,8 +94,12 @@ export const createPaymasterSigner = (executorKey: Hex, paymasterAddress: Hex) =
   return {
     address: paymasterAddress,
 
+    // ERC-7677 `pm_getPaymasterStubData`: clients call this BEFORE a real userOp
+    // exists, to size gas. "Stub" here is the standard 7677 term for that phase —
+    // the returned paymasterData is a REAL signature over a zero-valued placeholder
+    // op, not a fabricated/fake credential. This is legitimate protocol behavior.
     async signStub(chainId: bigint = 31337n): Promise<PaymasterSignResult> {
-      const dummyOp: PackedUserOp = {
+      const placeholderOp: PackedUserOp = {
         sender: "0x0000000000000000000000000000000000000000" as Hex,
         nonce: "0x0" as Hex,
         callData: "0x" as Hex,
@@ -107,7 +111,7 @@ export const createPaymasterSigner = (executorKey: Hex, paymasterAddress: Hex) =
         signature: "0x" as Hex
       };
       const validUntil = Math.floor(Date.now() / 1000) + 3600;
-      const hash = getHash(dummyOp, validUntil, 0, chainId);
+      const hash = getHash(placeholderOp, validUntil, 0, chainId);
       const signature = await account.signMessage({ message: { raw: toBytes(hash) } });
       const timeData = encodeAbiParameters(parseAbiParameters("uint48, uint48"), [validUntil, 0]);
       return {

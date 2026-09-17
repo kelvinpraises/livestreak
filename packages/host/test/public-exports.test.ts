@@ -21,9 +21,9 @@ describe("host public exports", () => {
     expect(publicExport("SuiSponsorshipDescriptor")).toBeDefined();
     expect(publicExport("SuiSponsorRequest")).toBeDefined();
     expect(publicExport("SuiSponsorResponse")).toBeDefined();
-    expect(publicExport("MemoryAccessRequest")).toBeDefined();
-    expect(publicExport("MemoryAccessResponse")).toBeDefined();
-    expect(publicExport("MarketMemoryBinding")).toBeDefined();
+    expect(publicExport("MemoryRecordInput")).toBeDefined();
+    expect(publicExport("MemoryRecordDto")).toBeDefined();
+    expect(publicExport("MemoryRecallResponse")).toBeDefined();
     expect(publicExport("HostSimilarityRequest")).toBeDefined();
     expect(publicExport("HostSimilarityResult")).toBeDefined();
     expect(publicExport("HostSimilarVaultCandidate")).toBeDefined();
@@ -31,7 +31,7 @@ describe("host public exports", () => {
     expect(publicExport("decodeHostPolicyRequest")).toBeTypeOf("function");
     expect(publicExport("decodeHostDiscoveryRequest")).toBeTypeOf("function");
     expect(publicExport("decodeHostDiscoveryIndexRequest")).toBeTypeOf("function");
-    expect(publicExport("decodeMemoryAccessRequest")).toBeTypeOf("function");
+    expect(publicExport("decodeMemoryRecordInput")).toBeTypeOf("function");
     expect(publicExport("validationErrorMessage")).toBeTypeOf("function");
   });
 

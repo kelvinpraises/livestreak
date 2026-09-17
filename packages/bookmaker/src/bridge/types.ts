@@ -21,38 +21,38 @@ export {
 export const bookmakerConfigScope = "bookmaker:config" as const;
 export const bookmakerConfigCloseScope = "bookmaker:config:close" as const;
 
-/**
- * Result of a createVault bridge action. The runtime already produces the new
- * vaultId; the bridge now returns it alongside the txId (previously dropped) so
- * the CLI/console can reference the created vault without a second lookup.
- */
+/** createVault result: txId plus the vaultId the runtime produced. */
 export interface CreateVaultActionResult {
   readonly txId: import("../chains/types.js").TxId;
   readonly vaultId: import("../chains/types.js").VaultId;
 }
 
+/** Any bridge action result — configure/close acks carry no vaultId. */
+export interface BookmakerActionResult {
+  readonly txId: import("../chains/types.js").TxId;
+  readonly vaultId?: import("../chains/types.js").VaultId;
+}
+
 export interface CreateBookmakerBridgeInput {
   readonly runtime: import("../runtime/runtime.js").BookmakerRuntime;
+  /** REQUIRED clock — bookmaker src never touches the wall clock (determinism gene). */
+  readonly now: () => number;
 }
 
 export interface BookmakerBridge {
   readonly runtime: import("../runtime/runtime.js").BookmakerRuntime;
   readonly readBoard: (
-    caller: BridgeCaller,
-    nowMs: number
+    caller: BridgeCaller
   ) => Promise<import("../model/watch-source.js").BookmakerPanelView>;
   readonly readControls: (
-    caller: BridgeCaller,
-    nowMs: number
+    caller: BridgeCaller
   ) => Promise<import("./panel/types.js").BookmakerPanelSnapshot>;
   readonly callAction: (
     caller: BridgeCaller,
-    envelope: CallActionEnvelope,
-    nowMs: number
-  ) => Promise<CreateVaultActionResult>;
+    envelope: CallActionEnvelope
+  ) => Promise<BookmakerActionResult>;
   readonly subscribeBoard: (
     caller: BridgeCaller,
-    listener: (board: import("../model/watch-source.js").BookmakerPanelView) => void,
-    nowMs: number
+    listener: (board: import("../model/watch-source.js").BookmakerPanelView) => void
   ) => () => void;
 }

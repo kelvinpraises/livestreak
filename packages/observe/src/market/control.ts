@@ -100,8 +100,28 @@ const registerCall = (
       })
     );
 
+    if (result.status === "registered" && deps.sessionInit !== undefined) {
+      yield* notifyCatalogFailOpen(deps.sessionInit, result.marketId);
+    }
+
     return { boardPatch: marketLifecyclePatch(result) };
   });
+
+// Instant catalog ingest: a fresh market appears in the app catalog without waiting for the
+// host's catalog-sync cron. Fail-open — registration success never depends on the host.
+const notifyCatalogFailOpen = (
+  sessionInit: PackageRuntimeInit,
+  marketId: string
+): Effect.Effect<void> =>
+  Effect.tryPromise(async () => {
+    const base = sessionInit.hostUrl.replace(/\/$/, "");
+    const chain = sessionInit.chain.startsWith("eip155") ? "evm" : "sui";
+    await fetch(`${base}/catalog/markets`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chain, marketId })
+    });
+  }).pipe(Effect.catchAll(() => Effect.void));
 
 const lifecycleCall = (
   envelope: ControlCallEnvelope,

@@ -34,10 +34,25 @@ export const defaultControlRun = {
 
 const browserEncodingValues = ["jpeg", "png"] as const;
 
+export interface ValidateBoardSettingsOptions {
+  /**
+   * Whether to enforce cross-cell COMPLETENESS (≥1 configured sink policy, each subscribing to a track).
+   * That is a go-live prerequisite, not a per-field shape rule — it must only gate prepare/kernel, never
+   * an intermediate configure write. On the remote console the operator mounts capture + sink cells with
+   * `system:config configure`, then configures them one at a time; if this rule fired on every settings
+   * write, configuring the capture cell before the sink cell would hard-fail with "At least one sink
+   * policy is required" and trap the operator (no exposed ordering that satisfies it). So the live board
+   * write path passes `false` (shape-only), and prepare (kernel) leaves it `true` (the default).
+   */
+  readonly requireComplete?: boolean;
+}
+
 export const validateBoardSettings = (
-  board: Board
+  board: Board,
+  options: ValidateBoardSettingsOptions = {}
 ): Effect.Effect<Board, LiveStreakConfigError> =>
   Effect.gen(function* () {
+    const requireComplete = options.requireComplete ?? true;
     const view = projectWorkerControlView(board);
 
     yield* validateSystemRunSettings(board);
@@ -45,6 +60,10 @@ export const validateBoardSettings = (
     yield* validateCaptureFileSettings(board);
     yield* validateCaptureBrowserSettings(board);
     yield* validateSinkCellSettings(board);
+
+    if (!requireComplete) {
+      return board;
+    }
 
     if (board.cells["system:config"] !== undefined && Object.keys(board.cells).length === 1) {
       return board;

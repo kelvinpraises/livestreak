@@ -26,12 +26,31 @@ export const validateBookmakerRuntimeConfig = (
   const runtimeId = requireNonEmptyString(value.runtimeId, "runtimeId", issues);
   const fundingToken = requireNonEmptyString(value.fundingToken, "fundingToken", issues);
 
-  const marketContext = validateNested(value.marketContext, validateBookmakerMarketContext, "marketContext");
+  // A remote-console runtime is constructed BEFORE the operator supplies a market:
+  // it must start honestly UNCONFIGURED (empty marketId), not against a fabricated
+  // sentinel id. Accept an empty marketId on both marketContext + watchSource as the
+  // explicit not-configured state (createVault stays gated by the intent validator +
+  // the panel descriptor). Once EITHER carries a marketId, full strict validation
+  // applies — including the cross-match — so a half-configured runtime is rejected.
+  const marketContextMarketId = readNestedMarketId(value.marketContext);
+  const watchSourceMarketId = readNestedMarketId(value.watchSource);
+  const allowUnconfigured = marketContextMarketId === "" && watchSourceMarketId === "";
+  const nestedOptions = allowUnconfigured ? { allowUnconfigured: true } : {};
+
+  const marketContext = validateNested(
+    value.marketContext,
+    (v) => validateBookmakerMarketContext(v, nestedOptions),
+    "marketContext"
+  );
   if (marketContext.ok === false) {
     issues.push(...marketContext.issues.map((issue) => `marketContext.${issue}`));
   }
 
-  const watchSource = validateNested(value.watchSource, validateBookmakerWatchSource, "watchSource");
+  const watchSource = validateNested(
+    value.watchSource,
+    (v) => validateBookmakerWatchSource(v, nestedOptions),
+    "watchSource"
+  );
   if (watchSource.ok === false) {
     issues.push(...watchSource.issues.map((issue) => `watchSource.${issue}`));
   }
@@ -105,6 +124,17 @@ export const validateBookmakerRuntimeConfig = (
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+// Read a nested marketId for the unconfigured check. A present-but-blank string
+// reads as "" (unconfigured); anything else (missing, non-string) reads as
+// undefined so the strict path runs and reports the real shape error.
+const readNestedMarketId = (nested: unknown): string | undefined => {
+  if (!isPlainObject(nested)) {
+    return undefined;
+  }
+  const raw = nested.marketId;
+  return typeof raw === "string" ? raw.trim() : undefined;
+};
 
 const validateNested = <T>(
   input: unknown,

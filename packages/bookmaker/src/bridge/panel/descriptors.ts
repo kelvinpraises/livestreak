@@ -153,6 +153,7 @@ const CREATE_VAULT_INPUT_SCHEMA: JsonSchema = obj([
     value: {
       type: "string",
       required,
+      format: "bigint",
       description: "Creator's opening stake. Base-unit integer as a decimal string."
     },
     help: "USDC base units staked by the creator."
@@ -162,6 +163,7 @@ const CREATE_VAULT_INPUT_SCHEMA: JsonSchema = obj([
     value: {
       type: "string",
       required,
+      format: "bigint",
       description: "Initial stream rate. Base-unit integer as a decimal string."
     },
     help: "USDC base units/sec seed rate."

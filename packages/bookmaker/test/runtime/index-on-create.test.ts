@@ -88,7 +88,7 @@ describe("runtime createVaultOnce discovery-index registration", () => {
   it("indexes through the live console path (bridge callAction createVault)", async () => {
     const client = recordingClient();
     const runtime = makeRuntime(client);
-    const bridge = createBookmakerBridge({ runtime });
+    const bridge = createBookmakerBridge({ runtime, now: () => nowMs });
     const caller = {
       id: "agent-1",
       grants: [
@@ -116,9 +116,7 @@ describe("runtime createVaultOnce discovery-index registration", () => {
           resolutionSource: intent.resolutionSource,
           resolutionWindowExpiresAtMs: intent.resolutionWindowExpiresAtMs
         }
-      },
-      nowMs
-    );
+      });
 
     expect(client.indexed).toHaveLength(1);
     expect(client.indexed[0]!.vaultId).toBe(result.vaultId);

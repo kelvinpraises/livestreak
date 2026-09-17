@@ -58,9 +58,26 @@ export interface BridgeStopRunInput {
   readonly timeoutMs?: number;
 }
 
+/** A remote-console call: cell-qualified `id` dispatches precisely (observe cells share fn names);
+ *  bare `action` is the authz key (`bridge:action:<action>`) and the legacy dispatch fallback. */
+export interface BridgeConsoleCallInput {
+  readonly caller: BridgeCaller;
+  readonly runId: string;
+  readonly id?: string;
+  readonly action: string;
+  readonly args: unknown;
+}
+
+export interface BridgeConsoleCallResult {
+  readonly txId: string;
+  readonly tokenId?: string;
+}
+
 export interface CreateObserveBridgeInput {
   readonly runtime: ObserveRuntime;
   readonly sessionInit?: PackageRuntimeInit;
+  /** Host relay base URL — the encode-once live sink signals/ingests through it (run prepare). */
+  readonly hostBaseUrl?: string;
 }
 
 export interface ObserveBridge {
@@ -71,6 +88,12 @@ export interface ObserveBridge {
   readonly readControls: (input: BridgeRunInput) => Effect.Effect<ControlsView, LiveStreakError>;
 
   readonly callFunction: (input: BridgeCallInput) => Effect.Effect<ControlCallResult, LiveStreakError>;
+
+  /** Console dispatch: scope resolution, run-lifecycle routing, configure coercion, and dual-accept
+   *  authz (internal scope OR the unified `bridge:action:<action>` a remote grant carries). */
+  readonly callConsoleAction: (
+    input: BridgeConsoleCallInput
+  ) => Effect.Effect<BridgeConsoleCallResult, LiveStreakError>;
 
   readonly getArtifact: (input: BridgeArtifactInput) => Effect.Effect<ControlArtifact, LiveStreakError>;
 

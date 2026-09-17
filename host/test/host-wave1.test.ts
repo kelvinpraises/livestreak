@@ -223,7 +223,7 @@ describe("Part C — module gating returns typed 503", () => {
   it("returns 503 module_disabled at the prefix when a module is off", async () => {
     const config = {
       ...defaultHostServerConfig(),
-      enabledModules: ["media", "walrus_memory", "walrus_content", "discovery"] as const
+      enabledModules: ["media", "memory", "walrus_content", "discovery"] as const
     };
     const app = createApp(createHostRouteDeps(config));
     const response = await request(app)

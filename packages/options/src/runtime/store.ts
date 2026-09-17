@@ -36,6 +36,8 @@ export interface OptionsRuntimeStore {
   setLastError: (error: OptionsRuntimeLastError | undefined) => void;
   setMemory: (key: string, value: unknown) => void;
   getMemory: <T>(key: string) => T | undefined;
+  /** Drop all snapshots (close/deconfigure). Memory survives; revision bumps. */
+  reset: () => void;
 }
 
 export const createOptionsRuntimeStore = (runtimeId: string): OptionsRuntimeStore =>
@@ -162,5 +164,13 @@ class OptionsRuntimeStoreInMemory implements OptionsRuntimeStore {
 
   getMemory<T>(key: string): T | undefined {
     return this.memory.get(key) as T | undefined;
+  }
+
+  reset(): void {
+    this.userSnapshot = undefined;
+    this.markets.clear();
+    this.vaults.clear();
+    this.lastError = undefined;
+    this.revision += 1;
   }
 }

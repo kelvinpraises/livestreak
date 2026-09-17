@@ -4,6 +4,7 @@ export {
   makeObserveRun,
   browserCaptureRunConfig,
   fileCaptureRunConfig,
+  shellRunConfig,
   validateObserveRunConfig,
   type ObserveRun,
   type ObserveRunConfig,
@@ -131,6 +132,8 @@ export { flowPermutationsV0, isValidFlowPermutation } from "./flows/index.js";
 export {
   createObserveBridge,
   evaluateBridgeAuthorization,
+  ensureObserveShellRun,
+  openObserveConsoleRuntime,
   bridgeBoardReadScope,
   bridgeControlsReadScope,
   bridgeArtifactReadScope,
@@ -140,12 +143,16 @@ export {
   type BridgeCaller,
   type BridgeRunInput,
   type BridgeCallInput,
+  type BridgeConsoleCallInput,
+  type BridgeConsoleCallResult,
   type BridgeArtifactInput,
   type BridgeSubscribeBoardInput,
   type BridgeSubscribeArtifactsInput,
   type BridgeStopRunInput,
   type CreateObserveBridgeInput,
-  type ObserveBridge
+  type ObserveBridge,
+  type ObserveBoardPersistencePort,
+  type ObserveConsoleRuntimeHandle
 } from "./bridge/index.js";
 
 export {
@@ -272,10 +279,8 @@ export type {
   ObserveRunMarketOptions,
   StreamId,
   SuiMarketRegistryConfig,
-  EvmAddress,
-  MarketLifecycleWriteInput,
-  MarketLifecycleWriteResult
+  EvmAddress
 } from "./market/index.js";
 
-export { observeRunStreamId, writeMarketLifecycle } from "./market/index.js";
+export { observeRunStreamId } from "./market/index.js";
 export { createMarketControlSurface } from "./market/control.js";

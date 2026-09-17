@@ -1,8 +1,7 @@
 import type { HostProviderDescriptor } from "@livestreak/host";
 import type { HostServerConfig } from "../config/host.js";
 import {
-  isMemoryBootstrapped,
-  isMemoryHostConfigured,
+  isModuleEnabled,
   isWalrusBootstrapped,
   isWalrusEnabled,
   toHostProviderDescriptor
@@ -20,7 +19,7 @@ export interface HealthResponse {
   readonly uptimeMs: number;
   readonly subsystems: {
     readonly walrusContent: SubsystemStatus;
-    readonly walrusMemory: SubsystemStatus;
+    readonly memory: SubsystemStatus;
   };
 }
 
@@ -35,9 +34,9 @@ export interface DescriptorRouteDeps {
 // are `disabled` and do not degrade the host.
 export const handleHealth = (deps: DescriptorRouteDeps, nowMs = Date.now()): HealthResponse => {
   const walrusContent = deriveWalrusContentStatus(deps.config);
-  const walrusMemory = deriveWalrusMemoryStatus(deps.config);
+  const memory = deriveMemoryStatus(deps.config);
   const status: HealthStatus =
-    walrusContent === "degraded" || walrusMemory === "degraded" ? "degraded" : "ok";
+    walrusContent === "degraded" || memory === "degraded" ? "degraded" : "ok";
 
   return {
     ok: true,
@@ -45,7 +44,7 @@ export const handleHealth = (deps: DescriptorRouteDeps, nowMs = Date.now()): Hea
     hostId: deps.config.hostId,
     version: "0.1.0",
     uptimeMs: Math.max(0, nowMs - deps.config.startedAtMs),
-    subsystems: { walrusContent, walrusMemory }
+    subsystems: { walrusContent, memory }
   };
 };
 
@@ -56,11 +55,12 @@ const deriveWalrusContentStatus = (config: HostServerConfig): SubsystemStatus =>
   return isWalrusBootstrapped(config) ? "ok" : "degraded";
 };
 
-const deriveWalrusMemoryStatus = (config: HostServerConfig): SubsystemStatus => {
-  if (!isMemoryHostConfigured(config)) {
+// DB-backed memory has no external bootstrap: enabled == ok, disabled == not_configured.
+const deriveMemoryStatus = (config: HostServerConfig): SubsystemStatus => {
+  if (!isModuleEnabled(config, "memory")) {
     return "disabled";
   }
-  return isMemoryBootstrapped(config) ? "ok" : "degraded";
+  return "ok";
 };
 
 export const handleDescriptor = (deps: DescriptorRouteDeps): HostProviderDescriptor =>

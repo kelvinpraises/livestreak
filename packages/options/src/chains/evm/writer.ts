@@ -407,7 +407,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     },
 
     setApprovalForAll: async (input: SetApprovalForAllInput) => {
-      const operator = validateUserAddress(input.operator, "operator");
+      const operator = validateUserAddress(input.operator ?? addresses.marketDriver, "operator");
 
       return send(addresses.marketDriver, abis.MarketDriver, "setApprovalForAll", [
         operator as `0x${string}`,

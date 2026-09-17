@@ -8,6 +8,14 @@ export interface ManifestStore {
   readonly getBySessionId: (sessionId: string) => EndpointManifest | undefined;
 }
 
+// Dev manifests are NOT host-signed yet: no media-signing key is wired and no
+// consumer verifies this field. The schema requires a non-empty `signature`, so
+// emit an explicit "unsigned" marker rather than a string shaped like a real
+// signature — nothing must learn to trust it. When manifest signing lands, sign
+// over the canonical manifest bytes with a dedicated host media key (mirroring
+// the Ed25519 grant signer in services/remote/grant.ts) and set this to the sig.
+export const MANIFEST_UNSIGNED = "unsigned:dev" as const;
+
 export const createManifestStore = (): ManifestStore => {
   const manifests = new Map<string, EndpointManifest>();
 
@@ -53,7 +61,7 @@ export const buildDevManifest = (
     cacheReceiptRefs: [],
     issuedAtMs: nowMs,
     expiresAtMs,
-    signature: `dev-stub-signature:${config.hostId}:${manifestId}`
+    signature: MANIFEST_UNSIGNED
   };
 };
 

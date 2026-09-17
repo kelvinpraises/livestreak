@@ -6,7 +6,7 @@ import type { StewardStateSnapshot } from "./store.js";
 import type { StewardActionPlan } from "../model/action-plan.js";
 import type { StewardDecisionAction } from "../model/decision.js";
 import { planStewardActions } from "../workflow/action/plan.js";
-import { sameSubject, type StewardSubjectKind } from "../model/subject.js";
+import { sameSubject, type StewardSubject, type StewardSubjectKind } from "../model/subject.js";
 import { isStewardDecisionAction } from "../validate/decision.js";
 import { isStewardSubjectKind } from "../validate/subject.js";
 import {
@@ -29,6 +29,11 @@ import { createStewardRuntimeStore, type StewardRuntimeStore } from "./store.js"
 
 export interface StewardRuntime {
   readonly config: StewardRuntimeConfig;
+  /** Board-first lens: replace the watched subjects and refresh their facts/findings. */
+  configure: (subjects: readonly StewardSubject[]) => Promise<StewardStateSnapshot>;
+  /** Inverse of configure: back to the bootstrap subjects (steward self), board clears. */
+  close: () => Promise<StewardStateSnapshot>;
+  watchedSubjects: () => readonly StewardSubject[];
   readSnapshot: () => StewardStateSnapshot;
   readPanel: () => StewardPanelView;
   readBoard: () => StewardBoard;
@@ -54,9 +59,11 @@ class StewardRuntimeFacade implements StewardRuntime {
   private readonly listeners = new Set<(snapshot: StewardStateSnapshot) => void>();
   private readonly boardListeners = new Set<(board: StewardBoard) => void>();
   private pollingTimer: ReturnType<typeof setInterval> | undefined;
+  private subjects: readonly StewardSubject[];
 
   constructor(input: StewardRuntimeInput) {
     this.config = validateStewardRuntimeConfig(input.config);
+    this.subjects = this.config.watchedSubjects;
     this.store = createStewardRuntimeStore(this.config.runtimeId);
     this.contractFactSource = input.contractFactSource;
     this.hostFactSource = input.hostFactSource;
@@ -66,11 +73,24 @@ class StewardRuntimeFacade implements StewardRuntime {
     this.memorySink = input.memorySink;
   }
 
+  async configure(subjects: readonly StewardSubject[]): Promise<StewardStateSnapshot> {
+    this.subjects = subjects;
+    return this.refresh();
+  }
+
+  async close(): Promise<StewardStateSnapshot> {
+    return this.configure(this.config.watchedSubjects);
+  }
+
+  watchedSubjects(): readonly StewardSubject[] {
+    return this.subjects;
+  }
+
   readSnapshot(): StewardStateSnapshot {
     const snapshot = this.store.readSnapshot();
     return {
       ...snapshot,
-      watchedSubjects: [...this.config.watchedSubjects]
+      watchedSubjects: [...this.subjects]
     };
   }
 
@@ -86,7 +106,7 @@ class StewardRuntimeFacade implements StewardRuntime {
   async refresh(): Promise<StewardStateSnapshot> {
     try {
       const result = await refreshWatchedSubjects({
-        watchedSubjects: this.config.watchedSubjects,
+        watchedSubjects: this.subjects,
         ruleset: this.config.ruleset,
         decisionPolicy: this.config.decisionPolicy,
         actionContext: this.config.actionContext,
@@ -98,7 +118,11 @@ class StewardRuntimeFacade implements StewardRuntime {
         }
       });
 
+      // Nothing-to-remember means no write — a polling refresh must not spam empty rows.
       for (const group of result.perSubject) {
+        if (group.findings.length === 0 && group.decisions.length === 0) {
+          continue;
+        }
         await this.memorySink.remember(group);
       }
 
@@ -107,7 +131,7 @@ class StewardRuntimeFacade implements StewardRuntime {
       }
 
       this.store.writeRefresh({
-        watchedSubjects: this.config.watchedSubjects,
+        watchedSubjects: this.subjects,
         latestFindings: result.latestFindings,
         latestDecisions: result.latestDecisions,
         pendingActionPlans: result.pendingActionPlans

@@ -37,6 +37,40 @@ describe("validateBookmakerMarketContext", () => {
     }
   });
 
+  it("rejects an empty marketId by default", () => {
+    const result = validateBookmakerMarketContext({
+      marketId: "",
+      observeRunId: "run-1",
+      observer: "0xabc"
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok === false) {
+      expect(result.issues).toContain("marketId must be a non-empty string");
+    }
+  });
+
+  it("accepts an empty marketId as the unconfigured state when allowed", () => {
+    const result = validateBookmakerMarketContext(
+      { marketId: "", observeRunId: "run-1", observer: "0xabc" },
+      { allowUnconfigured: true }
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.marketId).toBe("");
+    }
+  });
+
+  it("still rejects a missing (non-string) marketId even when unconfigured is allowed", () => {
+    const result = validateBookmakerMarketContext(
+      { observeRunId: "run-1", observer: "0xabc" },
+      { allowUnconfigured: true }
+    );
+
+    expect(result.ok).toBe(false);
+  });
+
   it("accepts a valid market context", () => {
     const result = validateBookmakerMarketContext({
       marketId: "market-1",

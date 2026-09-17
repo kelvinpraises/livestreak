@@ -46,7 +46,7 @@ describe("bookmaker bridge createVault wiring", () => {
         };
       })
     );
-    const bridge = createBookmakerBridge({ runtime });
+    const bridge = createBookmakerBridge({ runtime, now: () => nowMs });
     const caller = actionCaller([actionGrant]);
     const envelope = {
       scope: bridgeActionScope,
@@ -54,8 +54,8 @@ describe("bookmaker bridge createVault wiring", () => {
       args: createArgs
     } as const;
 
-    const first = await bridge.callAction(caller, envelope, nowMs);
-    const second = await bridge.callAction(caller, envelope, nowMs);
+    const first = await bridge.callAction(caller, envelope);
+    const second = await bridge.callAction(caller, envelope);
 
     expect(createCalls).toBe(1);
     // P1: callAction now returns { txId, vaultId } (vaultId previously dropped).
@@ -73,16 +73,16 @@ describe("bookmaker bridge createVault wiring", () => {
         vaultId: `0x${"22".repeat(32)}` as const
       }))
     );
-    const bridge = createBookmakerBridge({ runtime });
+    const bridge = createBookmakerBridge({ runtime, now: () => nowMs });
 
     // Before: nothing completed.
     expect(runtime.readPanel().completedVaultCreations).toHaveLength(0);
 
-    await bridge.callAction(
-      actionCaller([actionGrant]),
-      { scope: bridgeActionScope, action: "createVault", args: createArgs },
-      nowMs
-    );
+    await bridge.callAction(actionCaller([actionGrant]), {
+      scope: bridgeActionScope,
+      action: "createVault",
+      args: createArgs
+    });
 
     // After: the vault landed AND the panel reflects it. Previously createVaultOnce returned the id but
     // never published a snapshot, so completedVaultCreations stayed empty and the console showed no success.
@@ -102,19 +102,15 @@ describe("bookmaker bridge createVault wiring", () => {
         };
       })
     );
-    const bridge = createBookmakerBridge({ runtime });
+    const bridge = createBookmakerBridge({ runtime, now: () => nowMs });
 
     // The remote console serializes args as JSON, which has no bigint — amounts
     // arrive as decimal strings, so the bridge must coerce them before validation.
-    const result = await bridge.callAction(
-      actionCaller([actionGrant]),
-      {
-        scope: bridgeActionScope,
-        action: "createVault",
-        args: { ...createArgs, creatorStake: "5000000", seedRate: "8333" }
-      },
-      nowMs
-    );
+    const result = await bridge.callAction(actionCaller([actionGrant]), {
+      scope: bridgeActionScope,
+      action: "createVault",
+      args: { ...createArgs, creatorStake: "5000000", seedRate: "8333" }
+    });
 
     expect(createCalls).toBe(1);
     expect(result).toEqual({
@@ -134,19 +130,15 @@ describe("bookmaker bridge createVault wiring", () => {
         };
       })
     );
-    const bridge = createBookmakerBridge({ runtime });
+    const bridge = createBookmakerBridge({ runtime, now: () => nowMs });
 
     await expect(
-      bridge.callAction(
-        actionCaller([actionGrant]),
-        {
-          scope: bridgeActionScope,
-          action: "createVault",
-          // An object cannot coerce to bigint → the field is dropped → validation rejects.
-          args: { ...createArgs, creatorStake: { not: "a number" } }
-        },
-        nowMs
-      )
+      bridge.callAction(actionCaller([actionGrant]), {
+        scope: bridgeActionScope,
+        action: "createVault",
+        // An object cannot coerce to bigint → the field is dropped → validation rejects.
+        args: { ...createArgs, creatorStake: { not: "a number" } }
+      })
     ).rejects.toBeInstanceOf(LiveStreakConfigError);
 
     expect(createCalls).toBe(0);
@@ -163,46 +155,38 @@ describe("bookmaker bridge capability expiry", () => {
     revoked: false
   };
 
-  it("rejects expired grants when nowMs is after expiresAt", async () => {
+  it("rejects expired grants when the clock is after expiresAt", async () => {
     const runtime = createTestRuntime(createFakeBookmakerChain());
-    const bridge = createBookmakerBridge({ runtime });
+    const bridge = createBookmakerBridge({ runtime, now: () => 2_000 });
 
     await expect(
-      bridge.callAction(
-        actionCaller([expiredGrant]),
-        {
-          scope: bridgeActionScope,
-          action: "createVault",
-          args: {}
-        },
-        2_000
-      )
+      bridge.callAction(actionCaller([expiredGrant]), {
+        scope: bridgeActionScope,
+        action: "createVault",
+        args: {}
+      })
     ).rejects.toBeInstanceOf(LiveStreakCapabilityError);
   });
 
-  it("allows grants when nowMs is before expiresAt", async () => {
+  it("allows grants when the clock is before expiresAt", async () => {
     const runtime = createTestRuntime(createFakeBookmakerChain());
-    const bridge = createBookmakerBridge({ runtime });
+    const bridge = createBookmakerBridge({ runtime, now: () => 500 });
     const draft = vaultDraft({ marketId: FAKE_MARKET_ID });
 
     await expect(
-      bridge.callAction(
-        actionCaller([expiredGrant]),
-        {
-          scope: bridgeActionScope,
-          action: "createVault",
-          args: {
-            marketId: draft.marketId,
-            question: draft.question,
-            creatorSide: draft.creatorSide,
-            creatorStake: draft.creatorStake,
-            seedRate: draft.seedRate,
-            resolutionSource: draft.resolutionSource,
-            resolutionWindowExpiresAtMs: draft.resolutionWindow.expiresAtMs
-          }
-        },
-        500
-      )
+      bridge.callAction(actionCaller([expiredGrant]), {
+        scope: bridgeActionScope,
+        action: "createVault",
+        args: {
+          marketId: draft.marketId,
+          question: draft.question,
+          creatorSide: draft.creatorSide,
+          creatorStake: draft.creatorStake,
+          seedRate: draft.seedRate,
+          resolutionSource: draft.resolutionSource,
+          resolutionWindowExpiresAtMs: draft.resolutionWindow.expiresAtMs
+        }
+      })
     ).resolves.toBeDefined();
   });
 });

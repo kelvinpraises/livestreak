@@ -1,14 +1,19 @@
 // Renders the in-package function catalog as ONE package container (the "GLOBAL" pattern), uniform
-// across all four packages. Two descriptor shapes converge here:
+// across all four packages. Three descriptor shapes converge here:
 //   - a package that emits a single wrapping root group (bookmaker/steward/options) → the group IS
 //     the container (unwrapped, so its label titles the pane).
-//   - a package that emits loose root actions (observe) → a container is synthesized from packageLabel.
-// Either way the console shows exactly one titled container per package. GROUP nodes nest as indented
-// sub-containers (e.g. steward "Subject: vault X"); ACTION nodes are leaf cards rendered by the slot.
+//   - a package whose actions carry a `parentId` naming a logical section but that emits NO group node
+//     for it (observe: `observe.capture.file`, `observe.sink.live`, `observe.market`,
+//     `observe.system.run`, …) → a section group is SYNTHESIZED per distinct parentId so the actions
+//     nest under a labelled header instead of collapsing into one flat blob.
+//   - loose root actions with no parentId at all → they sit directly under the package container.
+// Either way the console shows exactly one titled container per package, with grouped sections inside.
+// GROUP nodes nest as indented sub-containers; ACTION nodes are leaf cards rendered by the slot.
 // Nodes with `visible === false` are omitted.
 
 import { useMemo, type ReactNode } from 'react'
 import type { FunctionDescriptor } from '@livestreak/schema'
+import { bridgeActionScope } from '@livestreak/schema'
 
 interface Props {
   readonly functions: readonly FunctionDescriptor[]
@@ -21,12 +26,70 @@ interface TreeIndex {
   readonly childrenOf: ReadonlyMap<string, readonly FunctionDescriptor[]>
 }
 
+// Turn a dangling parentId into a readable section header, e.g.
+//   observe.capture.file  → "Capture · File"
+//   observe.sink.live     → "Sink · Live"
+//   observe.system.run    → "Run"       (the "system" qualifier is noise for the operator)
+//   observe.market        → "Market"
+// The package prefix (first segment) is dropped — the container already names the package.
+export function deriveSectionLabel(parentId: string): string {
+  const parts = parentId.split('.').filter((p) => p.length > 0)
+  const withoutPackage = parts.length > 1 ? parts.slice(1) : parts
+  const meaningful = withoutPackage.filter((p) => p !== 'system')
+  const segments = (meaningful.length > 0 ? meaningful : withoutPackage).map(titleCase)
+  return segments.length > 0 ? segments.join(' · ') : titleCase(parentId)
+}
+
+const titleCase = (segment: string): string =>
+  segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)
+
+// Build a synthetic GROUP descriptor for an orphaned parentId so FunctionTree can render a real section.
+// `package` is inherited from a child (FunctionTree is already filtered per-package upstream, so this is
+// only for completeness); the node is structural — never dispatched — so its scope is inert.
+const syntheticGroup = (
+  parentId: string,
+  order: number,
+  pkg: FunctionDescriptor['package']
+): FunctionDescriptor => ({
+  id: parentId,
+  package: pkg,
+  name: parentId,
+  label: deriveSectionLabel(parentId),
+  scope: bridgeActionScope,
+  disabled: false,
+  visible: true,
+  nodeKind: 'group',
+  order,
+})
+
 export function buildTree(functions: readonly FunctionDescriptor[]): TreeIndex {
   const visible = functions.filter((f) => f.visible !== false)
-  const byId = new Map(visible.map((f) => [f.id, f]))
+  const byId = new Map<string, FunctionDescriptor>(visible.map((f) => [f.id, f]))
   const childrenOf = new Map<string, FunctionDescriptor[]>()
 
+  // Synthesize a group for every parentId that is referenced but has no node of its own, so its children
+  // nest under a section header rather than falling through to the flat package root. The group inherits
+  // its first child's order so observe's cell ordering (Run, Capture, Sink, Market, …) is preserved.
+  const orphanGroupOrder = new Map<string, number>()
+  const orphanGroupPackage = new Map<string, FunctionDescriptor['package']>()
   for (const fn of visible) {
+    const pid = fn.parentId
+    if (pid && !byId.has(pid)) {
+      const existing = orphanGroupOrder.get(pid)
+      const order = fn.order ?? 0
+      if (existing === undefined || order < existing) {
+        orphanGroupOrder.set(pid, order)
+      }
+      if (!orphanGroupPackage.has(pid)) {
+        orphanGroupPackage.set(pid, fn.package)
+      }
+    }
+  }
+  for (const [pid, order] of orphanGroupOrder) {
+    byId.set(pid, syntheticGroup(pid, order, orphanGroupPackage.get(pid) ?? 'observe'))
+  }
+
+  for (const fn of byId.values()) {
     const pid = fn.parentId
     if (pid && byId.has(pid)) {
       const list = childrenOf.get(pid) ?? []
@@ -39,7 +102,7 @@ export function buildTree(functions: readonly FunctionDescriptor[]): TreeIndex {
     kids.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
   }
 
-  const roots = visible
+  const roots = [...byId.values()]
     .filter((f) => !f.parentId || !byId.has(f.parentId))
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
 

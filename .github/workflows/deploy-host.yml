@@ -30,9 +30,8 @@ name: Deploy host
 #     LIVESTREAK_SUI_NETWORK, LIVESTREAK_SUI_RPC_URL, LIVESTREAK_SUI_DEPLOYMENT,
 #     LIVESTREAK_SUI_SPONSOR_MNEMONIC
 #   Walrus (content blobs + memory relayer)
-#     LIVESTREAK_WALRUS_NETWORK, LIVESTREAK_WALRUS_MEMORY_RELAYER_URL_OVERRIDE,
-#     LIVESTREAK_WALRUS_REGISTRY_ID_OVERRIDE, LIVESTREAK_MEMORY_OWNER_KEY (or
-#     LIVESTREAK_MEMORY_OWNER_SEED), LIVESTREAK_WALLET_SEED
+#     LIVESTREAK_WALRUS_NETWORK, LIVESTREAK_WALLET_SEED
+#     (steward memory is host-DB-backed: DATABASE_URL, Turso-compatible)
 #   Remote Bridge Console (P4) + LiveKit
 #     LIVESTREAK_APP_ORIGIN, LIVESTREAK_REMOTE_GATEWAY_TOKEN,
 #     LIVESTREAK_REMOTE_GRANT_KEY, LIVESTREAK_REMOTE_SESSION_TTL_MS, LIVEKIT_API_KEY
@@ -71,6 +70,7 @@ jobs:
               - 'packages/wallet/**'
               - 'packages/contracts/**'
               - 'packages/host/**'
+              - 'packages/options/**'
               - 'package.json'
               - 'package-lock.json'
               - 'tsconfig.base.json'

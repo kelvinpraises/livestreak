@@ -1,7 +1,6 @@
 import type {
   HostModuleToken,
   HostProviderDescriptor,
-  MemoryTrustModel,
   WalrusNetwork
 } from "@livestreak/host";
 import type { OutputMode } from "@livestreak/schema";
@@ -9,7 +8,6 @@ import {
   bootstrapWalrus,
   parseWalrusNetwork,
   profileBlobEndpoints,
-  profileMemoryRelayerUrl,
   walrusNetworkProfiles,
   type ResolvedWalrus
 } from "../infrastructure/walrus/network.js";
@@ -33,12 +31,7 @@ export interface HostServerConfig {
   readonly minDurationSeconds: number;
   readonly maxDurationSeconds: number;
   readonly walrusNetwork: WalrusNetwork | null;
-  readonly walrusMemoryRelayerUrlOverride: string | null;
-  readonly walrusRegistryIdOverride: string | null;
   readonly walletSeed: string | null;
-  readonly memorySuiOwnerPrivateKey: string | null;
-  readonly memoryOwnerSeed: string | null;
-  readonly memoryTrustModel: MemoryTrustModel;
   readonly walrusContentEphemeralEpochs: number;
   readonly walrusContentLockedEpochs: number;
   readonly resolvedWalrus: ResolvedWalrus | null;
@@ -57,20 +50,14 @@ export interface HostServerConfig {
 export const isWalrusEnabled = (config: HostServerConfig): boolean =>
   config.walrusNetwork !== null;
 
-export const isMemoryHostConfigured = (config: HostServerConfig): boolean =>
-  isWalrusEnabled(config) &&
-  (config.memorySuiOwnerPrivateKey !== null || config.memoryOwnerSeed !== null);
-
 export const isWalrusBootstrapped = (config: HostServerConfig): boolean =>
   isWalrusEnabled(config) && config.resolvedWalrus !== null;
-
-export const isMemoryBootstrapped = (config: HostServerConfig): boolean =>
-  isMemoryHostConfigured(config) && isWalrusBootstrapped(config);
 
 const allModules: readonly HostModuleToken[] = [
   "aa",
   "media",
-  "walrus_memory",
+  "memory",
+  "forum",
   "walrus_content",
   "discovery",
   "remote"
@@ -92,14 +79,7 @@ export const defaultHostServerConfig = (): HostServerConfig => ({
   minDurationSeconds: 0,
   maxDurationSeconds: 6 * 60 * 60,
   walrusNetwork: parseWalrusNetwork(readOptionalEnv("LIVESTREAK_WALRUS_NETWORK")),
-  walrusMemoryRelayerUrlOverride: readOptionalEnv("LIVESTREAK_WALRUS_MEMORY_RELAYER_URL_OVERRIDE"),
-  walrusRegistryIdOverride: readOptionalEnv("LIVESTREAK_WALRUS_REGISTRY_ID_OVERRIDE"),
   walletSeed: readOptionalEnv("LIVESTREAK_WALLET_SEED"),
-  memorySuiOwnerPrivateKey:
-    readOptionalEnv("LIVESTREAK_MEMORY_OWNER_KEY") ??
-    readOptionalEnv("LIVESTREAK_MEMORY_SUI_OWNER_KEY"),
-  memoryOwnerSeed: readOptionalEnv("LIVESTREAK_MEMORY_OWNER_SEED"),
-  memoryTrustModel: "plaintext-relayer",
   walrusContentEphemeralEpochs: readPositiveIntEnv("LIVESTREAK_WALRUS_CONTENT_EPHEMERAL_EPOCHS", 1),
   walrusContentLockedEpochs: readPositiveIntEnv("LIVESTREAK_WALRUS_CONTENT_LOCKED_EPOCHS", 5),
   resolvedWalrus: null,
@@ -116,7 +96,6 @@ export const toHostProviderDescriptor = (config: HostServerConfig): HostProvider
     (mode) => mode !== "simulcast" || simulcastAvailable
   );
 
-  const relayerUrl = profileMemoryRelayerUrl(config);
   const blob = profileBlobEndpoints(config);
 
   return {
@@ -130,9 +109,7 @@ export const toHostProviderDescriptor = (config: HostServerConfig): HostProvider
       network: config.walrusNetwork
     },
     memory: {
-      relayerUrl,
-      namespaceTemplate: "market:{marketId}",
-      trustModel: config.memoryTrustModel
+      recordsAvailable: config.enabledModules.includes("memory")
     },
     content: {
       publisherUrl: blob?.publisherUrl ?? null,
@@ -148,9 +125,8 @@ export const isModuleEnabled = (
 ): boolean => config.enabledModules.includes(token);
 
 export const bootstrapHostServerConfig = async (
-  config: HostServerConfig = defaultHostServerConfig(),
-  fetchImpl: typeof fetch = fetch
-): Promise<HostServerConfig> => bootstrapWalrus(config, fetchImpl);
+  config: HostServerConfig = defaultHostServerConfig()
+): Promise<HostServerConfig> => bootstrapWalrus(config);
 
 // --- helpers ---
 

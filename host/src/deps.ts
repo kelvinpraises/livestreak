@@ -45,9 +45,14 @@ import { createManifestStore } from "./services/media/manifest.js";
 import { createSessionStore } from "./services/media/session.js";
 import { createContentStore } from "./services/walrus/content/content.js";
 import { createLocalContentStore } from "./services/walrus/content/local-store.js";
-import { createMemoryBindingStore } from "./services/walrus/memory/binding.js";
-import { createMemWalAccountOperations } from "./services/walrus/memory/memwal-ops.js";
-import { resolveMemoryOwnerKey } from "./infrastructure/wallet/index.js";
+import {
+  createMemoryRepository,
+  type MemoryRepository
+} from "./infrastructure/database/memory-repository.js";
+import {
+  createForumRepository,
+  type ForumRepository
+} from "./infrastructure/database/forum-repository.js";
 import type { ResolvedWalrus } from "./infrastructure/walrus/network.js";
 
 // --- exports ---
@@ -103,8 +108,7 @@ export const bootstrapHostRouteDeps = async (
 ): Promise<HostRouteDeps> => {
   const aa = await bootstrapAaRouteDeps(config, options);
   const resolved = options.walrusResolved ?? config.resolvedWalrus;
-  const ops = options.memoryOps ?? createMemWalAccountOperations();
-  const walrus = buildWalrusDeps(config, resolved, ops);
+  const walrus = buildWalrusDeps(config, resolved);
   const discoveryStore = createDiscoveryStore();
   const catalogStack = buildCatalogStack(config, discoveryStore, options);
   // Boot path: also run the formal migrator (records the migration as applied on top of the
@@ -130,6 +134,8 @@ export const bootstrapHostRouteDeps = async (
       store: discoveryStore
     },
     walrus,
+    memory: { repo: createMemoryRepository(catalogStack.db.db) },
+    forum: { repo: createForumRepository(catalogStack.db.db) },
     aa,
     remote: buildRemoteService(config),
     ...stackToDeps(catalogStack),
@@ -142,6 +148,8 @@ export interface HostRouteDeps {
   readonly media: MediaRouteDeps;
   readonly discovery: DiscoveryRouteDeps;
   readonly walrus: WalrusRouteDeps;
+  readonly memory: MemoryRouteDeps;
+  readonly forum: ForumRouteDeps;
   readonly aa: AaRouteDeps;
   readonly remote: RemoteService;
   readonly catalog: CatalogService;
@@ -174,12 +182,15 @@ export interface DiscoveryRouteDeps {
 }
 
 export interface WalrusRouteDeps {
-  readonly memory: MemoryRouteDeps;
   readonly content: ContentRouteDeps;
 }
 
 export interface MemoryRouteDeps {
-  readonly bindings: ReturnType<typeof createMemoryBindingStore>;
+  readonly repo: MemoryRepository;
+}
+
+export interface ForumRouteDeps {
+  readonly repo: ForumRepository;
 }
 
 export interface ContentRouteDeps {
@@ -188,7 +199,6 @@ export interface ContentRouteDeps {
 
 export interface CreateHostRouteDepsOptions extends CreateAaRouteDepsOptions {
   readonly walrusResolved?: ResolvedWalrus;
-  readonly memoryOps?: ReturnType<typeof createMemWalAccountOperations>;
   // Inject a reader provider in tests; defaults to the env/deploy-snapshot provider.
   readonly catalogReaders?: CatalogReaderProvider;
   // Inject a DB handle in tests (e.g. createDatabase(":memory:")); defaults to the
@@ -268,9 +278,9 @@ export const createHostRouteDeps = (
   options: CreateHostRouteDepsOptions = {}
 ): HostRouteDeps => {
   const resolved = options.walrusResolved ?? config.resolvedWalrus;
-  const ops = options.memoryOps ?? createMemWalAccountOperations();
-  const walrus = buildWalrusDeps(config, resolved, ops);
+  const walrus = buildWalrusDeps(config, resolved);
   const discoveryStore = createDiscoveryStore();
+  const catalogStack = buildCatalogStack(config, discoveryStore, options);
 
   return {
     config,
@@ -283,9 +293,11 @@ export const createHostRouteDeps = (
       store: discoveryStore
     },
     walrus,
+    memory: { repo: createMemoryRepository(catalogStack.db.db) },
+    forum: { repo: createForumRepository(catalogStack.db.db) },
     aa: createAaRouteDeps(config, options),
     remote: buildRemoteService(config),
-    ...stackToDeps(buildCatalogStack(config, discoveryStore, options)),
+    ...stackToDeps(catalogStack),
     live: createLiveRingStore()
   };
 };
@@ -326,17 +338,10 @@ const buildSuiGasStation = async (
 
 const buildWalrusDeps = (
   config: HostServerConfig,
-  resolved: ResolvedWalrus | null,
-  ops: ReturnType<typeof createMemWalAccountOperations>
+  resolved: ResolvedWalrus | null
 ): WalrusRouteDeps => {
   const disabledWalrus: ResolvedWalrus = {
     network: "mainnet",
-    sui: {
-      rpcUrl: "https://fullnode.mainnet.sui.io:443",
-      packageId: "0x0",
-      registryId: "0x0"
-    },
-    memory: { relayerUrl: "http://walrus-disabled.invalid" },
     blob: {
       publisherUrl: "http://walrus-disabled.invalid",
       aggregatorUrl: "http://walrus-disabled.invalid"
@@ -346,22 +351,6 @@ const buildWalrusDeps = (
   const active = resolved ?? disabledWalrus;
 
   return {
-    memory: {
-      bindings:
-        resolved === null
-          ? createMemoryBindingStore({
-              resolved: active,
-              resolveOwnerKey: async () => {
-                throw new Error("walrus_not_bootstrapped");
-              },
-              ops
-            })
-          : createMemoryBindingStore({
-              resolved: active,
-              resolveOwnerKey: async () => resolveMemoryOwnerKey(config, active.sui.rpcUrl),
-              ops
-            })
-    },
     content: {
       // When Walrus is not configured (local EVM dev stack), fall back to an in-process,
       // content-addressed store served by this host so produce/publish/resolve still work.

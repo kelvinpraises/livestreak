@@ -40,8 +40,3 @@ export {
   validateObserveRunMarketOptions
 } from "./validate.js";
 export { createMarketRegistrar } from "./chains/index.js";
-export { writeMarketLifecycle } from "./lifecycle.js";
-export type {
-  MarketLifecycleWriteInput,
-  MarketLifecycleWriteResult
-} from "./lifecycle.js";

@@ -4,12 +4,16 @@ import type { DB } from "../schema.js";
 import { SCHEMA_DDL } from "../ddl.js";
 import * as init20260622 from "./20260622T000000_init.js";
 import * as vaultLivePools20260623 from "./20260623T000000_vault_live_pools.js";
+import * as stewardMemory20260715 from "./20260715T000000_steward_memory.js";
+import * as forumMessages20260715 from "./20260715T000100_forum_messages.js";
 
 // Static in-process migration provider (the agentix runner pattern, minus filesystem
 // scanning so it works after bundling). Add new migrations here in timestamp order.
 const MIGRATIONS: Record<string, Migration> = {
   "20260622T000000_init": init20260622,
-  "20260623T000000_vault_live_pools": vaultLivePools20260623
+  "20260623T000000_vault_live_pools": vaultLivePools20260623,
+  "20260715T000000_steward_memory": stewardMemory20260715,
+  "20260715T000100_forum_messages": forumMessages20260715
 };
 
 class StaticMigrationProvider implements MigrationProvider {

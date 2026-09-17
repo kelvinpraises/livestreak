@@ -22,7 +22,8 @@
     "dev": "tsc -w -p tsconfig.build.json"
   },
   "dependencies": {
-    "effect": "3.21.3"
+    "effect": "3.21.3",
+    "@livestreak/schema": "file:../schema"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",

@@ -12,10 +12,42 @@ import type { StewardChainConfig } from "../../chains/index.js";
 
 export type { PackageRuntimeInit, SessionWallet };
 
-const defaultRuleset = (): StewardRuleset => ({ id: "remote-console", rules: [] });
+// v0 console ruleset: findings from the wired contract facts (vault.status), decisions capped at
+// coordinate/record (openThread/annotate). Anything that moves money — resolve, veto, penalise —
+// stays a MANUAL console action; auto-executing those is a mechanism-design decision, not a default.
+const defaultRuleset = (): StewardRuleset => ({
+  id: "remote-console",
+  rules: [
+    {
+      id: "vault-hot",
+      findingKind: "market_hot",
+      condition: { type: "fact_equals", key: "vault.status", value: "hot" },
+      severity: "warning",
+      message: "Vault flagged hot on-chain \u2014 steward attention required."
+    },
+    {
+      id: "vault-disputed",
+      findingKind: "bad_resolution",
+      condition: { type: "fact_equals", key: "vault.status", value: "disputed" },
+      severity: "critical",
+      message: "Vault resolution is disputed on-chain."
+    }
+  ]
+});
 const defaultDecisionPolicy = (): StewardDecisionPolicy => ({
   id: "remote-console",
-  mappings: []
+  mappings: [
+    {
+      findingKind: "market_hot",
+      action: "openThread",
+      reason: "Hot vault: open a coordination thread for review."
+    },
+    {
+      findingKind: "bad_resolution",
+      action: "annotate",
+      reason: "Disputed resolution recorded for operator review."
+    }
+  ]
 });
 
 export const stewardSubjectsFromPackageInit = (

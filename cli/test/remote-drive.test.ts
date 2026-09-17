@@ -36,8 +36,15 @@ describe("remote drive", () => {
     mockClient.call.mockClear();
     mockClient.boards.mockClear();
     mockClient.close.mockClear();
-    mockClient.call.mockResolvedValue({ ok: true });
-    mockClient.boards.mockReturnValue({ observe: observeBoardWithMarket("0xmarketdeadbeef") });
+    mockClient.call.mockImplementation(async (_target: string, action: string) => ({
+      ok: true,
+      ...(action === "createVault" ? { result: { tokenId: "0xvault01" } } : {}),
+      ...(action === "mint" ? { result: { tokenId: "7" } } : {})
+    }));
+    mockClient.boards.mockReturnValue({
+      observe: observeBoardWithMarket("0xmarketdeadbeef"),
+      options: { snapshot: { account: "0xoperator" } }
+    });
 
     const dir = await mkdtemp(join(tmpdir(), "livestreak-drive-test-"));
     settingsPath = join(dir, "settings.json");
@@ -77,12 +84,21 @@ describe("remote drive", () => {
     expect(actions).toEqual([
       "observe:configure",
       "observe:register",
+      "bookmaker:configure",
+      "bookmaker:createVault",
       "options:configure",
       "options:setApprovalForAll",
+      "options:mint",
       "options:fund",
+      "steward:configure",
       "steward:resolve",
       "options:withdraw"
     ]);
+    // Threaded ids reach the dependent steps.
+    const fundArgs = mockClient.call.mock.calls.find((c) => c[1] === "fund")?.[2] as Record<string, unknown>;
+    expect(fundArgs).toMatchObject({ tokenId: "7", vaultId: "0xvault01", side: "yes" });
+    const resolveArgs = mockClient.call.mock.calls.find((c) => c[1] === "resolve")?.[2] as Record<string, unknown>;
+    expect(resolveArgs).toMatchObject({ subjectId: "0xvault01", subjectKind: "vault" });
   });
 
   it("readMarketIdFromBoard reads market cell readonly", () => {

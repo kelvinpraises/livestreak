@@ -3,8 +3,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/core",
     "packages/schema",
+    "packages/core",
     "packages/wallet",
     "packages/contracts",
     "packages/host",

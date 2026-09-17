@@ -5,6 +5,10 @@ import { createRemoteUiClient, type RemoteDriveTarget, type RemoteUiClient } fro
 export interface RemoteDriveInput {
   readonly sessionId: string;
   readonly pairingPassword: string;
+  /** Steward-role session for the resolve leg — on-chain resolution is authorized to the
+   *  registered steward address, so it cannot run from the primary session's wallet. */
+  readonly stewardSessionId?: string;
+  readonly stewardPairingPassword?: string;
   readonly hostUrl?: string;
   readonly settingsPath?: string;
   readonly marketId?: string;
@@ -83,6 +87,16 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
     log
   });
 
+  const stewardClient =
+    input.stewardSessionId === undefined
+      ? undefined
+      : createRemoteUiClient({
+          hostBaseUrl,
+          sessionId: input.stewardSessionId,
+          pairingPassword: input.stewardPairingPassword ?? "",
+          log
+        });
+
   const steps: RemoteDriveStep[] = [];
   const record = (step: RemoteDriveStep): void => {
     steps.push(step);
@@ -90,6 +104,10 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
 
   try {
     await client.connect();
+    if (stewardClient !== undefined) {
+      await stewardClient.connect();
+    }
+    const stewardLeg = stewardClient ?? client;
 
     const marketId =
       input.marketId ??
@@ -105,6 +123,27 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
       return { marketId, steps };
     }
 
+    // Bookmaker: seed a vault on the fresh market; the result's tokenId IS the vaultId.
+    const bmConfigure = await client.call("bookmaker", "configure", { marketId });
+    record({ target: "bookmaker", action: "configure", ok: bmConfigure.ok, error: bmConfigure.error });
+    if (!bmConfigure.ok) {
+      throw new Error(bmConfigure.error ?? "bookmaker configure failed");
+    }
+
+    const createVault = await client.call("bookmaker", "createVault", {
+      marketId,
+      question: `Will ${input.observeTitle ?? "the stream"} deliver?`,
+      creatorSide: "yes",
+      creatorStake: "5000000",
+      seedRate: "8333"
+    });
+    record({ target: "bookmaker", action: "createVault", ok: createVault.ok, error: createVault.error });
+    const vaultId = createVault.result?.tokenId;
+    if (!createVault.ok || vaultId === undefined) {
+      throw new Error(createVault.error ?? "createVault failed (no vaultId)");
+    }
+    log(`vaultId: ${vaultId}`);
+
     const optionsConfigure = await client.call("options", "configure", { marketId });
     record({
       target: "options",
@@ -116,6 +155,16 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
       throw new Error(optionsConfigure.error ?? "options configure failed");
     }
 
+    // Operator address off the live options board (the session wallet's account).
+    const board = client.boards().options as
+      | { snapshot?: { account?: string } }
+      | undefined;
+    const account = board?.snapshot?.account;
+    if (account === undefined) {
+      throw new Error("options board has no account after configure");
+    }
+
+    // operator omitted: the writer defaults it to the MarketDriver.
     const approval = await client.call("options", "setApprovalForAll", { approved: true });
     record({
       target: "options",
@@ -127,7 +176,19 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
       throw new Error(approval.error ?? "setApprovalForAll failed");
     }
 
+    const mint = await client.call("options", "mint", { marketId, to: account });
+    record({ target: "options", action: "mint", ok: mint.ok, error: mint.error });
+    const tokenId = mint.result?.tokenId;
+    if (!mint.ok || tokenId === undefined) {
+      throw new Error(mint.error ?? "mint failed (no tokenId)");
+    }
+    log(`tokenId: ${tokenId}`);
+
     const fund = await client.call("options", "fund", {
+      tokenId,
+      vaultId,
+      side: "yes",
+      rate: "1000",
       deposit: input.fundDeposit ?? "1000000"
     });
     record({ target: "options", action: "fund", ok: fund.ok, error: fund.error });
@@ -135,7 +196,17 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
       throw new Error(fund.error ?? "fund failed");
     }
 
-    const resolve = await client.call("steward", "resolve", {
+    // Steward: watch the vault, then resolve it (via the steward-role session when provided).
+    const stConfigure = await stewardLeg.call("steward", "configure", { marketId, vaultId });
+    record({ target: "steward", action: "configure", ok: stConfigure.ok, error: stConfigure.error });
+    if (!stConfigure.ok) {
+      throw new Error(stConfigure.error ?? "steward configure failed");
+    }
+
+    const resolve = await stewardLeg.call("steward", "resolve", {
+      subjectId: vaultId,
+      subjectKind: "vault",
+      vaultId,
       outcome: input.resolveOutcome ?? "yes"
     });
     record({ target: "steward", action: "resolve", ok: resolve.ok, error: resolve.error });
@@ -143,7 +214,7 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
       throw new Error(resolve.error ?? "steward resolve failed");
     }
 
-    const withdraw = await client.call("options", "withdraw", {});
+    const withdraw = await client.call("options", "withdraw", { tokenId, vaultId, to: account });
     record({ target: "options", action: "withdraw", ok: withdraw.ok, error: withdraw.error });
     if (!withdraw.ok) {
       throw new Error(withdraw.error ?? "withdraw failed");
@@ -151,6 +222,7 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
 
     return { marketId, steps };
   } finally {
+    stewardClient?.close();
     client.close();
   }
 };

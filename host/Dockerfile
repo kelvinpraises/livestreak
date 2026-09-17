@@ -35,27 +35,32 @@ COPY packages/core/package.json ./packages/core/package.json
 COPY packages/schema/package.json ./packages/schema/package.json
 COPY packages/contracts/package.json ./packages/contracts/package.json
 COPY packages/host/package.json ./packages/host/package.json
+COPY packages/options/package.json ./packages/options/package.json
 COPY packages/wallet/package.json ./packages/wallet/package.json
 COPY packages/wallet/patches ./packages/wallet/patches
 COPY host/package.json ./host/package.json
 
 # 2) Root workspace install. Re-resolves native binaries for this platform; the
-#    remaining absent workspace members (observe, bookmaker, steward, options, cli,
-#    app) are simply skipped.
+#    remaining absent workspace members (observe, bookmaker, steward, cli, app)
+#    are simply skipped.
 RUN npm install --no-audit --no-fund
 
 # 3) Build the workspace dist chain host imports. dist/ is gitignored with no prepare
 #    script, so nothing resolves until built here. Order: leaves (core, schema,
-#    wallet) -> contracts (ts bindings only, no forge) -> packages/host.
+#    wallet) -> contracts (ts bindings only, no forge) -> packages/host -> options
+#    (host-server's catalog service imports @livestreak/options, which depends on
+#    core/contracts/host/schema/wallet — all built above).
 COPY tsconfig.base.json ./
 COPY packages/core ./packages/core
 COPY packages/schema ./packages/schema
 COPY packages/contracts ./packages/contracts
 COPY packages/host ./packages/host
+COPY packages/options ./packages/options
 COPY packages/wallet ./packages/wallet
 RUN npm run build -w @livestreak/core -w @livestreak/schema -w @livestreak/wallet \
  && npm run build:ts -w @livestreak/contracts \
- && npm run build -w @livestreak/host
+ && npm run build -w @livestreak/host \
+ && npm run build -w @livestreak/options
 
 # 4) Host server source + build.
 COPY host ./host

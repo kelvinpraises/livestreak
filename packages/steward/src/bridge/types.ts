@@ -25,6 +25,15 @@ export interface CreateStewardBridgeInput {
   readonly runtime: import("../runtime/runtime.js").StewardRuntime;
 }
 
+/** Configure/close acks carry a txId-shaped receipt; decision actions return the full plan. */
+export interface StewardActionAck {
+  readonly txId: string;
+}
+
+export type StewardActionResult =
+  | import("../model/action-plan.js").StewardActionPlan
+  | StewardActionAck;
+
 export interface StewardBridge {
   readonly runtime: import("../runtime/runtime.js").StewardRuntime;
   readonly readBoard: (caller: BridgeCaller) => Promise<import("../runtime/board.js").StewardBoard>;
@@ -34,7 +43,7 @@ export interface StewardBridge {
   readonly callAction: (
     caller: BridgeCaller,
     envelope: CallActionEnvelope
-  ) => Promise<import("../model/action-plan.js").StewardActionPlan>;
+  ) => Promise<StewardActionResult>;
   readonly subscribeBoard: (
     caller: BridgeCaller,
     listener: (board: import("../runtime/board.js").StewardBoard) => void

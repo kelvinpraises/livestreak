@@ -65,16 +65,15 @@ describe("originate and bridge share runtime idempotency store", () => {
       return;
     }
 
-    const bridge = (await import("../../src/bridge/bridge.js")).createBookmakerBridge({ runtime });
-    await bridge.callAction(
-      { id: "agent-1", trusted: true },
-      {
-        scope: "bridge:action",
-        action: "createVault",
-        args: originated.intent
-      },
-      nowMs
-    );
+    const bridge = (await import("../../src/bridge/bridge.js")).createBookmakerBridge({
+      runtime,
+      now: () => nowMs
+    });
+    await bridge.callAction({ id: "agent-1", trusted: true }, {
+      scope: "bridge:action",
+      action: "createVault",
+      args: originated.intent
+    });
 
     expect(createCalls).toBe(1);
   });

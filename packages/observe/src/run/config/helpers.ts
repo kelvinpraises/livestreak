@@ -44,6 +44,21 @@ export const fileCaptureRunConfig = (
     instanceId,
     config: { path: sinkPath }
   },
-   
+
+  process: null
+});
+
+/**
+ * A neutral run-config SHELL that carries no capture/sink identity. It exists only to give a run a valid
+ * store identity at construction (`makeObserveRun` → `createInitialBoard` needs a runId; the board is
+ * pristine and ignores capture/sink), before the operator has configured anything. The real capture and
+ * live/file sink are derived from the CONFIGURED board later (`runConfigFromBoard`), so this shell must
+ * never masquerade as a concrete lane: no `file`/`file-export` driver, no paths, no instanceId. Using a
+ * fabricated file-export lane here surfaced as phantom `file-export` cruft on the remote console.
+ */
+export const shellRunConfig = (runId: string): ObserveRunConfig => ({
+  runId,
+  capture: { driverId: "shell", config: {} },
+  sink: { driverId: "shell", config: {} },
   process: null
 });

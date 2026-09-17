@@ -4,13 +4,11 @@ import type { StewardMemoryRememberInput, StewardMemorySink } from "../sink.js";
 import type { StewardFact } from "../../workflow/facts/fact.js";
 import { buildStewardFact } from "./fact.js";
 
-// --- Memory fact source + sink (WAVE 5 BUILD) ---
+// --- Memory fact source + sink ---
 //
-// The durable-memory leg. Backed by Walrus **MemWal** via the host/wallet path (the host owns the MemWal
-// account + Sui owner wiring; the executor injects a `MemWalMemory` client here). `recall` becomes
-// `source:"memory"` facts; `remember` persists a subject's findings/decisions. We never import
-// `@mysten-incubation/memwal` directly — the client is injected, so the SDK ownership stays with the
-// host/wallet layer.
+// The durable-memory leg, storage-agnostic: the gateway injects a `StewardMemoryClient` (today an
+// HTTP client over the host's DB-backed /memory/records; swappable for any store). `recall` becomes
+// `source:"memory"` facts; `remember` persists a subject's findings/decisions.
 
 export interface MemoryRecord {
   readonly key: string;
@@ -19,19 +17,19 @@ export interface MemoryRecord {
   readonly observedAtMs?: number;
 }
 
-export interface MemWalRememberRecord {
+export interface StewardMemoryRememberRecord {
   readonly subject: StewardSubject;
   readonly findingIds: readonly string[];
   readonly decisionActions: readonly string[];
   readonly atMs: number;
 }
 
-export interface MemWalMemory {
+export interface StewardMemoryClient {
   readonly recall: (subject: StewardSubject) => Promise<readonly MemoryRecord[]>;
-  readonly remember: (record: MemWalRememberRecord) => Promise<void> | void;
+  readonly remember: (record: StewardMemoryRememberRecord) => Promise<void> | void;
 }
 
-export const createMemoryFactSource = (memory: MemWalMemory): MemoryFactSource => ({
+export const createMemoryFactSource = (memory: StewardMemoryClient): MemoryFactSource => ({
   readFacts: async (subject: StewardSubject): Promise<readonly StewardFact[]> => {
     const records = await memory.recall(subject);
     return records.map((record) =>
@@ -46,7 +44,7 @@ export const createMemoryFactSource = (memory: MemWalMemory): MemoryFactSource =
   }
 });
 
-export const createMemorySink = (memory: MemWalMemory): StewardMemorySink => ({
+export const createMemorySink = (memory: StewardMemoryClient): StewardMemorySink => ({
   remember: async (input: StewardMemoryRememberInput): Promise<void> => {
     await memory.remember({
       subject: input.subject,

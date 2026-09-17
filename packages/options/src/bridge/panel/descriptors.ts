@@ -149,7 +149,15 @@ const bool = (description: string): JsonSchema => ({ type: "boolean", required, 
 const amountStr = (description: string): JsonSchema => ({
   type: "string",
   required,
+  format: "bigint",
   description: `${description} Base-unit integer as a decimal string.`
+});
+
+const tokenIdStr = (description: string): JsonSchema => ({
+  type: "string",
+  required,
+  format: "bigint",
+  description
 });
 
 const obj = (properties: JsonSchema["properties"]): JsonSchema => ({ type: "object", properties });
@@ -169,6 +177,10 @@ const CONFIGURE_INPUT_SCHEMA: JsonSchema = obj([
   }
 ]);
 
+/** The console input schema for an action — also the bridge's coercion source (format:"bigint"). */
+export const optionsActionInputSchema = (action: string): JsonSchema | undefined =>
+  OPTIONS_INPUT_SCHEMAS[action];
+
 const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
   mint: obj([
     { name: "marketId", value: str("Market to enter."), help: "Market id (bytes32 hex)." },
@@ -181,6 +193,7 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
       value: {
         type: "integer",
         required,
+        format: "bigint",
         description: "Deterministic tokenId salt (uint64, 0 .. 2^64-1)."
       },
       help: "uint64 salt fed to calcTokenIdWithSalt for a deterministic tokenId."
@@ -188,14 +201,14 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
     { name: "to", value: str("NFT recipient."), help: "Recipient wallet address." }
   ]),
   fund: obj([
-    { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "Owned position NFT token id." },
     { name: "vaultId", value: str("Vault to fund."), help: "Target vault id." },
     { name: "side", value: sideEnum, help: "Side to back." },
     { name: "rate", value: amountStr("Per-second stream rate."), help: "Stream rate in USDC base units/sec." },
     { name: "deposit", value: amountStr("Initial deposit."), help: "Up-front deposit in USDC base units." }
   ]),
   setLanes: obj([
-    { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "Owned position NFT token id." },
     {
       name: "lanes",
       value: arrayOf(
@@ -211,7 +224,7 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
     { name: "addDeposit", value: amountStr("Additional deposit."), help: "Extra USDC base units to add." }
   ]),
   addFunds: obj([
-    { name: "tokenId", value: str("Position NFT id."), help: "NFT whose shared balance to top up." },
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "NFT whose shared balance to top up." },
     {
       name: "deposit",
       value: amountStr("Deposit to add."),
@@ -219,20 +232,20 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
     }
   ]),
   stopFunding: obj([
-    { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "Owned position NFT token id." },
     { name: "vaultId", value: str("Vault id."), help: "Vault whose lane to stop." },
     { name: "side", value: sideEnum, help: "Side of the lane to stop." }
   ]),
   stopAllFunding: obj([
-    { name: "tokenId", value: str("Position NFT id."), help: "Stop every active lane on this NFT." }
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "Stop every active lane on this NFT." }
   ]),
   withdraw: obj([
-    { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "Owned position NFT token id." },
     { name: "vaultId", value: str("Vault id."), help: "Vault to withdraw winnings from." },
     { name: "to", value: str("Payout recipient."), help: "Address receiving the payout." }
   ]),
   withdrawMany: obj([
-    { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "Owned position NFT token id." },
     {
       name: "vaultIds",
       value: arrayOf(str("Vault id."), "Vaults to withdraw from."),
@@ -241,7 +254,7 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
     { name: "to", value: str("Payout recipient."), help: "Address receiving the payouts." }
   ]),
   claimLossLvst: obj([
-    { name: "tokenId", value: str("Position NFT id."), help: "Owned position NFT token id." },
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "Owned position NFT token id." },
     { name: "vaultId", value: str("Vault id."), help: "Losing vault to claim LVST from." },
     { name: "side", value: sideEnum, help: "Losing side." },
     { name: "to", value: str("LVST recipient."), help: "Address receiving the LVST." }
@@ -255,14 +268,18 @@ const OPTIONS_INPUT_SCHEMAS: Readonly<Record<string, JsonSchema>> = {
   transferNft: obj([
     { name: "from", value: str("Current owner."), help: "Address transferring the NFT." },
     { name: "to", value: str("New owner."), help: "Recipient address." },
-    { name: "tokenId", value: str("Position NFT id."), help: "NFT to transfer." }
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "NFT to transfer." }
   ]),
   approveNft: obj([
     { name: "operator", value: str("Operator address."), help: "Address approved for the NFT." },
-    { name: "tokenId", value: str("Position NFT id."), help: "NFT to approve." }
+    { name: "tokenId", value: tokenIdStr("Position NFT id."), help: "NFT to approve." }
   ]),
   setApprovalForAll: obj([
-    { name: "operator", value: str("Operator address."), help: "Address to grant/revoke." },
+    {
+      name: "operator",
+      value: { type: "string", description: "Operator address. Defaults to the MarketDriver." },
+      help: "Leave blank to approve the protocol MarketDriver."
+    },
     { name: "approved", value: bool("Grant (true) or revoke (false)."), help: "Approval flag." }
   ])
 };

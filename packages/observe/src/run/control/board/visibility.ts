@@ -17,17 +17,35 @@ export const isConfiguratorVisible = (
   liveConfigurators: readonly string[]
 ): boolean => liveConfigurators.includes(configuratorId);
 
+// A configurator cell's `close` descriptor is hidden until that cell carries real configuration — the
+// same board-first contract the ControlsView projector enforces (see bridge/panel/project.ts). This keeps
+// the descriptor `.visible` flag coherent for consumers that read descriptors without the ControlsView
+// pre-filter (e.g. the panel-descriptor tests).
+const cellConfiguredForClose = (cellId: string, board: Board): boolean => {
+  const cell = board.cells[cellId];
+  if (cell === undefined) {
+    return false;
+  }
+  if (cellId === "system:config") {
+    return cell.status[0] === "configured";
+  }
+  return cell.readonly?.configured === true;
+};
+
 export const isDescriptorVisibleForBoard = (
   descriptorId: string,
   board: Board
 ): boolean => {
   const live = readLiveConfigurators(board);
 
-  if (descriptorId === "observe.system.config.configure" || descriptorId === "observe.system.config.close") {
-    return live.includes(systemConfigConfiguratorId);
+  if (descriptorId === "observe.system.config.close") {
+    return live.includes(systemConfigConfiguratorId) && cellConfiguredForClose("system:config", board);
   }
 
-  if (descriptorId.startsWith("observe.system.config.")) {
+  if (
+    descriptorId === "observe.system.config.configure" ||
+    descriptorId.startsWith("observe.system.config.")
+  ) {
     return live.includes(systemConfigConfiguratorId);
   }
 
@@ -36,7 +54,12 @@ export const isDescriptorVisibleForBoard = (
     if (captureId === undefined) {
       return false;
     }
-    return live.includes(`observe.capture.${captureId}`);
+    if (!live.includes(`observe.capture.${captureId}`)) {
+      return false;
+    }
+    return descriptorId.endsWith(".close")
+      ? cellConfiguredForClose(`capture:${captureId}`, board)
+      : true;
   }
 
   if (descriptorId.startsWith("observe.sink.")) {
@@ -44,7 +67,12 @@ export const isDescriptorVisibleForBoard = (
     if (sinkId === undefined) {
       return false;
     }
-    return live.includes(`observe.sink.${sinkId}`);
+    if (!live.includes(`observe.sink.${sinkId}`)) {
+      return false;
+    }
+    return descriptorId.endsWith(".close")
+      ? cellConfiguredForClose(`sink:${sinkId}`, board)
+      : true;
   }
 
   if (descriptorId.startsWith("observe.market.")) {

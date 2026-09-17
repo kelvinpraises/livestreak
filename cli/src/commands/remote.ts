@@ -288,6 +288,8 @@ export const runRemoteRevoke = async (sessionId: string): Promise<string> => {
 export const runRemoteDrive = async (input: {
   readonly session: string;
   readonly pairPassword: string;
+  readonly stewardSession?: string;
+  readonly stewardPairPassword?: string;
   readonly hostUrl?: string;
   readonly settingsPath?: string;
   readonly marketId?: string;
@@ -298,6 +300,10 @@ export const runRemoteDrive = async (input: {
   const result = await executeRemoteDrive({
     sessionId: input.session,
     pairingPassword: input.pairPassword,
+    ...(input.stewardSession === undefined ? {} : { stewardSessionId: input.stewardSession }),
+    ...(input.stewardPairPassword === undefined
+      ? {}
+      : { stewardPairingPassword: input.stewardPairPassword }),
     ...(input.hostUrl === undefined ? {} : { hostUrl: input.hostUrl }),
     ...(input.settingsPath === undefined ? {} : { settingsPath: input.settingsPath }),
     ...(input.marketId === undefined ? {} : { marketId: input.marketId }),
@@ -379,6 +385,8 @@ const remoteDriveCommand = Command.make(
   {
     session: Options.text("session"),
     pairPassword: Options.text("pair-password"),
+    stewardSession: Options.text("steward-session").pipe(Options.optional),
+    stewardPairPassword: Options.text("steward-pair-password").pipe(Options.optional),
     hostUrl: Options.text("host-url").pipe(Options.optional),
     settings: settingsPathOpt,
     marketId: Options.text("market-id").pipe(Options.optional),
@@ -386,12 +394,16 @@ const remoteDriveCommand = Command.make(
     fundDeposit: Options.text("fund-deposit").pipe(Options.optional),
     resolveOutcome: Options.text("resolve-outcome").pipe(Options.optional)
   },
-  ({ session, pairPassword, hostUrl, settings, marketId, observeOnly, fundDeposit, resolveOutcome }) =>
+  ({ session, pairPassword, stewardSession, stewardPairPassword, hostUrl, settings, marketId, observeOnly, fundDeposit, resolveOutcome }) =>
     Effect.tryPromise({
       try: () =>
         runRemoteDrive({
           session,
           pairPassword,
+          ...(Option.isSome(stewardSession) ? { stewardSession: stewardSession.value } : {}),
+          ...(Option.isSome(stewardPairPassword)
+            ? { stewardPairPassword: stewardPairPassword.value }
+            : {}),
           ...(Option.isSome(hostUrl) ? { hostUrl: hostUrl.value } : {}),
           ...(Option.isSome(settings) ? { settingsPath: settings.value } : {}),
           ...(Option.isSome(marketId) ? { marketId: marketId.value } : {}),

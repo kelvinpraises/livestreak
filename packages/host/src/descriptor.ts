@@ -13,7 +13,8 @@ export { OutputMode, type OutputMode as HostOutputMode } from "@livestreak/schem
 export const HostModuleToken = Schema.Literal(
   "aa",
   "media",
-  "walrus_memory",
+  "memory",
+  "forum",
   "walrus_content",
   "discovery",
   // Remote Bridge Console relay router (Objective 4, P4). Canonicalized here from
@@ -23,7 +24,7 @@ export const HostModuleToken = Schema.Literal(
 
 export type HostModuleToken = Schema.Schema.Type<typeof HostModuleToken>;
 
-export { MemoryTrustModel, MemoryDescriptorAdvert } from "./memory.js";
+export { MemoryDescriptorAdvert } from "./memory.js";
 
 export {
   WalrusNetwork,

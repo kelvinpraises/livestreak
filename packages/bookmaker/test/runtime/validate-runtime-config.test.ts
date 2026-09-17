@@ -76,6 +76,35 @@ describe("validateBookmakerRuntimeConfig", () => {
     }
   });
 
+  it("accepts an unconfigured runtime with empty marketId on both context and watch source", () => {
+    const result = validateBookmakerRuntimeConfig({
+      ...validConfig,
+      marketContext: marketContext({ marketId: "" }),
+      watchSource: watchSource({ marketId: "" })
+    });
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.marketContext.marketId).toBe("");
+      expect(result.value.watchSource.marketId).toBe("");
+    }
+  });
+
+  it("rejects a half-configured runtime (market set, watch source empty)", () => {
+    const result = validateBookmakerRuntimeConfig({
+      ...validConfig,
+      marketContext: marketContext({ marketId: "market-1" }),
+      watchSource: watchSource({ marketId: "" })
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok === false) {
+      // watchSource stays strict once the context carries a market, so the empty
+      // marketId is a non-empty-string error (never silently accepted).
+      expect(result.issues.some((issue) => issue.includes("watchSource"))).toBe(true);
+    }
+  });
+
   it("rejects malformed policy", () => {
     const result = validateBookmakerRuntimeConfig({
       ...validConfig,

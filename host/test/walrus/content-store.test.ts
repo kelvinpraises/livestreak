@@ -5,14 +5,6 @@ import type { ResolvedWalrus } from "#infrastructure/walrus/network.js";
 
 const testResolved = (): ResolvedWalrus => ({
   network: "testnet",
-  sui: {
-    rpcUrl: "https://fullnode.testnet.sui.io:443",
-    packageId: "0xpackage",
-    registryId: "0xregistry"
-  },
-  memory: {
-    relayerUrl: "https://relayer-staging.memory.walrus.xyz"
-  },
   blob: {
     publisherUrl: "https://publisher.walrus-testnet.walrus.space",
     aggregatorUrl: "https://aggregator.walrus-testnet.walrus.space"

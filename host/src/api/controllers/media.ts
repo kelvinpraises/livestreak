@@ -18,7 +18,11 @@ import type { HostServerConfig } from "../../config/host.js";
 import { isModuleEnabled } from "../../config/host.js";
 import type { HostRouteDeps, MediaRouteDeps } from "../../deps.js";
 import { createLiveKitMediaProvider } from "../../infrastructure/livekit.js";
-import { buildDevManifest, appendManifestCacheReceiptRef } from "../../services/media/manifest.js";
+import {
+  buildDevManifest,
+  appendManifestCacheReceiptRef,
+  MANIFEST_UNSIGNED
+} from "../../services/media/manifest.js";
 import { evaluateHostPolicy, type PolicyEvaluatorDeps } from "../../services/media/policy.js";
 import { handlePolicyEvaluate } from "../../services/media/policy-routes.js";
 import { asyncHandler, param, sendRouteResult } from "../middleware/respond.js";
@@ -205,7 +209,11 @@ export const handleCacheReceipt = (
     evidence: request.evidence,
     status: "accepted",
     issuedAtMs,
-    signature: `dev-stub-receipt:${deps.config.hostId}:${receiptId}`
+    // Cache receipts are NOT host-signed yet (no receipt-signing key wired, no
+    // consumer verifies this). The schema requires a non-empty `signature`, so emit
+    // the explicit unsigned marker rather than a signature-shaped string. When
+    // receipt signing lands, sign the canonical receipt bytes with a host key.
+    signature: MANIFEST_UNSIGNED
   };
 
   const nextQuota = Math.max(0, quotaRemainingBytes - bytesStored);
@@ -320,7 +328,10 @@ const buildSessionDraftShell = (
     cacheReceiptRefs: [],
     issuedAtMs: nowMs,
     expiresAtMs: nowMs + 60 * 60 * 1000,
-    signature: `dev-stub-signature:${config.hostId}:pending`
+    // Draft shell only — handleCreateSession overwrites manifestDraft with the real
+    // buildDevManifest output before persisting. Still emit the explicit unsigned
+    // marker (never a signature-shaped string) for the transient draft.
+    signature: MANIFEST_UNSIGNED
   },
   policy
 });

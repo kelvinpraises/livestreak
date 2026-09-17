@@ -246,7 +246,7 @@ sui_wire() {
     scall steward_registry register_steward register_steward "$steward_reg" "$STEWARD_ADDR"
     scall steward_registry set_default_steward set_default_steward "$steward_reg" "$STEWARD_ADDR"
   fi
-  for role in bookmaker options; do
+  for role in $ROLES; do
     addr="$(cat "$ROLES_DIR/$role/addr" 2>/dev/null || true)"
     [ -z "$addr" ] && continue
     scall mock_usdc mint_to "mint_to $role" "$mint_cap" "$DEMO_USDC_MINT" "$addr"
@@ -330,7 +330,7 @@ evm_wire() {
     wire "registerSteward" "$steward_reg" "registerSteward(address)" "$STEWARD_ADDR"
     wire "setDefaultSteward" "$steward_reg" "setDefaultSteward(address)" "$STEWARD_ADDR"
   fi
-  for role in bookmaker options; do
+  for role in $ROLES; do
     addr="$(cat "$ROLES_DIR/$role/addr" 2>/dev/null || true)"
     [ -z "$addr" ] && continue
     wire "mint USDC -> $role" "$usdc" "mint(address,uint256)" "$addr" "$DEMO_USDC_MINT"

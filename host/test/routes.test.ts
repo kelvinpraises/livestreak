@@ -3,7 +3,8 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createApp, createHostRouteDeps } from "#server.js";
 import { handleFindSimilar, handleIndexVault } from "#api/controllers/discovery.js";
-import { handleMemoryAccess } from "#services/walrus/memory/routes.js";
+import { handleMemoryRecall, handleMemoryRemember } from "#services/memory/records.js";
+import { handleForumList, handleForumPost } from "#services/forum/messages.js";
 import { handlePolicyEvaluate } from "#services/media/policy-routes.js";
 import {
   handleCacheReceipt,
@@ -80,10 +81,27 @@ describe("host route handlers", () => {
     await request(app).post("/media/policy/evaluate").send({}).expect(400);
     await request(app).post("/discovery/vaults").send(validIndexVaultBody).expect(201);
     await request(app).post("/discovery/find").send(validFindSimilarBody).expect(200);
+    // Memory + forum are DB-backed (no Walrus gate): valid writes persist regardless of Walrus config.
     await request(app)
-      .post("/memory/access")
-      .send({ marketId: "mkt_01", suiDelegate: "a".repeat(64) })
-      .expect(503);
+      .post("/memory/records")
+      .send({
+        subjectKind: "vault",
+        subjectId: "0xvault1",
+        findingIds: [],
+        decisionActions: [],
+        atMs: 1
+      })
+      .expect(201);
+    await request(app)
+      .post("/forum/messages")
+      .send({
+        kind: "thread",
+        subjectKind: "vault",
+        subjectId: "0xvault1",
+        title: "review",
+        atMs: 1
+      })
+      .expect(201);
     // Content blobs no longer hard-gate on Walrus: with Walrus unconfigured the host
     // falls back to a local store, so requests are validated/served on their merits —
     // an empty payload is a 400 and an unknown pointer is a 404 (not a blanket 503).
@@ -579,122 +597,47 @@ describe("discovery routes", () => {
   });
 });
 
-describe("memory access route", () => {
-  const configuredMemory = () => ({
-    ...defaultHostServerConfig(),
-    walrusNetwork: "mainnet" as const,
-    memorySuiOwnerPrivateKey: "suiprivkey1qqtest",
-    memoryOwnerSeed: null,
-    walletSeed: null,
-    resolvedWalrus: {
-      network: "mainnet" as const,
-      sui: {
-        rpcUrl: "https://fullnode.mainnet.sui.io:443",
-        packageId: "0xpackage",
-        registryId: "0xregistry"
-      },
-      memory: {
-        relayerUrl: "https://memwal.example"
-      },
-      blob: {
-        publisherUrl: "https://publisher.example",
-        aggregatorUrl: "https://aggregator.example"
-      }
-    }
-  });
+describe("memory records routes", () => {
+  it("remembers then recalls a subject's records through the DB repo", async () => {
+    const host = createTestHost();
 
-  const validDelegateKey = "a".repeat(64);
-
-  it("returns scoped credentials including accountId for a granted delegate", async () => {
-    const bindings = {
-      get: vi.fn(),
-      provision: vi.fn(async (marketId: string) => ({
-        marketId,
-        memWalAccountId: "0xaccount_scoped",
-        namespace: `market:${marketId}`
-      })),
-      grantDelegate: vi.fn(async () => undefined),
-      hasDelegate: vi.fn(() => true)
-    };
-
-    const response = await handleMemoryAccess(
-      { marketId: "mkt_01", suiDelegate: validDelegateKey },
+    const remembered = await handleMemoryRemember(
       {
-        config: configuredMemory(),
-        bindings
-      }
+        subjectKind: "vault",
+        subjectId: "0xvault1",
+        marketId: "mkt_01",
+        findingIds: ["f1", "f2"],
+        decisionActions: ["resolve"],
+        atMs: 1_000
+      },
+      host.deps.memory
     );
 
-    expect(response.ok).toBe(true);
-    if (response.ok) {
-      expect(response.result).toEqual({
-        relayerUrl: "https://memwal.example",
-        namespace: "market:mkt_01",
-        accountId: "0xaccount_scoped"
+    expect(remembered.ok).toBe(true);
+
+    const recalled = await handleMemoryRecall(
+      { subjectKind: "vault", subjectId: "0xvault1" },
+      host.deps.memory
+    );
+
+    expect(recalled.ok).toBe(true);
+    if (recalled.ok) {
+      expect(recalled.result.records).toHaveLength(1);
+      expect(recalled.result.records[0]).toMatchObject({
+        subjectKind: "vault",
+        subjectId: "0xvault1",
+        marketId: "mkt_01",
+        findingIds: ["f1", "f2"],
+        decisionActions: ["resolve"],
+        atMs: 1_000
       });
-      expect(JSON.stringify(response.result)).not.toContain("memWalAccountId");
     }
   });
 
-  it("returns 503 when walrus network selector is absent", async () => {
-    const host = createTestHost({
-      ...defaultHostServerConfig(),
-      walrusNetwork: null,
-      memorySuiOwnerPrivateKey: null,
-      memoryOwnerSeed: null,
-      resolvedWalrus: null
-    });
+  it("rejects a remember body missing required fields", async () => {
+    const host = createTestHost();
 
-    const response = await handleMemoryAccess(
-      { marketId: "mkt_01", suiDelegate: validDelegateKey },
-      {
-        config: host.deps.config,
-        bindings: host.deps.walrus.memory.bindings
-      }
-    );
-
-    expect(response.ok).toBe(false);
-    if (!response.ok) {
-      expect(response.status).toBe(503);
-    }
-  });
-
-  it("returns 503 when memory is configured but walrus is not bootstrapped", async () => {
-    const host = createTestHost({
-      ...defaultHostServerConfig(),
-      walrusNetwork: "mainnet",
-      memorySuiOwnerPrivateKey: "suiprivkey1qqtest",
-      memoryOwnerSeed: null,
-      resolvedWalrus: null
-    });
-
-    const response = await handleMemoryAccess(
-      { marketId: "mkt_01", suiDelegate: validDelegateKey },
-      {
-        config: host.deps.config,
-        bindings: host.deps.walrus.memory.bindings
-      }
-    );
-
-    expect(response.ok).toBe(false);
-    if (!response.ok) {
-      expect(response.status).toBe(503);
-    }
-  });
-
-  it("returns 400 when suiDelegate is missing", async () => {
-    const response = await handleMemoryAccess(
-      { marketId: "mkt_01" },
-      {
-        config: configuredMemory(),
-        bindings: {
-          get: vi.fn(),
-          provision: vi.fn(),
-          grantDelegate: vi.fn(),
-          hasDelegate: vi.fn()
-        }
-      }
-    );
+    const response = await handleMemoryRemember({ subjectKind: "vault" }, host.deps.memory);
 
     expect(response.ok).toBe(false);
     if (!response.ok) {
@@ -702,18 +645,51 @@ describe("memory access route", () => {
     }
   });
 
-  it("returns 400 when suiDelegate is not a valid delegate public key", async () => {
-    const response = await handleMemoryAccess(
-      { marketId: "mkt_01", suiDelegate: "0xabc" },
-      {
-        config: configuredMemory(),
-        bindings: {
-          get: vi.fn(),
-          provision: vi.fn(),
-          grantDelegate: vi.fn(),
-          hasDelegate: vi.fn()
-        }
-      }
+  it("rejects a recall without subject params", async () => {
+    const host = createTestHost();
+
+    const response = await handleMemoryRecall({}, host.deps.memory);
+
+    expect(response.ok).toBe(false);
+    if (!response.ok) {
+      expect(response.status).toBe(400);
+    }
+  });
+});
+
+describe("forum message routes", () => {
+  it("posts then lists a subject's thread oldest-first", async () => {
+    const host = createTestHost();
+
+    const opened = await handleForumPost(
+      { kind: "thread", subjectKind: "vault", subjectId: "0xv1", title: "review", atMs: 1 },
+      host.deps.forum
+    );
+    const appended = await handleForumPost(
+      { kind: "message", subjectKind: "vault", subjectId: "0xv1", message: "looks off", atMs: 2 },
+      host.deps.forum
+    );
+
+    expect(opened.ok).toBe(true);
+    expect(appended.ok).toBe(true);
+
+    const listed = await handleForumList(
+      { subjectKind: "vault", subjectId: "0xv1" },
+      host.deps.forum
+    );
+
+    expect(listed.ok).toBe(true);
+    if (listed.ok) {
+      expect(listed.result.messages.map((m) => m.kind)).toEqual(["thread", "message"]);
+    }
+  });
+
+  it("rejects an invalid kind", async () => {
+    const host = createTestHost();
+
+    const response = await handleForumPost(
+      { kind: "nope", subjectKind: "vault", subjectId: "0xv1", atMs: 1 },
+      host.deps.forum
     );
 
     expect(response.ok).toBe(false);

@@ -10,6 +10,7 @@ export { validateObserveRunConfig } from "./validate.js";
 export {
   browserCaptureRunConfig,
   fileCaptureRunConfig,
+  shellRunConfig,
   type BrowserCaptureConfig,
   type BrowserCaptureCrop,
   type BrowserCaptureImageEncoding,

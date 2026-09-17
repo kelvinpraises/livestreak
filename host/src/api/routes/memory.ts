@@ -8,7 +8,8 @@ export const createMemoryRouter = (deps: HostRouteDeps): Router => {
   const router = Router();
   const controller = createMemoryController(deps);
 
-  router.post("/memory/access", controller.access);
+  router.post("/memory/records", controller.remember);
+  router.get("/memory/records", controller.recall);
 
   return router;
 };

@@ -14,16 +14,12 @@ describe("host descriptor", () => {
     const descriptor = handleDescriptor({ config });
 
     expect(descriptor.modules).toEqual(
-      expect.arrayContaining(["aa", "media", "walrus_memory", "walrus_content", "discovery"])
+      expect.arrayContaining(["aa", "media", "memory", "walrus_content", "discovery"])
     );
     expect(descriptor.media.simulcastAvailable).toBe(false);
     expect(descriptor.supportedOutputs).not.toContain("simulcast");
     expect(descriptor.walrus).toEqual({ network: "mainnet" });
-    expect(descriptor.memory).toEqual({
-      relayerUrl: walrusNetworkProfiles.mainnet.memory.relayerUrl,
-      namespaceTemplate: "market:{marketId}",
-      trustModel: "plaintext-relayer"
-    });
+    expect(descriptor.memory).toEqual({ recordsAvailable: true });
     expect(descriptor.content).toEqual({
       publisherUrl: walrusNetworkProfiles.mainnet.blob.publisherUrl,
       aggregatorUrl: walrusNetworkProfiles.mainnet.blob.aggregatorUrl
@@ -44,7 +40,7 @@ describe("host descriptor", () => {
     const descriptor = handleDescriptor({ config });
 
     expect(descriptor.walrus).toEqual({ network: null });
-    expect(descriptor.memory.relayerUrl).toBeNull();
+    expect(descriptor.memory.recordsAvailable).toBe(true);
     expect(descriptor.content.publisherUrl).toBeNull();
     expect(descriptor.content.aggregatorUrl).toBeNull();
   });

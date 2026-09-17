@@ -1,4 +1,3 @@
-import { LiveStreakConfigError } from "@livestreak/core";
 import type { Hex } from "viem";
 import type { HostServerConfig } from "../../config/host.js";
 import { resolveEvmExecutorPrivateKey, type EvmWalletContext } from "./evm.js";
@@ -18,8 +17,8 @@ export interface WalletInit {
 }
 
 export const resolveHostWalletSeed = (
-  config: Pick<HostServerConfig, "walletSeed" | "memoryOwnerSeed">
-): string | null => config.walletSeed ?? config.memoryOwnerSeed;
+  config: Pick<HostServerConfig, "walletSeed">
+): string | null => config.walletSeed;
 
 export const resolveWalletPrivateKey = async (init: WalletInit): Promise<string | Hex> => {
   switch (init.chain) {
@@ -41,40 +40,10 @@ export const resolveWalletPrivateKey = async (init: WalletInit): Promise<string 
         throw new Error("sui_wallet_context_incomplete");
       }
 
-      return resolveSuiOwnerPrivateKey({
-        memorySuiOwnerPrivateKey: init.seed,
-        memoryOwnerSeed: null,
-        walletSeed: init.seed
-      });
+      return resolveSuiOwnerPrivateKey({ privateKey: init.seed, seed: init.seed });
     }
     default: {
       throw new Error(`unsupported_wallet_chain:${String(init.chain)}`);
     }
   }
-};
-
-export const resolveMemoryOwnerKey = async (
-  config: Pick<HostServerConfig, "walletSeed" | "memoryOwnerSeed" | "memorySuiOwnerPrivateKey">,
-  suiRpcUrl: string
-): Promise<string> => {
-  void suiRpcUrl;
-  // A directly-injected Sui owner private key (e.g. the testnet deployer key in
-  // LIVESTREAK_MEMORY_OWNER_KEY) is sufficient on its own — it does not require a
-  // wallet/owner seed. Only fall through to the seed-derivation guard when no
-  // direct key is present, matching isMemoryHostConfigured's semantics.
-  if (config.memorySuiOwnerPrivateKey === null) {
-    const seed = resolveHostWalletSeed(config);
-    if (seed === null) {
-      throw new LiveStreakConfigError({
-        message: "memory_owner_not_configured",
-        metadata: { retryable: false }
-      });
-    }
-  }
-
-  return resolveSuiOwnerPrivateKey({
-    memorySuiOwnerPrivateKey: config.memorySuiOwnerPrivateKey,
-    memoryOwnerSeed: config.memoryOwnerSeed,
-    walletSeed: config.walletSeed
-  });
 };

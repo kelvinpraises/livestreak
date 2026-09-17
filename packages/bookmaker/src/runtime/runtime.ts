@@ -1,7 +1,8 @@
 import { LiveStreakRuntimeError } from "@livestreak/core";
 
 import { projectBookmakerPanel, type BookmakerPanelSnapshot } from "../bridge/panel/project.js";
-import type { BookmakerPanelView } from "../model/watch-source.js";
+import type { BookmakerMarketContext } from "../model/market-context.js";
+import type { BookmakerPanelView, BookmakerWatchSource } from "../model/watch-source.js";
 import { createBookmakerChain, type BookmakerChain } from "../chains/index.js";
 import { validateBookmakerChainConfig } from "../chains/config.js";
 import type { BookmakerRuntimeConfig } from "./config.js";
@@ -31,6 +32,11 @@ export interface BookmakerRuntime {
   readonly config: BookmakerRuntimeConfig;
   readonly chain: BookmakerChain;
   readonly idempotencyStore: IdempotencyStore;
+  /** Board-first lens: aim the runtime at one market. Swaps context in place — no teardown. */
+  readonly configure: (input: { readonly marketId: string }) => BookmakerRuntimeState;
+  /** Inverse of configure: back to unconfigured (empty marketId), board clears. */
+  readonly close: () => BookmakerRuntimeState;
+  readonly activeMarketId: () => string;
   readonly readSnapshot: () => BookmakerRuntimeState;
   readonly readPanel: () => BookmakerPanelView;
   readonly publishSnapshot: (snapshot: BookmakerPanelSnapshot) => BookmakerRuntimeState;
@@ -59,6 +65,9 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
   // Last published snapshot — lets incremental updates (recording a completed vault, surfacing a
   // failure) preserve prior panel state (watchSource, marketContext, pending intents) instead of clobbering it.
   private lastSnapshot: BookmakerPanelSnapshot;
+  // Configure/close lens: the market the runtime is aimed at, swapped without teardown.
+  private marketContext: BookmakerMarketContext;
+  private watchSource: BookmakerWatchSource;
 
   constructor(input: BookmakerRuntimeInput) {
     const validated = validateBookmakerRuntimeConfig(input.config);
@@ -69,6 +78,8 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
     }
 
     this.config = validated.value;
+    this.marketContext = this.config.marketContext;
+    this.watchSource = this.config.watchSource;
     this.store = createBookmakerRuntimeStore(this.config.runtimeId);
     this.idempotencyStore = createIdempotencyStore(input.idempotencyPersistence);
     this.chain =
@@ -82,6 +93,22 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
         })
       );
     this.lastSnapshot = this.emptyPanelSnapshot();
+  }
+
+  configure(input: { readonly marketId: string }): BookmakerRuntimeState {
+    const marketId = input.marketId.trim();
+    this.marketContext = { ...this.marketContext, marketId };
+    this.watchSource = { ...this.watchSource, marketId };
+    // New market, new board: prior detections/drafts belonged to the old lens.
+    return this.publishSnapshot(this.emptyPanelSnapshot());
+  }
+
+  close(): BookmakerRuntimeState {
+    return this.configure({ marketId: "" });
+  }
+
+  activeMarketId(): string {
+    return this.marketContext.marketId;
   }
 
   readSnapshot(): BookmakerRuntimeState {
@@ -198,8 +225,8 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
   private emptyPanelSnapshot(): BookmakerPanelSnapshot {
     return {
       runtimeId: this.config.runtimeId,
-      marketContext: this.config.marketContext,
-      watchSource: this.config.watchSource,
+      marketContext: this.marketContext,
+      watchSource: this.watchSource,
       pendingWriteIntents: [],
       completedVaultCreations: [],
       updatedAtMs: 0

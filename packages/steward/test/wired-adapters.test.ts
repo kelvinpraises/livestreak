@@ -8,8 +8,8 @@ import {
   createMemoryFactSource,
   createMemorySink,
   createObserveFactSource,
-  type MemWalMemory,
-  type MemWalRememberRecord
+  type StewardMemoryClient,
+  type StewardMemoryRememberRecord
 } from "../src/runtime/adapters/index.js";
 import type { StewardContractCall } from "../src/model/action-plan.js";
 
@@ -44,10 +44,10 @@ const config = {
   actionContext: { stewardId: "steward-1" }
 };
 
-// In-memory MemWal stand-in (the real adapter is injected the host/wallet MemWal client).
+// In-memory stand-in for the injected memory client.
 const makeMemory = () => {
-  const remembered: MemWalRememberRecord[] = [];
-  const memory: MemWalMemory = {
+  const remembered: StewardMemoryRememberRecord[] = [];
+  const memory: StewardMemoryClient = {
     recall: async () => [],
     remember: (record) => {
       remembered.push(record);
@@ -95,7 +95,7 @@ describe("steward runtime wired through the REAL injected-port adapters", () => 
     expect(dispatched[0]?.functionName).toBe("triggerHot");
     expect(dispatched[0]?.args[0]).toBe("vault-1");
 
-    // The wired memory sink persisted the subject's finding via the MemWal client.
+    // The wired memory sink persisted the subject's finding via the memory client.
     expect(remembered).toHaveLength(1);
     expect(remembered[0]?.findingIds).toHaveLength(1);
   });

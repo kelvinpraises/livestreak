@@ -1,8 +1,11 @@
 // --- exports ---
 
 import { LiveStreakConfigError } from "@livestreak/core";
+import { coerceArgsBySchema, SchemaCoercionError } from "@livestreak/schema";
 
-import type { MintResult, TxId } from "../chains/types.js";
+import { asMarketId } from "../model/ids.js";
+import { asTxId, type MintResult, type TxId } from "../chains/types.js";
+import { optionsActionInputSchema } from "./panel/descriptors.js";
 import { projectOptionsControls } from "./panel/project.js";
 import type { OptionsControlsView } from "./panel/types.js";
 import { authorizeBridgeCaller } from "./scope.js";
@@ -82,7 +85,21 @@ export const createOptionsBridge = (input: CreateOptionsBridgeInput): OptionsBri
         });
       }
 
-      return dispatchWriterAction(runtime, envelope.action, envelope.args);
+      const result = await dispatchWriterAction(runtime, envelope.action, envelope.args);
+
+      // Reflect a chain write on the board immediately (configure/close publish themselves).
+      if (envelope.action !== "configure" && envelope.action !== "close") {
+        const active = runtime.activeMarketId();
+        if (active !== undefined && runtime.config.user !== undefined) {
+          try {
+            await runtime.refreshUser(runtime.config.user, active);
+          } catch {
+            // best-effort: the write already succeeded
+          }
+        }
+      }
+
+      return result;
     },
 
     subscribeBoard: (caller, listener) => {
@@ -102,9 +119,22 @@ export const createOptionsBridge = (input: CreateOptionsBridgeInput): OptionsBri
 const dispatchWriterAction = async (
   runtime: CreateOptionsBridgeInput["runtime"],
   action: string,
-  args: unknown
+  rawArgs: unknown
 ): Promise<TxId | MintResult> => {
   const writer = runtime.chain.writer;
+
+  // Configure/close are runtime lens verbs, not chain writes.
+  if (action === "configure") {
+    const marketId = asMarketId(readStringField(readArgs(rawArgs), "marketId"));
+    await runtime.configure({ marketId });
+    return asTxId(`configured-${marketId}`);
+  }
+  if (action === "close") {
+    runtime.close();
+    return asTxId("closed");
+  }
+
+  const args = coerceActionArgs(action, rawArgs);
 
   switch (action) {
     case "mint":
@@ -113,12 +143,6 @@ const dispatchWriterAction = async (
       return writer.mintWithSalt(readArgs(args));
     case "fund":
       return runtime.fundStream(readArgs(args));
-    case "streamLane":
-      return runtime.streamLane(readArgs(args));
-    case "pauseLane":
-      return runtime.pauseLane(readArgs(args));
-    case "resumeLane":
-      return runtime.resumeLane(readArgs(args));
     case "setLanes":
       return writer.setLanes(readArgs(args));
     case "addFunds":
@@ -157,6 +181,30 @@ const dispatchWriterAction = async (
         metadata: { details: action }
       });
   }
+};
+
+// JSON transports have no bigint — the action's own descriptor (format:"bigint") drives coercion,
+// so the console form, CLI, and any agent are coerced by one source of truth.
+const coerceActionArgs = (action: string, args: unknown): unknown => {
+  try {
+    return coerceArgsBySchema(optionsActionInputSchema(action), args);
+  } catch (error) {
+    if (error instanceof SchemaCoercionError) {
+      throw new LiveStreakConfigError({ message: error.message });
+    }
+    throw error;
+  }
+};
+
+const readStringField = (record: Record<string, unknown>, field: string): string => {
+  const value = record[field];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new LiveStreakConfigError({
+      message: `Options bridge action requires ${field}`,
+      metadata: { details: String(value) }
+    });
+  }
+  return value.trim();
 };
 
 const readArgs = <T>(args: unknown): T => {

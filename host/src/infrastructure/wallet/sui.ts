@@ -13,10 +13,7 @@ export interface SuiSponsorWallet {
 }
 
 export const resolveSuiSponsorSeed = (
-  config: Pick<HostServerConfig, "walletSeed" | "memoryOwnerSeed"> = {
-    walletSeed: null,
-    memoryOwnerSeed: null
-  }
+  config: Pick<HostServerConfig, "walletSeed"> = { walletSeed: null }
 ): string | null =>
   readOptionalEnv("LIVESTREAK_SUI_SPONSOR_SEED") ??
   readOptionalEnv("LIVESTREAK_SUI_SPONSOR_MNEMONIC") ??
@@ -26,10 +23,7 @@ export const resolveSuiSponsorRpcUrl = (): string | null =>
   readOptionalEnv("LIVESTREAK_SUI_RPC_URL");
 
 export const resolveSuiSponsorWallet = async (
-  config: Pick<HostServerConfig, "walletSeed" | "memoryOwnerSeed"> = {
-    walletSeed: null,
-    memoryOwnerSeed: null
-  }
+  config: Pick<HostServerConfig, "walletSeed"> = { walletSeed: null }
 ): Promise<SuiSponsorWallet> => {
   const seed = resolveSuiSponsorSeed(config);
   if (seed === null) {
@@ -65,20 +59,19 @@ export const resolveSuiSponsorWallet = async (
 };
 
 export const resolveSuiOwnerPrivateKey = async (
-  config: Pick<HostServerConfig, "memorySuiOwnerPrivateKey" | "memoryOwnerSeed" | "walletSeed"> = {
-    memorySuiOwnerPrivateKey: null,
-    memoryOwnerSeed: null,
-    walletSeed: null
+  config: { readonly privateKey: string | null; readonly seed: string | null } = {
+    privateKey: null,
+    seed: null
   }
 ): Promise<string> => {
-  if (config.memorySuiOwnerPrivateKey !== null) {
-    return config.memorySuiOwnerPrivateKey;
+  if (config.privateKey !== null) {
+    return config.privateKey;
   }
 
-  const seed = config.memoryOwnerSeed ?? resolveHostWalletSeed(config);
+  const seed = config.seed;
   if (seed === null) {
     throw new LiveStreakConfigError({
-      message: "sui_memory_owner_not_configured",
+      message: "sui_owner_not_configured",
       metadata: { retryable: false }
     });
   }
@@ -89,14 +82,13 @@ export const resolveSuiOwnerPrivateKey = async (
   const privateKey = account.keyPair.privateKey;
   if (privateKey === null) {
     throw new LiveStreakConfigError({
-      message: "sui_memory_owner_private_key_unavailable",
+      message: "sui_owner_private_key_unavailable",
       metadata: { retryable: false }
     });
   }
 
-  // MemWal account ops expect a bech32-encoded Sui private key (suiprivkey1...),
-  // not raw hex. Encode the seed-derived secret accordingly so the seed path and
-  // the directly-injected-key path both yield a key MemWal can sign with.
+  // Sui signers expect a bech32-encoded private key (suiprivkey1...), not raw hex —
+  // encode the seed-derived secret so both paths yield a signable key.
   return Ed25519Keypair.fromSecretKey(privateKey).getSecretKey();
 };
 

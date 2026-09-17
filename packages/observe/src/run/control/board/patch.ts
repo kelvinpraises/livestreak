@@ -78,8 +78,12 @@ export const applyBoardPatch = (
       cells: nextCells
     });
 
+    // Shape-only on live patches (see settings.ts): a configure write validates the SHAPE of what it wrote,
+    // but the cross-cell ≥1-sink COMPLETENESS rule is a go-live prerequisite the kernel enforces at prepare
+    // (with requireComplete defaulting true). Enforcing completeness on every patch traps the operator who
+    // configures the capture cell before the sink cell ("At least one sink policy is required").
     if (patchChangesSettings(patch)) {
-      yield* validateBoardSettings(nextBoard);
+      yield* validateBoardSettings(nextBoard, { requireComplete: false });
     }
 
     return {

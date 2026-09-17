@@ -17,9 +17,9 @@ export { createObserveFactSource, type ObserveBoardReader } from "./observe-sour
 export {
   createMemoryFactSource,
   createMemorySink,
-  type MemWalMemory,
+  type StewardMemoryClient,
   type MemoryRecord,
-  type MemWalRememberRecord
+  type StewardMemoryRememberRecord
 } from "./memory.js";
 export {
   createActionPlanSink,

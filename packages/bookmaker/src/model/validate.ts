@@ -104,8 +104,20 @@ export const validateDetection = (input: unknown): ValidationResult<Detection> =
   });
 };
 
+export interface ValidateMarketContextOptions {
+  /**
+   * When true, an EMPTY marketId is accepted as the explicit "not configured yet"
+   * state (a remote console runtime is constructed before the operator supplies a
+   * market). Every other field stays strict, and createVault remains gated by the
+   * intent validator + the panel descriptor, so this never lets a vault originate
+   * against a blank market. Off by default — the general validator stays strict.
+   */
+  readonly allowUnconfigured?: boolean;
+}
+
 export const validateBookmakerMarketContext = (
-  input: unknown
+  input: unknown,
+  options: ValidateMarketContextOptions = {}
 ): ValidationResult<BookmakerMarketContext> => {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return validationFailure("BookmakerMarketContext must be an object");
@@ -114,7 +126,10 @@ export const validateBookmakerMarketContext = (
   const value = input as Record<string, unknown>;
   const issues: string[] = [];
 
-  const marketId = requireNonEmptyString(value.marketId, "marketId", issues);
+  const marketId =
+    options.allowUnconfigured === true
+      ? requireStringAllowingEmpty(value.marketId, "marketId", issues)
+      : requireNonEmptyString(value.marketId, "marketId", issues);
   const observeRunId = requireNonEmptyString(value.observeRunId, "observeRunId", issues);
   const observer = requireNonEmptyString(value.observer, "observer", issues);
 
@@ -309,7 +324,10 @@ export const validateVaultDraftForCreate = (
   return base;
 };
 
-export const validateBookmakerWatchSource = (input: unknown): ValidationResult<BookmakerWatchSource> => {
+export const validateBookmakerWatchSource = (
+  input: unknown,
+  options: ValidateMarketContextOptions = {}
+): ValidationResult<BookmakerWatchSource> => {
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return validationFailure("BookmakerWatchSource must be an object");
   }
@@ -317,7 +335,10 @@ export const validateBookmakerWatchSource = (input: unknown): ValidationResult<B
   const value = input as Record<string, unknown>;
   const issues: string[] = [];
 
-  const marketId = requireNonEmptyString(value.marketId, "marketId", issues);
+  const marketId =
+    options.allowUnconfigured === true
+      ? requireStringAllowingEmpty(value.marketId, "marketId", issues)
+      : requireNonEmptyString(value.marketId, "marketId", issues);
 
   requireOptionalNonEmptyString(value.watchUrl, "watchUrl", issues);
   requireOptionalNonEmptyString(value.webrtcUrl, "webrtcUrl", issues);
@@ -515,6 +536,22 @@ const requireNonEmptyString = (
 ): string | undefined => {
   if (typeof value !== "string" || value.trim().length === 0) {
     issues.push(`${fieldPath} must be a non-empty string`);
+    return undefined;
+  }
+
+  return value.trim();
+};
+
+// A string that MAY be empty — models the explicit "not configured yet" marketId.
+// The value must still be a string (a missing/non-string field is an error); an
+// empty/blank string trims to "" and is accepted as the unconfigured sentinel.
+const requireStringAllowingEmpty = (
+  value: unknown,
+  fieldPath: string,
+  issues: string[]
+): string | undefined => {
+  if (typeof value !== "string") {
+    issues.push(`${fieldPath} must be a string`);
     return undefined;
   }
 

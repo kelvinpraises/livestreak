@@ -4,7 +4,8 @@ import { HostCreateSessionRequest } from "./media/session.js";
 import { HostCacheReceiptRequest } from "./media/evidence.js";
 import { AaPaymasterRequest } from "./aa.js";
 import { HostSimilarityIndexRequest, HostSimilarityRequest } from "./discovery.js";
-import { MemoryAccessRequest } from "./memory.js";
+import { MemoryRecordInput } from "./memory.js";
+import { ForumMessageInput } from "./forum.js";
 import { ContentBlobStoreRequest } from "./walrus.js";
 
 // --- exports ---
@@ -21,7 +22,8 @@ export const decodeHostDiscoveryRequest = Schema.decodeUnknownEither(HostSimilar
 
 export const decodeHostDiscoveryIndexRequest = Schema.decodeUnknownEither(HostSimilarityIndexRequest);
 
-export const decodeMemoryAccessRequest = Schema.decodeUnknownEither(MemoryAccessRequest);
+export const decodeMemoryRecordInput = Schema.decodeUnknownEither(MemoryRecordInput);
+export const decodeForumMessageInput = Schema.decodeUnknownEither(ForumMessageInput);
 
 export const decodeContentBlobStoreRequest = Schema.decodeUnknownEither(ContentBlobStoreRequest);
 

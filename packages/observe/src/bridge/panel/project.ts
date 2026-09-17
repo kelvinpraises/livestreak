@@ -107,20 +107,43 @@ const projectCellView = (
     readonly: cloneJsonRecord(cell.readonly),
     refs: projectReferences(cell.refs),
     functions: cell.functions
-      .filter((name) => isFunctionVisibleOnCell(id, name, liveConfigurators))
+      .filter((name) => isFunctionVisibleOnCell(id, name, cell, liveConfigurators))
       .map((name) =>
         applyDisabledState(projectFunctionView(id, cell.catalog, name, catalog), state, runState)
       )
   };
 };
 
+// A configurator cell's `close` tears down that cell's mounted configuration; it is meaningless (and
+// confused live operators) on a cell that was never configured. So `close` stays hidden until the cell
+// carries real config: system:config while it is still at the pristine `idle` root level, and the
+// pipeline cells (capture:* / sink:*) until their own `configure` flips readonly.configured to true.
+const cellHasBeenConfigured = (cellId: string, cell: Board["cells"][string]): boolean => {
+  if (cellId === "system:config") {
+    return cell.status[0] === "configured";
+  }
+  if (cellId.startsWith("capture:") || cellId.startsWith("sink:")) {
+    return cell.readonly?.configured === true;
+  }
+  // market / system:run etc. are not configure/close configurators — their own actions gate themselves.
+  return true;
+};
+
 const isFunctionVisibleOnCell = (
   cellId: string,
   fnName: string,
+  cell: Board["cells"][string],
   liveConfigurators: readonly string[]
 ): boolean => {
-  if (cellId === "system:config" && (fnName === "configure" || fnName === "close")) {
+  if (cellId === "system:config" && fnName === "configure") {
     return liveConfigurators.includes("observe.system.config");
+  }
+
+  if (fnName === "close") {
+    if (cellId === "system:config" && !liveConfigurators.includes("observe.system.config")) {
+      return false;
+    }
+    return cellHasBeenConfigured(cellId, cell);
   }
 
   return true;
@@ -138,7 +161,14 @@ const projectFunctionView = (
     disabled: false
   };
 
-  const catalogFunction = catalog?.cells[catalogKey ?? cellId]?.functions[name];
+  // The control catalog is keyed by CELL ID (capture:file, sink:file-export, sink:live, system:config,
+  // market …), so the cell id is the canonical lookup key. `cell.catalog` (the catalog/kind identity) only
+  // coincides with the cell id for most cells — the file sink diverges (cell id `sink:file-export` vs
+  // catalog `sink:file`). Prefer the cell id so the file sink's configure resolves its `input` schema
+  // (the `path` field) instead of falling through fieldless; fall back to `cell.catalog` for safety.
+  const catalogFunction =
+    catalog?.cells[cellId]?.functions[name] ??
+    (catalogKey === undefined ? undefined : catalog?.cells[catalogKey]?.functions[name]);
 
   if (catalogFunction === undefined) {
     return derived;

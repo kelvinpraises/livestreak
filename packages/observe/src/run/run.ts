@@ -19,7 +19,8 @@ export type {
 export {
   validateObserveRunConfig,
   browserCaptureRunConfig,
-  fileCaptureRunConfig
+  fileCaptureRunConfig,
+  shellRunConfig
 } from "./config/index.js";
 
 export interface ObserveRun {

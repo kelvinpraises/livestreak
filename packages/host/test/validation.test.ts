@@ -5,7 +5,7 @@ import {
   decodeHostDiscoveryIndexRequest,
   decodeHostDiscoveryRequest,
   decodeHostPolicyRequest,
-  decodeMemoryAccessRequest,
+  decodeMemoryRecordInput,
   validationErrorMessage
 } from "#index.js";
 
@@ -101,10 +101,14 @@ describe("host validation", () => {
     expect(decoded._tag).toBe("Right");
   });
 
-  it("accepts a valid memory access request", () => {
-    const decoded = decodeMemoryAccessRequest({
+  it("accepts a valid memory record input", () => {
+    const decoded = decodeMemoryRecordInput({
+      subjectKind: "vault",
+      subjectId: "0xvault1",
       marketId: "mkt_01",
-      suiDelegate: "0xdelegate"
+      findingIds: ["f1"],
+      decisionActions: ["resolve"],
+      atMs: 1000
     });
 
     expect(decoded._tag).toBe("Right");

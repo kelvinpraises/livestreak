@@ -62,6 +62,11 @@ export type ResumeLaneInput = PauseLaneInput;
 export interface OptionsRuntime {
   readonly config: OptionsRuntimeConfig;
   readonly chain: OptionsChain;
+  /** Board-first lens: aim the runtime at one market and load the user's view of it. */
+  configure: (input: { readonly marketId: MarketId }) => Promise<OptionsRuntimeState>;
+  /** Inverse of configure: drop the lens and clear snapshots — the board reads empty again. */
+  close: () => OptionsRuntimeState;
+  activeMarketId: () => MarketId | undefined;
   readSnapshot: () => OptionsRuntimeState;
   readPanel: () => OptionsPanel;
   readBoard: () => OptionsBoard;
@@ -115,6 +120,7 @@ class OptionsRuntimeFacade implements OptionsRuntime {
   private readonly changeListeners = new Set<(state: OptionsRuntimeState) => void>();
   private readonly memoryWatchers = new Map<string, Set<(value: unknown) => void>>();
   private pollingTimer: ReturnType<typeof setInterval> | undefined;
+  private activeMarket: MarketId | undefined;
 
   constructor(input: OptionsRuntimeInput) {
     this.config = validateOptionsRuntimeConfig(input.config);
@@ -126,18 +132,35 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     this.persistPausedLanes = input.pausedLanes?.onChange;
   }
 
+  async configure(input: { readonly marketId: MarketId }): Promise<OptionsRuntimeState> {
+    this.activeMarket = input.marketId;
+    if (this.config.user !== undefined) {
+      return this.refreshUser(this.config.user, input.marketId);
+    }
+    return this.refreshMarket(input.marketId);
+  }
+
+  close(): OptionsRuntimeState {
+    this.activeMarket = undefined;
+    this.store.reset();
+    return this.publish();
+  }
+
+  activeMarketId(): MarketId | undefined {
+    return this.activeMarket;
+  }
+
   readSnapshot(): OptionsRuntimeState {
     return this.store.readState();
   }
 
   readPanel(): OptionsPanel {
-    const snapshot = this.requireUserSnapshot();
-    return this.projectPanel(snapshot);
+    return this.projectPanel(this.userSnapshotOrEmpty());
   }
 
   readBoard(): OptionsBoard {
     const state = this.store.readState();
-    const snapshot = this.requireUserSnapshot();
+    const snapshot = this.userSnapshotOrEmpty();
     return assembleBoard(state.revision, snapshot, this.projectPanel(snapshot));
   }
 
@@ -509,6 +532,30 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     return snapshot;
   }
 
+  // Board-first: unconfigured (or closed) reads as an honest empty board, not an error.
+  private userSnapshotOrEmpty(): OptionsUserOptionsSnapshot {
+    const snapshot = this.store.readState().userSnapshot;
+    if (snapshot !== undefined) {
+      return snapshot;
+    }
+    if (this.config.user === undefined) {
+      return this.requireUserSnapshot();
+    }
+    return {
+      account: this.config.user,
+      markets: [],
+      vaults: [],
+      nfts: [],
+      lvstAccount: {
+        account: this.config.user,
+        balance: 0n,
+        staked: 0n,
+        pendingDividends: 0n
+      },
+      usdcBalance: 0n
+    };
+  }
+
   private requireUser(): UserAddress {
     if (this.config.user === undefined) {
       throw new LiveStreakConfigError({
@@ -531,9 +578,10 @@ class OptionsRuntimeFacade implements OptionsRuntime {
       listener(state);
     }
 
-    if (state.userSnapshot !== undefined) {
+    if (state.userSnapshot !== undefined || this.config.user !== undefined) {
+      const snapshot = this.userSnapshotOrEmpty();
       this.boardSubscriptions.notify(
-        assembleBoard(state.revision, state.userSnapshot, this.projectPanel(state.userSnapshot))
+        assembleBoard(state.revision, snapshot, this.projectPanel(snapshot))
       );
     }
 

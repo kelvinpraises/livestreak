@@ -141,10 +141,32 @@ const suiChainAdapter: ChainAdapter = {
   })
 };
 
+// --- Solana adapter (solana:*) — Ed25519 native signing; sponsorship = Kora paymaster via the host ---
+
+const solanaChainAdapter: ChainAdapter = {
+  kind: "solana",
+  matches: (caip2) => namespaceOf(caip2) === "solana",
+  // No deployment artifact yet (packages/contracts/chains/solana is a stub); the bag is overrides-only
+  // until the Solana port lands.
+  deriveContracts: (overrides) => ({ ...(overrides ?? {}) }),
+  buildWalletInit: (ctx) => ({
+    chain: "solana",
+    seedSource: "raw",
+    // Self-pay until the Solana deployment artifact exists. Sponsorship threads in here as the
+    // paymaster triple — paymasterUrl = `${hostUrl}/aa/solana/paymaster`, paymasterAddress/token
+    // from the deployment/descriptor — once there are Solana contracts to write against.
+    config: { provider: ctx.rpc }
+  })
+};
+
 // --- the registry ---
 
-// Ordered; first matching adapter wins. Append new chains here (e.g. solanaChainAdapter).
-export const chainAdapters: readonly ChainAdapter[] = [evmChainAdapter, suiChainAdapter];
+// Ordered; first matching adapter wins. Append new chains here.
+export const chainAdapters: readonly ChainAdapter[] = [
+  evmChainAdapter,
+  suiChainAdapter,
+  solanaChainAdapter
+];
 
 export const resolveChainAdapter = (caip2: string): ChainAdapter => {
   const adapter = chainAdapters.find((a) => a.matches(caip2));

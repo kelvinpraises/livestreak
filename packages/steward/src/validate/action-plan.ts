@@ -94,13 +94,22 @@ const isStewardContractCall = (value: unknown): value is StewardContractCall => 
   return validateStewardRegistryContractCall(record.functionName, record.args);
 };
 
+const isFindingSeverity = (value: unknown): boolean =>
+  value === "info" || value === "warning" || value === "critical";
+
 const validateVaultContractCall = (functionName: string, args: unknown[]): boolean => {
-  if (args.length !== 2) {
-    return false;
+  if (functionName === "triggerHot") {
+    return (
+      args.length === 3 &&
+      isNonEmptyString(args[0]) &&
+      isNonEmptyString(args[1]) &&
+      isFindingSeverity(args[2])
+    );
   }
 
-  if (functionName === "triggerHot" || functionName === "resolve") {
-    return isNonEmptyString(args[0]) && isNonEmptyString(args[1]);
+  if (functionName === "resolve") {
+    // outcome is the on-chain Vault.Outcome enum value (a number), not a string.
+    return args.length === 2 && isNonEmptyString(args[0]) && isFiniteNumber(args[1]);
   }
 
   return false;

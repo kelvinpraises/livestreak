@@ -22,6 +22,13 @@ export class LiveStreakRuntimeError extends Data.TaggedError("LiveStreakRuntimeE
   readonly metadata?: ErrorMetadata;
 }> {}
 
+// Honest gap for a chain whose wallet leg is live but whose contracts port has not landed
+// (today: solana). Distinct from "unsupported chain" — the chain IS supported, its contracts aren't.
+export const contractsNotDeployedError = (chain: string, consumer: string): LiveStreakConfigError =>
+  new LiveStreakConfigError({
+    message: `LiveStreak ${chain} contracts are not deployed yet — ${consumer} lands with the ${chain} contracts port (wallet + sponsorship legs are already live)`
+  });
+
 export class LiveStreakCapabilityError extends Data.TaggedError("LiveStreakCapabilityError")<{
   readonly message: string;
   readonly requiredScope?: string;

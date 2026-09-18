@@ -13,6 +13,7 @@ import type { OptionsBoardState } from "../../model/math/accrual.js";
 import type { FunderBoundary } from "../../model/math/live-pool.js";
 import type { OptionsMarket } from "../../model/market.js";
 import type { OptionsNft } from "../../model/nft.js";
+import type { OptionsProtocolSummary } from "../../model/snapshot.js";
 import type { OptionsStreamState } from "../../model/stream.js";
 import type {
   OptionsVault,
@@ -69,7 +70,8 @@ type ReaderContext = {
 export const createSuiOptionsReader = (
   ids: OptionsSuiObjectIds,
   rpcUrl: string,
-  network?: SuiNetwork
+  network?: SuiNetwork,
+  options?: { readonly includeProtocolSummary?: boolean }
 ): OptionsReader => {
   const client = createSuiReadClient(rpcUrl, network);
   const ctx: ReaderContext = {
@@ -79,12 +81,19 @@ export const createSuiOptionsReader = (
     coinType: usdcCoinType(ids.packageId)
   };
 
-  return buildReader(ctx);
+  const reader = buildReader(ctx);
+
+  if (options?.includeProtocolSummary === true) {
+    reader.readProtocolSummary = async () => loadProtocolSummary(ctx);
+  }
+
+  return reader;
 };
 
 const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readMarket: (marketId) => readMarket(ctx, marketId),
   readStreamState: (marketId) => readStreamState(ctx, marketId),
+  listMarketIds: () => listMarketIds(ctx),
   listMarketVaults: (marketId) => listMarketVaults(ctx, marketId),
   readVault: (vaultId) => readVault(ctx, vaultId),
   readVaultShareTotals: (vaultId) => readVaultShareTotals(ctx, vaultId),
@@ -286,6 +295,81 @@ const listMarketVaults = async (
 ): Promise<readonly VaultId[]> => {
   const market = await readMarket(ctx, marketId);
   return market.vaultIds;
+};
+
+// Parity with EVM loadProtocolSummary: market count + total vault count across all markets.
+// One batched devInspect resolves get_vault_ids for every market.
+const loadProtocolSummary = async (ctx: ReaderContext): Promise<OptionsProtocolSummary> => {
+  try {
+    const marketIds = await listMarketIds(ctx);
+    if (marketIds.length === 0) {
+      return { marketCount: 0, vaultCount: 0 };
+    }
+
+    const tx = new Transaction();
+    for (const marketId of marketIds) {
+      const marketHex = marketId.startsWith("0x") ? marketId.slice(2) : marketId;
+      const marketBytes = Array.from({ length: 32 }, (_, i) =>
+        parseInt(marketHex.slice(i * 2, i * 2 + 2) || "0", 16)
+      );
+      tx.moveCall({
+        target: target(ctx.packageId, MODULES.marketRegistry, "get_vault_ids"),
+        arguments: [
+          tx.object(ctx.ids.marketRegistry),
+          tx.pure(bcs.vector(bcs.u8()).serialize(marketBytes).toBytes())
+        ]
+      });
+    }
+    const results = await inspect(ctx, tx);
+    let vaultCount = 0;
+    for (const returnValues of results) {
+      const val = returnValues[0];
+      if (val === undefined) continue;
+      vaultCount += decodeVaultIdsList(val).length;
+    }
+
+    return { marketCount: marketIds.length, vaultCount };
+  } catch (error) {
+    if (error instanceof LiveStreakConfigError) throw error;
+    throw suiReadFailed("protocol summary", error);
+  }
+};
+
+// Parity with EVM listMarketIds: the Move registry keeps the same append-only market_ids ledger
+// (market_count / market_id_at). One devInspect for the count, one batched devInspect for all ids.
+const listMarketIds = async (ctx: ReaderContext): Promise<readonly MarketId[]> => {
+  try {
+    const countTx = new Transaction();
+    countTx.moveCall({
+      target: target(ctx.packageId, MODULES.marketRegistry, "market_count"),
+      arguments: [countTx.object(ctx.ids.marketRegistry)]
+    });
+    const countResults = await inspect(ctx, countTx);
+    const countVal = countResults[0]?.[0];
+    if (countVal === undefined) return [];
+    const count = Number(readU64(countVal));
+    if (count === 0) return [];
+
+    const idsTx = new Transaction();
+    for (let index = 0; index < count; index += 1) {
+      idsTx.moveCall({
+        target: target(ctx.packageId, MODULES.marketRegistry, "market_id_at"),
+        arguments: [idsTx.object(ctx.ids.marketRegistry), idsTx.pure.u64(BigInt(index))]
+      });
+    }
+    const idsResults = await inspect(ctx, idsTx);
+    const ids: MarketId[] = [];
+    for (const returnValues of idsResults) {
+      const val = returnValues[0];
+      if (val === undefined) continue;
+      const parsed = bcs.vector(bcs.u8()).parse(Uint8Array.from(val[0])) as number[];
+      ids.push(asMarketId(bytesVecToHex(parsed)));
+    }
+    return ids;
+  } catch (error) {
+    if (error instanceof LiveStreakConfigError) throw error;
+    throw suiReadFailed("market ids", error);
+  }
 };
 
 const readVaultData = async (

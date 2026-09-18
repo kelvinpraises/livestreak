@@ -1,6 +1,7 @@
 import type {
   AaCapabilityDescriptor,
   AaChainDescriptor,
+  SolanaSponsorshipDescriptor,
   SuiSponsorshipDescriptor
 } from "@livestreak/host";
 import type { AaChainConfig } from "../../services/aa/chains.js";
@@ -144,6 +145,38 @@ export const createAaController = (deps: AaRouteDeps) => ({
       }),
       next
     );
+  },
+
+  solanaPaymaster: async (
+    req: { body: unknown; headers?: Record<string, unknown> },
+    res: { status: (code: number) => { json: (body: unknown) => void } }
+  ): Promise<void> => {
+    const request = asJsonRpcRequest(req.body);
+
+    if (!deps.solanaPaymaster.configured) {
+      res
+        .status(503)
+        .json(jsonRpcError(-32000, "Solana paymaster is not configured", request.id));
+      return;
+    }
+
+    // Same H1 drain-protection as the EVM paymaster: open sponsorship is loopback-only;
+    // a non-loopback bind requires the bearer token before the host co-signs anything.
+    if (deps.aa.requirePaymasterAuth) {
+      if (deps.aa.paymasterAuthToken === undefined) {
+        res
+          .status(503)
+          .json(jsonRpcError(-32000, "Paymaster sponsorship is disabled on this host", request.id));
+        return;
+      }
+      if (!hasValidBearer(req.headers, deps.aa.paymasterAuthToken)) {
+        res.status(401).json(jsonRpcError(-32001, "Paymaster authorization required", request.id));
+        return;
+      }
+    }
+
+    const result = await deps.solanaPaymaster.handleRpc(req.body);
+    res.status(result.status).json(result.body);
   }
 });
 
@@ -179,7 +212,10 @@ const buildAaDescriptor = (deps: AaRouteDeps): AaCapabilityDescriptorEmit => ({
   })),
   ...(buildSuiSponsorshipDescriptor(deps) === undefined
     ? {}
-    : { suiSponsorship: buildSuiSponsorshipDescriptor(deps) })
+    : { suiSponsorship: buildSuiSponsorshipDescriptor(deps) }),
+  ...(buildSolanaSponsorshipDescriptor(deps) === undefined
+    ? {}
+    : { solanaSponsorship: buildSolanaSponsorshipDescriptor(deps) })
 });
 
 const buildSuiSponsorshipDescriptor = (deps: AaRouteDeps): SuiSponsorshipDescriptor | undefined => {
@@ -192,6 +228,21 @@ const buildSuiSponsorshipDescriptor = (deps: AaRouteDeps): SuiSponsorshipDescrip
     ...(deps.suiGasStation.sponsorAddress === null
       ? {}
       : { sponsorAddress: deps.suiGasStation.sponsorAddress })
+  };
+};
+
+const buildSolanaSponsorshipDescriptor = (
+  deps: AaRouteDeps
+): SolanaSponsorshipDescriptor | undefined => {
+  if (!deps.solanaPaymaster.configured || !deps.solanaPaymaster.advertise) {
+    return undefined;
+  }
+
+  return {
+    paymasterPath: deps.solanaPaymaster.paymasterPath,
+    ...(deps.solanaPaymaster.payerAddress === null
+      ? {}
+      : { payerAddress: deps.solanaPaymaster.payerAddress })
   };
 };
 

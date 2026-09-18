@@ -305,6 +305,8 @@ export const mapSuiLvstAccount = (
 
 export type SuiContractsReadEntity =
   | "market"
+  | "market ids"
+  | "protocol summary"
   | "vault"
   | "vault share totals"
   | "owner tokens"

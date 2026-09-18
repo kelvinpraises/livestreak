@@ -43,6 +43,15 @@ describe("validateBookmakerChainConfig", () => {
       })
     ).toThrow();
   });
+
+  it("names the honest gap for solana (wallet live, contracts pending)", () => {
+    expect(() =>
+      validateBookmakerChainConfig({
+        ...validConfig,
+        walletInit: { chain: "solana", seedSource: "raw", config: { rpcUrl: "http://x" } }
+      })
+    ).toThrow(/contracts are not deployed yet/);
+  });
 });
 
 const validSuiAddresses = {

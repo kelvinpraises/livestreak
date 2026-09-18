@@ -42,7 +42,7 @@ const contractCallsForDecision = (
             {
               contract: "vault",
               functionName: "triggerHot",
-              args: [subject.vaultId, decision.reason]
+              args: [subject.vaultId, decision.reason, decision.finding.severity]
             }
           ];
     case "challenge":

@@ -48,7 +48,13 @@ describe("steward action plan validation", () => {
         {
           contract: "vault" as const,
           functionName: "triggerHot" as const,
-          args: ["vault-1", "Escalate"]
+          args: ["vault-1", "Escalate", "warning"]
+        },
+        {
+          contract: "vault" as const,
+          functionName: "resolve" as const,
+          // outcome is the on-chain enum NUMBER — a string here must reject (latent validator bug fixed).
+          args: ["vault-1", 1]
         },
         {
           contract: "stewardRegistry" as const,
@@ -97,6 +103,38 @@ describe("steward action plan validation", () => {
     const plan = {
       decision,
       contractCalls: [{ contract: "vault", functionName: "resolve", args: ["", "reason"] }],
+      hostActions: []
+    };
+
+    expect(isStewardActionPlan(plan)).toBe(false);
+  });
+
+  it("rejects resolve with a string outcome", () => {
+    const plan = {
+      decision,
+      contractCalls: [{ contract: "vault", functionName: "resolve", args: ["vault-1", "yes"] }],
+      hostActions: []
+    };
+
+    expect(isStewardActionPlan(plan)).toBe(false);
+  });
+
+  it("rejects triggerHot without a severity", () => {
+    const plan = {
+      decision,
+      contractCalls: [{ contract: "vault", functionName: "triggerHot", args: ["vault-1", "Escalate"] }],
+      hostActions: []
+    };
+
+    expect(isStewardActionPlan(plan)).toBe(false);
+  });
+
+  it("rejects triggerHot with an unknown severity", () => {
+    const plan = {
+      decision,
+      contractCalls: [
+        { contract: "vault", functionName: "triggerHot", args: ["vault-1", "Escalate", "severe"] }
+      ],
       hostActions: []
     };
 

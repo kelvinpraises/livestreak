@@ -1,4 +1,5 @@
 import type { StewardDecision } from "./decision.js";
+import type { StewardFindingSeverity } from "./finding.js";
 import type { StewardSubject } from "./subject.js";
 
 // --- exports ---
@@ -13,7 +14,9 @@ export type StewardContractCall =
   | {
       readonly contract: "vault";
       readonly functionName: "triggerHot";
-      readonly args: readonly [vaultId: string, reason: string];
+      // Severity rides the call so the executor maps it onto the on-chain enum (Warm/Hot/Critical)
+      // instead of guessing; the reason is hashed at the executor boundary (reasonHash on-chain).
+      readonly args: readonly [vaultId: string, reason: string, severity: StewardFindingSeverity];
     }
   | {
       readonly contract: "vault";

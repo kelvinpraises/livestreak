@@ -1,4 +1,5 @@
 import { ConfigurationError, WalletManagerEvmErc4337 } from '#chains/evm.js'
+import { WalletManagerSolana } from '#chains/solana/index.js'
 import { WalletManagerSui } from '#chains/sui/index.js'
 
 import type { WalletChain, WalletConfigByChain, WalletManagerForChain } from '#types.js'
@@ -19,6 +20,12 @@ export function createWalletManager<C extends WalletChain>(
       return new WalletManagerSui(
         seed,
         config as WalletConfigByChain['sui'],
+      ) as WalletManagerForChain<C>
+    }
+    case 'solana': {
+      return new WalletManagerSolana(
+        seed,
+        config as WalletConfigByChain['solana'],
       ) as WalletManagerForChain<C>
     }
     default: {

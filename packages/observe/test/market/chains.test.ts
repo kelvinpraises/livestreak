@@ -201,6 +201,25 @@ describe("market chain seam", () => {
     }
   });
 
+  it("names the honest gap for solana (wallet live, contracts pending)", async () => {
+    const config: ObserveRunMarketConfig = {
+      walletInit: {
+        chain: "solana",
+        seedSource: "raw",
+        config: { rpcUrl: "http://127.0.0.1:8899" }
+      } as never,
+      seed: "test-seed",
+      marketRegistryAddress: "0x0000000000000000000000000000000000000001",
+      title: "Solana stream"
+    };
+
+    const exit = await Effect.runPromiseExit(createMarketRegistrar(config));
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(String(exit.cause)).toContain("contracts are not deployed yet");
+    }
+  });
+
   it("EVM goLive/setEnded encode the marketRegistry calldata and poll inclusion", async () => {
     const registrar = createEvmMarketRegistrar(minimalEvmConfig());
     const lifecycleInput = {

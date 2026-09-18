@@ -3,6 +3,20 @@
 import type { WalletInit } from "@livestreak/schema";
 import { LiveStreakConfigError } from "@livestreak/core";
 
+import type { StewardFindingSeverity } from "../model/finding.js";
+
+// StewardRegistry severity enum on both chains: Warm = 0, Hot = 1, Critical = 2.
+export const severityToContractValue = (severity: StewardFindingSeverity): number => {
+  switch (severity) {
+    case "critical":
+      return 2;
+    case "warning":
+      return 1;
+    case "info":
+      return 0;
+  }
+};
+
 export interface StewardEvmAddresses {
   readonly stewardRegistry: string;
 }

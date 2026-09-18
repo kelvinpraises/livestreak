@@ -19,6 +19,19 @@ const EXPECTED_EXPORTS = [
   'assembleSponsoredTxBytes',
   'createLocalGasStation',
   'isSponsoredSuiConfig',
+  'WalletManagerSolana',
+  'WalletAccountSolana',
+  'WalletAccountReadOnlySolana',
+  'WalletAccountSolanaGasless',
+  'WalletAccountReadOnlySolanaGasless',
+  'assertKoraPreservedSignedTransaction',
+  'assertSolanaSponsorshipConfig',
+  'guardKoraClient',
+  'isSponsoredSolanaConfig',
+  'readSolanaSignatureReceipt',
+  'KoraClient',
+  'createSolanaRpc',
+  'solanaAddress',
 ]
 
 describe('public export surface', () => {

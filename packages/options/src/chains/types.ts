@@ -139,9 +139,9 @@ export interface OptionsReader {
   readMarket(marketId: MarketId): Promise<OptionsMarket>;
   readStreamState(marketId: MarketId): Promise<OptionsStreamState>;
   // Enumerate every registered market off the on-chain registry. The host indexer uses this
-  // to discover markets without an in-memory store or env seed. Optional: the EVM registry
-  // exposes marketCount + marketIdAt; the Sui registry does not enumerate, so its reader omits
-  // this and the host falls back to the discovery store for that leg.
+  // to discover markets without an in-memory store or env seed. EVM (marketCount/marketIdAt)
+  // and Sui (market_count/market_id_at) both implement it; optional only for chains whose
+  // contracts are not deployed yet (solana) — the host falls back to the discovery store there.
   listMarketIds?(): Promise<readonly MarketId[]>;
   listMarketVaults(marketId: MarketId): Promise<readonly VaultId[]>;
   readVault(vaultId: VaultId): Promise<OptionsVault>;
@@ -183,8 +183,9 @@ export interface OptionsWriter {
   fund(input: FundStreamInput): Promise<TxId>;
   advance(input: AdvanceInput): Promise<TxId>;
   setLanes(input: SetLanesInput): Promise<TxId>;
-  // Balance-first deposit that preserves existing lanes (see AddFundsInput). Optional: EVM implements it;
-  // Sui has no equivalent yet, so the bridge rejects the action on a chain that omits it.
+  // Balance-first deposit that preserves existing lanes (see AddFundsInput). EVM and Sui both
+  // implement it as a read-lanes + setLanes composite; optional only for chains without deployed
+  // contracts (solana) — the bridge rejects the action on a chain that omits it.
   addFunds?(input: AddFundsInput): Promise<TxId>;
   stopFunding(input: StopFundingInput): Promise<TxId>;
   stopAllFunding(input: StopAllFundingInput): Promise<TxId>;

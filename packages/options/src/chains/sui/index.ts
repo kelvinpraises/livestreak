@@ -31,7 +31,9 @@ export const createSuiOptionsChain = (config?: OptionsChainConfig): OptionsChain
   const ids = config.addresses as OptionsSuiObjectIds;
 
   return {
-    reader: createSuiOptionsReader(ids, rpcUrl, suiConfig.network),
+    reader: createSuiOptionsReader(ids, rpcUrl, suiConfig.network, {
+      includeProtocolSummary: config.includeProtocolSummary
+    }),
     writer: createSuiOptionsWriter(config)
   };
 };

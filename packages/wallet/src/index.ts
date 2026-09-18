@@ -22,6 +22,19 @@ export {
   verifySponsoredSignatures,
 } from '#chains/sui/index.js'
 
+export {
+  WalletManagerSolana,
+  WalletAccountSolana,
+  WalletAccountReadOnlySolana,
+  WalletAccountSolanaGasless,
+  WalletAccountReadOnlySolanaGasless,
+  assertKoraPreservedSignedTransaction,
+  assertSolanaSponsorshipConfig,
+  guardKoraClient,
+  isSponsoredSolanaConfig,
+  readSolanaSignatureReceipt,
+} from '#chains/solana/index.js'
+
 export type {
   WalletChain,
   EvmErc4337WalletConfig,
@@ -45,6 +58,14 @@ export type {
   SuiNetwork,
 } from '#chains/sui/index.js'
 
+export type {
+  SolanaTransaction,
+  LiveStreakSolanaWalletConfig,
+  SolanaNetwork,
+  SolanaPaymasterToken,
+  SponsoredSolanaWalletConfig,
+} from '#chains/solana/index.js'
+
 // Multichain-hygiene: @livestreak/wallet is the SINGLE @mysten/sui (v2) owner. Sui executors
 // (options writer/reader, observe registrar) build PTBs + read VIA these re-exports instead of
 // declaring their own direct @mysten/sui dependency.
@@ -52,6 +73,20 @@ export { Transaction } from '@mysten/sui/transactions'
 export { bcs } from '@mysten/sui/bcs'
 export { SuiJsonRpcClient } from '@mysten/sui/jsonRpc'
 export type { SuiTransactionBlockResponse } from '@mysten/sui/jsonRpc'
+
+// Same hygiene for Solana: the wallet is the single @solana/* + @solana/kora owner. The host's
+// Kora-compatible signer and any Solana executor consume these re-exports.
+export { createSolanaRpc } from '@solana/rpc'
+export { address as solanaAddress } from '@solana/addresses'
+export {
+  getTransactionDecoder,
+  getTransactionEncoder,
+  getBase64EncodedWireTransaction,
+} from '@solana/transactions'
+export { getBase58Decoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs'
+export { getCompiledTransactionMessageDecoder } from '@solana/transaction-messages'
+export { createKeyPairSignerFromPrivateKeyBytes } from '@solana/signers'
+export { KoraClient } from '@solana/kora'
 
 export type { IWalletAccount } from '@tetherto/wdk-wallet'
 export type {

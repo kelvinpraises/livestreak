@@ -65,6 +65,34 @@ export const SuiWalletInitConfig = Schema.Struct({
 });
 export type SuiWalletInitConfig = Schema.Schema.Type<typeof SuiWalletInitConfig>;
 
+// SOLANA wallet config. Signs natively (Ed25519) like Sui; sponsorship is the Kora paymaster
+// model (fee-payer co-sign quoted in an SPL token), so the sponsored arm carries the paymaster
+// triple instead of the EVM bundler/entryPoint apparatus.
+export const SolanaWalletInitConfig = Schema.Struct({
+  provider: Schema.Union(Schema.String, Schema.Array(Schema.String)), // one endpoint or a failover list
+  retries: Schema.optional(Schema.Number),
+  isSponsored: Schema.optional(Schema.Boolean),
+  paymasterUrl: Schema.optional(Schema.Union(Schema.String, Schema.Array(Schema.String))), // e.g. {host}/aa/solana/paymaster
+  paymasterAddress: Schema.optional(Schema.String), // base58 fee-payer address
+  paymasterToken: Schema.optional(Schema.Struct({ address: Schema.String })),
+  network: Schema.optional(Schema.Literal("mainnet-beta", "devnet", "testnet", "localnet"))
+}).pipe(
+  // Same contradiction-kill as the EVM arm: the wallet's assertSolanaSponsorshipConfig throws when
+  // sponsored without the paymaster triple — fail at decode instead of first send.
+  Schema.filter(
+    (config) =>
+      config.isSponsored !== true ||
+      (config.paymasterUrl !== undefined &&
+        config.paymasterAddress !== undefined &&
+        config.paymasterToken !== undefined),
+    {
+      message: () =>
+        "paymasterUrl, paymasterAddress and paymasterToken are required when isSponsored is true"
+    }
+  )
+);
+export type SolanaWalletInitConfig = Schema.Schema.Type<typeof SolanaWalletInitConfig>;
+
 // --- wallet init ---
 
 // Where the seed comes from. The SECRET bytes are supplied at runtime by the caller —
@@ -73,7 +101,7 @@ export const WalletSeedSource = Schema.Literal("raw", "mnemonic", "signature-der
 export type WalletSeedSource = Schema.Schema.Type<typeof WalletSeedSource>;
 
 // Which chain a wallet-init targets. Mirrors @livestreak/wallet createWalletManager's switch key.
-export const WalletChain = Schema.Literal("evm", "sui");
+export const WalletChain = Schema.Literal("evm", "sui", "solana");
 export type WalletChain = Schema.Schema.Type<typeof WalletChain>;
 
 // THE wallet-init the caller (composition root) fills — chain-discriminated, one type per chain.
@@ -88,6 +116,11 @@ export const WalletInit = Schema.Union(
     chain: Schema.Literal("sui"),
     seedSource: WalletSeedSource,
     config: SuiWalletInitConfig
+  }),
+  Schema.Struct({
+    chain: Schema.Literal("solana"),
+    seedSource: WalletSeedSource,
+    config: SolanaWalletInitConfig
   })
 );
 export type WalletInit = Schema.Schema.Type<typeof WalletInit>;

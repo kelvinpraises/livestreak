@@ -9,6 +9,12 @@ import {
   type SuiGasStationService
 } from "./services/aa/sui-gas-station.js";
 import { readSuiGasStationRuntimeConfig } from "./services/aa/sui-sponsor.js";
+import {
+  createSolanaPaymaster,
+  readSolanaPaymasterRuntimeConfig,
+  type SolanaPaymasterService
+} from "./services/aa/solana-paymaster.js";
+import { readKoraSpawnConfig, startKora } from "./infrastructure/relay/kora.js";
 import { createDiscoveryStore } from "./services/discovery.js";
 import {
   createCatalogService,
@@ -63,6 +69,7 @@ export interface AaRouteDeps {
   readonly aa: AaServerConfig;
   readonly paymasterSigners: Map<string, PaymasterSigner>;
   readonly suiGasStation: SuiGasStationService;
+  readonly solanaPaymaster: SolanaPaymasterService;
 }
 
 export interface CreateAaRouteDepsOptions {
@@ -70,6 +77,7 @@ export interface CreateAaRouteDepsOptions {
   readonly suiGasStation?: SuiGasStationService;
   readonly suiClient?: SuiJsonRpcClient;
   readonly suiInitialCoins?: readonly SuiGasCoinRef[];
+  readonly solanaPaymaster?: SolanaPaymasterService;
 }
 
 export const createAaRouteDeps = (
@@ -81,7 +89,8 @@ export const createAaRouteDeps = (
     config,
     aa,
     paymasterSigners: options.paymasterSigners ?? buildPaymasterSigners(aa),
-    suiGasStation: options.suiGasStation ?? createSuiGasStation({ config: null })
+    suiGasStation: options.suiGasStation ?? createSuiGasStation({ config: null }),
+    solanaPaymaster: options.solanaPaymaster ?? createSolanaPaymaster({ config: null })
   };
 };
 
@@ -90,13 +99,22 @@ export const bootstrapAaRouteDeps = async (
   options: CreateAaRouteDepsOptions = {}
 ): Promise<AaRouteDeps> => {
   const suiGasStation = await buildSuiGasStation(config, options);
-  const deps = createAaRouteDeps(config, { ...options, suiGasStation });
+  const solanaPaymaster = await buildSolanaPaymaster(config, options);
+  const deps = createAaRouteDeps(config, { ...options, suiGasStation, solanaPaymaster });
 
   if (deps.suiGasStation.configured) {
     try {
       await deps.suiGasStation.bootstrap();
     } catch (error) {
       console.warn(`[aa]: Sui gas station bootstrap skipped: ${String(error)}`);
+    }
+  }
+
+  if (deps.solanaPaymaster.configured) {
+    try {
+      await deps.solanaPaymaster.bootstrap();
+    } catch (error) {
+      console.warn(`[aa]: Solana paymaster bootstrap skipped: ${String(error)}`);
     }
   }
 
@@ -325,6 +343,36 @@ const buildRemoteService = (config: HostServerConfig): RemoteService =>
     grantKeyHex: config.remoteGrantKeyHex,
     grantKeyId: `${config.hostId}_grant`
   });
+
+const buildSolanaPaymaster = async (
+  config: HostServerConfig,
+  options: CreateAaRouteDepsOptions
+): Promise<SolanaPaymasterService> => {
+  if (options.solanaPaymaster !== undefined) {
+    return options.solanaPaymaster;
+  }
+
+  const runtime = await readSolanaPaymasterRuntimeConfig(config).catch(() => null);
+  if (runtime === null) {
+    return createSolanaPaymaster({ config: null });
+  }
+
+  // Shape A: spawn a real kora-rpc sidecar when enabled; the service then proxies to it.
+  const spawnConfig = readKoraSpawnConfig(
+    runtime.rpcUrl,
+    Buffer.from(runtime.payerPrivateKey).toString("base64")
+  );
+  if (spawnConfig !== null && runtime.koraUrl === null) {
+    try {
+      const koraUrl = await startKora(spawnConfig);
+      return createSolanaPaymaster({ config: { ...runtime, koraUrl } });
+    } catch (error) {
+      console.warn(`[aa]: kora sidecar spawn failed, using in-process signer: ${String(error)}`);
+    }
+  }
+
+  return createSolanaPaymaster({ config: runtime });
+};
 
 const buildSuiGasStation = async (
   config: HostServerConfig,

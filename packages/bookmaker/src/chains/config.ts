@@ -1,6 +1,6 @@
 // --- exports ---
 
-import { LiveStreakConfigError } from "@livestreak/core";
+import { LiveStreakConfigError, contractsNotDeployedError } from "@livestreak/core";
 import type { WalletInit } from "@livestreak/schema";
 
 import { validateBookmakerSuiObjectIds, type BookmakerContractAddresses } from "./addresses.js";
@@ -36,6 +36,10 @@ export const validateBookmakerChainConfig = (input: unknown): BookmakerChainConf
       message: "Bookmaker chain config requires addresses",
       metadata: { details: describeValue(input.addresses) }
     });
+  }
+
+  if (walletInit.chain === "solana") {
+    throw contractsNotDeployedError("solana", "the bookmaker chain");
   }
 
   const addresses =

@@ -37,6 +37,18 @@ export const SuiSponsorshipDescriptor = Schema.Struct({
 
 export type SuiSponsorshipDescriptor = Schema.Schema.Type<typeof SuiSponsorshipDescriptor>;
 
+// Solana sponsorship = a Kora-RPC-compatible paymaster endpoint (fee-payer co-sign). The wallet's
+// gasless kit points its paymasterUrl here; whether the host answers in-process or via a real kora
+// node is invisible to callers.
+export const SolanaSponsorshipDescriptor = Schema.Struct({
+  paymasterPath: Schema.NonEmptyString,
+  payerAddress: Schema.optional(Schema.NonEmptyString),
+  feeTokens: Schema.optional(Schema.Array(Schema.NonEmptyString)),
+  rpcUrl: Schema.optional(Schema.NonEmptyString)
+});
+
+export type SolanaSponsorshipDescriptor = Schema.Schema.Type<typeof SolanaSponsorshipDescriptor>;
+
 export const AaCapabilityDescriptor = Schema.Struct({
   version: Schema.Literal("0.1.0"),
   hostId: Schema.NonEmptyString,
@@ -44,7 +56,8 @@ export const AaCapabilityDescriptor = Schema.Struct({
   supportedOperations: Schema.Array(AaOperationKind),
   paymasterPath: Schema.NonEmptyString,
   chains: Schema.Array(AaChainDescriptor),
-  suiSponsorship: Schema.optional(SuiSponsorshipDescriptor)
+  suiSponsorship: Schema.optional(SuiSponsorshipDescriptor),
+  solanaSponsorship: Schema.optional(SolanaSponsorshipDescriptor)
 });
 
 export type AaCapabilityDescriptor = Schema.Schema.Type<typeof AaCapabilityDescriptor>;

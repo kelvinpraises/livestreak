@@ -218,6 +218,14 @@ sui_leg_env() {
   export LIVESTREAK_SUI_SPONSOR_MNEMONIC="$DEV_SUI_MNEMONIC"
 }
 
+solana_leg_env() {
+  # Solana leg = the host's Kora-compatible paymaster only (contracts port pending, so no local
+  # validator/deploy). Devnet RPC + the reference test mnemonic, whose account-0 payer is funded
+  # on devnet. Host bootstrap is warn-only, so offline dev degrades to "not advertised".
+  export LIVESTREAK_SOLANA_RPC_URL="${LIVESTREAK_SOLANA_RPC_URL:-https://api.devnet.solana.com}"
+  export LIVESTREAK_SOLANA_SPONSOR_SEED="${LIVESTREAK_SOLANA_SPONSOR_SEED:-test test test test test test test test test test test junk}"
+}
+
 sui_leg_up() {
   sui_ensure_node || return 1
   sui_kill_stale
@@ -487,6 +495,7 @@ print_summary() {
   echo -e "${G}✓ LiveStreak live protocol instance — CHAIN=$CHAIN${N}"
   echo "  Anvil → $RPC"
   [ "$WITH_SUI" = "1" ] && echo "  Sui   → $SUI_RPC_LOCAL (localnet)"
+  echo "  Solana → $LIVESTREAK_SOLANA_RPC_URL (paymaster leg; contracts pending)"
   echo "  Host  → http://127.0.0.1:8787"
   echo "  App   → $LIVESTREAK_APP_ORIGIN"
   echo ""
@@ -523,6 +532,7 @@ if [ "$WITH_SUI" = "1" ]; then
   fi
 fi
 
+solana_leg_env
 host_up
 app_up
 

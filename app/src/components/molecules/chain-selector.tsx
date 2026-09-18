@@ -19,31 +19,45 @@ export function ChainSelector() {
     <div data-testid="chain-selector" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {SUPPORTED_CHAINS.map(item => {
         const active = chain === item.id
+        const pending = !item.deployed
         return (
           <Button
             key={item.id}
             variant="ghost"
             data-testid={`chain-select-${item.id}`}
             type="button"
-            disabled={isLoading || active}
-            title={active ? undefined : 'Switch chain — re-derives this chain’s wallet from your seed'}
-            onClick={() => setChain(item.id)}
+            disabled={isLoading || active || pending}
+            title={
+              pending
+                ? `${item.label} wallet + gas sponsorship are live; contracts port in progress (${item.network})`
+                : active
+                  ? undefined
+                  : 'Switch chain — re-derives this chain’s wallet from your seed'
+            }
+            onClick={() => {
+              if (!pending) setChain(item.id as Parameters<typeof setChain>[0])
+            }}
             style={{
               height: 'auto',
               padding: '6px 10px',
               borderRadius: 6,
-              border: `1px solid ${active ? 'rgba(0,255,135,0.35)' : 'rgba(255,255,255,0.1)'}`,
+              border: `1px ${pending ? 'dashed' : 'solid'} ${active ? 'rgba(0,255,135,0.35)' : 'rgba(255,255,255,0.1)'}`,
               background: active ? 'rgba(0,255,135,0.12)' : 'rgba(255,255,255,0.04)',
-              color: active ? '#00ff87' : 'rgba(255,255,255,0.45)',
+              color: active ? '#00ff87' : pending ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.45)',
               fontSize: 11,
               fontWeight: 600,
               fontFamily: 'var(--font-mono)',
               letterSpacing: '0.06em',
-              cursor: isLoading ? 'wait' : active ? 'default' : 'pointer',
+              cursor: isLoading ? 'wait' : active || pending ? 'default' : 'pointer',
               opacity: isLoading && !active ? 0.6 : 1,
             }}
           >
             {item.label}
+            {pending && (
+              <span style={{ marginLeft: 5, fontSize: 9, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.22)' }}>
+                SOON
+              </span>
+            )}
           </Button>
         )
       })}

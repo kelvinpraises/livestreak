@@ -22,6 +22,10 @@ export const createAaRouter = (deps: AaRouteDeps): Router => {
     "/aa/sui/sponsor",
     asyncHandler(async (req, res, next) => controller.suiSponsor(req, res, next))
   );
+  router.post(
+    "/aa/solana/paymaster",
+    asyncHandler(async (req, res) => controller.solanaPaymaster(req, res))
+  );
 
   return router;
 };

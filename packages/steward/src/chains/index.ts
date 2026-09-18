@@ -1,6 +1,6 @@
 // --- exports ---
 
-import { LiveStreakConfigError } from "@livestreak/core";
+import { LiveStreakConfigError, contractsNotDeployedError } from "@livestreak/core";
 import type { WalletInit } from "@livestreak/schema";
 
 import type { StewardContractExecutor } from "../runtime/adapters/action-plan-sink.js";
@@ -14,13 +14,18 @@ import {
 
 export type { StewardChainConfig, StewardEvmAddresses, StewardSuiObjectIds } from "./types.js";
 
-export const validateStewardChainConfig = (config: StewardChainConfig): StewardChainConfig => ({
-  ...config,
-  addresses:
-    config.walletInit.chain === "sui"
-      ? validateStewardSuiObjectIds(config.addresses)
-      : validateStewardEvmAddresses(config.addresses)
-});
+export const validateStewardChainConfig = (config: StewardChainConfig): StewardChainConfig => {
+  if (config.walletInit.chain === "solana") {
+    throw contractsNotDeployedError("solana", "the steward executor");
+  }
+  return {
+    ...config,
+    addresses:
+      config.walletInit.chain === "sui"
+        ? validateStewardSuiObjectIds(config.addresses)
+        : validateStewardEvmAddresses(config.addresses)
+  };
+};
 
 // Chain-dispatched steward contract executor. Adding a chain = one more case (mirrors options/bookmaker).
 export const createStewardContractExecutor = (config: StewardChainConfig): StewardContractExecutor => {

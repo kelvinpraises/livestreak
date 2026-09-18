@@ -92,4 +92,18 @@ describe("createOptionsChain", () => {
       } as never)
     ).toThrow(LiveStreakConfigError);
   });
+
+  it("names the honest gap for solana (wallet live, contracts pending)", () => {
+    expect(() =>
+      createOptionsChain({
+        walletInit: {
+          chain: "solana",
+          seedSource: "raw",
+          config: { rpcUrl: "http://127.0.0.1:8899" }
+        },
+        seed: "test-seed",
+        addresses: DEFAULT_FAKE_ADDRESSES
+      } as never)
+    ).toThrow(/contracts are not deployed yet/);
+  });
 });

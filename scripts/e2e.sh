@@ -3,11 +3,13 @@
 #   1. boot the whole protocol via dev.sh (owns anvil/host/app/role consoles)
 #   2. wait for the observer role console session
 #   3. drive the full loop through the REAL remote relay (`remote drive`):
-#      observe configure+register → bookmaker createVault → options configure+mint+fund
+#      observe configure+register → DIRECT video go-live (lan mode: broadcaster serves a real
+#      viewer, host signals only) → bookmaker createVault → options configure+mint+fund
 #      → steward configure+resolve — every step asserted
 #   4. tear the stack down (unless KEEP_UP=1)
 #
-# Lean CI shape: `WITH_SUI=0 ./scripts/e2e.sh` (EVM only). bash 3.2 compatible.
+# Lean CI shape: `WITH_SUI=0 ./scripts/e2e.sh` (EVM only). WITH_DIRECT=0 skips the video leg
+# (needs ffmpeg). bash 3.2 compatible.
 set -eo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,7 +18,13 @@ DEV_LOG="/tmp/livestreak-e2e-dev.log"
 DRIVE_LOG="/tmp/livestreak-e2e-drive.log"
 KEEP_UP="${KEEP_UP:-0}"
 WITH_SUI="${WITH_SUI:-0}"
-BOOT_TIMEOUT="${BOOT_TIMEOUT:-240}"
+WITH_DIRECT="${WITH_DIRECT:-1}"
+# The window spans dev.sh's ENTIRE boot (clean rebuild + chains + host + consoles) — a loaded
+# machine pushed a healthy boot past 240s (observed 2026-07-17: console URL landed seconds after
+# the old window expired and teardown fired on a stack that was about to be green).
+BOOT_TIMEOUT="${BOOT_TIMEOUT:-480}"
+E2E_VIDEO="${E2E_VIDEO:-/tmp/livestreak-e2e-clip.mp4}"
+DIRECT_PORT="${DIRECT_PORT:-48711}"
 
 G='\033[0;32m'; R='\033[0;31m'; N='\033[0m'
 step() { echo -e "${G}[e2e]${N} $1"; }
@@ -36,6 +44,20 @@ teardown() {
   fi
 }
 trap teardown EXIT
+
+# --- 0. direct-lane prerequisites (a clip for the broadcaster to encode) ---
+DIRECT_ARGS=""
+if [ "$WITH_DIRECT" = "1" ]; then
+  if ! command -v ffmpeg >/dev/null 2>&1; then
+    fail "WITH_DIRECT=1 needs ffmpeg (set WITH_DIRECT=0 to skip the video leg)"
+  fi
+  if [ ! -s "$E2E_VIDEO" ]; then
+    step "Generating test clip ($E2E_VIDEO, 20s 320x240)"
+    ffmpeg -y -f lavfi -i "testsrc=duration=20:size=320x240:rate=30" -pix_fmt yuv420p \
+      "$E2E_VIDEO" >/dev/null 2>&1 || fail "could not generate the test clip"
+  fi
+  DIRECT_ARGS="--direct-video $E2E_VIDEO --direct-port $DIRECT_PORT"
+fi
 
 # --- 1. boot ---
 # Clear stale role-console session files from a previous run — the wait below must only
@@ -68,14 +90,19 @@ STEWARD_SESSION="$(sed 's|.*/remote/||' "$STEWARD_URL_FILE" 2>/dev/null | tr -d 
 step "Steward session:  $STEWARD_SESSION"
 
 # --- 3. drive the keynote loop over the real relay ---
-step "Driving: observe configure+register → createVault → mint+fund → resolve..."
+if [ "$WITH_DIRECT" = "1" ]; then
+  step "Driving: observe configure+register → DIRECT go-live+watch → createVault → mint+fund → resolve..."
+else
+  step "Driving: observe configure+register → createVault → mint+fund → resolve..."
+fi
 set +e
 ( cd "$ROOT/cli" && npm run dev -- remote drive \
     --session "$SESSION" \
     --pair-password "demo-pass-observe" \
     --steward-session "$STEWARD_SESSION" \
     --steward-pair-password "demo-pass-steward" \
-    --resolve-outcome yes ) > "$DRIVE_LOG" 2>&1
+    --resolve-outcome yes \
+    $DIRECT_ARGS ) > "$DRIVE_LOG" 2>&1
 DRIVE_EXIT=$?
 set -e
 
@@ -87,6 +114,11 @@ echo "--------------------"
 [ "$DRIVE_EXIT" = 0 ] || fail "remote drive exited $DRIVE_EXIT — see $DRIVE_LOG"
 grep -q "remote drive complete" "$DRIVE_LOG" || fail "no completion line — see $DRIVE_LOG"
 grep -q "=fail" "$DRIVE_LOG" && fail "a drive step failed — see $DRIVE_LOG"
+if [ "$WITH_DIRECT" = "1" ]; then
+  grep -q "observe:directWatch=ok" "$DRIVE_LOG" \
+    || fail "direct video leg missing — no observe:directWatch=ok in $DRIVE_LOG"
+  step "  direct lane: $(grep -oE 'direct watch: init=[0-9]+b fragments=[0-9]+' "$DRIVE_LOG" | tail -1)"
+fi
 
 MARKET_ID="$(grep -oE "marketId: 0x[0-9a-f]+" "$DRIVE_LOG" | head -1 | awk '{print $2}')"
 

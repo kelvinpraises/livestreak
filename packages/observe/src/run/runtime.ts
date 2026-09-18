@@ -19,6 +19,7 @@ import {
 import { makeObserveRun, type ObserveRun, type ObserveRunConfig } from "./run.js";
 import { runConfigFromBoard } from "./board-run-config.js";
 import { createLiveSinkDriver } from "#pipeline/publish/sinks/live/driver.js";
+import { createDirectSinkDriver } from "#pipeline/publish/sinks/direct/driver.js";
 import {
   callStoredRunFunction,
   createRunStore,
@@ -33,6 +34,7 @@ import {
 } from "./store.js";
 
 type LiveSinkDriver = ReturnType<typeof createLiveSinkDriver>;
+type DirectSinkDriver = ReturnType<typeof createDirectSinkDriver>;
 
 export type { StopRunOptions } from "./kernel.js";
 export { defaultStopTimeoutMs } from "./kernel.js";
@@ -122,14 +124,20 @@ const buildObserveRuntime = (
   const defaultKernelOptions = input.defaultKernelOptions;
   const sessionInit = input.sessionInit;
 
-  // The encode-once fMP4 live sink driver — built once, reused for prepare + start. The ingest transport
-  // rides on the run config (built by runConfigFromBoard), so the driver itself is stateless here.
+  // The encode-once streaming sink drivers — built once, reused for prepare + start. Their per-run state
+  // (ingest transport / viewer server) rides on the run config or attach, so the drivers are stateless here.
   let cachedLiveSink: LiveSinkDriver | undefined;
-  const ensureLiveSink = (): LiveSinkDriver => {
-    if (cachedLiveSink === undefined) {
-      cachedLiveSink = createLiveSinkDriver();
+  let cachedDirectSink: DirectSinkDriver | undefined;
+  const streamingSinkFor = (driverId: string): LiveSinkDriver | DirectSinkDriver | undefined => {
+    if (driverId === "live") {
+      cachedLiveSink ??= createLiveSinkDriver();
+      return cachedLiveSink;
     }
-    return cachedLiveSink;
+    if (driverId === "direct") {
+      cachedDirectSink ??= createDirectSinkDriver();
+      return cachedDirectSink;
+    }
+    return undefined;
   };
 
   const runHooks: import("./control/system/run.js").SystemRunHooks = {
@@ -175,15 +183,21 @@ const buildObserveRuntime = (
         // Re-preparing a finished run reclaims its terminal handle (so reads route to the fresh bus,
         // not the dead run's); an ACTIVE run refuses re-prepare.
         yield* reclaimTerminalRunHandle(store, runId);
+        // Config derives from the BUS board (canonical) — the stored run's board copy can lag
+        // behind configure calls that haven't been synced back yet.
         const config = yield* runConfigFromBoard({
           runId,
-          board: run.board,
+          board: yield* readStoredRunBoard(store, runId),
           hostBaseUrl: options.hostBaseUrl
         });
-        const sinkDriver = ensureLiveSink();
+        const sinkDriver = streamingSinkFor(config.sink.driverId);
         const prepared = yield* prepareObserveRun(
           { ...run, config, manifest: run.manifest, prepared: false },
-          mergeKernelOptions(defaultKernelOptions, { sinkDriver, sessionInit, runHooks })
+          mergeKernelOptions(defaultKernelOptions, {
+            ...(sinkDriver === undefined ? {} : { sinkDriver }),
+            sessionInit,
+            runHooks
+          })
         );
         yield* store.replace(prepared);
         return prepared;
@@ -191,19 +205,19 @@ const buildObserveRuntime = (
 
     startRun: (runId, options) =>
       Effect.gen(function* () {
-        // Re-supply the injected fMP4 live sink for a board-configured live run (the kernel re-resolves the
+        // Re-supply the injected streaming sink for a board-configured run (the kernel re-resolves the
         // driver at start). For every other sink, leave sinkDriver unset — writing an `undefined` key into
         // the overrides would clobber defaultKernelOptions.sinkDriver, so the kernel fails to resolve the
         // driver (e.g. the in-memory test sink) and the worker hangs.
         const run = yield* store.require(runId);
-        const liveSink = run.config.sink.driverId === "live" ? ensureLiveSink() : undefined;
+        const streamingSink = streamingSinkFor(run.config.sink.driverId);
         return yield* startRunEffect(
           store,
           scope,
           runId,
           mergeKernelOptions(defaultKernelOptions, {
             ...options,
-            ...(liveSink === undefined ? {} : { sinkDriver: liveSink }),
+            ...(streamingSink === undefined ? {} : { sinkDriver: streamingSink }),
             sessionInit,
             runHooks
           })

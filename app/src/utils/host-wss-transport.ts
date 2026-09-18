@@ -230,10 +230,22 @@ export class HostWssTransport implements RemoteTransport {
       },
     }
     return new Promise<CallResult>((resolve) => {
-      this.pending.set(callId, resolve)
+      // Liveness bound: a call the gateway never answers must resolve to an honest error, not a
+      // silent forever-pending card. Longer than the gateway's own dispatch timeout so the
+      // relay's more specific error wins whenever the gateway is alive.
+      const timer = setTimeout(() => {
+        if (this.pending.delete(callId)) {
+          resolve({ ok: false, error: 'no response from gateway (timed out)' })
+        }
+      }, 150_000)
+      this.pending.set(callId, (r) => {
+        clearTimeout(timer)
+        resolve(r)
+      })
       try {
         this.ws!.send(JSON.stringify(frame))
       } catch {
+        clearTimeout(timer)
         this.pending.delete(callId)
         resolve({ ok: false, error: 'failed to send' })
       }

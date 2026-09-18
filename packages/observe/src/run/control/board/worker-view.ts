@@ -105,5 +105,8 @@ const catalogKindToSinkKind = (catalog: string | undefined): string => {
   if (catalog === "sink:live") {
     return "live";
   }
+  if (catalog === "sink:direct") {
+    return "direct";
+  }
   return "unknown";
 };

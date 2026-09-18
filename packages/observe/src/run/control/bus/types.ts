@@ -127,6 +127,12 @@ export interface ControlBus {
   readonly mountSurface: (
     surface: ControlSurface
   ) => import("effect").Effect.Effect<void, import("@livestreak/core").LiveStreakError>;
+  /** Mount a driver's stage cell over an existing cell id WITHOUT shadowing it: the mounted
+   *  surface inherits the existing surface's function entries (and the cell keeps its advertised
+   *  functions) so configurators stay callable after prepare. */
+  readonly mountStageCell: (
+    definition: ControlCellDefinition
+  ) => import("effect").Effect.Effect<void, import("@livestreak/core").LiveStreakError>;
   readonly applyBoardPatch: (
     patch: BoardPatch
   ) => import("effect").Effect.Effect<

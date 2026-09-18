@@ -17,6 +17,7 @@ import {
   defaultFileExportConfigure,
   type SystemConfigConfigurePayload
 } from "#run/board-first.js";
+import { readBoardRunPrepared } from "#run/control/board/index.js";
 import { hasAnyScope, requireAnyScope, type CapabilityScope } from "#scope/scopes.js";
 import type {
   BridgeCaller,
@@ -155,6 +156,21 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
         return { txId: `prepare-${consoleInput.runId}` };
       }
       if (internalScope === systemRunStartScope) {
+        // Prepared is a disposable derivation of the board (a pipeline config change demotes
+        // it) — start re-derives it instead of failing "must be prepared" at the operator.
+        const run = yield* runtime.store.require(consoleInput.runId);
+        if (run.prepared !== true) {
+          if (input.hostBaseUrl === undefined) {
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message: "Observe bridge run start requires hostBaseUrl at bridge creation"
+              })
+            );
+          }
+          yield* runtime.prepareConfiguredRun(consoleInput.runId, {
+            hostBaseUrl: input.hostBaseUrl
+          });
+        }
         yield* runtime.startRun(consoleInput.runId);
         return { txId: `start-${consoleInput.runId}` };
       }
@@ -178,10 +194,15 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
         payload
       });
 
-      // Keep the stored run's board in sync so later store reads see the post-call state.
+      // Keep the stored run's board in sync so later store reads see the post-call state —
+      // including the prepared flag, which the board patch layer demotes on config changes.
       const run = yield* runtime.store.require(consoleInput.runId);
       const board = yield* runtime.readBoard(consoleInput.runId);
-      yield* runtime.store.replace({ ...run, board });
+      yield* runtime.store.replace({
+        ...run,
+        board,
+        prepared: readBoardRunPrepared(board) ?? run.prepared
+      });
 
       return {
         txId: result.callId,
@@ -310,7 +331,7 @@ const coerceConfigurePayload = (
       typeof record.chain === "string" &&
       typeof record.capture === "string" &&
       typeof record.publish === "string" &&
-      record.process === null
+      (record.process === null || record.process === undefined)
     ) {
       return {
         chain: record.chain,

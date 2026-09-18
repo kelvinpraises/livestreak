@@ -34,6 +34,9 @@ export interface CatalogServiceConfig {
   readonly listDiscoveryMarketIds?: () => readonly string[];
   // Explicit (chain, marketId) seeds, e.g. from LIVESTREAK_CATALOG_MARKETS.
   readonly seedMarkets?: readonly CatalogMarketRef[];
+  // Signaling-plane liveness (live ring ingest / direct-lane announce) — a stream serving
+  // bytes right now is live even before the on-chain goLive write lands.
+  readonly isStreamLive?: (marketId: string) => boolean;
   readonly now?: () => number;
 }
 
@@ -46,6 +49,33 @@ export interface CatalogService {
 }
 
 const refKey = (ref: CatalogMarketRef): string => `${ref.chain}:${ref.marketId}`;
+
+/** `seed` ∪ every market enumerable off each chain's on-chain registry. Shared by the live
+ *  catalog service and the DB indexer so both self-heal from the chain after a restart. */
+export const enumerateMarkets = async (
+  readers: CatalogReaderProvider,
+  seed: readonly CatalogMarketRef[]
+): Promise<readonly CatalogMarketRef[]> => {
+  const out = new Map<string, CatalogMarketRef>();
+  for (const ref of seed) {
+    out.set(refKey(ref), ref);
+  }
+  await Promise.all(
+    readers.availableChains.map(async (chain) => {
+      const reader = readers.reader(chain);
+      if (reader?.listMarketIds === undefined) return;
+      try {
+        for (const marketId of await reader.listMarketIds()) {
+          const ref: CatalogMarketRef = { chain, marketId: String(marketId) };
+          if (!out.has(refKey(ref))) out.set(refKey(ref), ref);
+        }
+      } catch (error) {
+        console.warn(`[catalog]: enumerate ${chain} markets failed — ${String(error)}`);
+      }
+    })
+  );
+  return [...out.values()];
+};
 
 export const createCatalogService = (config: CatalogServiceConfig): CatalogService => {
   const now = config.now ?? (() => Date.now());
@@ -77,19 +107,27 @@ export const createCatalogService = (config: CatalogServiceConfig): CatalogServi
     return [...out.values()];
   };
 
-  // Read + map every known market live. Per-market failures are logged and skipped so one
-  // bad market (or a not-yet-deployed chain) never blanks the whole catalog.
+  // Read + map every known market live (registrations ∪ on-chain enumeration — a restarted
+  // host self-heals from the chain). Per-market failures are logged and skipped so one bad
+  // market (or a not-yet-deployed chain) never blanks the whole catalog.
   const collect = async (): Promise<MappedMarket[]> => {
     const nowMs = now();
     const mapped: MappedMarket[] = [];
     await Promise.all(
-      knownMarkets().map(async (ref) => {
+      (await enumerateMarkets(config.readers, knownMarkets())).map(async (ref) => {
         const reader = config.readers.reader(ref.chain);
         if (reader === null) return;
         try {
           const graph = await readMarketGraph(reader, ref.marketId);
           mapped.push(
-            mapMarket(ref.chain, graph.snap, nowMs, config.baseUrl, graph.vaultSnapshots)
+            mapMarket(
+              ref.chain,
+              graph.snap,
+              nowMs,
+              config.baseUrl,
+              graph.vaultSnapshots,
+              config.isStreamLive?.(ref.marketId)
+            )
           );
         } catch (error) {
           console.warn(

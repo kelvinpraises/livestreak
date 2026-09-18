@@ -2,6 +2,9 @@ import { Effect } from "effect";
 import { LiveStreakConfigError } from "@livestreak/core";
 import {
   incrementBoardRevision,
+  readBoardRunPrepared,
+  setBoardRunPrepared,
+  setBoardRunStatus,
   type Board,
   type BoardCell
 } from "#run/control/board/model.js";
@@ -33,6 +36,7 @@ export const applyBoardPatch = (
 
     let nextCells = { ...board.cells } as Record<BoardCellId, BoardCell>;
     let changed = false;
+    let pipelineConfigChanged = false;
 
     for (const [cellId, cellPatch] of Object.entries(cellPatches)) {
       if (cellPatch.remove === true) {
@@ -40,6 +44,7 @@ export const applyBoardPatch = (
           const { [cellId]: _removed, ...rest } = nextCells;
           nextCells = rest as Record<BoardCellId, BoardCell>;
           changed = true;
+          if (isPipelineCell(cellId)) pipelineConfigChanged = true;
         }
         continue;
       }
@@ -66,6 +71,7 @@ export const applyBoardPatch = (
       if (patched.changed) {
         nextCells = { ...nextCells, [cellId]: patched.cell };
         changed = true;
+        if (patchTouchesPipelineConfig(cellId, cellPatch)) pipelineConfigChanged = true;
       }
     }
 
@@ -73,10 +79,21 @@ export const applyBoardPatch = (
       return { board, changed: false };
     }
 
-    const nextBoard = incrementBoardRevision({
+    let nextBoard = incrementBoardRevision({
       ...board,
       cells: nextCells
     });
+
+    // Prepared is a derivation of the board: a pipeline config change makes it stale, so the
+    // run cell demotes honestly instead of letting start run the OLD config. Start re-prepares.
+    if (pipelineConfigChanged && readBoardRunPrepared(nextBoard) === true) {
+      nextBoard = setBoardRunPrepared(nextBoard, false);
+      nextBoard = setBoardRunStatus(
+        nextBoard,
+        "created",
+        "configuration changed — Start will re-prepare"
+      );
+    }
 
     // Shape-only on live patches (see settings.ts): a configure write validates the SHAPE of what it wrote,
     // but the cross-cell ≥1-sink COMPLETENESS rule is a go-live prerequisite the kernel enforces at prepare
@@ -93,6 +110,21 @@ export const applyBoardPatch = (
   });
 
 // --- helpers ---
+
+// Cells whose config feeds runConfigFromBoard: capture/sink settings, and the market cell's
+// marketId (the direct lane's streamId). Changes to these invalidate a prepared run.
+const isPipelineCell = (cellId: string): boolean =>
+  cellId.startsWith("capture:") || cellId.startsWith("sink:");
+
+const patchTouchesPipelineConfig = (cellId: string, patch: BoardCellPatch): boolean => {
+  if (isPipelineCell(cellId)) {
+    return patch.settings !== undefined;
+  }
+  if (cellId === "market") {
+    return patch.readonly?.set !== undefined && Object.hasOwn(patch.readonly.set, "marketId");
+  }
+  return false;
+};
 
 const patchBoardCell = (
   cell: BoardCell,

@@ -24,7 +24,30 @@ export interface RelayDeps {
   readonly registry: SessionRegistry;
   readonly dispatch: DispatchFn;
   readonly now?: () => number;
+  /** Liveness bound per dispatched call — a wedged bridge call must yield an honest error
+   *  frame, never silence (chain writes poll up to ~60s; default leaves ample headroom). */
+  readonly dispatchTimeoutMs?: number;
 }
+
+const DEFAULT_DISPATCH_TIMEOUT_MS = 120_000;
+
+const withTimeout = async <T>(promise: Promise<T>, ms: number): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`gateway dispatch timed out after ${ms}ms`)),
+          ms
+        );
+        (timer as { unref?: () => void }).unref?.();
+      })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 export interface Relay {
   handleCall(frame: HostCallFrame): Promise<CallResultFrame>;
@@ -47,7 +70,10 @@ export const createRelay = (deps: RelayDeps): Relay => {
     }
 
     try {
-      const result = await deps.dispatch(deps.registry.callerFor(record), frame.envelope, frame.target);
+      const result = await withTimeout(
+        deps.dispatch(deps.registry.callerFor(record), frame.envelope, frame.target),
+        deps.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS
+      );
       deps.registry.commitSpend(frame.sessionId, frame.envelope);
       const payload: { txId?: string; tokenId?: string } = {};
       if (result.txId !== undefined) {

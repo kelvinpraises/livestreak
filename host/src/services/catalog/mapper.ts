@@ -72,6 +72,8 @@ const impliedMultiplier = (
 };
 
 const formatElapsed = (fromMs: number, nowMs: number): string => {
+  // A missing/zero start timestamp would render as decades of "elapsed" — show nothing instead.
+  if (fromMs <= 0 || fromMs > nowMs + 60_000) return "";
   const mins = Math.max(0, Math.floor((nowMs - fromMs) / 60_000));
   if (mins < 60) return `${mins}m`;
   const hours = Math.floor(mins / 60);
@@ -96,12 +98,16 @@ export const mapMarket = (
   snap: OptionsMarketSnapshot,
   nowMs: number,
   baseUrl: string,
-  vaultSnapshots?: ReadonlyMap<string, OptionsVaultSnapshot>
+  vaultSnapshots?: ReadonlyMap<string, OptionsVaultSnapshot>,
+  // Signaling-plane liveness (host ring ingest or a direct-lane announce). The chain's
+  // streamState covers goLive'd markets; a broadcaster serving bytes RIGHT NOW is live even
+  // before (or without) the on-chain goLive write.
+  liveSignal?: boolean
 ): MappedMarket => {
   const marketId = String(snap.market.marketId);
   const title = snap.market.title;
   const category = snap.market.category ?? "Live";
-  const isLive = snap.streamState?.status === "live";
+  const isLive = snap.streamState?.status === "live" || liveSignal === true;
 
   const fromMs =
     snap.streamState?.updatedAtMs ?? snap.market.timing?.createdAtMs ?? nowMs;
@@ -236,12 +242,13 @@ export const snapshotToRows = (
   snap: OptionsMarketSnapshot,
   nowMs: number,
   baseUrl: string,
-  vaultSnapshots?: ReadonlyMap<string, OptionsVaultSnapshot>
+  vaultSnapshots?: ReadonlyMap<string, OptionsVaultSnapshot>,
+  liveSignal?: boolean
 ): MarketRows => {
   const marketId = String(snap.market.marketId);
   const title = snap.market.title;
   const category = snap.market.category ?? "Live";
-  const isLive = snap.streamState?.status === "live";
+  const isLive = snap.streamState?.status === "live" || liveSignal === true;
   const fromMs =
     snap.streamState?.updatedAtMs ?? snap.market.timing?.createdAtMs ?? nowMs;
   const watchUrl = watchUrlFor(snap, baseUrl);

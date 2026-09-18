@@ -100,6 +100,12 @@ export const clearBoardRunStopRequest = (board: Board): Board => {
   });
 };
 
+/** Read the run cell's prepared flag; undefined when the run cell (or flag) isn't on the board. */
+export const readBoardRunPrepared = (board: Board): boolean | undefined => {
+  const prepared = board.cells["system:run"]?.readonly?.prepared;
+  return typeof prepared === "boolean" ? prepared : undefined;
+};
+
 export const setBoardRunPrepared = (
   board: Board,
   prepared: boolean,

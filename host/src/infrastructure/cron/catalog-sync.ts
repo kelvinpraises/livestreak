@@ -1,4 +1,8 @@
-import type { CatalogMarketRef, CatalogReaderProvider } from "../../services/catalog/catalog.js";
+import {
+  enumerateMarkets,
+  type CatalogMarketRef,
+  type CatalogReaderProvider
+} from "../../services/catalog/catalog.js";
 import { readMarketGraph } from "../../services/catalog/readers.js";
 import { snapshotToRows } from "../../services/catalog/mapper.js";
 import type { CatalogRepository } from "../database/repository.js";
@@ -14,6 +18,8 @@ export interface CatalogIndexerConfig {
   readonly baseUrl: string;
   // The (chain, marketId) set to index — registrations U discovery U env seed.
   readonly knownMarkets: () => readonly CatalogMarketRef[];
+  // Signaling-plane liveness (live ring ingest / direct-lane announce); see mapMarket.
+  readonly isStreamLive?: (marketId: string) => boolean;
   readonly now?: () => number;
   // A market whose row is older than this is re-indexed on the lazy path. Default 15s.
   readonly stalenessMs?: number;
@@ -40,7 +46,14 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
     try {
       const graph = await readMarketGraph(reader, ref.marketId);
       await config.repo.syncMarket(
-        snapshotToRows(ref.chain, graph.snap, now(), config.baseUrl, graph.vaultSnapshots)
+        snapshotToRows(
+          ref.chain,
+          graph.snap,
+          now(),
+          config.baseUrl,
+          graph.vaultSnapshots,
+          config.isStreamLive?.(ref.marketId)
+        )
       );
       return true;
     } catch (error) {
@@ -54,27 +67,8 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
   // enumeration is why an observe-registered market shows on the homepage without anyone calling
   // /discovery — the host reads the registry directly. A chain whose reader can't enumerate (Sui)
   // simply contributes nothing here and still surfaces via the discovery store.
-  const resolveMarkets = async (): Promise<readonly CatalogMarketRef[]> => {
-    const out = new Map<string, CatalogMarketRef>();
-    for (const ref of config.knownMarkets()) {
-      out.set(`${ref.chain}:${ref.marketId}`, ref);
-    }
-    await Promise.all(
-      config.readers.availableChains.map(async (chain) => {
-        const reader = config.readers.reader(chain);
-        if (reader?.listMarketIds === undefined) return;
-        try {
-          for (const marketId of await reader.listMarketIds()) {
-            const ref: CatalogMarketRef = { chain, marketId: String(marketId) };
-            out.set(`${chain}:${ref.marketId}`, ref);
-          }
-        } catch (error) {
-          console.warn(`[catalog-sync]: enumerate ${chain} markets failed — ${String(error)}`);
-        }
-      })
-    );
-    return [...out.values()];
-  };
+  const resolveMarkets = (): Promise<readonly CatalogMarketRef[]> =>
+    enumerateMarkets(config.readers, config.knownMarkets());
 
   const syncAll = async (): Promise<{ indexed: number; failed: number }> => {
     const results = await Promise.all((await resolveMarkets()).map(syncMarket));

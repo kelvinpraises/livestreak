@@ -11,7 +11,7 @@ import {
   setBoardRunStatus
 } from "./control/board/index.js";
 import { buildControlCatalog } from "./control/catalog.js";
-import { createControlBus, stageCellSurface } from "./control/bus/index.js";
+import { createControlBus } from "./control/bus/index.js";
 import { applyWorkerSnapshotToBoard } from "./control/board/index.js";
 import { validateBoardSettings } from "./control/board/index.js";
 import { bootstrapLegacyObserveBoard } from "./control/board/legacy-bootstrap.js";
@@ -63,18 +63,29 @@ export const prepareObserveRun = (
     const captureConfig = yield* captureDriver.validate(run.config.capture.config);
     const sinkConfig = yield* sinkDriver.validate(run.config.sink.config);
 
-    let board = bootstrapLegacyObserveBoard(run.board, run.config);
-    board = setBoardRunStatus(board, "preparing", "validating observe run");
-
-    const bus = yield* createControlBus({
-      runId: run.config.runId,
-      board,
-      catalog: buildControlCatalog(),
-      surfaces: createObserveControlSurfaces({
-        sessionInit: options.sessionInit,
-        runHooks: options.runHooks
-      })
-    });
+    // A board-first run already owns a live bus (the T0 mount): REUSE it. Creating a fresh bus
+    // here would sever every existing board subscription (the console rail would freeze) and
+    // unmount the pipeline configurators (a prepared run would refuse reconfiguration).
+    // Prepared is a disposable derivation of the board — re-prepare just re-derives on the
+    // same bus. The fresh-bus path remains for legacy callers that prepare without a T0 mount.
+    let bus = run.bus;
+    if (bus !== undefined) {
+      yield* bus.commitBoard(
+        setBoardRunStatus(yield* bus.readBoard(), "preparing", "validating observe run")
+      );
+    } else {
+      let board = bootstrapLegacyObserveBoard(run.board, run.config);
+      board = setBoardRunStatus(board, "preparing", "validating observe run");
+      bus = yield* createControlBus({
+        runId: run.config.runId,
+        board,
+        catalog: buildControlCatalog(),
+        surfaces: createObserveControlSurfaces({
+          sessionInit: options.sessionInit,
+          runHooks: options.runHooks
+        })
+      });
+    }
 
     const nowMs = Date.now();
     const sinkInstanceId = resolveSinkInstanceId(run.config);
@@ -89,13 +100,13 @@ export const prepareObserveRun = (
     };
 
     const captureCell = yield* captureDriver.describeControl(captureConfig, captureContext);
-    yield* bus.mountSurface(stageCellSurface(captureCell));
+    yield* bus.mountStageCell(captureCell);
 
     const sinkCell = yield* sinkDriver.describeControl(sinkConfig, sinkContext);
-    yield* bus.mountSurface(stageCellSurface(sinkCell));
+    yield* bus.mountStageCell(sinkCell);
     yield* bus.applyBoardPatch(markSinkCellConfiguredPatch(sinkCell.id));
 
-    board = yield* bus.readBoard();
+    let board = yield* bus.readBoard();
     yield* validateBoardSettings(board);
 
     board = setBoardRunStatus(board, "prepared", "observe run is ready to start");
@@ -286,6 +297,10 @@ const resolveSinkInstanceId = (config: ObserveRun["config"]): string => {
 
   if (config.sink.driverId === "live") {
     return "live";
+  }
+
+  if (config.sink.driverId === "direct") {
+    return "direct";
   }
 
   return "file-export";

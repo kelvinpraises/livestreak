@@ -18,6 +18,7 @@ import { createDiscoveryRouter } from "./api/routes/discovery.js";
 import { createMediaRouter } from "./api/routes/media.js";
 import { createMemoryRouter } from "./api/routes/memory.js";
 import { createForumRouter } from "./api/routes/forum.js";
+import { createLiveRouter } from "./api/routes/live.js";
 import { createRemoteRouter } from "./api/routes/remote.js";
 import {
   createCorsMiddleware,
@@ -42,7 +43,10 @@ export const createApp = (deps: HostRouteDeps): Express => {
   const app = express();
 
   // Part C: security headers + CORS allowlist on every request.
-  app.set("trust proxy", true);
+  // Trust only LOCAL proxy hops (Caddy on the same box), never `true`: with `true`, any direct
+  // caller could spoof X-Forwarded-For to fake req.ip — turning the reachability echo into a
+  // third-party port scanner and making the per-IP rate limits trivially evadable.
+  app.set("trust proxy", "loopback, linklocal, uniquelocal");
   app.use(securityHeaders);
   app.use(createCorsMiddleware(deps.config));
 
@@ -62,6 +66,8 @@ export const createApp = (deps: HostRouteDeps): Express => {
   // (The live video fan-out is a WS transport — /live/ingest + /live/watch — attached to the http.Server
   // in main.ts, not an Express router.)
   app.use(createCatalogRouter(deps));
+  // Direct-stream signaling (reachability echo + announce) — always-on for the same reason.
+  app.use(createLiveRouter(deps));
   // Page-shaped discovery endpoints (/homepage, /agents, /stream/:id) served from the DB
   // read-model — always-on, one fetch per page.
   app.use(createPagesRouter(deps));

@@ -50,10 +50,11 @@ export const runConfigFromBoard = (
     }
 
     const publish = cellRecord(board, "system:config").readonly.publish;
-    if (publish !== "live") {
+    if (publish !== "live" && publish !== "direct") {
       return yield* Effect.fail(
         new LiveStreakConfigError({
-          message: "Going live streams to viewers — set the publish sink to 'live' (the go-live path)."
+          message:
+            "Going live streams to viewers — set the publish sink to 'live' (host fan-out) or 'direct' (broadcaster-served)."
         })
       );
     }
@@ -65,14 +66,38 @@ export const runConfigFromBoard = (
       );
     }
 
+    // Decode straight to I420 at real time (`-re`) so frames feed the fMP4 encode with no color conversion
+    // and stream paced at wall-clock FPS (see the live/direct sinks + file capture).
+    const capture = {
+      driverId: "file",
+      config: { path: capturePath, pixelFormat: "yuv420p", realtime: true }
+    };
+
+    if (publish === "direct") {
+      // Broadcaster-served fan-out: the sink opens its own viewer door (UPnP + host echo eligibility);
+      // the host does signaling only. Operator knobs come from the sink:direct cell.
+      const settings = cellRecord(board, "sink:direct").settings;
+      return {
+        runId,
+        capture,
+        sink: {
+          driverId: "direct",
+          instanceId: "direct",
+          config: {
+            streamId: marketId,
+            hostBaseUrl,
+            ...(typeof settings.port === "number" ? { port: settings.port } : {}),
+            ...(typeof settings.maxViewers === "number" ? { maxViewers: settings.maxViewers } : {}),
+            ...(settings.reachability === "lan" ? { reachability: "lan" as const } : {})
+          }
+        },
+        process: null
+      };
+    }
+
     return {
       runId,
-      // Decode straight to I420 at real time (`-re`) so frames feed the fMP4 encode with no color conversion
-      // and stream paced at wall-clock FPS (see the live sink + file capture).
-      capture: {
-        driverId: "file",
-        config: { path: capturePath, pixelFormat: "yuv420p", realtime: true }
-      },
+      capture,
       sink: {
         driverId: "live",
         instanceId: "live",

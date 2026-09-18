@@ -53,6 +53,10 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
   let backoffMs = 500;
   // Frames queued while the socket is (re)connecting.
   const pending: GatewayFrame[] = [];
+  // Last register frame per session — re-sent on every (re)connect. The host's session table is
+  // in-memory, so a host restart forgets us; without re-registration every console 404s until the
+  // gateway itself restarts.
+  const registrations = new Map<string, RegisterFrame>();
 
   const safeSend = (frame: GatewayFrame): void => {
     assertNoSeedInFrame(frame, deps.seed); // seed must never leave the gateway
@@ -124,6 +128,9 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
     ws.on("open", () => {
       backoffMs = 500;
       log("leg-A connected");
+      for (const frame of registrations.values()) {
+        safeSend(frame);
+      }
       flush();
     });
     ws.on("message", handleMessage);
@@ -154,9 +161,11 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
         ...(deps.authToken === undefined ? {} : { gatewayToken: deps.authToken }),
         ...(functions === undefined ? {} : { functions })
       };
+      registrations.set(record.sessionId, frame);
       safeSend(frame);
     },
     revoke: (sessionId) => {
+      registrations.delete(sessionId);
       const frame: RevokeFrame = { type: "revoke", sessionId };
       safeSend(frame);
     },

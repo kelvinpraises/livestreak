@@ -38,6 +38,9 @@ export function coerceField(schema: JsonSchema, raw: unknown): CoerceResult {
     case 'string': {
       const value = typeof raw === 'string' ? raw.trim() : raw == null ? '' : String(raw)
       if (schema.required && value === '') return { error: 'Required' }
+      // Blank optional → omitted, so writer-side defaults ("operator → MarketDriver") apply
+      // instead of receiving a present-but-empty string.
+      if (value === '') return { value: undefined }
       return { value }
     }
     case 'number':

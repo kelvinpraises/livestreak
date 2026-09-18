@@ -20,17 +20,27 @@ import {
   type LiveSinkConfig,
   type LiveSinkDriverOptions
 } from "./pipeline/publish/sinks/live/driver.js";
+import {
+  createDirectSinkDriver,
+  directSinkDescriptor,
+  type DirectSinkConfig,
+  type DirectSinkDriverOptions
+} from "./pipeline/publish/sinks/direct/driver.js";
 import type { SinkDriver } from "./pipeline/publish/types.js";
 
 export type BuiltInCaptureDriverId = "file";
-export type BuiltInSinkDriverId = "file" | "live";
+export type BuiltInSinkDriverId = "file" | "live" | "direct";
 
 export const builtInObserveRegistry = createObserveRegistry({
   capture: {
     drivers: [{ descriptor: fileCaptureDescriptor }, { descriptor: browserCaptureDescriptor }]
   },
   publish: {
-    sinks: [{ descriptor: fileSinkDescriptor }, { descriptor: liveSinkDescriptor }]
+    sinks: [
+      { descriptor: fileSinkDescriptor },
+      { descriptor: liveSinkDescriptor },
+      { descriptor: directSinkDescriptor }
+    ]
   }
 });
 
@@ -47,14 +57,18 @@ export const getBuiltInCaptureDriver = (
 
 export const getBuiltInSinkDriver = (
   id: BuiltInSinkDriverId,
-  options: FileSinkDriverOptions & LiveSinkDriverOptions = {}
-): SinkDriver<FileSinkConfig> | SinkDriver<LiveSinkConfig> => {
+  options: FileSinkDriverOptions & LiveSinkDriverOptions & DirectSinkDriverOptions = {}
+): SinkDriver<FileSinkConfig> | SinkDriver<LiveSinkConfig> | SinkDriver<DirectSinkConfig> => {
   if (id === "file") {
     return createFileSinkDriver(options);
   }
 
   if (id === "live") {
     return createLiveSinkDriver(options);
+  }
+
+  if (id === "direct") {
+    return createDirectSinkDriver(options);
   }
 
   return missingSinkDriver(id);

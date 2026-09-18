@@ -127,8 +127,8 @@ const CONFIGURE_INPUT_SCHEMA: JsonSchema = obj([
   },
   {
     name: "runId",
-    value: str("Observe run id backing market context."),
-    help: "Run id from the active observe session."
+    value: { type: "string", description: "Observe run id backing market context." },
+    help: "Optional — defaults to this console's own run id."
   }
 ]);
 

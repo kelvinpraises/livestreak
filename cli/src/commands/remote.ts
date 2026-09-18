@@ -296,6 +296,8 @@ export const runRemoteDrive = async (input: {
   readonly observeOnly?: boolean;
   readonly fundDeposit?: string;
   readonly resolveOutcome?: string;
+  readonly directVideo?: string;
+  readonly directPort?: number;
 }): Promise<string> => {
   const result = await executeRemoteDrive({
     sessionId: input.session,
@@ -309,7 +311,9 @@ export const runRemoteDrive = async (input: {
     ...(input.marketId === undefined ? {} : { marketId: input.marketId }),
     ...(input.observeOnly === undefined ? {} : { observeOnly: input.observeOnly }),
     ...(input.fundDeposit === undefined ? {} : { fundDeposit: input.fundDeposit }),
-    ...(input.resolveOutcome === undefined ? {} : { resolveOutcome: input.resolveOutcome })
+    ...(input.resolveOutcome === undefined ? {} : { resolveOutcome: input.resolveOutcome }),
+    ...(input.directVideo === undefined ? {} : { directVideoPath: input.directVideo }),
+    ...(input.directPort === undefined ? {} : { directPort: input.directPort })
   });
   const summary = result.steps.map((s) => `${s.target}:${s.action}=${s.ok ? "ok" : "fail"}`).join(" ");
   return `remote drive complete marketId=${result.marketId ?? "n/a"} ${summary}`;
@@ -392,9 +396,14 @@ const remoteDriveCommand = Command.make(
     marketId: Options.text("market-id").pipe(Options.optional),
     observeOnly: Options.boolean("observe-only").pipe(Options.optional),
     fundDeposit: Options.text("fund-deposit").pipe(Options.optional),
-    resolveOutcome: Options.text("resolve-outcome").pipe(Options.optional)
+    resolveOutcome: Options.text("resolve-outcome").pipe(Options.optional),
+    directVideo: Options.text("direct-video").pipe(
+      Options.withDescription("Media file for the direct-serve video leg (publish=direct, lan mode)"),
+      Options.optional
+    ),
+    directPort: Options.integer("direct-port").pipe(Options.optional)
   },
-  ({ session, pairPassword, stewardSession, stewardPairPassword, hostUrl, settings, marketId, observeOnly, fundDeposit, resolveOutcome }) =>
+  ({ session, pairPassword, stewardSession, stewardPairPassword, hostUrl, settings, marketId, observeOnly, fundDeposit, resolveOutcome, directVideo, directPort }) =>
     Effect.tryPromise({
       try: () =>
         runRemoteDrive({
@@ -409,7 +418,9 @@ const remoteDriveCommand = Command.make(
           ...(Option.isSome(marketId) ? { marketId: marketId.value } : {}),
           ...(Option.isSome(observeOnly) ? { observeOnly: observeOnly.value } : {}),
           ...(Option.isSome(fundDeposit) ? { fundDeposit: fundDeposit.value } : {}),
-          ...(Option.isSome(resolveOutcome) ? { resolveOutcome: resolveOutcome.value } : {})
+          ...(Option.isSome(resolveOutcome) ? { resolveOutcome: resolveOutcome.value } : {}),
+          ...(Option.isSome(directVideo) ? { directVideo: directVideo.value } : {}),
+          ...(Option.isSome(directPort) ? { directPort: directPort.value } : {})
         }),
       catch: (error) => (error instanceof Error ? error : new Error(String(error)))
     }).pipe(Effect.flatMap((output) => Console.log(output)))

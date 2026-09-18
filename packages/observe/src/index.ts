@@ -246,6 +246,9 @@ export {
   type WebSocketFactory
 } from "./pipeline/publish/sinks/live/transport.js";
 
+// --- Direct-serve fMP4 sink (broadcaster IS the byte plane; host does signaling only) ---
+export * from "./pipeline/publish/sinks/direct/index.js";
+
 export {
   createFmp4Encoder,
   makeFfmpegFmp4Arguments,

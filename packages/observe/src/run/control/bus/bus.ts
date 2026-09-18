@@ -143,6 +143,32 @@ export const createControlBus = (
           }
         }),
 
+      mountStageCell: (definition) =>
+        Effect.gen(function* () {
+          const existing = surfaces.find((entry) => entry.cell.id === definition.id);
+          // A stage cell carries state, not capabilities: functions (both the callable entries
+          // and the cell's advertised list) stay with whatever configurator surface already owns
+          // this cell id — a prepared run must remain reconfigurable.
+          const cell =
+            definition.cell.functions.length === 0 && existing !== undefined
+              ? { ...definition.cell, functions: existing.cell.cell.functions }
+              : definition.cell;
+          const surface: ControlSurface = {
+            cell: { id: definition.id, cell },
+            functions: existing?.functions ?? []
+          };
+
+          surfaces = yield* mountSurfaceRegistry(surfaces, surface);
+          functionIndex = yield* buildSurfaceFunctionIndex(surfaces);
+
+          const mergeResult = mergeBoardCellOnSurfaceMount(board, surface.cell);
+          board = mergeResult.board;
+
+          if (mergeResult.changed) {
+            boardSubscriptions.notify(board);
+          }
+        }),
+
       applyBoardPatch: (patch) => applyPatch(patch),
 
       commitBoard: (nextBoard) => commitBoardInternal(nextBoard, true),

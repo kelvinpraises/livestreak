@@ -16,6 +16,10 @@ export interface RemoteDriveInput {
   readonly fundDeposit?: string;
   readonly resolveOutcome?: string;
   readonly observeOnly?: boolean;
+  /** When set, drive the DIRECT video lane too: publish=direct + this capture file, go live in
+   *  lan mode, then connect to the broadcaster's announced door and assert real bytes flow. */
+  readonly directVideoPath?: string;
+  readonly directPort?: number;
   readonly log?: (line: string) => void;
 }
 
@@ -49,12 +53,15 @@ const runObserveLeg = async (
   client: RemoteUiClient,
   chain: string,
   title: string,
-  record: (step: RemoteDriveStep) => void
+  record: (step: RemoteDriveStep) => void,
+  publish?: "direct"
 ): Promise<string> => {
   const configureResult = await client.call(
     "observe",
     "configure",
-    defaultFileExportConfigure({ chain })
+    publish === "direct"
+      ? { chain, capture: "file", process: null, publish: "direct" }
+      : defaultFileExportConfigure({ chain })
   );
   record({ target: "observe", action: "configure", ok: configureResult.ok, error: configureResult.error });
   if (!configureResult.ok) {
@@ -72,6 +79,128 @@ const runObserveLeg = async (
     throw new Error("marketId not found on observe board after register");
   }
   return marketId;
+};
+
+// --- direct video leg -------------------------------------------------------
+
+const DIRECT_FRAME_INIT = 0x01;
+const DIRECT_FRAME_FRAGMENT = 0x02;
+
+const pollDirectAnnounce = async (
+  hostBaseUrl: string,
+  streamId: string,
+  timeoutMs: number
+): Promise<string> => {
+  const base = hostBaseUrl.replace(/\/+$/, "");
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${base}/live/direct/${encodeURIComponent(streamId)}`);
+      if (response.ok) {
+        const body = (await response.json()) as { watchUrl?: unknown };
+        if (typeof body.watchUrl === "string") {
+          return body.watchUrl;
+        }
+      }
+    } catch {
+      /* host not ready for this poll — keep waiting */
+    }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error(`no direct announce for ${streamId} within ${timeoutMs}ms`);
+};
+
+/** Connect to the broadcaster's door as a real viewer; resolve once init + 2 fragments arrive. */
+const consumeDirectFrames = async (
+  watchUrl: string,
+  timeoutMs: number
+): Promise<{ initBytes: number; fragments: number }> => {
+  const { default: WebSocket } = await import("ws");
+  return await new Promise((resolve, reject) => {
+    const ws = new WebSocket(watchUrl);
+    let initBytes = 0;
+    let fragments = 0;
+    const timer = setTimeout(() => {
+      ws.close();
+      reject(
+        new Error(`direct watch got init=${initBytes}b fragments=${fragments} within ${timeoutMs}ms`)
+      );
+    }, timeoutMs);
+    ws.binaryType = "nodebuffer";
+    ws.on("message", (data, isBinary) => {
+      if (!isBinary) return;
+      const buf = data as Buffer;
+      if (buf.length === 0) return;
+      if (buf[0] === DIRECT_FRAME_INIT) initBytes = buf.length - 1;
+      if (buf[0] === DIRECT_FRAME_FRAGMENT) fragments += 1;
+      if (initBytes > 0 && fragments >= 2) {
+        clearTimeout(timer);
+        ws.close();
+        resolve({ initBytes, fragments });
+      }
+    });
+    ws.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err instanceof Error ? err : new Error(String(err)));
+    });
+  });
+};
+
+// Go live on the direct lane (lan mode — the e2e stack is one box) and PROVE the byte plane:
+// a real viewer dials the broadcaster's announced door and receives init + media fragments
+// that never transited the host.
+const runDirectVideoLeg = async (
+  client: RemoteUiClient,
+  input: { marketId: string; videoPath: string; port?: number; hostBaseUrl: string },
+  record: (step: RemoteDriveStep) => void,
+  log: (line: string) => void
+): Promise<void> => {
+  const step = async (
+    label: string,
+    action: string,
+    args: unknown,
+    id: string
+  ): Promise<void> => {
+    const result = await client.call("observe", action, args, id);
+    record({ target: "observe", action: label, ok: result.ok, error: result.error });
+    if (!result.ok) {
+      throw new Error(result.error ?? `observe ${label} failed`);
+    }
+  };
+
+  await step("captureConfigure", "configure", { path: input.videoPath }, "observe.capture.file.configure");
+  await step(
+    "directConfigure",
+    "configure",
+    {
+      streamId: input.marketId,
+      reachability: "lan",
+      ...(input.port === undefined ? {} : { port: input.port })
+    },
+    "observe.sink.direct.configure"
+  );
+  await step("prepare", "prepare", {}, "observe.system.run.prepare");
+  await step("start", "start", {}, "observe.system.run.start");
+
+  try {
+    const watchUrl = await pollDirectAnnounce(input.hostBaseUrl, input.marketId, 30_000);
+    log(`direct door: ${watchUrl}`);
+    const consumed = await consumeDirectFrames(watchUrl, 30_000);
+    log(`direct watch: init=${consumed.initBytes}b fragments=${consumed.fragments}`);
+    record({ target: "observe", action: "directWatch", ok: true });
+  } catch (cause) {
+    record({
+      target: "observe",
+      action: "directWatch",
+      ok: false,
+      error: cause instanceof Error ? cause.message : String(cause)
+    });
+    throw cause;
+  } finally {
+    // Best-effort stop either way so the producer never outlives the drive.
+    const stop = await client.call("observe", "stop", {}, "observe.system.run.stop");
+    record({ target: "observe", action: "stop", ok: stop.ok, error: stop.error });
+  }
 };
 
 export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDriveResult> => {
@@ -115,9 +244,24 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
         client,
         settings.defaultChain,
         input.observeTitle ?? `remote-drive-${input.sessionId}`,
-        record
+        record,
+        input.directVideoPath === undefined ? undefined : "direct"
       ));
     log(`marketId: ${marketId}`);
+
+    if (input.directVideoPath !== undefined) {
+      await runDirectVideoLeg(
+        client,
+        {
+          marketId,
+          videoPath: input.directVideoPath,
+          ...(input.directPort === undefined ? {} : { port: input.directPort }),
+          hostBaseUrl
+        },
+        record,
+        log
+      );
+    }
 
     if (input.observeOnly === true) {
       return { marketId, steps };

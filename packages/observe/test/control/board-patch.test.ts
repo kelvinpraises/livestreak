@@ -101,3 +101,90 @@ describe("applyBoardPatch", () => {
     }
   });
 });
+
+// Prepared is a derivation of the board: a pipeline config change while prepared demotes the
+// run cell (start re-prepares), so start can never run a config the board no longer shows.
+describe("applyBoardPatch prepared demotion", () => {
+  const preparedBoard = {
+    revision: 5,
+    catalogVersion: "0.1.0",
+    cells: {
+      "system:run": {
+        label: "Run",
+        catalog: "system:run",
+        status: ["prepared", null, 1] as const,
+        readonly: { prepared: true },
+        functions: ["prepare", "start", "await", "stop"]
+      },
+      "sink:direct": {
+        label: "Direct Stream",
+        catalog: "sink:direct",
+        status: ["configured", null, 1] as const,
+        settings: { streamId: "0xold", port: 48700 },
+        functions: ["configure", "close"]
+      },
+      market: {
+        label: "Market",
+        catalog: "market",
+        status: ["registered", null, 1] as const,
+        readonly: { marketId: "0xold" },
+        functions: ["register"]
+      }
+    }
+  };
+
+  it("demotes prepared when a sink cell's settings change", async () => {
+    const result = await Effect.runPromise(
+      applyBoardPatch(preparedBoard, {
+        cells: { "sink:direct": { settings: { set: { streamId: "0xnew" } } } }
+      })
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.board.cells["system:run"]?.readonly?.prepared).toBe(false);
+    expect(result.board.cells["system:run"]?.status[0]).toBe("created");
+    expect(result.board.cells["system:run"]?.status[1]).toContain("re-prepare");
+  });
+
+  it("demotes prepared when the market cell's marketId changes", async () => {
+    const result = await Effect.runPromise(
+      applyBoardPatch(preparedBoard, {
+        cells: { market: { readonly: { set: { marketId: "0xnew" } } } }
+      })
+    );
+
+    expect(result.board.cells["system:run"]?.readonly?.prepared).toBe(false);
+  });
+
+  it("leaves prepared intact for readonly-only pipeline patches", async () => {
+    const result = await Effect.runPromise(
+      applyBoardPatch(preparedBoard, {
+        cells: { "sink:direct": { readonly: { set: { configured: true } } } }
+      })
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.board.cells["system:run"]?.readonly?.prepared).toBe(true);
+  });
+
+  it("leaves prepared intact when the run is not prepared", async () => {
+    const unprepared = {
+      ...preparedBoard,
+      cells: {
+        ...preparedBoard.cells,
+        "system:run": {
+          ...preparedBoard.cells["system:run"],
+          readonly: { prepared: false }
+        }
+      }
+    };
+    const result = await Effect.runPromise(
+      applyBoardPatch(unprepared, {
+        cells: { "sink:direct": { settings: { set: { streamId: "0xnew" } } } }
+      })
+    );
+
+    expect(result.board.cells["system:run"]?.status[0]).not.toBe("created");
+    expect(result.board.cells["system:run"]?.readonly?.prepared).toBe(false);
+  });
+});

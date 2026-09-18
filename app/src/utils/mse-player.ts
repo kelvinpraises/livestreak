@@ -49,6 +49,11 @@ export interface SourceBufferLike {
 export interface OpenMsePlayerInput {
   readonly baseUrl: string
   readonly streamId: string
+  /**
+   * Full viewer socket URL override. Set when the broadcaster serves viewers DIRECTLY (the host's
+   * /live/direct announce) — same tagged-frame wire, different door. Default: the host watch path.
+   */
+  readonly watchUrl?: string
   /** The <video> element to attach the MediaSource to (via `src = URL.createObjectURL(mediaSource)`). */
   readonly video: HTMLVideoElement
   readonly socketFactory?: PlayerSocketFactory
@@ -201,7 +206,7 @@ export function openMsePlayer(input: OpenMsePlayerInput): MsePlayerHandle {
     fail(error instanceof Error ? error : new Error(String(error)))
   }
 
-  const socket = socketFactory(toWsUrl(input.baseUrl, input.streamId))
+  const socket = socketFactory(input.watchUrl ?? toWsUrl(input.baseUrl, input.streamId))
   socket.binaryType = 'arraybuffer'
   socket.addEventListener('message', (event) => {
     if (closed) return

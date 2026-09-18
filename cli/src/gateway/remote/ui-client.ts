@@ -28,7 +28,9 @@ export interface RemoteCallOutcome {
 
 export interface RemoteUiClient {
   connect(): Promise<void>;
-  call(target: RemoteDriveTarget, action: string, args?: unknown): Promise<RemoteCallOutcome>;
+  /** `id` is the optional cell-qualified descriptor id (e.g. "observe.sink.direct.configure") —
+   *  needed when a package's cells share a fn name; authz stays keyed on the bare action. */
+  call(target: RemoteDriveTarget, action: string, args?: unknown, id?: string): Promise<RemoteCallOutcome>;
   boards(): Readonly<Record<string, unknown>>;
   close(): void;
 }
@@ -164,7 +166,7 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
       log("leg-B connected");
     },
 
-    call: async (target, action, args = {}) => {
+    call: async (target, action, args = {}, id) => {
       if (ws === undefined || ws.readyState !== WebSocket.OPEN) {
         return { ok: false, error: "not connected" };
       }
@@ -173,6 +175,7 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
       const envelope: CallActionEnvelope = {
         scope: bridgeActionScope,
         action,
+        ...(id === undefined ? {} : { id }),
         args
       };
       return await new Promise<RemoteCallOutcome>((resolve) => {
@@ -184,7 +187,7 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
             seq,
             nonce: randomUUID(),
             target,
-            envelope: { scope: envelope.scope, action: envelope.action, args: envelope.args }
+            envelope
           })
         );
       });

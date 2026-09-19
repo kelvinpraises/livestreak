@@ -1,0 +1,15 @@
+[package]
+name = "livestreak-engine"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "LiveStreak streaming/cycle engine — pure-logic 1:1 port of chains/sui/sources/streaming (Anchor-free; the conservation suite is the spec)"
+
+[dependencies]
+livestreak-math = { path = "../livestreak-math" }
+ethnum = { version = "1.5", default-features = false }
+ruint = { version = "1", default-features = false, features = ["alloc", "serde"] }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+postcard = { version = "1", default-features = false, features = ["alloc"] }
+blake2 = { version = "0.10", default-features = false }
+sha3 = { version = "0.10", default-features = false }

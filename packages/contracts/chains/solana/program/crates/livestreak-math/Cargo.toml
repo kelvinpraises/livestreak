@@ -1,0 +1,14 @@
+[package]
+name = "livestreak-math"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+description = "LiveStreak fixed-point math core (bonding curve + ln kernel). Wide-by-default: all arithmetic in U256/I256 (ethnum), u128 is storage-only behind a checked narrow()."
+
+[dependencies]
+# U256 + I256 in one no_std crate — the Move u256/i256 sites transliterate 1:1.
+ethnum = { version = "1.5", default-features = false }
+ruint = { version = "1", default-features = false, features = ["alloc", "serde"] }
+
+[lib]
+crate-type = ["lib"]

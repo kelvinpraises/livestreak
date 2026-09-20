@@ -3,7 +3,11 @@
 
 import type { PackageRuntimeInit, SessionWallet } from "@livestreak/schema";
 
-import type { BookmakerContractAddresses, BookmakerSuiObjectIds } from "../../chains/addresses.js";
+import type {
+  BookmakerContractAddresses,
+  BookmakerSolanaAddresses,
+  BookmakerSuiObjectIds
+} from "../../chains/addresses.js";
 import type { BookmakerChainConfig } from "../../chains/types.js";
 import type { BookmakerMarketContext } from "../../model/market-context.js";
 import type { BookmakerWatchSource } from "../../model/watch-source.js";
@@ -55,19 +59,31 @@ export const bookmakerSuiObjectIdsFromInit = (
   streamsRegistry: requireContract(contracts, "streamsRegistry")
 });
 
-// Dispatch the addresses bag on the wallet chain: EVM contract addresses vs Sui object ids.
+export const bookmakerSolanaAddressesFromInit = (
+  contracts: Readonly<Record<string, string>>
+): BookmakerSolanaAddresses => ({
+  programId: requireContract(contracts, "programId"),
+  usdcMint: requireContract(contracts, "usdcMint")
+});
+
+// Dispatch the addresses bag on the wallet chain: EVM contract addresses vs Sui object ids vs
+// the Solana program bag (all other accounts are PDAs derived from it).
 const bookmakerAddressesFromInit = (
   init: PackageRuntimeInit
-): BookmakerContractAddresses | BookmakerSuiObjectIds =>
+): BookmakerContractAddresses | BookmakerSuiObjectIds | BookmakerSolanaAddresses =>
   init.wallet.walletInit.chain === "sui"
     ? bookmakerSuiObjectIdsFromInit(init.contracts)
-    : bookmakerContractAddressesFromInit(init.contracts);
+    : init.wallet.walletInit.chain === "solana"
+      ? bookmakerSolanaAddressesFromInit(init.contracts)
+      : bookmakerContractAddressesFromInit(init.contracts);
 
-// The funding token: the USDC coin type on Sui, the USDC contract address on EVM.
+// The funding token: the USDC coin type on Sui, the SPL mint on Solana, the contract address on EVM.
 const bookmakerFundingTokenFromInit = (init: PackageRuntimeInit): string =>
   init.wallet.walletInit.chain === "sui"
     ? `${bookmakerSuiObjectIdsFromInit(init.contracts).packageId}::mock_usdc::MOCK_USDC`
-    : bookmakerContractAddressesFromInit(init.contracts).usdc;
+    : init.wallet.walletInit.chain === "solana"
+      ? bookmakerSolanaAddressesFromInit(init.contracts).usdcMint
+      : bookmakerContractAddressesFromInit(init.contracts).usdc;
 
 export const bookmakerChainConfigFromPackageInit = (
   init: PackageRuntimeInit,

@@ -11,7 +11,6 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::state::{AccountId, StreamsHistory, StreamReceiver};
-use crate::streams::*;
 use crate::StreamsRegistry;
 
 /// i128::MAX as u128 — total managed balance must stay signable.

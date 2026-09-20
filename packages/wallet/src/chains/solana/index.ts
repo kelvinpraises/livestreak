@@ -21,3 +21,7 @@ export {
   assertKoraPreservedSignedTransaction,
   guardKoraClient,
 } from './sponsored-transaction.js'
+
+// The shared livestreak program layer (PDAs + instruction builders + account decoders)
+// every Solana handler leg consumes.
+export * from './livestreak/index.js'

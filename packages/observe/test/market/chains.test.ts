@@ -201,22 +201,28 @@ describe("market chain seam", () => {
     }
   });
 
-  it("names the honest gap for solana (wallet live, contracts pending)", async () => {
+  it("requires the deployed solana program id from config (never a constant)", async () => {
     const config: ObserveRunMarketConfig = {
       walletInit: {
         chain: "solana",
         seedSource: "raw",
-        config: { rpcUrl: "http://127.0.0.1:8899" }
+        config: { provider: "http://127.0.0.1:8899" }
       } as never,
       seed: "test-seed",
       marketRegistryAddress: "0x0000000000000000000000000000000000000001",
       title: "Solana stream"
     };
 
-    const exit = await Effect.runPromiseExit(createMarketRegistrar(config));
+    const registrar = await Effect.runPromise(createMarketRegistrar(config));
+    const exit = await Effect.runPromiseExit(
+      registrar.registerMarket({ runId: "run_solana", title: config.title })
+    );
+
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      expect(String(exit.cause)).toContain("contracts are not deployed yet");
+      // O4: Solana registrar is wired to the real Anchor program; it resolves the
+      // deployed program id from config and fails clearly when it is absent.
+      expect(String(exit.cause)).toContain("solanaRegistry");
     }
   });
 

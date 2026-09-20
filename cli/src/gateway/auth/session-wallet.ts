@@ -1,4 +1,9 @@
-import { createWalletManager, type EvmErc4337WalletConfig, type SuiWalletConfig } from "@livestreak/wallet";
+import {
+  createWalletManager,
+  type EvmErc4337WalletConfig,
+  type LiveStreakSolanaWalletConfig,
+  type SuiWalletConfig
+} from "@livestreak/wallet";
 import type { SessionWallet, SettingsDoc, WalletInit } from "@livestreak/schema";
 import { chainSettingsFor } from "../../prefs/settings.js";
 import { resolveChainAdapter } from "./chain-registry.js";
@@ -32,7 +37,9 @@ export const buildSessionWallet = async (
   const manager =
     walletInit.chain === "evm"
       ? createWalletManager("evm", seed, walletInit.config as unknown as EvmErc4337WalletConfig)
-      : createWalletManager("sui", seed, walletInit.config as unknown as SuiWalletConfig);
+      : walletInit.chain === "solana"
+        ? createWalletManager("solana", seed, walletInit.config as unknown as LiveStreakSolanaWalletConfig)
+        : createWalletManager("sui", seed, walletInit.config as unknown as SuiWalletConfig);
   const account = await manager.getAccount();
   const operatorAddress = await account.getAddress();
 

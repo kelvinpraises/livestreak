@@ -1,0 +1,33 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_protocolview_free: (a: number, b: number) => void;
+export const protocolview_account_vault_ids: (a: number, b: number, c: number) => [number, number, number, number];
+export const protocolview_board: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const protocolview_boundaries: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const protocolview_calc_token_id_with_salt: (a: number, b: number, c: number, d: bigint) => [number, number, number, number];
+export const protocolview_claimable: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const protocolview_collected: (a: number, b: number, c: number) => [number, number, number];
+export const protocolview_decode: (a: number, b: number) => [number, number, number];
+export const protocolview_lane_count: (a: number, b: number, c: number) => [number, number, number];
+export const protocolview_list_vault_ids: (a: number) => [number, number];
+export const protocolview_loss_claimable: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const protocolview_lvst_staked: (a: number, b: number, c: number) => [number, number, number, number];
+export const protocolview_market_vaults: (a: number, b: number, c: number) => [number, number, number, number];
+export const protocolview_mint_rate: (a: number) => [number, number];
+export const protocolview_pending_boundaries: (a: number, b: number, c: number, d: number) => [bigint, number, number];
+export const protocolview_pending_dividends: (a: number, b: number, c: number) => [number, number, number, number];
+export const protocolview_pending_shares: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint) => [number, number, number, number];
+export const protocolview_position: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const protocolview_pot: (a: number, b: number, c: number) => [number, number, number, number];
+export const protocolview_seed_account: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+export const protocolview_share_price: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+export const protocolview_summary: (a: number) => [number, number];
+export const protocolview_vault: (a: number, b: number, c: number) => [number, number, number, number];
+export const protocolview_vault_pools: (a: number, b: number, c: number) => [number, number, number, number];
+export const __wbindgen_externrefs: WebAssembly.Table;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __externref_table_dealloc: (a: number) => void;
+export const __wbindgen_free: (a: number, b: number, c: number) => void;
+export const __wbindgen_start: () => void;

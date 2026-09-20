@@ -93,7 +93,24 @@ describe("createOptionsChain", () => {
     ).toThrow(LiveStreakConfigError);
   });
 
-  it("names the honest gap for solana (wallet live, contracts pending)", () => {
+  it("constructs the solana leg from base58 program + usdc addresses", () => {
+    const chain = createOptionsChain({
+      walletInit: {
+        chain: "solana",
+        seedSource: "raw",
+        config: { rpcUrl: "http://127.0.0.1:8899" }
+      },
+      seed: "test-seed",
+      addresses: {
+        programId: "11111111111111111111111111111111",
+        usdcMint: "So11111111111111111111111111111111111111112"
+      }
+    } as never);
+    expect(chain.reader).toBeDefined();
+    expect(chain.writer).toBeDefined();
+  });
+
+  it("rejects solana addresses that are not valid base58 pubkeys", () => {
     expect(() =>
       createOptionsChain({
         walletInit: {
@@ -102,8 +119,8 @@ describe("createOptionsChain", () => {
           config: { rpcUrl: "http://127.0.0.1:8899" }
         },
         seed: "test-seed",
-        addresses: DEFAULT_FAKE_ADDRESSES
+        addresses: { programId: "not-base58!", usdcMint: "also-bad" }
       } as never)
-    ).toThrow(/contracts are not deployed yet/);
+    ).toThrow(LiveStreakConfigError);
   });
 });

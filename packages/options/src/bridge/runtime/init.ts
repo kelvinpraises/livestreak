@@ -8,6 +8,7 @@ import { asUserAddress, type UserAddress } from "../../model/ids.js";
 import type { OptionsRuntimeConfig } from "../../runtime/config.js";
 import type { OptionsContractAddresses } from "../../chains/evm/addresses.js";
 import type { OptionsSuiObjectIds } from "../../chains/sui/addresses.js";
+import type { OptionsSolanaAddresses } from "../../chains/solana/addresses.js";
 
 export type { PackageRuntimeInit, SessionWallet };
 
@@ -53,6 +54,13 @@ export const optionsSuiObjectIdsFromInit = (
     : { lvstTreasuryCap: contracts.lvstTreasuryCap as `0x${string}` })
 });
 
+export const optionsSolanaAddressesFromInit = (
+  contracts: Readonly<Record<string, string>>
+): OptionsSolanaAddresses => ({
+  programId: requireContract(contracts, "programId"),
+  usdcMint: requireContract(contracts, "usdcMint")
+});
+
 export const optionsChainConfigFromPackageInit = (
   init: PackageRuntimeInit,
   options?: { readonly readRpcUrl?: string }
@@ -62,7 +70,9 @@ export const optionsChainConfigFromPackageInit = (
   addresses:
     init.wallet.walletInit.chain === "sui"
       ? optionsSuiObjectIdsFromInit(init.contracts)
-      : optionsContractAddressesFromInit(init.contracts),
+      : init.wallet.walletInit.chain === "solana"
+        ? optionsSolanaAddressesFromInit(init.contracts)
+        : optionsContractAddressesFromInit(init.contracts),
   ...(options?.readRpcUrl === undefined ? {} : { readRpcUrl: options.readRpcUrl })
 });
 

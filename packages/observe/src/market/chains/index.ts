@@ -1,9 +1,10 @@
 import { Effect } from "effect";
-import { LiveStreakConfigError, contractsNotDeployedError } from "@livestreak/core";
+import { LiveStreakConfigError } from "@livestreak/core";
 import type { WalletInit } from "@livestreak/schema";
 import type { MarketRegistrar, ObserveRunMarketConfig } from "#market/types.js";
 import { createEvmMarketRegistrar } from "./evm.js";
 import { createSuiMarketRegistrar } from "./sui.js";
+import { createSolanaMarketRegistrar } from "./solana.js";
 
 export const createMarketRegistrar = (
   config: ObserveRunMarketConfig
@@ -18,7 +19,7 @@ export const createMarketRegistrar = (
       return Effect.succeed(createSuiMarketRegistrar({ ...config, walletInit }));
     }
     case "solana": {
-      return Effect.fail(contractsNotDeployedError("solana", "market registration"));
+      return Effect.succeed(createSolanaMarketRegistrar({ ...config, walletInit }));
     }
     default: {
       return Effect.fail(

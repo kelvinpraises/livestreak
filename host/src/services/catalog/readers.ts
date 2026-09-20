@@ -39,6 +39,11 @@ const DEFAULT_SUI_DEPLOYMENT = resolve(
   "../packages/contracts/chains/sui/deployments/localnet.json"
 );
 
+const DEFAULT_SOLANA_DEPLOYMENT = resolve(
+  HOST_ROOT,
+  "../packages/contracts/chains/solana/deployments/localnet.json"
+);
+
 // World-known anvil dev key. Reads never sign — the options reader only ever issues
 // `eth_call` against `readRpcUrl`; the seed is required by the chain-config validator but
 // the wallet account is derived lazily and only for writes (which the catalog never does).
@@ -153,6 +158,42 @@ const buildSuiReader = (): OptionsReader | null => {
   }
 };
 
+const buildSolanaReader = (): OptionsReader | null => {
+  const deploymentPath =
+    process.env.LIVESTREAK_SOLANA_DEPLOYMENT ?? DEFAULT_SOLANA_DEPLOYMENT;
+  const deployment = readJsonFile<{
+    programId?: string;
+    rpc?: string;
+    accounts?: { usdcMint?: string };
+  }>(deploymentPath);
+  if (deployment === null) return null;
+  const rpcUrl = process.env.LIVESTREAK_SOLANA_RPC_URL ?? deployment.rpc;
+  const programId = deployment.programId;
+  const usdcMint = deployment.accounts?.usdcMint;
+  if (rpcUrl === undefined || rpcUrl.length === 0) return null;
+  if (programId === undefined || usdcMint === undefined) return null;
+  // Reads never sign — the reference mnemonic only satisfies the chain-config validator.
+  const seed =
+    process.env.LIVESTREAK_SOLANA_SPONSOR_SEED ??
+    "test test test test test test test test test test test junk";
+  const walletInit = {
+    chain: "solana",
+    seedSource: "raw",
+    config: { provider: rpcUrl }
+  } as unknown as WalletInit;
+  try {
+    return createOptionsChain({
+      walletInit,
+      seed,
+      addresses: { programId, usdcMint },
+      readRpcUrl: rpcUrl
+    }).reader;
+  } catch (error) {
+    console.warn(`[catalog]: Solana reader unavailable — ${String(error)}`);
+    return null;
+  }
+};
+
 // Build a reader provider from the environment + deploy snapshots. Each chain reader is
 // constructed once and cached; a chain with no deployment/RPC resolves to null so the
 // catalog simply omits it.
@@ -160,14 +201,17 @@ export const createEnvReaderProvider = (): CatalogReaderProvider => {
   const cache = new Map<CatalogChain, OptionsReader | null>();
   const get = (chain: CatalogChain): OptionsReader | null => {
     if (!cache.has(chain)) {
-      cache.set(chain, chain === "evm" ? buildEvmReader() : buildSuiReader());
+      cache.set(
+        chain,
+        chain === "evm" ? buildEvmReader() : chain === "sui" ? buildSuiReader() : buildSolanaReader()
+      );
     }
     return cache.get(chain) ?? null;
   };
   return {
     reader: get,
     get availableChains() {
-      return (["evm", "sui"] as const).filter((c) => get(c) !== null);
+      return (["evm", "sui", "solana"] as const).filter((c) => get(c) !== null);
     }
   };
 };
@@ -200,7 +244,7 @@ export const readMarketGraph = async (
   return { snap, vaultSnapshots };
 };
 
-// Parse LIVESTREAK_CATALOG_MARKETS="evm:0x..,sui:0x.." into seed refs.
+// Parse LIVESTREAK_CATALOG_MARKETS="evm:0x..,sui:0x..,solana:0x.." into seed refs.
 export const parseSeedMarkets = (
   raw: string | undefined
 ): readonly { chain: CatalogChain; marketId: string }[] => {
@@ -210,7 +254,7 @@ export const parseSeedMarkets = (
     const [chainPart, marketId] = entry.split(":");
     const chain = chainPart?.trim();
     const id = marketId?.trim();
-    if ((chain === "evm" || chain === "sui") && id !== undefined && id.length > 0) {
+    if ((chain === "evm" || chain === "sui" || chain === "solana") && id !== undefined && id.length > 0) {
       out.push({ chain, marketId: id });
     }
   }

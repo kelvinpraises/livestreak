@@ -22,6 +22,7 @@ import type {
 } from "../model/vault.js";
 import type { OptionsContractAddresses } from "./evm/addresses.js";
 import type { OptionsSuiObjectIds } from "./sui/addresses.js";
+import type { OptionsSolanaAddresses } from "./solana/addresses.js";
 
 export type TxId = string & { readonly __brand: "TxId" };
 
@@ -210,7 +211,7 @@ export type ContractChain = "evm" | "sui" | "solana";
 export type OptionsChainConfig = {
   readonly walletInit: WalletInit;
   readonly seed: string | Uint8Array;
-  readonly addresses: OptionsContractAddresses | OptionsSuiObjectIds;
+  readonly addresses: OptionsContractAddresses | OptionsSuiObjectIds | OptionsSolanaAddresses;
   readonly readRpcUrl?: string;
   readonly includeProtocolSummary?: boolean;
   readonly transferOperator?: UserAddress;

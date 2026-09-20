@@ -223,3 +223,51 @@ fn only_creator_drives_lifecycle() {
     h.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
     assert!(h.lifecycle(&id, &stranger, true, b"hijack").is_err());
 }
+
+#[test]
+fn default_steward_handover() {
+    let mut h = Harness::new();
+    h.initialize(h.payer.pubkey());
+
+    let set_default = |h: &mut Harness, authority: &Keypair, steward: Pubkey| {
+        let ix = Instruction::new_with_bytes(
+            h.program_id,
+            &livestreak::instruction::SetDefaultSteward { steward }.data(),
+            livestreak::accounts::SetDefaultSteward {
+                authority: authority.pubkey(),
+                registry: h.registry_pda(),
+            }
+            .to_account_metas(None),
+        );
+        let payer = h.payer.insecure_clone();
+        if authority.pubkey() == payer.pubkey() {
+            h.send(ix, &[&payer])
+        } else {
+            h.send(ix, &[&payer, authority])
+        }
+    };
+    let default_steward = |h: &Harness| {
+        let account = h.svm.get_account(&h.registry_pda()).unwrap();
+        livestreak::state::Registry::try_deserialize(&mut account.data.as_slice())
+            .unwrap()
+            .default_steward
+    };
+
+    // A stranger cannot take the registry.
+    let stranger = Keypair::new();
+    h.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    assert!(set_default(&mut h, &stranger, stranger.pubkey()).is_err());
+    assert_eq!(default_steward(&h), h.payer.pubkey());
+
+    // The current default steward hands over (the wire-time deployer -> steward-role flow) ...
+    let steward_role = Keypair::new();
+    let payer = h.payer.insecure_clone();
+    set_default(&mut h, &payer, steward_role.pubkey()).unwrap();
+    assert_eq!(default_steward(&h), steward_role.pubkey());
+
+    // ... after which the OLD steward is locked out and the new one holds the gate.
+    assert!(set_default(&mut h, &payer, payer.pubkey()).is_err());
+    h.svm.airdrop(&steward_role.pubkey(), 1_000_000_000).unwrap();
+    set_default(&mut h, &steward_role, payer.pubkey()).unwrap();
+    assert_eq!(default_steward(&h), payer.pubkey());
+}

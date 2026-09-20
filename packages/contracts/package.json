@@ -39,6 +39,18 @@
       "types": "./dist/chains/sui/deployments/localnet.d.ts",
       "default": "./dist/chains/sui/deployments/localnet.js"
     },
+    "./solana": {
+      "types": "./dist/chains/solana/index.d.ts",
+      "default": "./dist/chains/solana/index.js"
+    },
+    "./solana/node": {
+      "types": "./dist/chains/solana/node.d.ts",
+      "default": "./dist/chains/solana/node.js"
+    },
+    "./solana/deployments/localnet": {
+      "types": "./dist/chains/solana/deployments/localnet.d.ts",
+      "default": "./dist/chains/solana/deployments/localnet.js"
+    },
     "./package": {
       "default": "./package.json"
     }
@@ -51,7 +63,10 @@
     "chains/evm/deployments",
     "chains/evm/foundry.toml",
     "chains/evm/solidity",
-    "chains/sui/deployments"
+    "chains/sui/deployments",
+    "chains/solana/deployments",
+    "chains/solana/idl",
+    "chains/solana/wasm"
   ],
   "scripts": {
     "clean": "rm -rf dist chains/evm/out chains/evm/cache chains/evm/generated/abis.ts",
@@ -60,15 +75,20 @@
     "lint": "eslint . && cd chains/evm && forge fmt --check solidity test",
     "deploy": "tsx chains/evm/deploy/main.ts",
     "deploy:sui": "tsx chains/sui/deploy/publish.ts",
+    "deploy:solana": "tsx chains/solana/deploy/main.ts",
+    "wire:solana": "tsx chains/solana/deploy/wire.ts",
+    "build:solana:idl": "node chains/solana/scripts/sync-idl.mjs",
     "e2e": "tsx chains/evm/deploy/e2e.ts",
     "e2e:sui": "tsx chains/sui/deploy/e2e.ts",
     "e2e:4337": "npm run build -w @livestreak/wallet && tsx chains/evm/deploy/e2e-4337.ts",
     "test": "cd chains/evm && forge test",
-    "build:ts": "tsc -p tsconfig.build.json",
+    "build:ts": "tsc -p tsconfig.build.json && node chains/solana/scripts/copy-wasm.mjs",
     "dev": "tsc -w -p tsconfig.build.json"
   },
   "dependencies": {
     "@mysten/sui": "^2.19.0",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.98.0",
     "viem": "^2.23.0"
   },
   "devDependencies": {

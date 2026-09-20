@@ -11,19 +11,31 @@ design, so parity claims trace to Move first, EVM second. Layout:
 
 ## Toolchain
 
-Two sharp edges, both deliberate:
+Three sharp edges, all deliberate:
 
 1. **Build tools come from the Anza release, not brew.** Homebrew's `solana` ships the
    validator/CLI but not `cargo-build-sbf`. The Anza install's PATH must precede brew:
 
    ```sh
    export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
-   anchor build   # or: cargo-build-sbf
+   ( cd programs/livestreak && cargo-build-sbf --arch v3 )
    ```
 
    `dev.sh`'s solana leg exports this itself; only manual builds need it.
 
-2. **ruint is pinned to 1.17 and `Cargo.lock` is committed.** The SBF toolchain
+2. **`--arch v3` is mandatory, and the build runs from `programs/livestreak`.**
+   `anchor build` / bare `cargo-build-sbf` default to `--arch v0`, which agave 4.x
+   REFUSES to deploy ("Detected sbpf_version ... not enabled" — the modern loader
+   only accepts v3), while litesvm executes v3 fine since 0.14 (hence that pin; 0.10
+   choked on v3 with `InvalidAccountData` at `add_program`). One artifact serves both.
+   The workspace root can't be the cwd: `cargo-build-sbf` would try to build the wasm
+   crate for SBF and fail on wasm-bindgen. CACHE TRAP: `--arch` alone does NOT
+   invalidate cargo's cache — switching arch silently reuses the previous artifact
+   (a "v3 rebuild" once shipped v2 bytes in 0.39s). `touch src/lib.rs` first when
+   changing arch, and verify with the ELF e_flags (v3 ⇒ 3):
+   `python3 -c "import struct;print(struct.unpack('<I',open('target/deploy/livestreak.so','rb').read(64)[48:52])[0])"`
+
+3. **ruint is pinned to 1.17 and `Cargo.lock` is committed.** The SBF toolchain
    currently ships rustc 1.89; newer ruint releases require a newer compiler. A plain
    `cargo update` will break the on-chain build until Anza ships a newer toolchain —
    don't update deps without re-running `anchor build`. No `rust-toolchain.toml`:
@@ -38,7 +50,7 @@ Two sharp edges, both deliberate:
 
 ```sh
 cargo test -p livestreak-math -p livestreak-engine   # host-side: math + conservation suites
-anchor build && cargo test -p livestreak             # litesvm: on-chain keynote loop
+( cd programs/livestreak && cargo-build-sbf --arch v3 ) && cargo test -p livestreak   # litesvm: on-chain keynote loop
 ```
 
 The engine suites are the spec: every assertion is exact to the unit (no tolerances).

@@ -5,6 +5,7 @@ import type { WalletInit } from "@livestreak/schema";
 
 import { validateBookmakerChainConfig } from "./config.js";
 import { createEvmBookmakerChain } from "./evm/index.js";
+import { createSolanaBookmakerChain } from "./solana/index.js";
 import { createSuiBookmakerChain } from "./sui/index.js";
 import type { BookmakerChain, BookmakerChainConfig } from "./types.js";
 
@@ -32,6 +33,9 @@ export const createBookmakerChain = (config: BookmakerChainConfig): BookmakerCha
     }
     case "sui": {
       return createSuiBookmakerChain({ ...validated, walletInit });
+    }
+    case "solana": {
+      return createSolanaBookmakerChain({ ...validated, walletInit });
     }
     default: {
       return unreachableChain(walletInit);

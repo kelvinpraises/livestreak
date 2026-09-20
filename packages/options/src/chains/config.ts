@@ -1,11 +1,12 @@
 // --- exports ---
 
-import { LiveStreakConfigError, contractsNotDeployedError } from "@livestreak/core";
+import { LiveStreakConfigError } from "@livestreak/core";
 
 import { asUserAddress } from "../model/ids.js";
 import type { OptionsChainConfig } from "./types.js";
 import { validateOptionsContractAddresses } from "./evm/addresses.js";
 import { validateOptionsSuiObjectIds } from "./sui/addresses.js";
+import { validateOptionsSolanaAddresses } from "./solana/addresses.js";
 
 export const validateOptionsChainConfig = (input: unknown): OptionsChainConfig => {
   if (!isPlainObject(input)) {
@@ -39,14 +40,13 @@ export const validateOptionsChainConfig = (input: unknown): OptionsChainConfig =
   }
 
   const chain = (walletInit as { chain?: string }).chain;
-  if (chain === "solana") {
-    throw contractsNotDeployedError("solana", "the options chain");
-  }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const addresses =
     chain === "sui"
       ? validateOptionsSuiObjectIds(input.addresses as any)
-      : validateOptionsContractAddresses(input.addresses as any);
+      : chain === "solana"
+        ? validateOptionsSolanaAddresses(input.addresses as any)
+        : validateOptionsContractAddresses(input.addresses as any);
 
   const readRpcUrl =
     input.readRpcUrl === undefined

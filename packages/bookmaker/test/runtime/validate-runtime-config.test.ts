@@ -144,7 +144,7 @@ describe("validateBookmakerRuntimeConfig", () => {
     expect(result.ok).toBe(false);
     if (result.ok === false) {
       expect(result.issues).toContain(
-        "addresses must include vaultDriver, marketRegistry, vault, and usdc"
+        "addresses must match a chain shape (evm contract addresses, sui object ids, or solana programId/usdcMint)"
       );
     }
   });

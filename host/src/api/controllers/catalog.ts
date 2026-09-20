@@ -9,7 +9,7 @@ import type { CatalogMarketRef } from "../../services/catalog/catalog.js";
 const parseMarketRef = (body: unknown): CatalogMarketRef | null => {
   if (body === null || typeof body !== "object") return null;
   const { chain, marketId } = body as { chain?: unknown; marketId?: unknown };
-  if ((chain !== "evm" && chain !== "sui") || typeof marketId !== "string") return null;
+  if ((chain !== "evm" && chain !== "sui" && chain !== "solana") || typeof marketId !== "string") return null;
   if (marketId.trim().length === 0) return null;
   return { chain, marketId: marketId.trim() };
 };
@@ -56,7 +56,7 @@ export const createCatalogController = (deps: HostRouteDeps) => ({
           ok: false,
           status: 400,
           error: new LiveStreakConfigError({
-            message: "catalog market requires { chain: 'evm'|'sui', marketId }",
+            message: "catalog market requires { chain: 'evm'|'sui'|'solana', marketId }",
             metadata: { retryable: false }
           })
         },

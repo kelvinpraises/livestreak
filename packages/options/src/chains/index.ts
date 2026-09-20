@@ -9,11 +9,15 @@ import { resolveEvmAccountAddress } from "./evm/account.js";
 import { createEvmOptionsChain } from "./evm/index.js";
 import { createSuiOptionsChain } from "./sui/index.js";
 import { resolveSuiAccountAddress } from "./sui/account.js";
+import { createSolanaOptionsChain } from "./solana/index.js";
+import { resolveSolanaAccountAddress } from "./solana/account.js";
 import type { OptionsChain, OptionsChainConfig } from "./types.js";
 
 export type { OptionsContractAddresses } from "./evm/addresses.js";
 export type { OptionsSuiObjectIds } from "./sui/addresses.js";
+export type { OptionsSolanaAddresses } from "./solana/addresses.js";
 export { validateOptionsSuiObjectIds } from "./sui/addresses.js";
+export { validateOptionsSolanaAddresses } from "./solana/addresses.js";
 export { validateOptionsChainConfig } from "./config.js";
 export type {
   ApproveNftInput,
@@ -52,6 +56,9 @@ export const createOptionsChain = (config: OptionsChainConfig): OptionsChain => 
     case "sui": {
       return createSuiOptionsChain({ ...validated, walletInit });
     }
+    case "solana": {
+      return createSolanaOptionsChain({ ...validated, walletInit });
+    }
     default: {
       return unreachableChain(walletInit);
     }
@@ -70,6 +77,9 @@ export const resolveOptionsAccountAddress = async (
     }
     case "sui": {
       return resolveSuiAccountAddress({ ...validated, walletInit });
+    }
+    case "solana": {
+      return resolveSolanaAccountAddress({ ...validated, walletInit });
     }
     default: {
       return unreachableChain(walletInit);

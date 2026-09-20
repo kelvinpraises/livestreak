@@ -88,6 +88,10 @@ export { getCompiledTransactionMessageDecoder } from '@solana/transaction-messag
 export { createKeyPairSignerFromPrivateKeyBytes } from '@solana/signers'
 export { KoraClient } from '@solana/kora'
 
+// The shared livestreak Solana program layer (PDAs, instruction builders, account
+// decoders, tx composer + the kit Address/IInstruction primitives) for handler legs.
+export * from '#chains/solana/livestreak/index.js'
+
 export type { IWalletAccount } from '@tetherto/wdk-wallet'
 export type {
   TransactionResult,

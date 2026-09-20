@@ -254,7 +254,7 @@ const buildCatalogStack = (
     readers,
     baseUrl: config.baseUrl,
     defaultChain:
-      (process.env.LIVESTREAK_CATALOG_DEFAULT_CHAIN as "evm" | "sui" | undefined) ?? "evm",
+      (process.env.LIVESTREAK_CATALOG_DEFAULT_CHAIN as "evm" | "sui" | "solana" | undefined) ?? "evm",
     listDiscoveryMarketIds: () => store.listMarketIds(),
     seedMarkets: parseSeedMarkets(process.env.LIVESTREAK_CATALOG_MARKETS),
     ...(isStreamLive === undefined ? {} : { isStreamLive })

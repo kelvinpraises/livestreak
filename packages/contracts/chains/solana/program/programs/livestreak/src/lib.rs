@@ -10,6 +10,57 @@ pub mod error;
 pub mod instructions;
 pub mod state;
 
+// The default SBF allocator is a BUMP allocator: nothing is ever freed, so every postcard
+// decode/encode temporary and BTreeMap node stays allocated for the whole transaction. Engine
+// ops churn far more than they retain — live state is small, transient churn is not — so a
+// freeing (first-fit linked-list) allocator over the full 256KB heap frame is what makes
+// engine instructions viable at all (and lets ops repeat within one tx). Clients MUST pair
+// this with ComputeBudget::RequestHeapFrame(256KB) — buildLivestreakTransaction and the
+// litesvm harness both do; a default 32KB frame would fault past the mapped region.
+#[cfg(target_os = "solana")]
+mod allocator {
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::{mem, ptr};
+    use linked_list_allocator::Heap;
+
+    const HEAP_START: usize = 0x3_0000_0000;
+    const HEAP_LEN: usize = 256 * 1024;
+    const MAGIC: usize = 0x11FE_57AE;
+
+    // The control block lives INSIDE the heap region (Solana's own bump allocator does the same):
+    // program .bss/.data statics get GC'd by the SBF linker, and the heap region arrives zeroed,
+    // so a magic word doubles as the once-init flag.
+    unsafe fn heap() -> &'static mut Heap {
+        let flag = HEAP_START as *mut usize;
+        let control = (HEAP_START + mem::size_of::<usize>()) as *mut Heap;
+        if *flag != MAGIC {
+            ptr::write(control, Heap::empty());
+            let data = HEAP_START + mem::size_of::<usize>() + mem::size_of::<Heap>();
+            let data = (data + 15) & !15;
+            (*control).init(data as *mut u8, HEAP_LEN - (data - HEAP_START));
+            *flag = MAGIC;
+        }
+        &mut *control
+    }
+
+    struct FreeingHeap;
+
+    unsafe impl GlobalAlloc for FreeingHeap {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            heap()
+                .allocate_first_fit(layout)
+                .map(|p| p.as_ptr())
+                .unwrap_or(ptr::null_mut())
+        }
+        unsafe fn dealloc(&self, ptr_: *mut u8, layout: Layout) {
+            heap().deallocate(ptr::NonNull::new_unchecked(ptr_), layout)
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: FreeingHeap = FreeingHeap;
+}
+
 use anchor_lang::prelude::*;
 
 pub use constants::*;
@@ -44,6 +95,10 @@ pub mod livestreak {
 
     pub fn set_market_steward(ctx: Context<SetMarketSteward>, steward: Pubkey) -> Result<()> {
         instructions::steward::handle_set_market_steward(ctx, steward)
+    }
+
+    pub fn set_default_steward(ctx: Context<SetDefaultSteward>, steward: Pubkey) -> Result<()> {
+        instructions::steward::handle_set_default_steward(ctx, steward)
     }
 
     pub fn init_protocol(ctx: Context<InitProtocol>, capacity: u16) -> Result<()> {

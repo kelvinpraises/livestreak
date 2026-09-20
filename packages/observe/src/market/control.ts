@@ -115,7 +115,11 @@ const notifyCatalogFailOpen = (
 ): Effect.Effect<void> =>
   Effect.tryPromise(async () => {
     const base = sessionInit.hostUrl.replace(/\/$/, "");
-    const chain = sessionInit.chain.startsWith("eip155") ? "evm" : "sui";
+    const chain = sessionInit.chain.startsWith("eip155")
+      ? "evm"
+      : sessionInit.chain.startsWith("solana")
+        ? "solana"
+        : "sui";
     await fetch(`${base}/catalog/markets`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -205,11 +209,24 @@ const buildMarketConfig = (
       );
     }
 
+    // The registry ADDRESS is an EVM/Sui concept; on Solana every registry account is a PDA
+    // derived from the programId carried by contracts.solanaMarketRegistry below.
+    const chain = wallet.walletInit.chain;
     const marketRegistryAddress = deps.sessionInit?.contracts?.marketRegistry;
-    if (typeof marketRegistryAddress !== "string" || !marketRegistryAddress.startsWith("0x")) {
+    if (
+      chain !== "solana" &&
+      (typeof marketRegistryAddress !== "string" || !marketRegistryAddress.startsWith("0x"))
+    ) {
       return yield* Effect.fail(
         new LiveStreakConfigError({
           message: "market controls require contracts.marketRegistry in runtime init"
+        })
+      );
+    }
+    if (chain === "solana" && deps.sessionInit?.contracts?.solanaMarketRegistry === undefined) {
+      return yield* Effect.fail(
+        new LiveStreakConfigError({
+          message: "market controls require contracts.solanaMarketRegistry in runtime init"
         })
       );
     }
@@ -217,13 +234,22 @@ const buildMarketConfig = (
     return {
       walletInit: wallet.walletInit,
       seed: wallet.seed,
-      marketRegistryAddress: marketRegistryAddress as ObserveRunMarketConfig["marketRegistryAddress"],
+      ...(typeof marketRegistryAddress === "string" && marketRegistryAddress.startsWith("0x")
+        ? { marketRegistryAddress: marketRegistryAddress as ObserveRunMarketConfig["marketRegistryAddress"] }
+        : {}),
       title,
       ...(deps.sessionInit?.contracts?.suiMarketRegistry === undefined
         ? {}
         : {
             suiRegistry: JSON.parse(deps.sessionInit.contracts.suiMarketRegistry) as NonNullable<
               ObserveRunMarketConfig["suiRegistry"]
+            >
+          }),
+      ...(deps.sessionInit?.contracts?.solanaMarketRegistry === undefined
+        ? {}
+        : {
+            solanaRegistry: JSON.parse(deps.sessionInit.contracts.solanaMarketRegistry) as NonNullable<
+              ObserveRunMarketConfig["solanaRegistry"]
             >
           })
     };

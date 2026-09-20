@@ -44,13 +44,29 @@ describe("validateBookmakerChainConfig", () => {
     ).toThrow();
   });
 
-  it("names the honest gap for solana (wallet live, contracts pending)", () => {
+  it("validates a solana config (programId + usdcMint base58)", () => {
+    const validated = validateBookmakerChainConfig({
+      ...validConfig,
+      walletInit: { chain: "solana", seedSource: "raw", config: { rpcUrl: "http://x" } },
+      addresses: {
+        programId: "CZnAfgbnbVtuXDRQynwL9XMHqeQ7wngbodRihGLbErK8",
+        usdcMint: "Cuzvn5YeJ2Wdn6gVsybkKvyDgMJFjBWNxZyGiZmAnB7Z"
+      }
+    });
+    expect(validated.addresses).toMatchObject({
+      programId: "CZnAfgbnbVtuXDRQynwL9XMHqeQ7wngbodRihGLbErK8",
+      usdcMint: "Cuzvn5YeJ2Wdn6gVsybkKvyDgMJFjBWNxZyGiZmAnB7Z"
+    });
+  });
+
+  it("rejects a solana config with a malformed pubkey", () => {
     expect(() =>
       validateBookmakerChainConfig({
         ...validConfig,
-        walletInit: { chain: "solana", seedSource: "raw", config: { rpcUrl: "http://x" } }
+        walletInit: { chain: "solana", seedSource: "raw", config: { rpcUrl: "http://x" } },
+        addresses: { programId: "not-base58!", usdcMint: "also-bad" }
       })
-    ).toThrow(/contracts are not deployed yet/);
+    ).toThrow(/Invalid Solana address/);
   });
 });
 

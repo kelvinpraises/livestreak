@@ -6,8 +6,9 @@
 # options = conviction). The four packages ARE the four protocol roles; each console is an open
 # control surface anyone can hook into — driving them by hand IS the production behavior.
 #
-# Chain is selected by config alone (the CLI is chain-agnostic): CHAIN=evm (default) | sui.
-# Re-run with `CHAIN=sui ./dev.sh` to flip the SAME consoles to Sui — that flip is the multichain proof.
+# Chain is selected by config alone (the CLI is chain-agnostic): CHAIN=evm (default) | sui | solana.
+# Re-run with `CHAIN=sui ./dev.sh` (or CHAIN=solana) to flip the SAME consoles — that flip is the
+# multichain proof.
 #
 # Layout: config → helpers → per-chain legs (sui_* / evm_*) → shared phases → a flat main flow that
 # just calls them in order. bash 3.2 compatible (macOS default): no associative arrays.
@@ -28,6 +29,10 @@ export -n CHAIN 2>/dev/null || true
 WITH_SUI="${WITH_SUI:-1}"
 [ "$CHAIN" = "sui" ] && WITH_SUI=1
 SUI_PID=""
+# Solana leg opt-in (a third always-on validator would tax every boot); CHAIN=solana forces it.
+WITH_SOLANA="${WITH_SOLANA:-0}"
+[ "$CHAIN" = "solana" ] && WITH_SOLANA=1
+SOLANA_PID=""
 
 LIVESTREAK_APP_ORIGIN="${LIVESTREAK_APP_ORIGIN:-http://localhost:3000}"
 export LIVESTREAK_APP_ORIGIN
@@ -84,6 +89,10 @@ kill_sui() {
   pkill -9 -f "sui-faucet" 2>/dev/null || true
   for p in 9000 9123 9124; do lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true; done
 }
+kill_solana() {
+  pkill -9 -f "solana-test-validator" 2>/dev/null || true
+  for p in 8899 8900; do lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true; done
+}
 
 cleanup() {
   [ -n "${_CLEANED:-}" ] && return
@@ -91,9 +100,11 @@ cleanup() {
   log "Shutting down..."
   kill_servers
   kill_sui
+  kill_solana
   [ -n "$HOST_PID" ] && kill "$HOST_PID" 2>/dev/null || true
   [ -n "$APP_PID" ]  && kill "$APP_PID"  2>/dev/null || true
   [ -n "$SUI_PID" ]  && kill "$SUI_PID"  2>/dev/null || true
+  [ -n "$SOLANA_PID" ] && kill "$SOLANA_PID" 2>/dev/null || true
 }
 # EXIT runs cleanup on ANY exit (normal end or the exit below). The signal trap converts Ctrl-C /
 # kill / terminal-close (HUP) into an exit so cleanup runs exactly once. Only kill -9 escapes
@@ -219,11 +230,125 @@ sui_leg_env() {
 }
 
 solana_leg_env() {
-  # Solana leg = the host's Kora-compatible paymaster only (contracts port pending, so no local
-  # validator/deploy). Devnet RPC + the reference test mnemonic, whose account-0 payer is funded
-  # on devnet. Host bootstrap is warn-only, so offline dev degrades to "not advertised".
+  # Paymaster env for the host. When the local leg is up, solana_leg_up already exported the
+  # local RPC, which the :- default preserves; otherwise devnet + the reference test mnemonic
+  # (account-0 payer funded on devnet). Host bootstrap is warn-only, so offline dev degrades
+  # to "not advertised".
   export LIVESTREAK_SOLANA_RPC_URL="${LIVESTREAK_SOLANA_RPC_URL:-https://api.devnet.solana.com}"
   export LIVESTREAK_SOLANA_SPONSOR_SEED="${LIVESTREAK_SOLANA_SPONSOR_SEED:-test test test test test test test test test test test junk}"
+}
+
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+# Solana leg — solana-test-validator + program deploy + registry init. The solana_* mirror of the
+# sui_* leg above. Requires the Anza toolchain and a built program (anchor build → livestreak.so).
+# ════════════════════════════════════════════════════════════════════════════════════════════════
+SOLANA_RPC_LOCAL="http://127.0.0.1:8899"
+SOLANA_LOG="/tmp/livestreak-solana.log"
+SOLANA_LEDGER="/tmp/livestreak-solana-ledger"
+ANZA_BIN="$HOME/.local/share/solana/install/active_release/bin"
+
+# Pick the NEWEST agave install (brew vs Anza) and pin its bin dir first on PATH — profile-level
+# PATH order is unreliable (a stale Anza 4.1.1 shadowing brew 4.1.2 rejected the sbpf-v3 artifact
+# with "sbpf_version ... not enabled"; v3 deploys need >= 4.1.2). The same dir then serves the
+# solana/solana-keygen CLIs the deploy tooling shells out to, so validator and CLI always match.
+# Fail BEFORE touching chain state if the validator or the built program is missing.
+solana_ensure_toolchain() {
+  local dir v best_dir="" best_ver="0"
+  for dir in /opt/homebrew/bin "$ANZA_BIN" "$(dirname "$(command -v solana-test-validator 2>/dev/null)" 2>/dev/null)"; do
+    [ -n "$dir" ] && [ -x "$dir/solana-test-validator" ] || continue
+    v="$("$dir/solana-test-validator" --version 2>/dev/null | awk '{print $2}')"
+    [ -n "$v" ] || continue
+    if [ "$(printf '%s\n%s\n' "$best_ver" "$v" | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)" = "$v" ]; then
+      best_ver="$v"; best_dir="$dir"
+    fi
+  done
+  if [ -z "$best_dir" ]; then
+    err "solana-test-validator not found (install agave via brew or the Anza release). Aborting Solana leg."
+    return 1
+  fi
+  export PATH="$best_dir:$PATH"
+  log "Solana toolchain: $best_dir (agave $best_ver)"
+  if [ ! -f "$ROOT/packages/contracts/chains/solana/program/target/deploy/livestreak.so" ]; then
+    err "livestreak.so not built — run 'cargo-build-sbf --arch v3' in .../solana/program/programs/livestreak (see program README: v3 is mandatory)."
+    return 1
+  fi
+}
+
+solana_kill_stale() {
+  log "Killing stale Solana processes..."
+  kill_solana
+  sleep 1
+}
+
+# --reset: fresh chain every boot (regenesis parity with the sui leg). --limit-ledger-size keeps
+# the throwaway ledger from eating the disk on a long dev session.
+solana_start() {
+  log "Starting Solana localnet (solana-test-validator --reset)..."
+  solana-test-validator --reset --ledger "$SOLANA_LEDGER" --limit-ledger-size 10000000 \
+    > "$SOLANA_LOG" 2>&1 &
+  SOLANA_PID=$!
+  for _ in $(seq 1 60); do
+    if curl -s -X POST "$SOLANA_RPC_LOCAL" -H 'content-type: application/json' \
+         -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' 2>/dev/null | grep -q '"ok"'; then
+      log "Solana localnet up (PID $SOLANA_PID) — $SOLANA_RPC_LOCAL"
+      return 0
+    fi
+    sleep 1
+  done
+  err "Solana localnet failed to start. See $SOLANA_LOG"
+  return 1
+}
+
+# Deploy the program + init registry + mock USDC, then rebuild dist so the BROWSER app picks up the
+# fresh committed snapshot (node roles read deployments/localnet.json from disk at call time).
+solana_deploy() {
+  log "Deploying Solana program (deploy:solana --name localnet --force)..."
+  ( cd "$ROOT/packages/contracts" \
+      && LIVESTREAK_SOLANA_RPC_URL="$SOLANA_RPC_LOCAL" npm run deploy:solana -- --name localnet --force \
+      && npm run build:ts ) 2>&1 | sed 's/^/  /'
+  local rc=${PIPESTATUS[0]}
+  local snap="$ROOT/packages/contracts/chains/solana/deployments/localnet.json"
+  if [ "$rc" -ne 0 ] || [ ! -f "$snap" ]; then
+    err "Solana deploy failed (exit $rc) — see output above"
+    return 1
+  fi
+  log "Solana deployed → chains/solana/deployments/localnet.{json,ts}"
+}
+
+solana_leg_up() {
+  sui_ensure_node || return 1
+  solana_ensure_toolchain || return 1
+  solana_kill_stale
+  solana_start || return 1
+  solana_deploy || return 1
+  export LIVESTREAK_SOLANA_RPC_URL="$SOLANA_RPC_LOCAL"
+}
+
+# Wiring: hand the registry default steward to the steward ROLE + mint mock USDC to the role/UI
+# wallets — wire:solana signs with the deployer keypair (mint authority + initialize-time steward).
+# Roles are NATIVE self-pay on Solana (no paymaster in the dev loop), so each also needs SOL for
+# fees + rent (init_protocol allocates the ~9KB engine blob) — airdrop alongside the USDC mint.
+solana_wire() {
+  log "Wiring Solana: set default steward + airdrop SOL + mint mock USDC..."
+  local wire_args="" role addr pw ui_addr
+  sol_fund() { solana airdrop 10 "$1" --url "$SOLANA_RPC_LOCAL" >/dev/null 2>&1 || warn "SOL airdrop to $1 failed"; }
+  [ -n "$STEWARD_ADDR" ] && wire_args="--steward $STEWARD_ADDR"
+  for role in $ROLES; do
+    addr="$(cat "$ROLES_DIR/$role/addr" 2>/dev/null || true)"
+    [ -z "$addr" ] && continue
+    sol_fund "$addr"
+    wire_args="$wire_args --mint $addr=$DEMO_USDC_MINT"
+  done
+  # Fund the UI demo wallet(s) too (see evm_wire for why). Default "1234".
+  for pw in ${UI_DEMO_PASSWORDS:-1234}; do
+    ui_addr="$(role_address "$pw")"
+    [ -z "$ui_addr" ] && { warn "UI demo wallet '$pw' derive failed — not funded"; continue; }
+    sol_fund "$ui_addr"
+    wire_args="$wire_args --mint $ui_addr=$DEMO_USDC_MINT"
+  done
+  ( cd "$ROOT/packages/contracts" \
+      && LIVESTREAK_SOLANA_RPC_URL="$SOLANA_RPC_LOCAL" npm run wire:solana -- $wire_args ) 2>&1 | sed 's/^/  /' \
+    || warn "Solana wiring failed (see output above)"
 }
 
 sui_leg_up() {
@@ -386,6 +511,8 @@ write_settings() {
   local chain_id deployment rpc slot
   if [ "$CHAIN" = "sui" ]; then
     chain_id="sui:localnet"; deployment="@livestreak/contracts/sui/deployments/localnet"; rpc="$SUI_RPC_LOCAL"; slot="sui-localnet"
+  elif [ "$CHAIN" = "solana" ]; then
+    chain_id="solana:localnet"; deployment="@livestreak/contracts/solana/deployments/localnet"; rpc="$SOLANA_RPC_LOCAL"; slot="solana-localnet"
   else
     chain_id="eip155:31337"; deployment="@livestreak/contracts/evm/deployments/localhost"; rpc="$RPC"; slot="evm-localhost"
   fi
@@ -495,7 +622,11 @@ print_summary() {
   echo -e "${G}✓ LiveStreak live protocol instance — CHAIN=$CHAIN${N}"
   echo "  Anvil → $RPC"
   [ "$WITH_SUI" = "1" ] && echo "  Sui   → $SUI_RPC_LOCAL (localnet)"
-  echo "  Solana → $LIVESTREAK_SOLANA_RPC_URL (paymaster leg; contracts pending)"
+  if [ "$WITH_SOLANA" = "1" ]; then
+    echo "  Solana → $SOLANA_RPC_LOCAL (localnet)"
+  else
+    echo "  Solana → $LIVESTREAK_SOLANA_RPC_URL (paymaster env only; WITH_SOLANA=1 for the local leg)"
+  fi
   echo "  Host  → http://127.0.0.1:8787"
   echo "  App   → $LIVESTREAK_APP_ORIGIN"
   echo ""
@@ -507,7 +638,7 @@ print_summary() {
   done
   echo ""
   echo "  Bets are placed on the UI ($LIVESTREAK_APP_ORIGIN) — open a tab per profile."
-  echo "  Flip chains: re-run with  CHAIN=sui ./dev.sh"
+  echo "  Flip chains: re-run with  CHAIN=sui ./dev.sh  or  CHAIN=solana ./dev.sh"
   echo ""
   echo "Press Ctrl+C to stop all services"
   echo ""
@@ -532,6 +663,17 @@ if [ "$WITH_SUI" = "1" ]; then
   fi
 fi
 
+if [ "$WITH_SOLANA" = "1" ]; then
+  log "Bringing up Solana-localnet leg..."
+  if solana_leg_up; then
+    log "Solana leg ready — $SOLANA_RPC_LOCAL"
+  else
+    warn "Solana leg failed (non-fatal unless CHAIN=solana). See $SOLANA_LOG"
+    [ "$CHAIN" = "solana" ] && { err "CHAIN=solana but the Solana leg failed — aborting."; exit 1; }
+    WITH_SOLANA=0
+  fi
+fi
+
 solana_leg_env
 host_up
 app_up
@@ -540,7 +682,11 @@ write_settings
 log "Console chain = $CHAIN (settings.json pinned; re-run with CHAIN=sui to flip)"
 derive_roles
 
-if [ "$CHAIN" = "sui" ]; then sui_wire; else evm_wire; fi
+case "$CHAIN" in
+  sui)    sui_wire ;;
+  solana) solana_wire ;;
+  *)      evm_wire ;;
+esac
 
 open_consoles
 print_summary

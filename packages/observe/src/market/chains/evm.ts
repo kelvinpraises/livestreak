@@ -66,6 +66,13 @@ const validateLifecycleInput = (
 export const createEvmMarketRegistrar = (
   config: ObserveRunMarketConfig
 ): MarketRegistrar => {
+  // The registry ref is optional on the shared config (absent on Solana) but load-bearing here.
+  const marketRegistryAddress = config.marketRegistryAddress;
+  if (marketRegistryAddress === undefined) {
+    throw new LiveStreakConfigError({
+      message: "EVM market registrar requires marketRegistryAddress"
+    });
+  }
   // Shared wallet/account plumbing for the creator-gated lifecycle writes. The
   // registrar derives the SAME operator Safe as registerMarket, so the on-chain
   // `onlyMarketCreator` gate lines up (golden-vector / keccak invariant protected).
@@ -115,7 +122,7 @@ export const createEvmMarketRegistrar = (
       const sendResult = yield* Effect.tryPromise({
         try: () =>
           account.sendTransaction({
-            to: config.marketRegistryAddress,
+            to: marketRegistryAddress,
             data,
             value: 0n
           }),
@@ -157,7 +164,7 @@ export const createEvmMarketRegistrar = (
         const alreadyRegistered = yield* Effect.tryPromise({
           try: () =>
             publicClient.readContract({
-              address: config.marketRegistryAddress,
+              address: marketRegistryAddress,
               abi: marketRegistryAbi,
               functionName: "marketExists",
               args: [marketId]
@@ -185,7 +192,7 @@ export const createEvmMarketRegistrar = (
       const sendResult = yield* Effect.tryPromise({
         try: () =>
           account.sendTransaction({
-            to: config.marketRegistryAddress,
+            to: marketRegistryAddress,
             data,
             value: 0n
           }),

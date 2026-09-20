@@ -86,13 +86,27 @@ export interface SuiMarketRegistryConfig {
   readonly marketRegistryObjectId: string;
 }
 
+/**
+ * Deployed Solana `livestreak` program coordinates. Base58; resolved from
+ * config/deployment (NOT hardcoded) — the multichain invariant. The Sui-parallel
+ * seam. `usdcMint` is unused by register/goLive/setEnded (kept for the canonical
+ * addresses shape shared with the money-moving legs).
+ */
+export interface SolanaMarketRegistryConfig {
+  readonly programId: string;
+  readonly usdcMint: string;
+}
+
 export interface ObserveRunMarketConfig {
   readonly walletInit: WalletInit;
   readonly seed: string | Uint8Array;
-  readonly marketRegistryAddress: EvmAddress;
+  /** Required for EVM/Sui runs (the registry contract/object); absent on Solana (PDA-derived). */
+  readonly marketRegistryAddress?: EvmAddress;
   readonly title: string;
   /** Required only for Sui runs; resolved from deployment, never a constant. */
   readonly suiRegistry?: SuiMarketRegistryConfig;
+  /** Required only for Solana runs; resolved from deployment, never a constant. */
+  readonly solanaRegistry?: SolanaMarketRegistryConfig;
 }
 
 export interface ObserveRunMarketOptions {

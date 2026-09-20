@@ -27,7 +27,15 @@
     "chains/sui/package.ts",
     "chains/sui/client.ts",
     "chains/sui/deployments/localnet.ts",
-    "chains/solana/index.ts"
+    "chains/solana/index.ts",
+    "chains/solana/node.ts",
+    "chains/solana/types.ts",
+    "chains/solana/seeds.ts",
+    "chains/solana/addresses-static.ts",
+    "chains/solana/engine-wasm.ts",
+    "chains/solana/idl/index.ts",
+    "chains/solana/idl/livestreak-types.ts",
+    "chains/solana/deployments/localnet.ts"
   ],
   "exclude": ["chains/evm/lib/**", "chains/evm/out/**", "chains/evm/cache/**"]
 }

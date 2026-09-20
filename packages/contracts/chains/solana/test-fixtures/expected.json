@@ -1,0 +1,28 @@
+{
+  "accountVaults": [
+    "0x6102522f60f4b429eb202c1614cd373b2f46eceaf671386e733ca7877d3678f3"
+  ],
+  "boardYes": {
+    "g": "0",
+    "lastAdvance": 1700000000,
+    "pool": "0",
+    "sideRate": "7000000",
+    "sideShares": "0"
+  },
+  "boundariesYes": [
+    {
+      "maxEnd": 1700000100,
+      "rate": "7000000"
+    }
+  ],
+  "claimableYes": "0",
+  "escrowExpected": "1200000000",
+  "laneCount": 1,
+  "marketId": "0x0707070707070707070707070707070707070707070707070707070707070707",
+  "now": 1700000100,
+  "pendingSharesYes": "6765864799999999999998000000",
+  "pot": "0",
+  "tokenId": "0xfcfdfeff9b9178e170b39cf93248d9b68edaf2e988d8fbcef7da71daafb1c18b",
+  "vaultId": "0x6102522f60f4b429eb202c1614cd373b2f46eceaf671386e733ca7877d3678f3",
+  "vaultOutcome": 1
+}

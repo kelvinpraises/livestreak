@@ -37,12 +37,12 @@ export const buildPackageInits = (
       contracts,
       runId
     },
+    // Full bag like every other package — the per-chain init mappers pick their own keys
+    // (an EVM-only {stewardRegistry} projection here broke the sui/solana steward edges).
     steward: {
       ...base,
       package: "steward",
-      contracts: {
-        stewardRegistry: contracts.stewardRegistry ?? ""
-      }
+      contracts
     }
   };
 };

@@ -6,7 +6,7 @@ import type { ColumnType, Generated } from "kysely";
 // shapes the mapper derives from these rows. Mirrors the agentix `infrastructure/database`
 // layout: kysely table interfaces + a `DB` registry consumed by `connection.ts`.
 
-export type ChainTag = "evm" | "sui";
+export type ChainTag = "evm" | "sui" | "solana";
 
 // One row per market == one stream header on the homepage / stream page. `route_id` is
 // what the app fetches `/stream/:id` by (== market_id). Per-stream aggregates

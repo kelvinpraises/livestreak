@@ -12,6 +12,7 @@
 import type { ChainAaSettings, EvmWalletInitConfig, WalletChain, WalletInit } from "@livestreak/schema";
 import { loadDeploymentOutput } from "@livestreak/contracts/evm/node";
 import { loadDeployment as loadSuiDeployment } from "@livestreak/contracts/sui/node";
+import { loadDeploymentFromDisk as loadSolanaDeployment } from "@livestreak/contracts/solana/node";
 
 // What the registry needs to assemble a chain's runtime config. Everything here is a "float" — read
 // from settings.json or the host at load, never a pre-baked wallet/contracts blob.
@@ -143,18 +144,35 @@ const suiChainAdapter: ChainAdapter = {
 
 // --- Solana adapter (solana:*) — Ed25519 native signing; sponsorship = Kora paymaster via the host ---
 
+const flattenSolanaDeployment = (): Record<string, string> => {
+  // Read fresh from the promoted JSON at call time so a redeploy is picked up without a rebuild.
+  const d = loadSolanaDeployment("localnet");
+  // Canonical per-package bag is { programId, usdcMint } (base58); registry/defaultSteward carried
+  // for convenience so a package can resolve PDAs without re-deriving.
+  return {
+    programId: d.programId,
+    usdcMint: d.accounts.usdcMint,
+    registry: d.accounts.registry,
+    defaultSteward: d.accounts.defaultSteward,
+    // observe's Solana market registrar consumes ONE JSON-encoded contract key
+    // (control.ts parses contracts.solanaMarketRegistry -> { programId, usdcMint }).
+    solanaMarketRegistry: JSON.stringify({
+      programId: d.programId,
+      usdcMint: d.accounts.usdcMint
+    })
+  };
+};
+
 const solanaChainAdapter: ChainAdapter = {
   kind: "solana",
   matches: (caip2) => namespaceOf(caip2) === "solana",
-  // No deployment artifact yet (packages/contracts/chains/solana is a stub); the bag is overrides-only
-  // until the Solana port lands.
-  deriveContracts: (overrides) => ({ ...(overrides ?? {}) }),
+  deriveContracts: (overrides) => ({ ...flattenSolanaDeployment(), ...(overrides ?? {}) }),
   buildWalletInit: (ctx) => ({
     chain: "solana",
     seedSource: "raw",
-    // Self-pay until the Solana deployment artifact exists. Sponsorship threads in here as the
-    // paymaster triple — paymasterUrl = `${hostUrl}/aa/solana/paymaster`, paymasterAddress/token
-    // from the deployment/descriptor — once there are Solana contracts to write against.
+    // Native Ed25519 self-pay. Sponsorship threads in here as the paymaster triple — paymasterUrl =
+    // `${hostUrl}/aa/solana/paymaster`, paymasterAddress/token from the descriptor — once the gasless
+    // write path is consumed; the on-chain addresses above are already live for reads/PDA derivation.
     config: { provider: ctx.rpc }
   })
 };

@@ -35,3 +35,22 @@ pub fn handle_set_market_steward(ctx: Context<SetMarketSteward>, steward: Pubkey
     account.bump = ctx.bumps.market_steward;
     Ok(())
 }
+
+/// Hand over the registry-wide default steward (mirrors EVM setDefaultSteward): only the
+/// CURRENT default steward may transfer it — the wire-time deployer→steward-role handover.
+#[derive(Accounts)]
+pub struct SetDefaultSteward<'info> {
+    pub authority: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [REGISTRY_SEED],
+        bump = registry.bump,
+        constraint = registry.default_steward == authority.key() @ LivestreakError::NotSteward
+    )]
+    pub registry: Account<'info, Registry>,
+}
+
+pub fn handle_set_default_steward(ctx: Context<SetDefaultSteward>, steward: Pubkey) -> Result<()> {
+    ctx.accounts.registry.default_steward = steward;
+    Ok(())
+}

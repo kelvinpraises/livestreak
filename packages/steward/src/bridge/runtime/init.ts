@@ -128,5 +128,10 @@ export const stewardChainConfigFromPackageInit = (init: PackageRuntimeInit): Ste
           stewardRegistry: init.contracts.stewardRegistry ?? "",
           vaultRegistry: init.contracts.vaultRegistry ?? ""
         }
-      : { stewardRegistry: init.contracts.stewardRegistry ?? "" }
+      : init.wallet.walletInit.chain === "solana"
+        ? {
+            programId: init.contracts.programId ?? "",
+            usdcMint: init.contracts.usdcMint ?? ""
+          }
+        : { stewardRegistry: init.contracts.stewardRegistry ?? "" }
 });

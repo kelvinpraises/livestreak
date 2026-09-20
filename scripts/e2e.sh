@@ -9,7 +9,8 @@
 #   4. tear the stack down (unless KEEP_UP=1)
 #
 # Lean CI shape: `WITH_SUI=0 ./scripts/e2e.sh` (EVM only). WITH_DIRECT=0 skips the video leg
-# (needs ffmpeg). bash 3.2 compatible.
+# (needs ffmpeg). Chain lanes: `CHAIN=sui ./scripts/e2e.sh` / `CHAIN=solana ./scripts/e2e.sh`
+# drive the SAME loop on that chain (solana implies WITH_SOLANA=1). bash 3.2 compatible.
 set -eo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,7 +18,11 @@ ROLES_DIR="/tmp/livestreak-roles"
 DEV_LOG="/tmp/livestreak-e2e-dev.log"
 DRIVE_LOG="/tmp/livestreak-e2e-drive.log"
 KEEP_UP="${KEEP_UP:-0}"
+CHAIN="${CHAIN:-evm}"
 WITH_SUI="${WITH_SUI:-0}"
+WITH_SOLANA="${WITH_SOLANA:-0}"
+[ "$CHAIN" = "sui" ] && WITH_SUI=1
+[ "$CHAIN" = "solana" ] && WITH_SOLANA=1
 WITH_DIRECT="${WITH_DIRECT:-1}"
 # The window spans dev.sh's ENTIRE boot (clean rebuild + chains + host + consoles) — a loaded
 # machine pushed a healthy boot past 240s (observed 2026-07-17: console URL landed seconds after
@@ -42,6 +47,16 @@ teardown() {
     for _ in $(seq 1 20); do kill -0 "$DEV_PID" 2>/dev/null || break; sleep 1; done
     kill -0 "$DEV_PID" 2>/dev/null && kill -TERM "$DEV_PID" 2>/dev/null || true
   fi
+  # dev.sh's signal path does not reliably reap its children when signaled non-interactively
+  # (observed: dev.sh dead, whole stack alive → the next boot races a ghost stack). Sweep the
+  # stack's own patterns + ports directly — the same list dev.sh's clean_slate owns.
+  for pat in "remote open" "tsx src/main.ts" "vite dev --port 3000" "alto --entrypoints" "anvil" \
+             "solana-test-validator" "sui start" "sui-faucet"; do
+    pkill -9 -f "$pat" 2>/dev/null || true
+  done
+  for p in 8545 8787 3000 4337 9000 9123 9124 8899 8900; do
+    lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true
+  done
 }
 trap teardown EXIT
 
@@ -63,8 +78,8 @@ fi
 # Clear stale role-console session files from a previous run — the wait below must only
 # accept THIS boot's sessions (a stale url races the drive against the workspace build).
 rm -f "$ROLES_DIR"/*/url 2>/dev/null || true
-step "Booting the protocol (dev.sh, WITH_SUI=$WITH_SUI) — log: $DEV_LOG"
-( cd "$ROOT" && WITH_SUI="$WITH_SUI" ./dev.sh ) > "$DEV_LOG" 2>&1 &
+step "Booting the protocol (dev.sh, CHAIN=$CHAIN WITH_SUI=$WITH_SUI WITH_SOLANA=$WITH_SOLANA) — log: $DEV_LOG"
+( cd "$ROOT" && CHAIN="$CHAIN" WITH_SUI="$WITH_SUI" WITH_SOLANA="$WITH_SOLANA" ./dev.sh ) > "$DEV_LOG" 2>&1 &
 DEV_PID=$!
 
 # --- 2. wait for the observer console session ---

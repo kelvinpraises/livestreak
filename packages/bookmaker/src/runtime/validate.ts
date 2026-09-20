@@ -70,7 +70,7 @@ export const validateBookmakerRuntimeConfig = (
   }
 
   if (value.addresses === undefined || hasBookmakerChainAddresses(value.addresses) === false) {
-    issues.push("addresses must include vaultDriver, marketRegistry, vault, and usdc");
+    issues.push("addresses must match a chain shape (evm contract addresses, sui object ids, or solana programId/usdcMint)");
   }
 
   if (!isPlainObject(value.walletInit) || typeof (value.walletInit as { chain?: unknown }).chain !== "string") {

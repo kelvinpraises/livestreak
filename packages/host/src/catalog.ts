@@ -10,7 +10,7 @@ import { Schema } from "effect";
 // additionally carries a `chain` tag (`evm`|`sui`); the app ignores unknown fields, so
 // the tag is a non-breaking superset of the app's current shapes.
 
-export const CatalogChain = Schema.Literal("evm", "sui");
+export const CatalogChain = Schema.Literal("evm", "sui", "solana");
 export type CatalogChain = Schema.Schema.Type<typeof CatalogChain>;
 
 // app/src/types/host-edge.ts -> HostStreamSummary (+ chain tag).

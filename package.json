@@ -5,8 +5,8 @@
   "workspaces": [
     "packages/schema",
     "packages/core",
-    "packages/wallet",
     "packages/contracts",
+    "packages/wallet",
     "packages/host",
     "packages/observe",
     "packages/options",

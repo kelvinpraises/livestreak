@@ -29,12 +29,22 @@ pub enum LivestreakError {
     EngineState,
     #[msg("protocol state account is full")]
     StateFull,
+    #[msg("protocol state is at its maximum size; cannot grow further")]
+    StateAtCapacity,
     #[msg("engine operation failed (see logs)")]
     EngineOp,
     #[msg("caller is not the effective steward")]
     NotSteward,
     #[msg("escrow balance diverged from engine ledgers")]
     ConservationViolated,
+    #[msg("settlement pending: winnings payable after the cycle boundary at ready_at")]
+    SettlementPending,
+    #[msg("staked mint is not the canonical LVST mint recorded in the registry")]
+    WrongLvstMint,
+    #[msg("no dividends accrued to claim")]
+    NoDividends,
+    #[msg("new position owner must be non-zero")]
+    ZeroNewOwner,
 
     // ── streams ──
     #[msg("too many stream receivers")]

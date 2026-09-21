@@ -73,8 +73,12 @@ declare_id!("CZnAfgbnbVtuXDRQynwL9XMHqeQ7wngbodRihGLbErK8");
 pub mod livestreak {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>, default_steward: Pubkey) -> Result<()> {
-        instructions::initialize::handle_initialize(ctx, default_steward)
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        default_steward: Pubkey,
+        lvst_mint: Pubkey,
+    ) -> Result<()> {
+        instructions::initialize::handle_initialize(ctx, default_steward, lvst_mint)
     }
 
     pub fn register_market(
@@ -105,6 +109,10 @@ pub mod livestreak {
         instructions::protocol::handle_init_protocol(ctx, capacity)
     }
 
+    pub fn grow_protocol(ctx: Context<GrowProtocol>) -> Result<()> {
+        instructions::protocol::handle_grow_protocol(ctx)
+    }
+
     pub fn create_vault_seeded(
         ctx: Context<UserEngineOp>,
         question: Vec<u8>,
@@ -119,6 +127,10 @@ pub mod livestreak {
         instructions::protocol::handle_mint_position(ctx, salt)
     }
 
+    pub fn transfer_position(ctx: Context<TransferPosition>, new_owner: Pubkey) -> Result<()> {
+        instructions::protocol::handle_transfer_position(ctx, new_owner)
+    }
+
     pub fn fund(
         ctx: Context<PositionEngineOp>,
         vault_id: [u8; 32],
@@ -131,6 +143,18 @@ pub mod livestreak {
 
     pub fn stop_all(ctx: Context<PositionEngineOp>) -> Result<()> {
         instructions::protocol::handle_stop_all(ctx)
+    }
+
+    pub fn stop_funding(ctx: Context<PositionStateOp>, vault_id: [u8; 32], side: u8) -> Result<()> {
+        instructions::protocol::handle_stop_funding(ctx, vault_id, side)
+    }
+
+    pub fn set_lanes(
+        ctx: Context<PositionEngineOp>,
+        lanes: Vec<LaneArg>,
+        add_deposit: u64,
+    ) -> Result<()> {
+        instructions::protocol::handle_set_lanes(ctx, lanes, add_deposit)
     }
 
     pub fn withdraw(ctx: Context<PositionEngineOp>, vault_id: [u8; 32]) -> Result<()> {
@@ -155,5 +179,21 @@ pub mod livestreak {
 
     pub fn resolve(ctx: Context<Resolve>, vault_id: [u8; 32], winning_side: u8) -> Result<()> {
         instructions::protocol::handle_resolve(ctx, vault_id, winning_side)
+    }
+
+    pub fn claim_loss_lvst(ctx: Context<ClaimLossLvst>, vault_id: [u8; 32], side: u8) -> Result<()> {
+        instructions::protocol::handle_claim_loss_lvst(ctx, vault_id, side)
+    }
+
+    pub fn stake_lvst(ctx: Context<StakeLvst>, amount: u64) -> Result<()> {
+        instructions::protocol::handle_stake_lvst(ctx, amount)
+    }
+
+    pub fn unstake_lvst(ctx: Context<UnstakeLvst>, amount: u64) -> Result<()> {
+        instructions::protocol::handle_unstake_lvst(ctx, amount)
+    }
+
+    pub fn claim_dividends(ctx: Context<ClaimDividends>) -> Result<()> {
+        instructions::protocol::handle_claim_dividends(ctx)
     }
 }

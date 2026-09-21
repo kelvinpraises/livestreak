@@ -5,6 +5,8 @@ import { getProgramDerivedAddress, getU64Encoder, type Address, type ProgramDeri
 import { findAssociatedTokenPda, TOKEN_PROGRAM_ADDRESS } from '@solana-program/token'
 import {
   ESCROW_SEED,
+  LVST_AUTHORITY_SEED,
+  LVST_ESCROW_SEED,
   MARKET_INDEX_SEED,
   MARKET_SEED,
   MARKET_STEWARD_SEED,
@@ -51,6 +53,17 @@ export const findEscrowPda = (programId: Address, marketId: Hex32): Promise<Pda>
 export const findPositionPda = (programId: Address, tokenId: Hex32): Promise<Pda> =>
   getProgramDerivedAddress({ programAddress: programId, seeds: [POSITION_SEED, bytesFromHex32(tokenId)] })
 
+/** Protocol-wide LVST mint-authority PDA: ["lvst_authority"] (signs the loss-mint CPI). */
+export const findLvstAuthorityPda = (programId: Address): Promise<Pda> =>
+  getProgramDerivedAddress({ programAddress: programId, seeds: [LVST_AUTHORITY_SEED] })
+
+/** Per-market LVST staking-escrow token account PDA: ["lvst_escrow", market_id] (authority = protocol_state). */
+export const findLvstEscrowPda = (programId: Address, marketId: Hex32): Promise<Pda> =>
+  getProgramDerivedAddress({ programAddress: programId, seeds: [LVST_ESCROW_SEED, bytesFromHex32(marketId)] })
+
+/** The owner's associated token account for an arbitrary SPL mint. */
+export const findAta = (owner: Address, mint: Address): Promise<Pda> =>
+  findAssociatedTokenPda({ owner, mint, tokenProgram: TOKEN_PROGRAM_ADDRESS })
+
 /** The caller's associated USDC token account (user_usdc in the money-moving flows). */
-export const findUsdcAta = (owner: Address, usdcMint: Address): Promise<Pda> =>
-  findAssociatedTokenPda({ owner, mint: usdcMint, tokenProgram: TOKEN_PROGRAM_ADDRESS })
+export const findUsdcAta = (owner: Address, usdcMint: Address): Promise<Pda> => findAta(owner, usdcMint)

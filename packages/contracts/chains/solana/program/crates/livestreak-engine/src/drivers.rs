@@ -327,6 +327,11 @@ impl Protocol {
             self.treasury.deposit_skim(skim_amt);
             self.treasury.notify_skim(skimmed);
         }
+        // Housekeeping: collect_vault catch_up_side just advanced both boards to
+        // resolved_at, so every dead boundary-prefix entry is now settled — reclaim
+        // it (and any fully-paid overage crumbs) from the persisted blob. Compaction
+        // is view-preserving, so downstream withdraw / loss-mint reads are unaffected.
+        self.vault.compact();
         Ok(skim_amt)
     }
 

@@ -12,6 +12,8 @@ export interface SolanaDeployment {
   accounts: {
     /** Mock/mainnet USDC SPL mint (base58). */
     usdcMint: string;
+    /** LVST reward-token SPL mint (base58) — mint authority is the lvst_authority PDA. */
+    lvstMint: string;
     /** Registry PDA (base58) — derived, recorded for convenience. */
     registry: string;
     /** The default steward pubkey the registry was initialized with. */

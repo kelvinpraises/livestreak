@@ -152,6 +152,8 @@ const flattenSolanaDeployment = (): Record<string, string> => {
   return {
     programId: d.programId,
     usdcMint: d.accounts.usdcMint,
+    // The canonical LVST reward-token mint — the options loss-mint path (claimLossLvst) needs it.
+    lvstMint: d.accounts.lvstMint,
     registry: d.accounts.registry,
     defaultSteward: d.accounts.defaultSteward,
     // observe's Solana market registrar consumes ONE JSON-encoded contract key

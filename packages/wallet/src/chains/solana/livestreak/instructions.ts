@@ -1,4 +1,4 @@
-// Typed instruction builders for all 16 livestreak instructions. Discriminators are read
+// Typed instruction builders for all 25 livestreak instructions. Discriminators are read
 // from the imported IDL const (never hand-typed); args are borsh-encoded per the IDL
 // layouts; accounts are resolved from the PDA helpers so callers pass only free variables.
 // Every builder returns a @solana/kit Instruction that plugs into buildLivestreakTransaction.
@@ -23,7 +23,10 @@ import { livestreakIdl } from '@livestreak/contracts/solana'
 
 import { bytesFromHex32, computePositionTokenId, type Hex32 } from './ids.js'
 import {
+  findAta,
   findEscrowPda,
+  findLvstAuthorityPda,
+  findLvstEscrowPda,
   findMarketIndexPda,
   findMarketPda,
   findPositionPda,
@@ -46,6 +49,7 @@ export const instructionDiscriminator = (name: IxName): Uint8Array => DISCRIMINA
 
 const u8 = getU8Encoder()
 const u16 = getU16Encoder()
+const u32 = getU32Encoder()
 const u64 = getU64Encoder()
 const pubkey = getAddressEncoder()
 const id32 = fixEncoderSize(getBytesEncoder(), 32) // [u8; 32] fixed array — raw 32 bytes
@@ -87,15 +91,17 @@ interface MarketScoped extends Base {
 export interface InitializeInput extends Base {
   payer: Address
   defaultSteward: Address
+  /** The canonical LVST reward-token mint, recorded in the registry for the staking guard. */
+  lvstMint: Address
 }
 
-/** initialize: create the singleton registry with a default steward. */
+/** initialize: create the singleton registry with a default steward + canonical LVST mint. */
 export async function buildInitializeIx(input: InitializeInput): Promise<Instruction> {
   const registry = first(await findRegistryPda(input.programId))
   return {
     programAddress: input.programId,
     accounts: [writableSigner(input.payer), writable(registry), readonly(SYSTEM_PROGRAM_ADDRESS)],
-    data: encodeData('initialize', enc(pubkey, input.defaultSteward)),
+    data: encodeData('initialize', enc(pubkey, input.defaultSteward), enc(pubkey, input.lvstMint)),
   }
 }
 
@@ -124,6 +130,25 @@ export async function buildInitProtocolIx(input: InitProtocolInput): Promise<Ins
       readonly(SYSTEM_PROGRAM_ADDRESS),
     ],
     data: encodeData('init_protocol', enc(u16, input.capacity)),
+  }
+}
+
+export interface GrowProtocolInput extends MarketScoped {
+  /** Rent-top-up payer (mut signer); the delta for the larger size moves payer -> protocol_state. */
+  payer: Address
+}
+
+/** grow_protocol: realloc a market's engine-state blob up one +10_240-byte rung (permissionless). */
+export async function buildGrowProtocolIx(input: GrowProtocolInput): Promise<Instruction> {
+  const protocolState = first(await findProtocolStatePda(input.programId, input.marketId))
+  return {
+    programAddress: input.programId,
+    accounts: [
+      writableSigner(input.payer),
+      writable(protocolState),
+      readonly(SYSTEM_PROGRAM_ADDRESS),
+    ],
+    data: encodeData('grow_protocol'),
   }
 }
 
@@ -496,5 +521,212 @@ export async function buildCollectIx(input: CollectInput): Promise<Instruction> 
     programAddress: input.programId,
     accounts: await engineOpAccounts(input.programId, input.marketId),
     data: encodeData('collect', enc(id32, bytesFromHex32(input.vaultId))),
+  }
+}
+
+// ── position ownership + lane reconfiguration ─────────────────────────────────────
+
+export interface TransferPositionInput extends Base {
+  owner: Address
+  tokenId: Hex32
+  newOwner: Address
+}
+
+/** transfer_position: reassign a position NFT to a new owner (owner-gated, no token movement). */
+export async function buildTransferPositionIx(input: TransferPositionInput): Promise<Instruction> {
+  const position = first(await findPositionPda(input.programId, input.tokenId))
+  return {
+    programAddress: input.programId,
+    accounts: [readonlySigner(input.owner), writable(position)],
+    data: encodeData('transfer_position', enc(pubkey, input.newOwner)),
+  }
+}
+
+export interface StopFundingInput extends MarketScoped {
+  user: Address
+  tokenId: Hex32
+  vaultId: Hex32
+  side: number
+}
+
+/** stop_funding: stop a single lane (one vault, one side) of a position; no cash moves. */
+export async function buildStopFundingIx(input: StopFundingInput): Promise<Instruction> {
+  const [protocolState, position] = await Promise.all([
+    findProtocolStatePda(input.programId, input.marketId).then(first),
+    findPositionPda(input.programId, input.tokenId).then(first),
+  ])
+  return {
+    programAddress: input.programId,
+    accounts: [readonlySigner(input.user), writable(protocolState), readonly(position)],
+    data: encodeData('stop_funding', enc(id32, bytesFromHex32(input.vaultId)), enc(u8, input.side)),
+  }
+}
+
+/** One desired lane in a set_lanes full-set declaration (mirrors the on-chain LaneArg). */
+export interface LaneArgInput {
+  vaultId: Hex32
+  side: number
+  rate: bigint
+}
+
+// Vec<LaneArg> borsh layout: u32-LE length prefix, then per item vault_id([u8;32]) ++ side(u8) ++ rate(u64-LE).
+const encodeLanes = (lanes: readonly LaneArgInput[]): Uint8Array => {
+  const items = lanes.map((l) => {
+    const item = new Uint8Array(32 + 1 + 8)
+    item.set(bytesFromHex32(l.vaultId), 0)
+    item.set(enc(u8, l.side), 32)
+    item.set(enc(u64, l.rate), 33)
+    return item
+  })
+  const out = new Uint8Array(4 + items.reduce((n, it) => n + it.length, 0))
+  out.set(enc(u32, lanes.length), 0)
+  let offset = 4
+  for (const it of items) {
+    out.set(it, offset)
+    offset += it.length
+  }
+  return out
+}
+
+export interface SetLanesInput extends MarketScoped {
+  user: Address
+  tokenId: Hex32
+  usdcMint: Address
+  /** The COMPLETE desired lane set; the engine diffs it against current lanes (add/remove). */
+  lanes: readonly LaneArgInput[]
+  /** Optional top-up pulled user->escrow before the reshape (re-funds run-dry re-added lanes). */
+  addDeposit: bigint
+}
+
+/** set_lanes: declarative full-set lane reconfiguration for a position, with an optional top-up. */
+export async function buildSetLanesIx(input: SetLanesInput): Promise<Instruction> {
+  return {
+    programAddress: input.programId,
+    accounts: await positionEngineOpAccounts(
+      input.programId,
+      input.marketId,
+      input.user,
+      input.tokenId,
+      input.usdcMint,
+    ),
+    data: encodeData('set_lanes', encodeLanes(input.lanes), enc(u64, input.addDeposit)),
+  }
+}
+
+// ── LVST loss-mint + staking dividends ────────────────────────────────────────────
+
+export interface ClaimLossLvstInput extends MarketScoped {
+  claimer: Address
+  tokenId: Hex32
+  /** The canonical LVST mint (its authority is the lvst_authority PDA); claimer_lvst is its ATA. */
+  lvstMint: Address
+  vaultId: Hex32
+  side: number
+}
+
+/** claim_loss_lvst: a losing position mints LVST against its vault-read loss basis (owner-gated). */
+export async function buildClaimLossLvstIx(input: ClaimLossLvstInput): Promise<Instruction> {
+  const [protocolState, position, lvstAuthority, claimerLvst] = await Promise.all([
+    findProtocolStatePda(input.programId, input.marketId).then(first),
+    findPositionPda(input.programId, input.tokenId).then(first),
+    findLvstAuthorityPda(input.programId).then(first),
+    findAta(input.claimer, input.lvstMint).then(first),
+  ])
+  return {
+    programAddress: input.programId,
+    accounts: [
+      readonlySigner(input.claimer),
+      writable(protocolState),
+      readonly(position),
+      readonly(lvstAuthority),
+      writable(input.lvstMint),
+      writable(claimerLvst),
+      readonly(TOKEN_PROGRAM_ADDRESS),
+    ],
+    data: encodeData('claim_loss_lvst', enc(id32, bytesFromHex32(input.vaultId)), enc(u8, input.side)),
+  }
+}
+
+export interface StakeLvstInput extends MarketScoped {
+  staker: Address
+  /** The canonical LVST mint (key-checked against the registry); staker_lvst is its ATA. */
+  lvstMint: Address
+  amount: bigint
+}
+
+/** stake_lvst: stake LVST into the per-market escrow to earn dividends (lazily inits the escrow). */
+export async function buildStakeLvstIx(input: StakeLvstInput): Promise<Instruction> {
+  const [protocolState, registry, lvstEscrow, stakerLvst] = await Promise.all([
+    findProtocolStatePda(input.programId, input.marketId).then(first),
+    findRegistryPda(input.programId).then(first),
+    findLvstEscrowPda(input.programId, input.marketId).then(first),
+    findAta(input.staker, input.lvstMint).then(first),
+  ])
+  return {
+    programAddress: input.programId,
+    accounts: [
+      writableSigner(input.staker),
+      writable(protocolState),
+      readonly(registry),
+      readonly(input.lvstMint),
+      writable(lvstEscrow),
+      writable(stakerLvst),
+      readonly(TOKEN_PROGRAM_ADDRESS),
+      readonly(SYSTEM_PROGRAM_ADDRESS),
+    ],
+    data: encodeData('stake_lvst', enc(u64, input.amount)),
+  }
+}
+
+export interface UnstakeLvstInput extends MarketScoped {
+  staker: Address
+  /** The canonical LVST mint (binds the escrow); staker_lvst is its ATA. */
+  lvstMint: Address
+  amount: bigint
+}
+
+/** unstake_lvst: withdraw staked LVST from the per-market escrow (paid out by the protocol PDA). */
+export async function buildUnstakeLvstIx(input: UnstakeLvstInput): Promise<Instruction> {
+  const [protocolState, lvstEscrow, stakerLvst] = await Promise.all([
+    findProtocolStatePda(input.programId, input.marketId).then(first),
+    findLvstEscrowPda(input.programId, input.marketId).then(first),
+    findAta(input.staker, input.lvstMint).then(first),
+  ])
+  return {
+    programAddress: input.programId,
+    accounts: [
+      readonlySigner(input.staker),
+      writable(protocolState),
+      readonly(input.lvstMint),
+      writable(lvstEscrow),
+      writable(stakerLvst),
+      readonly(TOKEN_PROGRAM_ADDRESS),
+    ],
+    data: encodeData('unstake_lvst', enc(u64, input.amount)),
+  }
+}
+
+export interface ClaimDividendsInput extends MarketScoped {
+  staker: Address
+  usdcMint: Address
+}
+
+/** claim_dividends: a staker claims their accrued USDC dividends out of the shared escrow. */
+export async function buildClaimDividendsIx(input: ClaimDividendsInput): Promise<Instruction> {
+  const [protocolState, escrow, stakerUsdc] = await Promise.all([
+    findProtocolStatePda(input.programId, input.marketId).then(first),
+    findEscrowPda(input.programId, input.marketId).then(first),
+    findUsdcAta(input.staker, input.usdcMint).then(first),
+  ])
+  return {
+    programAddress: input.programId,
+    accounts: [
+      readonlySigner(input.staker),
+      writable(protocolState),
+      writable(escrow),
+      writable(stakerUsdc),
+      readonly(TOKEN_PROGRAM_ADDRESS),
+    ],
+    data: encodeData('claim_dividends'),
   }
 }

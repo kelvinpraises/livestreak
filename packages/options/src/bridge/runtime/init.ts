@@ -58,7 +58,11 @@ export const optionsSolanaAddressesFromInit = (
   contracts: Readonly<Record<string, string>>
 ): OptionsSolanaAddresses => ({
   programId: requireContract(contracts, "programId"),
-  usdcMint: requireContract(contracts, "usdcMint")
+  usdcMint: requireContract(contracts, "usdcMint"),
+  // Optional: the loss-mint path needs it, but keep bootstrap valid on bags that omit it.
+  ...(contracts.lvstMint === undefined || contracts.lvstMint.trim().length === 0
+    ? {}
+    : { lvstMint: contracts.lvstMint.trim() })
 });
 
 export const optionsChainConfigFromPackageInit = (

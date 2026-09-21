@@ -10,6 +10,7 @@ export const localnetDeployment: SolanaDeployment = {
   programId: "CZnAfgbnbVtuXDRQynwL9XMHqeQ7wngbodRihGLbErK8",
   accounts: {
     usdcMint: "JAzfncsWDGhTFRbfuD6frApgtCEhKkLjq9LhRBErP9Zd",
+    lvstMint: "11111111111111111111111111111111",
     registry: "GgDkEWEaxPGpqi8DkFuH6EVUTL7k9g2YL9wG2Ahj6PNv",
     defaultSteward: "5QgNMwSCV3fCLhgnxvNgeRnffCWjY7Hqbb1TCq6Jfw2U",
   },

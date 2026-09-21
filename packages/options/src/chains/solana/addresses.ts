@@ -8,10 +8,13 @@ import { address } from "@livestreak/wallet";
 
 // Canonical Solana addresses for the options leg this phase: the deployed livestreak program id and
 // the USDC SPL mint. Both base58 (32-byte pubkeys). Escrow/protocol/position accounts are PDAs
-// derived from these, so nothing else needs configuring.
+// derived from these, so nothing else needs configuring. The LVST reward-token mint is OPTIONAL:
+// only the loss-mint path (claimLossLvst) needs it, and older configs predate it — methods that
+// require it fail typed when it is absent, everything else stays valid without it.
 export type OptionsSolanaAddresses = {
   readonly programId: string;
   readonly usdcMint: string;
+  readonly lvstMint?: string;
 };
 
 const validateBase58 = (value: unknown, field: string): string => {
@@ -36,5 +39,7 @@ export const validateOptionsSolanaAddresses = (
   ids: OptionsSolanaAddresses
 ): OptionsSolanaAddresses => ({
   programId: validateBase58(ids?.programId, "programId"),
-  usdcMint: validateBase58(ids?.usdcMint, "usdcMint")
+  usdcMint: validateBase58(ids?.usdcMint, "usdcMint"),
+  // Optional: validate only when present so existing { programId, usdcMint } configs stay valid.
+  ...(ids?.lvstMint === undefined ? {} : { lvstMint: validateBase58(ids.lvstMint, "lvstMint") })
 });

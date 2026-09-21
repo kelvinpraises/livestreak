@@ -6,6 +6,7 @@ import {
   address,
   buildCreateAtaIdempotentIx,
   buildCreateVaultSeededIx,
+  buildGrowProtocolIx,
   buildLivestreakTransaction,
   createSolanaRpc,
   createWalletManager,
@@ -114,15 +115,33 @@ export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): Bookm
         rate,
         deposit
       });
-      const tx = buildLivestreakTransaction([ensureAta, ix]);
+      const buildTx = (): unknown => buildLivestreakTransaction([ensureAta, ix]);
 
+      // One-shot StateFull recovery: a full protocol blob rejects a new vault with the typed,
+      // permissionlessly-recoverable `StateFull` fault. The fix is the permissionless grow_protocol
+      // ix (payer = creator), which reallocs the market's engine-state blob one +10_240-byte rung;
+      // then retry the createVault ONCE. Bounded — surface the original error if the retry still
+      // fails. (VaultBoardBehind is a per-vault-board fault that createVault cannot raise: it seeds
+      // a brand-new board, there are no elapsed funder boundaries to catch up on.)
       let sendResult: { hash: string };
       try {
-        sendResult = await account.sendTransaction(tx);
+        sendResult = await account.sendTransaction(buildTx());
       } catch (error) {
-        throw new LiveStreakRuntimeError({
-          message: `Solana createVault failed: ${error instanceof Error ? error.message : String(error)}`
-        });
+        if (detectSolanaCapacityError(error) !== "StateFull") {
+          throw new LiveStreakRuntimeError({
+            message: `Solana createVault failed: ${error instanceof Error ? error.message : String(error)}`
+          });
+        }
+        try {
+          const grow = await buildGrowProtocolIx({ programId, marketId, payer: owner });
+          const growResult = await account.sendTransaction(buildLivestreakTransaction([grow]));
+          await pollUntilUserOperationIncluded(readOnly, growResult.hash);
+          sendResult = await account.sendTransaction(buildTx());
+        } catch (retryError) {
+          throw new LiveStreakRuntimeError({
+            message: `Solana createVault failed after grow_protocol recovery: ${retryError instanceof Error ? retryError.message : String(retryError)}`
+          });
+        }
       }
 
       await pollUntilUserOperationIncluded(readOnly, sendResult.hash);
@@ -196,6 +215,37 @@ const pollUntilUserOperationIncluded = async (
       message: error instanceof Error ? error.message : String(error)
     });
   }
+};
+
+// The engine's typed, recoverable capacity fault for vault origination: a full protocol blob rejects
+// a new vault as `StateFull`. Anchor formats it as `Program log: AnchorError ... Error Code: StateFull
+// ...` and the kit hangs those preflight lines on the error's `context.logs`. Flatten the message/cause
+// chain PLUS any context.logs into one haystack and match the anchor error NAME. (VaultBoardBehind is
+// listed for symmetry with the options writer but createVault seeds a fresh board and cannot raise it.)
+// Pure + exported for unit tests. Self-contained per package — the writers share no module.
+export type SolanaCapacityError = "StateFull" | "VaultBoardBehind";
+
+export const detectSolanaCapacityError = (error: unknown): SolanaCapacityError | undefined => {
+  const parts: string[] = [];
+  let cur: unknown = error;
+  for (let depth = 0; cur !== undefined && cur !== null && depth < 8; depth += 1) {
+    if (typeof cur === "string") {
+      parts.push(cur);
+      break;
+    }
+    if (cur instanceof Error) {
+      parts.push(cur.message);
+      cur = (cur as { cause?: unknown }).cause;
+      continue;
+    }
+    parts.push(String(cur));
+    break;
+  }
+  const logs = (error as { context?: { logs?: readonly string[] } } | null)?.context?.logs ?? [];
+  const haystack = [...parts, ...logs].join(" ");
+  if (haystack.includes("StateFull")) return "StateFull";
+  if (haystack.includes("VaultBoardBehind")) return "VaultBoardBehind";
+  return undefined;
 };
 
 const requireHex32 = (id: string, field: string): string => {

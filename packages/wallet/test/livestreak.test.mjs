@@ -7,20 +7,28 @@ import { livestreakIdl } from '@livestreak/contracts/solana'
 import {
   address,
   buildAdvanceIx,
+  buildClaimDividendsIx,
+  buildClaimLossLvstIx,
   buildCollectIx,
   buildCreateVaultSeededIx,
   buildFundIx,
   buildGoLiveIx,
+  buildGrowProtocolIx,
   buildInitProtocolIx,
   buildInitializeIx,
   buildMintPositionIx,
   buildRegisterMarketIx,
   buildResolveIx,
   buildSetEndedIx,
+  buildSetLanesIx,
   buildSetMarketStewardIx,
   buildSetDefaultStewardIx,
+  buildStakeLvstIx,
   buildStopAllIx,
+  buildStopFundingIx,
   buildStopSeedIx,
+  buildTransferPositionIx,
+  buildUnstakeLvstIx,
   buildWithdrawIx,
   buildWithdrawSeedIx,
   computeMarketId,
@@ -37,6 +45,7 @@ const PROGRAM_ID = address('CZnAfgbnbVtuXDRQynwL9XMHqeQ7wngbodRihGLbErK8')
 const STEWARD = address('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
 const USER = address('So11111111111111111111111111111111111111112')
 const USDC = address('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v')
+const LVST_MINT = address('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
 const ID_A = '0x' + '11'.repeat(32)
 const ID_B = '0x' + '22'.repeat(32)
 
@@ -56,9 +65,11 @@ const idlByName = Object.fromEntries(livestreakIdl.instructions.map((ix) => [ix.
 
 // One representative invocation per IDL instruction name.
 const built = {
-  initialize: () => buildInitializeIx({ programId: PROGRAM_ID, payer: USER, defaultSteward: STEWARD }),
+  initialize: () =>
+    buildInitializeIx({ programId: PROGRAM_ID, payer: USER, defaultSteward: STEWARD, lvstMint: LVST_MINT }),
   init_protocol: () =>
     buildInitProtocolIx({ programId: PROGRAM_ID, marketId: ID_A, payer: USER, usdcMint: USDC, capacity: 9000 }),
+  grow_protocol: () => buildGrowProtocolIx({ programId: PROGRAM_ID, marketId: ID_A, payer: USER }),
   register_market: () =>
     buildRegisterMarketIx({
       programId: PROGRAM_ID,
@@ -113,15 +124,63 @@ const built = {
   advance: () =>
     buildAdvanceIx({ programId: PROGRAM_ID, marketId: ID_A, vaultId: ID_A, side: 0, maxSteps: 10n }),
   collect: () => buildCollectIx({ programId: PROGRAM_ID, marketId: ID_A, vaultId: ID_A }),
+  transfer_position: () =>
+    buildTransferPositionIx({ programId: PROGRAM_ID, owner: USER, tokenId: ID_B, newOwner: STEWARD }),
+  stop_funding: () =>
+    buildStopFundingIx({ programId: PROGRAM_ID, marketId: ID_A, user: USER, tokenId: ID_B, vaultId: ID_A, side: 0 }),
+  set_lanes: () =>
+    buildSetLanesIx({
+      programId: PROGRAM_ID,
+      marketId: ID_A,
+      user: USER,
+      tokenId: ID_B,
+      usdcMint: USDC,
+      lanes: [
+        { vaultId: ID_A, side: 0, rate: 7_000_000n },
+        { vaultId: ID_B, side: 1, rate: 3_000_000n },
+      ],
+      addDeposit: 500_000_000n,
+    }),
+  claim_loss_lvst: () =>
+    buildClaimLossLvstIx({
+      programId: PROGRAM_ID,
+      marketId: ID_A,
+      claimer: USER,
+      tokenId: ID_B,
+      lvstMint: LVST_MINT,
+      vaultId: ID_A,
+      side: 1,
+    }),
+  stake_lvst: () =>
+    buildStakeLvstIx({ programId: PROGRAM_ID, marketId: ID_A, staker: USER, lvstMint: LVST_MINT, amount: 1_000_000n }),
+  unstake_lvst: () =>
+    buildUnstakeLvstIx({ programId: PROGRAM_ID, marketId: ID_A, staker: USER, lvstMint: LVST_MINT, amount: 250_000n }),
+  claim_dividends: () =>
+    buildClaimDividendsIx({ programId: PROGRAM_ID, marketId: ID_A, staker: USER, usdcMint: USDC }),
 }
 
 describe('livestreak instruction builders', () => {
-  it('initialize data == deploy encoding (disc + steward pubkey)', async () => {
+  it('initialize data == deploy encoding (disc + steward pubkey + lvst mint pubkey)', async () => {
     const ix = await built.initialize()
     const disc = Uint8Array.from([175, 175, 109, 31, 13, 152, 155, 237])
-    const expected = new Uint8Array([...disc, ...bytesOf(STEWARD)])
+    const expected = new Uint8Array([...disc, ...bytesOf(STEWARD), ...bytesOf(LVST_MINT)])
     assert.deepEqual(ix.data, expected)
-    assert.equal(ix.data.length, 40)
+    assert.equal(ix.data.length, 72)
+  })
+
+  it('set_lanes data == borsh(disc + Vec<LaneArg> + add_deposit)', async () => {
+    const ix = await built.set_lanes()
+    const u32le = (n) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]
+    const u64of = (n) => Array.from(u64le.encode(n))
+    const expected = new Uint8Array([
+      ...idlByName['set_lanes'].discriminator, // 8-byte anchor disc
+      ...u32le(2), // Vec<LaneArg> length prefix (u32-LE)
+      ...Array(32).fill(0x11), 0, ...u64of(7_000_000n), // lane 0: vault ID_A, side 0, rate
+      ...Array(32).fill(0x22), 1, ...u64of(3_000_000n), // lane 1: vault ID_B, side 1, rate
+      ...u64of(500_000_000n), // add_deposit (u64-LE)
+    ])
+    assert.deepEqual(ix.data, expected)
+    assert.equal(ix.data.length, 8 + 4 + 41 * 2 + 8) // disc + veclen + 2×(32+1+8) + u64
   })
 
   it('every instruction matches its IDL discriminator + account count/order', async () => {
@@ -199,11 +258,13 @@ describe('livestreak account decoders', () => {
       ...u64le.encode(7n),
       ...bytesOf(STEWARD),
       9,
+      ...bytesOf(LVST_MINT), // lvst_mint appended last
     ])
     const acc = decodeRegistryAccount(bytes)
     assert.equal(acc.marketCount, 7n)
     assert.equal(acc.defaultSteward, STEWARD)
     assert.equal(acc.bump, 9)
+    assert.equal(acc.lvstMint, LVST_MINT)
   })
 
   it('round-trips a MarketIndex account', () => {

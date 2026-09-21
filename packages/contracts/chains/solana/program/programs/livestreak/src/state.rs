@@ -9,6 +9,11 @@ pub struct Registry {
     pub market_count: u64,
     pub default_steward: Pubkey,
     pub bump: u8,
+    /// Canonical LVST reward-token mint, recorded at the deployer-trusted `initialize`.
+    /// Staking constrains the staked mint against this so a fake-mint stake can't later
+    /// extract real USDC dividends. Placed LAST so market_count/default_steward/bump keep
+    /// their byte offsets (wire.ts decodes default_steward at 16..48); InitSpace adds 32.
+    pub lvst_mint: Pubkey,
 }
 
 /// One market. PDA: ["market", market_id]. market_id = keccak256(creator ++ stream_id),

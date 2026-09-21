@@ -80,6 +80,12 @@ public fun balances<T>(registry: &DripsRegistry<T>): (u128, u128) {
     (registry.streams_balance, registry.collectable_balance)
 }
 
+/// The cycle length (seconds) every DripsRegistry is created with (see `create_drips_registry`), and
+/// therefore the streams registry's `cycle_secs`. Canonical source for the vault settlement gate.
+public fun default_cycle_secs(): u64 {
+    DEFAULT_CYCLE_SECS
+}
+
 public fun held_balance<T>(registry: &DripsRegistry<T>): u128 {
     coin::value(&registry.vault) as u128
 }

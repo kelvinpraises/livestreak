@@ -46,6 +46,7 @@ export interface RegistryAccount {
   marketCount: bigint
   defaultSteward: Address
   bump: number
+  lvstMint: Address
 }
 export interface MarketAccount {
   marketId: Hex32
@@ -80,6 +81,8 @@ const registryBody = getStructDecoder([
   ['marketCount', getU64Decoder()],
   ['defaultSteward', getAddressDecoder()],
   ['bump', getU8Decoder()],
+  // lvst_mint is appended last in the account (keeps the older field offsets stable).
+  ['lvstMint', getAddressDecoder()],
 ])
 
 const marketBody = getStructDecoder([

@@ -20,6 +20,12 @@ interface IVaultDriver {
     function usdc() external view returns (IERC20);
 }
 
+/// @dev Streaming cycle clock. Drips only makes a cycle's USDC collectable once that cycle's boundary
+/// has fully elapsed, so payouts must wait for the boundary enclosing `resolvedAt` to close.
+interface IDripsCycle {
+    function CYCLE_SECS() external view returns (uint32);
+}
+
 /// @title Vault — binary YES/NO pool state under one market, with the streamed-funding Board.
 ///
 /// @notice Owns per-side pricing (the Board), per-funder positions, and the resolution skeleton.
@@ -128,6 +134,11 @@ contract Vault {
     event OverageRecorded(bytes32 indexed vaultId, Side indexed side, uint256 indexed account, uint256 amount);
     event OverageReclaimed(bytes32 indexed vaultId, Side indexed side, uint256 indexed account, uint256 amount);
     event Withdrawn(bytes32 indexed vaultId, uint256 indexed account, address indexed payee, uint256 amount);
+
+    /// @dev Winnings are payable only once the Drips cycle enclosing `resolvedAt` has closed and its
+    /// USDC is collectable. Raised by `withdraw` before then instead of letting the transfer revert
+    /// with a raw ERC20 insufficient-balance error. `readyAt` is the first timestamp payout is possible.
+    error SettlementPending(uint256 readyAt);
 
     constructor(Protocol protocol_) {
         require(address(protocol_) != address(0), "Vault: zero protocol");
@@ -686,6 +697,15 @@ contract Vault {
 
         Side winning = data.outcome == Outcome.Yes ? Side.Yes : Side.No;
         uint32 resolvedAt = data.resolvedAt;
+
+        // The pot froze from Board truth at `resolvedAt`, but Drips only releases a cycle's USDC after
+        // that cycle's boundary elapses. Pay before then and `usdc.safeTransfer` reverts deep in the
+        // ERC20 with an illegible insufficient-balance error. Make the wait explicit: readyAt is the
+        // boundary enclosing `resolvedAt` (ceil to the cycle). An exact-boundary resolvedAt is already
+        // past its boundary, so readyAt == resolvedAt and payout is immediate. cycleSecs > 1 (Streams).
+        uint256 cycleSecs = uint256(IDripsCycle(protocol.dripsStreaming()).CYCLE_SECS());
+        uint256 readyAt = ((uint256(resolvedAt) + cycleSecs - 1) / cycleSecs) * cycleSecs;
+        if (block.timestamp < readyAt) revert SettlementPending(readyAt);
 
         _advance(vaultId, Side.Yes, type(uint256).max);
         _advance(vaultId, Side.No, type(uint256).max);

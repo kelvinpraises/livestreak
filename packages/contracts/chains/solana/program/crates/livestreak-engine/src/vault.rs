@@ -15,6 +15,35 @@ pub const MAX_STEPS: u64 = 64;
 pub const BPS_DENOM: u128 = 10_000;
 pub const UNLIMITED_STEPS: u64 = 1_000_000;
 
+/// Ceiling on the boundary-pops an *implicit* catch-up (the fund / stop / refresh /
+/// collect / withdraw paths that touch a vault) will replay in a single instruction
+/// before bailing out with [`VaultError::BoardBehind`]. The explicit
+/// permissionless `advance(vault_id, side, max_steps)` entrypoint is the *uncapped*
+/// drain: a caller that hits this error advances the backlog down with repeated
+/// bounded `advance` calls, then retries the op.
+///
+/// Unit of work: a "step" here is one boundary-pop in `advance_internal` — one
+/// scheduled funder `max_end` settled, each *live* one costing a `seg_math`
+/// (the ~59-iteration u128 `ln` kernel + U256 curve/settle math, the dominant per-op
+/// CU term). Elapsed wall-clock time is NOT a step: a board with no pending
+/// boundaries catches up in one tail `seg_math` no matter how many hours it idled, so
+/// the runaway cost the Phase-3 OOMs hit is the *count of elapsed funder boundaries*,
+/// not the number of 10s cycles.
+///
+/// Value = `MAX_STEPS` (64): exactly one `advance_internal` batch. That batch size is
+/// the CU envelope the engine already trusts to fit one instruction (it is the
+/// per-call cap `advance_internal`/`settle` run under today, proven green on real
+/// sbpf-v3), so an implicit catch-up bounded to a single batch per side inherits that
+/// proven envelope rather than inventing a new CU assumption. `collect`/`withdraw`
+/// touch both sides, i.e. at most two batches per instruction — still a small
+/// multiple of one proven-safe `advance_internal`, comfortably inside the 1.4M CU /
+/// 256KB heap ceiling alongside state (de)serialization and the receiver harvest.
+/// Realistic markets settle with single- to low-double-digit elapsed boundaries per
+/// side (the existing suites warp 60–120s with a handful of funders → a few
+/// boundaries), so 64 clears every normal test/demo with margin and only a
+/// pathological market with dozens+ of elapsed funder boundaries on one side trips it.
+pub const MAX_IMPLICIT_CATCHUP_STEPS: u64 = MAX_STEPS;
+
 pub const STATUS_OPEN: u8 = 0;
 pub const STATUS_LOCKED: u8 = 2;
 pub const STATUS_RESOLVED: u8 = 3;
@@ -628,6 +657,56 @@ impl VaultRegistry {
     pub fn join_usdc(&mut self, amount: u128) {
         self.usdc_held += amount;
     }
+
+    /// Settled-state compaction: delete storage that can PROVABLY never be read
+    /// again. Idempotent and view-preserving — every surviving read (engine + wasm
+    /// views) returns byte-identical results. Only the two classes below are dead;
+    /// positions/boards/boundary-suffix stay (they still back loss-mint, winnings,
+    /// overage, and the get_boundaries live-pool view).
+    pub fn compact(&mut self) {
+        // (1) Boundary-queue prefix [0, head). Once advance_internal moves a board's
+        //     boundary head past an entry it is unreachable: advance_internal iterates
+        //     from `head` (advance loop + more_due check), get_boundaries does
+        //     `skip(head)`, pending_boundaries is `len - head`, and schedule_boundary
+        //     only bubble-sorts new entries within [head, len). Dropping the prefix and
+        //     resetting head to 0 leaves the live suffix — and every view over it —
+        //     unchanged. This is the boundary analog of receive_streams' amt_deltas
+        //     delete; the schedule grows monotonically as funders deplete / refresh
+        //     max_ends, so the dead prefix is the dominant lingering crumb.
+        let heads: Vec<((VaultId, u8), u64)> = self
+            .boundary_heads
+            .iter()
+            .filter(|(_, &h)| h > 0)
+            .map(|(k, &h)| (*k, h))
+            .collect();
+        for (key, head) in heads {
+            if let Some(list) = self.boundaries.get_mut(&key) {
+                let head = (head as usize).min(list.len());
+                list.drain(0..head);
+            }
+            self.boundary_heads.insert(key, 0);
+        }
+
+        // (2) Fully-settled overage crumbs. A ZERO overage_owed marks a rate==0
+        //     position whose post-resolution overage was paid in full: on_stop only
+        //     ever inserts a POSITIVE owed, and pay_overage zeroes it after paying the
+        //     whole entitlement. pay_overage's rate==0 branch reads overage_owed and
+        //     overage_paid via unwrap_or(ZERO), and a resolved vault can never re-fund
+        //     (on_fund requires STATUS_OPEN), so both maps read identically whether the
+        //     entry is ZERO or absent — the pair is dead. rate>0 positions keep
+        //     overage_paid: their entitlement still grows with time.
+        let dead: Vec<(VaultId, u8, AccountId)> = self
+            .overage_owed
+            .iter()
+            .filter(|(_, v)| **v == U256::ZERO)
+            .map(|(k, _)| *k)
+            .filter(|k| self.positions.get(k).map(|p| p.rate == U256::ZERO).unwrap_or(true))
+            .collect();
+        for key in dead {
+            self.overage_owed.remove(&key);
+            self.overage_paid.remove(&key);
+        }
+    }
 }
 
 // ── Internal helpers (Move segment/settle/boundary/advance/pot machinery) ───────
@@ -691,15 +770,56 @@ impl VaultRegistry {
         self.board_caught_up(vault_id, side, now)
     }
 
-    fn advance_to_now(&mut self, vault_id: &VaultId, side: u8, now: u64) -> VaultResult<()> {
-        self.advance_internal(vault_id, side, MAX_STEPS, now);
-        if !self.board_caught_up(vault_id, side, now) {
-            return Err(VaultError::BoardBehind);
+    /// Boundary-pops an implicit catch-up would replay to reach `now` — the exact step
+    /// count `advance_internal` executes (one pop per scheduled `max_end` at or before
+    /// the capped target; the queue is sorted ascending past the head, so the due
+    /// entries are a contiguous prefix). Pure read, no board mutation — cheap enough to
+    /// gate on *before* committing to the replay, which is what keeps a cap-exceeding
+    /// call free of partial mutation.
+    fn pending_catchup_steps(&self, vault_id: &VaultId, side: u8, now: u64) -> u64 {
+        let key = (*vault_id, side);
+        let Some(board) = self.boards.get(&key) else {
+            return 0;
+        };
+        // A fresh board's first advance only initializes last_advance; it pops nothing.
+        if board.last_advance == 0 {
+            return 0;
         }
-        Ok(())
+        let resolved_at = self.vaults.get(vault_id).map(|v| v.resolved_at).unwrap_or(0);
+        let mut now_cap = now;
+        if resolved_at != 0 && resolved_at < now_cap {
+            now_cap = resolved_at;
+        }
+        let Some(list) = self.boundaries.get(&key) else {
+            return 0;
+        };
+        let head = self.boundary_heads.get(&key).copied().unwrap_or(0) as usize;
+        let mut count = 0u64;
+        for boundary in list.iter().skip(head) {
+            if boundary.max_end > now_cap {
+                break;
+            }
+            count += 1;
+        }
+        count
+    }
+
+    /// Bounded implicit catch-up used by every vault-touching op (fund/stop/refresh/
+    /// collect/withdraw). Refuses — typed `BoardBehind`, board byte-identical — when
+    /// the replay would exceed [`MAX_IMPLICIT_CATCHUP_STEPS`]; the caller drains the
+    /// backlog first via the uncapped `advance(max_steps)` entrypoint. Because the
+    /// step count is read *before* any `advance_internal` call, a cap-exceeding op
+    /// escapes with no partial mutation.
+    fn advance_to_now(&mut self, vault_id: &VaultId, side: u8, now: u64) -> VaultResult<()> {
+        self.catch_up_side(vault_id, side, now)
     }
 
     fn catch_up_side(&mut self, vault_id: &VaultId, side: u8, now: u64) -> VaultResult<()> {
+        // Gate on the pending-work count BEFORE mutating: a badly-behind board bails
+        // here with the board untouched, rather than half-advancing then erroring.
+        if self.pending_catchup_steps(vault_id, side, now) > MAX_IMPLICIT_CATCHUP_STEPS {
+            return Err(VaultError::BoardBehind);
+        }
         let mut guard = 0u64;
         while !self.board_caught_up(vault_id, side, now) && guard < UNLIMITED_STEPS {
             self.advance_internal(vault_id, side, MAX_STEPS, now);

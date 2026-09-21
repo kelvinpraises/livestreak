@@ -937,6 +937,57 @@ fun test_claimable_matches_withdraw_after_collect() {
     ts::end(scenario);
 }
 
+/// Settlement gate: a resolve at a NON-boundary timestamp (resolved_at=155 -> ready_at=160) means
+/// delivered cash is not collectable until the next drips cycle boundary. A withdraw before it aborts
+/// with E_SETTLEMENT_PENDING (vault code 14) instead of failing illegibly in the payment path.
+#[test, expected_failure(abort_code = 14)]
+fun test_withdraw_before_cycle_boundary_aborts() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (_market_id, v1, _alice_token, _bob_token) = setup_fixture(&mut scenario, &clock);
+    wire::setup_steward(&mut scenario, wire::admin(), wire::steward());
+
+    fund_holder(&mut scenario, wire::alice(), v1, side::yes(), wire::rate(), deposit_units(50), &clock);
+    fund_holder(&mut scenario, wire::bob(), v1, side::no(), wire::rate(), deposit_units(50), &clock);
+
+    // resolve at start+55 = 155 (off the cycle grid) -> ready_at = ceil(155/10)*10 = 160
+    wire::warp(&mut clock, wire::start_secs() + 55);
+    wire::resolve_vault(&mut scenario, wire::steward(), v1, true, &clock);
+    wire::collect_vault(&mut scenario, v1, &clock);
+
+    // clock still 155 < 160 -> withdraw must abort E_SETTLEMENT_PENDING
+    wire::withdraw_market(&mut scenario, wire::alice(), v1, &clock);
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+/// Same off-boundary resolve, but the clock is advanced onto the boundary before withdrawing: the gate
+/// opens (now=160 >= ready_at=160) and the winner is paid.
+#[test]
+fun test_withdraw_at_cycle_boundary_succeeds() {
+    let mut scenario = ts::begin(wire::admin());
+    let mut clock = wire::new_clock(&mut scenario, wire::admin(), wire::start_secs());
+    let (_market_id, v1, _alice_token, _bob_token) = setup_fixture(&mut scenario, &clock);
+    wire::setup_steward(&mut scenario, wire::admin(), wire::steward());
+
+    fund_holder(&mut scenario, wire::alice(), v1, side::yes(), wire::rate(), deposit_units(50), &clock);
+    fund_holder(&mut scenario, wire::bob(), v1, side::no(), wire::rate(), deposit_units(50), &clock);
+
+    wire::warp(&mut clock, wire::start_secs() + 55);
+    wire::resolve_vault(&mut scenario, wire::steward(), v1, true, &clock);
+    wire::collect_vault(&mut scenario, v1, &clock);
+
+    // advance onto the ready_at boundary (160), collect the cycle tail, then withdraw succeeds
+    wire::warp(&mut clock, 160);
+    wire::collect_vault(&mut scenario, v1, &clock);
+    let paid = wire::withdraw_market(&mut scenario, wire::alice(), v1, &clock);
+    assert!(paid > 0, 0);
+
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
 /// claimable returns 0 when vault is not yet resolved.
 #[test]
 fun test_claimable_zero_before_resolution() {

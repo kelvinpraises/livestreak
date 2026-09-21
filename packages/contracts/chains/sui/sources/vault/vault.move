@@ -36,6 +36,9 @@ const E_NOT_RESOLVED: u64 = 10;
 const E_BOARD_BEHIND: u64 = 11;
 const E_DIV_ZERO: u64 = 12;
 const E_INSUFFICIENT_USDC: u64 = 13;
+// A resolved vault's delivered cash only becomes collectable after the next drips cycle boundary.
+// `withdraw` aborts with this until now >= ceil(resolved_at / cycle_secs) * cycle_secs.
+const E_SETTLEMENT_PENDING: u64 = 14;
 
 public struct VaultRegistry<phantom T> has key {
     id: UID,
@@ -789,6 +792,14 @@ public(package) fun withdraw<T>(
     };
     let resolved_at = data.resolved_at;
 
+    // Settlement gate: the pot froze from board truth at `resolved_at`, but delivered stream cash only
+    // becomes collectable after the next drips cycle boundary. Refuse (with a legible abort) until the
+    // boundary passes, rather than failing illegibly deep in the payment path. Boundary-aligned
+    // `resolved_at` => ready_at == resolved_at => payable immediately.
+    let cycle_secs = drips::default_cycle_secs();
+    let ready_at = ceil_to_cycle(resolved_at, cycle_secs);
+    assert!(timestamp_secs(clock) >= ready_at, E_SETTLEMENT_PENDING);
+
     catch_up_side(registry, vault_id, side::yes(), clock);
     catch_up_side(registry, vault_id, side::no(), clock);
 
@@ -862,6 +873,15 @@ fun empty_position(): Position {
 
 fun timestamp_secs(clock: &Clock): u64 {
     sui::clock::timestamp_ms(clock) / 1000
+}
+
+/// Smallest cycle boundary >= `ts` (ceiling division onto the cycle grid). `ts` already on a boundary
+/// returns `ts`. `cycle_secs == 0` (never reachable — the streams registry forbids it) returns `ts`.
+fun ceil_to_cycle(ts: u64, cycle_secs: u64): u64 {
+    if (cycle_secs == 0) {
+        return ts
+    };
+    ((ts + cycle_secs - 1) / cycle_secs) * cycle_secs
 }
 
 fun compute_vault_id(

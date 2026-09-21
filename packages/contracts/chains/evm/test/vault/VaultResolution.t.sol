@@ -270,6 +270,31 @@ contract VaultResolutionTest is Test {
         assertEq(marketDriver.withdraw(aliceNft, v1, address(0)), 10 * RATE, "succeeds once cash is in");
     }
 
+    /// The settlement gate is legible: resolving mid-cycle blocks withdraw with SettlementPending(readyAt)
+    /// until the enclosing cycle boundary elapses, then pays. resolvedAt=105, CYCLE=10 => readyAt=110.
+    function test_withdraw_revertsSettlementPendingUntilBoundary() public {
+        _fund(alice, aliceNft, Side.Yes, RATE, 10 * RATE);
+        _fund(bob, bobNft, Side.No, RATE, 10 * RATE);
+
+        vm.warp(105); // mid-cycle: 105 % CYCLE(10) == 5
+        _resolve(Vault.Outcome.Yes);
+        vm.prank(alice);
+        marketDriver.stop(aliceNft, v1, Side.Yes); // stop lanes so no live overage clouds the assertion
+        vm.prank(bob);
+        marketDriver.stop(bobNft, v1, Side.No);
+        vault.collect(v1);
+
+        uint256 readyAt = 110; // ceil(105 / 10) * 10
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(Vault.SettlementPending.selector, readyAt));
+        marketDriver.withdraw(aliceNft, v1, address(0));
+
+        vm.warp(readyAt); // exactly at the boundary — now payable
+        vault.collect(v1); // harvest the completed cycle's cash
+        vm.prank(alice);
+        assertEq(marketDriver.withdraw(aliceNft, v1, address(0)), 10 * RATE, "winner paid at readyAt");
+    }
+
     function test_overageRefundedViaWithdrawWithoutStop() public {
         _fund(alice, aliceNft, Side.Yes, RATE, 50 * RATE);
         _fund(bob, bobNft, Side.No, RATE, 50 * RATE);

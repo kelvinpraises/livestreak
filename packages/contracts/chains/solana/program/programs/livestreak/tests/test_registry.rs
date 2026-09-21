@@ -66,7 +66,9 @@ impl Harness {
     fn initialize(&mut self, default_steward: Pubkey) {
         let ix = Instruction::new_with_bytes(
             self.program_id,
-            &livestreak::instruction::Initialize { default_steward }.data(),
+            // No LVST mint under test here — record the zero pubkey (staking is not exercised).
+            &livestreak::instruction::Initialize { default_steward, lvst_mint: Pubkey::default() }
+                .data(),
             livestreak::accounts::Initialize {
                 payer: self.payer.pubkey(),
                 registry: self.registry_pda(),

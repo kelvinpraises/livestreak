@@ -61,7 +61,8 @@ async function main(): Promise<void> {
   if (args.steward) {
     const steward = new PublicKey(args.steward);
     const [registry] = PublicKey.findProgramAddressSync([Buffer.from(REGISTRY_SEED)], programId);
-    // Registry layout: 8 disc + market_count u64 + default_steward 32 + bump.
+    // Registry layout: 8 disc + market_count u64 + default_steward 32 + bump + lvst_mint 32.
+    // default_steward stays at 16..48 (lvst_mint is appended last), so this decode is stable.
     const info = await connection.getAccountInfo(registry);
     if (info === null) throw new Error("registry not initialized");
     const current = new PublicKey(info.data.subarray(16, 48));

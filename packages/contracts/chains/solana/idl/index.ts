@@ -56,6 +56,134 @@ export const livestreakIdl = {
       ]
     },
     {
+      "name": "claim_dividends",
+      "discriminator": [
+        105,
+        60,
+        172,
+        2,
+        136,
+        93,
+        128,
+        151
+      ],
+      "accounts": [
+        {
+          "name": "staker",
+          "signer": true
+        },
+        {
+          "name": "protocol_state",
+          "writable": true
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "staker_usdc",
+          "docs": [
+            "The staker's USDC token account. Require-exists (mirrors the other user_usdc ATAs)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "claim_loss_lvst",
+      "discriminator": [
+        106,
+        174,
+        157,
+        64,
+        132,
+        175,
+        142,
+        147
+      ],
+      "accounts": [
+        {
+          "name": "claimer",
+          "signer": true
+        },
+        {
+          "name": "protocol_state",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "docs": [
+            "Ownership gate: the claimer must own the position whose token_id fixes the loss."
+          ]
+        },
+        {
+          "name": "lvst_authority",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  118,
+                  115,
+                  116,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104,
+                  111,
+                  114,
+                  105,
+                  116,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lvst_mint",
+          "docs": [
+            "The canonical LVST mint (its authority must be the lvst_authority PDA)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "claimer_lvst",
+          "docs": [
+            "The claimer's LVST token account. Require-exists (mirrors how the program treats",
+            "user USDC ATAs): the client prepends a createAtaIdempotent for the LVST mint."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "side",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "collect",
       "discriminator": [
         208,
@@ -245,6 +373,35 @@ export const livestreakIdl = {
       ]
     },
     {
+      "name": "grow_protocol",
+      "discriminator": [
+        12,
+        163,
+        83,
+        216,
+        176,
+        210,
+        100,
+        45
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "protocol_state",
+          "writable": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "init_protocol",
       "discriminator": [
         3,
@@ -339,6 +496,10 @@ export const livestreakIdl = {
       "args": [
         {
           "name": "default_steward",
+          "type": "pubkey"
+        },
+        {
+          "name": "lvst_mint",
           "type": "pubkey"
         }
       ]
@@ -619,6 +780,61 @@ export const livestreakIdl = {
       ]
     },
     {
+      "name": "set_lanes",
+      "discriminator": [
+        199,
+        5,
+        232,
+        61,
+        20,
+        92,
+        40,
+        134
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "protocol_state",
+          "writable": true
+        },
+        {
+          "name": "position"
+        },
+        {
+          "name": "escrow",
+          "writable": true
+        },
+        {
+          "name": "user_usdc",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "lanes",
+          "type": {
+            "vec": {
+              "defined": {
+                "name": "LaneArg"
+              }
+            }
+          }
+        },
+        {
+          "name": "add_deposit",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "set_market_steward",
       "discriminator": [
         124,
@@ -676,6 +892,85 @@ export const livestreakIdl = {
       ]
     },
     {
+      "name": "stake_lvst",
+      "discriminator": [
+        129,
+        163,
+        230,
+        235,
+        42,
+        158,
+        89,
+        219
+      ],
+      "accounts": [
+        {
+          "name": "staker",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "protocol_state",
+          "writable": true
+        },
+        {
+          "name": "registry",
+          "docs": [
+            "Read-only registry: the canonical LVST mint lives here (recorded at initialize)."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "lvst_mint"
+        },
+        {
+          "name": "lvst_escrow",
+          "docs": [
+            "Per-market LVST staking escrow, created lazily on the first stake (payer = staker).",
+            "init_if_needed is already an enabled anchor feature; a lazy init keeps this to the",
+            "scoped two instructions (no separate init op / extra client round-trip) and cannot",
+            "be griefed into a bad state — the seeds are fixed and the mint/authority constraints",
+            "are re-checked on every call, so there is no trusted data to corrupt."
+          ],
+          "writable": true
+        },
+        {
+          "name": "staker_lvst",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "stop_all",
       "discriminator": [
         192,
@@ -714,6 +1009,47 @@ export const livestreakIdl = {
         }
       ],
       "args": []
+    },
+    {
+      "name": "stop_funding",
+      "discriminator": [
+        67,
+        127,
+        232,
+        106,
+        65,
+        131,
+        19,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "user",
+          "signer": true
+        },
+        {
+          "name": "protocol_state",
+          "writable": true
+        },
+        {
+          "name": "position"
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "side",
+          "type": "u8"
+        }
+      ]
     },
     {
       "name": "stop_seed",
@@ -759,6 +1095,82 @@ export const livestreakIdl = {
               32
             ]
           }
+        }
+      ]
+    },
+    {
+      "name": "transfer_position",
+      "discriminator": [
+        139,
+        130,
+        102,
+        147,
+        135,
+        77,
+        113,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "owner",
+          "signer": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "new_owner",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "unstake_lvst",
+      "discriminator": [
+        145,
+        44,
+        251,
+        143,
+        99,
+        253,
+        94,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "staker",
+          "signer": true
+        },
+        {
+          "name": "protocol_state",
+          "writable": true
+        },
+        {
+          "name": "lvst_mint"
+        },
+        {
+          "name": "lvst_escrow",
+          "docs": [
+            "Require-exists: you cannot unstake without a prior stake, which created this escrow."
+          ],
+          "writable": true
+        },
+        {
+          "name": "staker_lvst",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
         }
       ]
     },
@@ -993,221 +1405,276 @@ export const livestreakIdl = {
     },
     {
       "code": 6010,
+      "name": "StateAtCapacity",
+      "msg": "protocol state is at its maximum size; cannot grow further"
+    },
+    {
+      "code": 6011,
       "name": "EngineOp",
       "msg": "engine operation failed (see logs)"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "NotSteward",
       "msg": "caller is not the effective steward"
     },
     {
-      "code": 6012,
+      "code": 6013,
       "name": "ConservationViolated",
       "msg": "escrow balance diverged from engine ledgers"
     },
     {
-      "code": 6013,
+      "code": 6014,
+      "name": "SettlementPending",
+      "msg": "settlement pending: winnings payable after the cycle boundary at ready_at"
+    },
+    {
+      "code": 6015,
+      "name": "WrongLvstMint",
+      "msg": "staked mint is not the canonical LVST mint recorded in the registry"
+    },
+    {
+      "code": 6016,
+      "name": "NoDividends",
+      "msg": "no dividends accrued to claim"
+    },
+    {
+      "code": 6017,
+      "name": "ZeroNewOwner",
+      "msg": "new position owner must be non-zero"
+    },
+    {
+      "code": 6018,
       "name": "StreamsTooManyReceivers",
       "msg": "too many stream receivers"
     },
     {
-      "code": 6014,
+      "code": 6019,
       "name": "StreamsReceiversNotSorted",
       "msg": "stream receivers not sorted"
     },
     {
-      "code": 6015,
+      "code": 6020,
       "name": "StreamsAmtPerSecTooLow",
       "msg": "stream rate below minimum"
     },
     {
-      "code": 6016,
+      "code": 6021,
       "name": "StreamsCycleSecsTooLow",
       "msg": "cycle seconds below minimum"
     },
     {
-      "code": 6017,
+      "code": 6022,
       "name": "StreamsInvalidReceivers",
       "msg": "invalid streams receivers"
     },
     {
-      "code": 6018,
+      "code": 6023,
       "name": "StreamsInvalidHistory",
       "msg": "invalid streams history"
     },
     {
-      "code": 6019,
+      "code": 6024,
       "name": "StreamsEntryWithHashAndReceivers",
       "msg": "history entry has both hash and receivers"
     },
     {
-      "code": 6020,
+      "code": 6025,
       "name": "StreamsTimestampBeforeUpdate",
       "msg": "timestamp before last update"
     },
     {
-      "code": 6021,
+      "code": 6026,
       "name": "StreamsBalanceTooHigh",
       "msg": "streams balance too high"
     },
     {
-      "code": 6022,
+      "code": 6027,
       "name": "VaultEmptyQuestion",
       "msg": "vault question must be non-empty"
     },
     {
-      "code": 6023,
+      "code": 6028,
       "name": "VaultZeroCreator",
       "msg": "vault creator must be non-zero"
     },
     {
-      "code": 6024,
+      "code": 6029,
       "name": "VaultUnknown",
       "msg": "unknown vault"
     },
     {
-      "code": 6025,
+      "code": 6030,
       "name": "VaultNotOpen",
       "msg": "vault is not open"
     },
     {
-      "code": 6026,
+      "code": 6031,
       "name": "VaultZeroRate",
       "msg": "vault rate must be non-zero"
     },
     {
-      "code": 6027,
+      "code": 6032,
       "name": "VaultAlreadyFunding",
       "msg": "position already funding this vault"
     },
     {
-      "code": 6028,
+      "code": 6033,
       "name": "VaultLengthMismatch",
       "msg": "vault input length mismatch"
     },
     {
-      "code": 6029,
+      "code": 6034,
       "name": "VaultNotResolvable",
       "msg": "vault is not resolvable"
     },
     {
-      "code": 6030,
+      "code": 6035,
       "name": "VaultNotResolved",
       "msg": "vault is not resolved"
     },
     {
-      "code": 6031,
+      "code": 6036,
       "name": "VaultBoardBehind",
       "msg": "board is behind; advance before settling"
     },
     {
-      "code": 6032,
+      "code": 6037,
       "name": "VaultDivZero",
       "msg": "division by zero in vault math"
     },
     {
-      "code": 6033,
+      "code": 6038,
       "name": "VaultInsufficientUsdc",
       "msg": "insufficient USDC in vault ledger"
     },
     {
-      "code": 6034,
+      "code": 6039,
       "name": "DriverSaltUsed",
       "msg": "mint salt already used"
     },
     {
-      "code": 6035,
+      "code": 6040,
       "name": "DriverUnknownMarket",
       "msg": "unknown market"
     },
     {
-      "code": 6036,
+      "code": 6041,
       "name": "DriverZeroRate",
       "msg": "lane rate must be non-zero"
     },
     {
-      "code": 6037,
+      "code": 6042,
       "name": "DriverBadDeposit",
       "msg": "bad deposit amount"
     },
     {
-      "code": 6038,
+      "code": 6043,
       "name": "DriverWrongMarket",
       "msg": "vault belongs to a different market"
     },
     {
-      "code": 6039,
+      "code": 6044,
       "name": "DriverVaultHasLane",
       "msg": "position already has a lane on this vault"
     },
     {
-      "code": 6040,
+      "code": 6045,
       "name": "DriverTooManyLanes",
       "msg": "too many lanes on this position"
     },
     {
-      "code": 6041,
+      "code": 6046,
       "name": "DriverNoLane",
       "msg": "no lane on this vault"
     },
     {
-      "code": 6042,
+      "code": 6047,
       "name": "DriverDuplicateVault",
       "msg": "duplicate vault in lane set"
     },
     {
-      "code": 6043,
+      "code": 6048,
       "name": "DriverLengthMismatch",
       "msg": "driver input length mismatch"
     },
     {
-      "code": 6044,
+      "code": 6049,
       "name": "DriverSeedExists",
       "msg": "seed lane already exists"
     },
     {
-      "code": 6045,
+      "code": 6050,
       "name": "DriverNoSeed",
       "msg": "no seed lane"
     },
     {
-      "code": 6046,
+      "code": 6051,
       "name": "DripsTotalBalanceTooHigh",
       "msg": "total streamed balance too high"
     },
     {
-      "code": 6047,
+      "code": 6052,
       "name": "DripsTokenBalanceTooLow",
       "msg": "token balance too low"
     },
     {
-      "code": 6048,
+      "code": 6053,
       "name": "DripsWithdrawalAmountTooHigh",
       "msg": "withdrawal amount too high"
     },
     {
-      "code": 6049,
+      "code": 6054,
       "name": "TreasuryAlreadyClaimed",
       "msg": "loss already claimed"
     },
     {
-      "code": 6050,
+      "code": 6055,
       "name": "TreasuryNothingLost",
       "msg": "nothing lost to claim"
     },
     {
-      "code": 6051,
+      "code": 6056,
       "name": "TreasuryZeroStake",
       "msg": "stake must be non-zero"
     },
     {
-      "code": 6052,
+      "code": 6057,
       "name": "TreasuryInvalidUnstake",
       "msg": "invalid unstake amount"
     }
   ],
   "types": [
+    {
+      "name": "LaneArg",
+      "docs": [
+        "One desired lane in a `set_lanes` full-set declaration. Rates are the human u64 the",
+        "client speaks (mirroring `fund`); the handler widens each to the engine's U256 before",
+        "the driver call. Anchor-(de)serializable so it rides in the `Vec<LaneArg>` arg."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "rate",
+            "type": "u64"
+          }
+        ]
+      }
+    },
     {
       "name": "Market",
       "docs": [
@@ -1391,6 +1858,16 @@ export const livestreakIdl = {
           {
             "name": "bump",
             "type": "u8"
+          },
+          {
+            "name": "lvst_mint",
+            "docs": [
+              "Canonical LVST reward-token mint, recorded at the deployer-trusted `initialize`.",
+              "Staking constrains the staked mint against this so a fake-mint stake can't later",
+              "extract real USDC dividends. Placed LAST so market_count/default_steward/bump keep",
+              "their byte offsets (wire.ts decodes default_steward at 16..48); InitSpace adds 32."
+            ],
+            "type": "pubkey"
           }
         ]
       }

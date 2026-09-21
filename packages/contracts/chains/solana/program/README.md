@@ -34,6 +34,10 @@ Three sharp edges, all deliberate:
    (a "v3 rebuild" once shipped v2 bytes in 0.39s). `touch src/lib.rs` first when
    changing arch, and verify with the ELF e_flags (v3 ⇒ 3):
    `python3 -c "import struct;print(struct.unpack('<I',open('target/deploy/livestreak.so','rb').read(64)[48:52])[0])"`
+   And the IDL is a SEPARATE extraction: `cargo-build-sbf` compiles the .so but never
+   regenerates target/idl — after adding/changing instructions run
+   `anchor idl build -o target/idl/livestreak.json -t target/types/livestreak.ts`
+   then `npm run build:solana:idl` in packages/contracts, or the TS const sits stale.
 
 3. **ruint is pinned to 1.17 and `Cargo.lock` is committed.** The SBF toolchain
    currently ships rustc 1.89; newer ruint releases require a newer compiler. A plain

@@ -31,6 +31,9 @@ export type SolanaOptionsContext = {
   readonly rpcUrl: string;
   readonly programId: Address;
   readonly usdcMint: Address;
+  /** The canonical LVST mint. Optional — only the loss-mint write path needs it; absent on
+   *  configs that predate it, so methods that require it fail typed rather than at construction. */
+  readonly lvstMint?: Address;
   readonly solanaConfig: LiveStreakSolanaWalletConfig;
 };
 
@@ -49,6 +52,7 @@ export const resolveSolanaContext = (config: OptionsChainConfig): SolanaOptionsC
     rpcUrl,
     programId: address(ids.programId),
     usdcMint: address(ids.usdcMint),
+    ...(ids.lvstMint === undefined ? {} : { lvstMint: address(ids.lvstMint) }),
     solanaConfig
   };
 };

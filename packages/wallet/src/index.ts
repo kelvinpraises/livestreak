@@ -32,6 +32,7 @@ export {
   assertSolanaSponsorshipConfig,
   guardKoraClient,
   isSponsoredSolanaConfig,
+  isTokenFreeSponsoredConfig,
   readSolanaSignatureReceipt,
 } from '#chains/solana/index.js'
 

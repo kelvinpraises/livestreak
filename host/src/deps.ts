@@ -14,6 +14,10 @@ import {
   readSolanaPaymasterRuntimeConfig,
   type SolanaPaymasterService
 } from "./services/aa/solana-paymaster.js";
+import {
+  createSolanaFaucet,
+  type SolanaFaucetService
+} from "./services/aa/solana-faucet.js";
 import { readKoraSpawnConfig, startKora } from "./infrastructure/relay/kora.js";
 import { createDiscoveryStore } from "./services/discovery.js";
 import {
@@ -70,6 +74,7 @@ export interface AaRouteDeps {
   readonly paymasterSigners: Map<string, PaymasterSigner>;
   readonly suiGasStation: SuiGasStationService;
   readonly solanaPaymaster: SolanaPaymasterService;
+  readonly solanaFaucet: SolanaFaucetService;
 }
 
 export interface CreateAaRouteDepsOptions {
@@ -78,6 +83,7 @@ export interface CreateAaRouteDepsOptions {
   readonly suiClient?: SuiJsonRpcClient;
   readonly suiInitialCoins?: readonly SuiGasCoinRef[];
   readonly solanaPaymaster?: SolanaPaymasterService;
+  readonly solanaFaucet?: SolanaFaucetService;
 }
 
 export const createAaRouteDeps = (
@@ -90,7 +96,8 @@ export const createAaRouteDeps = (
     aa,
     paymasterSigners: options.paymasterSigners ?? buildPaymasterSigners(aa),
     suiGasStation: options.suiGasStation ?? createSuiGasStation({ config: null }),
-    solanaPaymaster: options.solanaPaymaster ?? createSolanaPaymaster({ config: null })
+    solanaPaymaster: options.solanaPaymaster ?? createSolanaPaymaster({ config: null }),
+    solanaFaucet: options.solanaFaucet ?? createSolanaFaucet()
   };
 };
 

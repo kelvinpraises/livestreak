@@ -136,8 +136,12 @@ export const mapSolanaNft = (
   owner: UserAddress,
   marketId: MarketId,
   laneCount: number,
-  lanes: readonly OptionsLane[]
-): OptionsNft => ({ tokenId, owner, marketId, laneCount, lanes });
+  lanes: readonly OptionsLane[],
+  // Shared streaming balance (USDC raw units) from the engine's per-token streams state. Always set on
+  // Solana now (the reader reads it via the wasm view), so the app's balance readout lights up — parity
+  // with EVM. `undefined` only if the caller couldn't resolve it.
+  balance?: bigint
+): OptionsNft => ({ tokenId, owner, marketId, laneCount, lanes, ...(balance === undefined ? {} : { balance }) });
 
 export const mapSolanaMarket = (
   marketId: MarketId,

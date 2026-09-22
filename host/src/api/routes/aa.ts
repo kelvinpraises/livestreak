@@ -26,6 +26,10 @@ export const createAaRouter = (deps: AaRouteDeps): Router => {
     "/aa/solana/paymaster",
     asyncHandler(async (req, res) => controller.solanaPaymaster(req, res))
   );
+  router.post(
+    "/aa/solana/faucet",
+    asyncHandler(async (req, res) => controller.solanaFaucet(req, res))
+  );
 
   return router;
 };

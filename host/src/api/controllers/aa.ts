@@ -177,6 +177,14 @@ export const createAaController = (deps: AaRouteDeps) => ({
 
     const result = await deps.solanaPaymaster.handleRpc(req.body);
     res.status(result.status).json(result.body);
+  },
+
+  solanaFaucet: async (
+    req: { body: unknown },
+    res: { status: (code: number) => { json: (body: unknown) => void } }
+  ): Promise<void> => {
+    const result = await deps.solanaFaucet.faucet(req.body);
+    res.status(result.status).json(result.body);
   }
 });
 
@@ -242,7 +250,14 @@ const buildSolanaSponsorshipDescriptor = (
     paymasterPath: deps.solanaPaymaster.paymasterPath,
     ...(deps.solanaPaymaster.payerAddress === null
       ? {}
-      : { payerAddress: deps.solanaPaymaster.payerAddress })
+      : { payerAddress: deps.solanaPaymaster.payerAddress }),
+    // Token-free by default: payerAddress + rpcUrl is all the app needs (solanaWalletInitFromDescriptor
+    // sponsors on the payer alone, no fee token). feeTokens is advertised ONLY when explicitly set
+    // (LIVESTREAK_SOLANA_FEE_TOKENS) to opt into the legacy Kora fee-token flow; omitted when empty.
+    ...(deps.solanaPaymaster.feeTokens.length === 0
+      ? {}
+      : { feeTokens: [...deps.solanaPaymaster.feeTokens] }),
+    ...(deps.solanaPaymaster.rpcUrl === null ? {} : { rpcUrl: deps.solanaPaymaster.rpcUrl })
   };
 };
 

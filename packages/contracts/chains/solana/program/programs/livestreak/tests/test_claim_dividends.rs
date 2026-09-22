@@ -164,6 +164,7 @@ fn staker_claims_usdc_dividends_and_guards_hold() {
         h.program_id,
         &livestreak::instruction::MintPosition { salt: 42 }.data(),
         livestreak::accounts::MintPosition {
+            payer: bettor.pubkey(),
             minter: bettor.pubkey(),
             protocol_state,
             market,

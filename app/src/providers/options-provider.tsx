@@ -10,8 +10,9 @@ import {
 } from 'react'
 import { sha256, toBytes, hexToBytes, bytesToHex, parseUnits, isAddress, type Address } from 'viem'
 import { Schema } from 'effect'
-import { EvmWalletInitConfig, type WalletInit } from '@livestreak/schema'
+import { EvmWalletInitConfig, solanaWalletInitFromDescriptor, type WalletInit } from '@livestreak/schema'
 import { localnetDeployment } from '@livestreak/contracts/sui'
+import { localnetDeployment as solanaLocalnetDeployment } from '@livestreak/contracts/solana/deployments/localnet'
 import {
   asTokenId,
   asVaultId,
@@ -90,10 +91,20 @@ interface AaChainDescriptor {
   rpcUrl?: string
 }
 
+// Advertised only when the host's Kora paymaster leg is up (see host buildSolanaSponsorshipDescriptor).
+// Absent → self-pay solana walletInit (read-only board still works; writes fund their own fee).
+interface SolanaSponsorshipDescriptor {
+  paymasterPath: string
+  payerAddress?: string
+  feeTokens?: string[]
+  rpcUrl?: string
+}
+
 interface AaCapabilityDescriptor {
   version: '0.1.0'
   paymasterPath: string
   chains: AaChainDescriptor[]
+  solanaSponsorship?: SolanaSponsorshipDescriptor
 }
 
 interface OptionsContextValue {
@@ -235,11 +246,26 @@ function buildWalletInit(descriptor: AaCapabilityDescriptor): WalletInit {
   return { chain: 'evm', seedSource: 'raw', config: evmConfig }
 }
 
+const SOLANA_RPC_URL = solanaLocalnetDeployment.rpc
+
+// Build the solana WalletInit from the host descriptor. When the descriptor advertises a
+// Delegates to the shared schema helper so the app and the CLI gateway map the host's advertised
+// Solana sponsorship the same way (Kora paymaster triple → fee-payer co-signed writes; else self-pay).
+function buildSolanaWalletInit(descriptor: AaCapabilityDescriptor): WalletInit {
+  return solanaWalletInitFromDescriptor(descriptor.solanaSponsorship, {
+    hostBaseUrl: HOST_BASE_URL,
+    fallbackRpc: SOLANA_RPC_URL,
+    network: 'localnet',
+  })
+}
+
 // Read-only viewer used to populate the board for a disconnected visitor — a dummy address that owns
 // nothing, so the board carries the market + vaults with zero positions. Writes stay gated on isConnected.
 const ANON_VIEWER: Record<OptionsChainKind, string> = {
   evm: '0x000000000000000000000000000000000000dead',
   sui: '0x000000000000000000000000000000000000000000000000000000000000dead',
+  // System program — a valid base58 pubkey that owns nothing, so the board renders zero positions.
+  solana: '11111111111111111111111111111111',
 }
 
 function buildChainConfig(
@@ -252,6 +278,22 @@ function buildChainConfig(
       deployment: localnetDeployment,
       seed: secret,
     })
+  }
+
+  if (chain === 'solana') {
+    if (!walletInit) throw new Error('Options wallet config not loaded')
+    const accounts = solanaLocalnetDeployment.accounts
+    return {
+      walletInit,
+      seed: secret,
+      addresses: {
+        programId: solanaLocalnetDeployment.programId,
+        usdcMint: accounts.usdcMint,
+        ...(accounts.lvstMint === undefined ? {} : { lvstMint: accounts.lvstMint }),
+      },
+      readRpcUrl: solanaLocalnetDeployment.rpc,
+      includeProtocolSummary: true,
+    }
   }
 
   if (!walletInit) throw new Error('Options wallet config not loaded')
@@ -371,7 +413,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   // secret; the writer is never invoked while disconnected) so the active market's vaults render.
   const bootAnonymous = useCallback(async () => {
     if (!activeMarketIdRef.current) return
-    if (chainRef.current === 'evm' && !walletInitRef.current) return
+    if (chainRef.current !== 'sui' && !walletInitRef.current) return
     try {
       await bootRuntime(new Uint8Array(32), ANON_VIEWER[chainRef.current] as UserAddress)
     } catch (err) {
@@ -388,21 +430,33 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   ): Promise<UserAddress> => {
     const cachedAddr = readCachedSafeAddress(secret, chainKind)
     if (cachedAddr) {
-      setDerivationStep('Restoring your Safe address…')
+      setDerivationStep('Restoring your wallet address…')
       return cachedAddr as UserAddress
     }
-    setDerivationStep('Deriving your Safe address (first time, ~1 min)…')
+    // EVM Safe counterfactual derivation is a slow (~1 min first-time) 4337 apparatus; Sui + Solana
+    // derive a native Ed25519 address instantly, so don't threaten the user with a minute-long wait.
+    setDerivationStep(
+      chainKind === 'evm'
+        ? 'Deriving your Safe address (first time, ~1 min)…'
+        : 'Deriving your wallet address…',
+    )
     const user = await resolveOptionsAccountAddress(chainConfig)
     writeCachedSafeAddress(secret, chainKind, user)
     return user
   }, [])
 
-  const loadEvmDescriptor = useCallback(async (cancelled: () => boolean) => {
+  // Load the host AA descriptor and build the walletInit for the given chain (EVM Safe/4337 apparatus
+  // vs. Solana Kora-paymaster triple). Sui needs no descriptor and skips this path entirely.
+  const loadDescriptor = useCallback(async (
+    chainKind: OptionsChainKind,
+    cancelled: () => boolean,
+  ) => {
     try {
       const res = await fetch(`${HOST_BASE_URL}/aa/descriptor`)
       if (!res.ok) throw new Error(`AA descriptor HTTP ${res.status}`)
       const descriptor = (await res.json()) as AaCapabilityDescriptor
-      walletInitRef.current = buildWalletInit(descriptor)
+      walletInitRef.current =
+        chainKind === 'solana' ? buildSolanaWalletInit(descriptor) : buildWalletInit(descriptor)
       if (!cancelled()) setReady(true)
     } catch (err) {
       if (!cancelled()) {
@@ -423,18 +477,18 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false
     setReady(false)
-    void loadEvmDescriptor(() => cancelled)
+    void loadDescriptor(chain, () => cancelled)
 
     return () => {
       cancelled = true
     }
-  }, [enabled, chain, loadEvmDescriptor])
+  }, [enabled, chain, loadDescriptor])
 
   useEffect(() => {
     if (!enabled || !ready || typeof window === 'undefined') return
-    // EVM wallet config can briefly be unloaded during an EVM⇄Sui switch; skip (re-runs once ready settles)
-    // rather than treating it as a derive failure that would wipe the secret.
-    if (chainRef.current === 'evm' && !walletInitRef.current) return
+    // EVM/Solana wallet config can briefly be unloaded during a chain switch; skip (re-runs once ready
+    // settles) rather than treating it as a derive failure that would wipe the secret. Sui needs none.
+    if (chainRef.current !== 'sui' && !walletInitRef.current) return
     const cached = sessionStorage.getItem(SESSION_SECRET_KEY)
     if (!cached) {
       void bootAnonymous() // disconnected: read-only board for the active market
@@ -507,7 +561,9 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       setError('Password required')
       return
     }
-    if (chainRef.current === 'evm' && !walletInitRef.current) {
+    // EVM (Safe/4337) and Solana (Kora/self-pay) both need a loaded walletInit before we can derive
+    // or write; Sui signs natively with no descriptor, so it is exempt.
+    if (chainRef.current !== 'sui' && !walletInitRef.current) {
       setError('Options config not ready — is host running?')
       return
     }

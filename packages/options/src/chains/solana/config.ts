@@ -9,8 +9,10 @@ import {
   address,
   createSolanaRpc,
   decodeMarketIndexAccount,
+  decodePositionOwnerAccount,
   decodeRegistryAccount,
   findMarketIndexPda,
+  findPositionPda,
   findProtocolStatePda,
   findRegistryPda,
   getBase64Encoder,
@@ -166,4 +168,42 @@ export const resolveMarketForToken = async (
     }
   }
   return undefined;
+};
+
+// Resolve a token's market even when it is LANELESS (freshly minted, never funded): try the engine
+// footprint first, then fall back to the PositionOwner PDA's recorded market_id (the per-token
+// accessor EVM/Sui already expose). This is what lets addFunds park a deposit on a brand-new
+// position — the first-bet top-up — before any lane exists. undefined only when the token is unminted.
+export const resolveMarketForTokenOrOwner = async (
+  ctx: SolanaOptionsContext,
+  tokenId: TokenId
+): Promise<Hex32 | undefined> => {
+  const fromEngine = await resolveMarketForToken(ctx, tokenId);
+  if (fromEngine !== undefined) return fromEngine;
+  const [posPda] = await findPositionPda(ctx.programId, tokenIdToHex32(tokenId));
+  const bytes = await fetchAccountBytes(ctx.rpc, posPda);
+  if (bytes === undefined) return undefined;
+  return decodePositionOwnerAccount(bytes).marketId;
+};
+
+// A position's current ACTIVE lanes (rate > 0) from the engine view, shaped as set_lanes LaneArgs so
+// addFunds can re-send them verbatim — extending every live stream while the deposit refills the shared
+// balance. Empty for a laneless position, so the deposit then simply parks as budget. Dried lanes
+// (rate 0) are omitted: set_lanes rejects a zero rate, and a depleted lane carries no rate to revive.
+export const readCurrentLanes = async (
+  ctx: SolanaOptionsContext,
+  marketId: Hex32,
+  tokenId: TokenId
+): Promise<Array<{ vaultId: Hex32; side: number; rate: bigint }>> => {
+  const tokenHex = tokenIdToHex32(tokenId);
+  return withProtocolView(ctx, marketId, (view) => {
+    const lanes: Array<{ vaultId: Hex32; side: number; rate: bigint }> = [];
+    for (const vId of view.accountVaultIds(tokenHex)) {
+      for (const side of [0, 1]) {
+        const pos = view.position(vId, side, tokenHex);
+        if (pos.rate > 0n) lanes.push({ vaultId: vId, side, rate: pos.rate });
+      }
+    }
+    return lanes;
+  });
 };

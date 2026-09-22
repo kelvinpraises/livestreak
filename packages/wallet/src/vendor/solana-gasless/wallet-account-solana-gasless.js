@@ -240,24 +240,33 @@ export default class WalletAccountSolanaGasless extends WalletAccountReadOnlySol
     const paymasterPublicKey = address(this._config.paymasterAddress)
     draft = setTransactionMessageFeePayer(paymasterPublicKey, draft)
 
+    // Attach the sender signer to its signer accounts so partiallySignTransactionMessageWithSigners can sign.
+    const remapSigners = (tx) => ({
+      ...tx,
+      instructions: tx.instructions.map(({ accounts = [], ...ix }) => ({
+        ...ix,
+        accounts: accounts.map((account) => (
+          account.address === signer.address && [AccountRole.READONLY_SIGNER, AccountRole.WRITABLE_SIGNER].includes(account.role)
+            ? { ...account, signer }
+            : account
+        ))
+      }))
+    })
+
+    // LiveStreak: token-free sponsorship. With no paymasterToken the paymaster co-signs as fee payer and
+    // takes NOTHING, so skip the fee-token payment instruction — and the getPaymentInstruction call that
+    // would need the sponsor's fee-token ATA (the step that aborts "invalid account data" for a fresh prod
+    // sponsor). Same fee-payer + signer setup as the paid path, minus the append; fee is 0.
+    if (this._config.paymasterToken === undefined) {
+      return { fee: 0n, transactionMessage: remapSigners(draft) }
+    }
+
     const { payment_amount: fee, payment_instruction: paymentInstruction } = await this._getTransactionPaymentInfo(draft, config)
 
     const transactionMessage = pipe(
       draft,
       (tx) => appendTransactionMessageInstruction(paymentInstruction, tx),
-      (tx) => ({
-        ...tx,
-        instructions: tx.instructions.map(({ accounts = [], ...ix }) => ({
-          ...ix,
-          accounts: accounts.map((account) => {
-            if (account.address === signer.address && [AccountRole.READONLY_SIGNER, AccountRole.WRITABLE_SIGNER].includes(account.role)) {
-              return { ...account, signer }
-            }
-
-            return account
-          })
-        }))
-      })
+      remapSigners
     )
 
     return { fee: BigInt(fee), transactionMessage }

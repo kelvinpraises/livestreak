@@ -3,10 +3,11 @@ import { isAddress } from 'viem'
 import type { OptionsFunctionView, OptionsNftPanel } from '@livestreak/options'
 
 import { isOptionsModeEnabled } from '#/utils/env'
-import { isValidRecipientAddress, type OptionsChainKind } from '#/utils/chain'
+import { isValidRecipientAddress, recipientPlaceholder, type OptionsChainKind } from '#/utils/chain'
 import { useOptionsContext } from '#/providers/options-provider'
 import { OptionsActionButton } from '#/components/atoms/options-action-button'
-import { formatUSDC, formatRunway } from '#/utils/format'
+import { formatUSDC, formatRunway, shortenId } from '#/utils/format'
+import { hasBalanceReadout } from '#/utils/options'
 
 // UI-only input gating (amount/address format); protocol gating comes from the real SDK descriptors.
 function invalidFn(reason: string): OptionsFunctionView {
@@ -19,7 +20,9 @@ export function NftPanel() {
 
   if (!optionsEnabled || !options.isConnected || !options.board) return null
 
-  const isSui = options.chain === 'sui'
+  // setApprovalForAll / approve are ERC-721 (EVM) concepts — Sui AND Solana have no operator-approval
+  // model, so gate the whole approval apparatus on EVM (mirrors the per-NFT `showApprove` below).
+  const isEvm = options.chain === 'evm'
   const nfts = options.board.panel.nfts
   const approveAllFn = options.findFunction('setApprovalForAll', fn => fn.target?.kind === 'global')
 
@@ -29,7 +32,7 @@ export function NftPanel() {
         POSITION NFTS
       </div>
 
-      {!isSui && <ApproveAllRow fn={approveAllFn} onApproveAll={options.setApprovalForAll} />}
+      {isEvm && <ApproveAllRow fn={approveAllFn} onApproveAll={options.setApprovalForAll} />}
 
       {nfts.length === 0 ? (
         <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.25)', padding: '0 4px 14px', margin: 0 }}>
@@ -49,7 +52,7 @@ export function NftPanel() {
               fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
             transferFn={options.findFunction('transferNft', fn =>
               fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
-            approveFn={!isSui
+            approveFn={isEvm
               ? options.findFunction('approveNft', fn =>
                 fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)
               : undefined}
@@ -155,11 +158,11 @@ function NftRow({
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 }}>
         <div>
-          <div className="mono" style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>
-            #{nft.tokenId}
+          <div className="mono" title={String(nft.tokenId)} style={{ fontSize: 12, fontWeight: 700, color: 'rgba(255,255,255,0.85)' }}>
+            #{shortenId(String(nft.tokenId))}
           </div>
-          <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
-            {nft.marketId} · {nft.laneCount} lane{nft.laneCount === 1 ? '' : 's'}
+          <div title={nft.marketId} style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>
+            {shortenId(nft.marketId)} · {nft.laneCount} lane{nft.laneCount === 1 ? '' : 's'}
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
@@ -175,8 +178,9 @@ function NftRow({
         owner {nft.owner}
       </div>
 
-      {/* Shared Drips balance (live-ticking) + runway + realized winnings (EVM only; balance absent on Sui). */}
-      {chain === 'evm' && nft.account.balanceUSDC !== undefined && (
+      {/* Shared Drips balance (live-ticking) + runway + realized winnings. DATA-gated, not chain-gated:
+          renders on any chain whose reader supplies `balanceUSDC` (EVM today; Sui/Solana omit it). */}
+      {hasBalanceReadout(nft.account) && (
         <RunwayReadout account={nft.account} pnl={nft.pnl} />
       )}
 
@@ -213,7 +217,7 @@ function NftRow({
           <input
             value={transferTo}
             onChange={e => setTransferTo(e.target.value.trim())}
-            placeholder={chain === 'sui' ? 'Transfer to Sui address…' : 'Transfer to 0x…'}
+            placeholder={recipientPlaceholder(chain)}
             style={addressInputStyle}
           />
           <OptionsActionButton

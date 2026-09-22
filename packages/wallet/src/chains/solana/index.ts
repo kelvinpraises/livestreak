@@ -15,7 +15,11 @@ export type {
   SolanaWalletConfig,
   SponsoredSolanaWalletConfig,
 } from './config.js'
-export { assertSolanaSponsorshipConfig, isSponsoredSolanaConfig } from './config.js'
+export {
+  assertSolanaSponsorshipConfig,
+  isSponsoredSolanaConfig,
+  isTokenFreeSponsoredConfig,
+} from './config.js'
 
 export {
   assertKoraPreservedSignedTransaction,

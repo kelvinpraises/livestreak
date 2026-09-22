@@ -101,7 +101,10 @@ const registerCall = (
     );
 
     if (result.status === "registered" && deps.sessionInit !== undefined) {
-      yield* notifyCatalogFailOpen(deps.sessionInit, result.marketId);
+      // Tag the catalog with the SAME chain the register used (registration.walletInit.chain) — the
+      // one source of truth. (Previously derived from sessionInit.chain, a separate CAIP-2 field that
+      // could diverge: a solana market got tagged evm and never synced into the catalog.)
+      yield* notifyCatalogFailOpen(deps.sessionInit, result.marketId, registration.walletInit.chain);
     }
 
     return { boardPatch: marketLifecyclePatch(result) };
@@ -111,15 +114,11 @@ const registerCall = (
 // host's catalog-sync cron. Fail-open — registration success never depends on the host.
 const notifyCatalogFailOpen = (
   sessionInit: PackageRuntimeInit,
-  marketId: string
+  marketId: string,
+  chain: "evm" | "sui" | "solana"
 ): Effect.Effect<void> =>
   Effect.tryPromise(async () => {
     const base = sessionInit.hostUrl.replace(/\/$/, "");
-    const chain = sessionInit.chain.startsWith("eip155")
-      ? "evm"
-      : sessionInit.chain.startsWith("solana")
-        ? "solana"
-        : "sui";
     await fetch(`${base}/catalog/markets`, {
       method: "POST",
       headers: { "content-type": "application/json" },

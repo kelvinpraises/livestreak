@@ -21,6 +21,7 @@ import {
   getBase64EncodedWireTransaction,
   guardKoraClient,
   isSponsoredSolanaConfig,
+  isTokenFreeSponsoredConfig,
   pollUntilUserOperationIncluded,
   readSolanaSignatureReceipt,
   solanaAddress,
@@ -81,6 +82,67 @@ describe('Solana config-union dispatch', () => {
   it('isSponsoredSolanaConfig discriminates on paymasterUrl', () => {
     assert.equal(isSponsoredSolanaConfig({}), false)
     assert.equal(isSponsoredSolanaConfig(SPONSORED_CONFIG), true)
+  })
+})
+
+// Token-free sponsorship: sponsored (paymasterUrl + paymasterAddress) with NO fee token. The paymaster
+// pays the SOL fee and takes nothing — so the account must NOT append a fee-token payment instruction
+// (and must never call getPaymentInstruction, which is what needs the sponsor's fee-token ATA in prod).
+const TOKEN_FREE_CONFIG = {
+  provider: 'http://127.0.0.1:1',
+  isSponsored: true,
+  paymasterUrl: 'http://127.0.0.1:2',
+  paymasterAddress: PAYMASTER_ADDRESS,
+}
+
+describe('token-free sponsorship (no paymasterToken)', () => {
+  it('constructs without error and still yields a gasless account', async () => {
+    const manager = createWalletManager('solana', TEST_MNEMONIC, TOKEN_FREE_CONFIG)
+    const account = await manager.getAccount()
+    assert.ok(account instanceof WalletAccountSolanaGasless)
+    assert.equal(await account.getAddress(), GOLDEN_SOLANA_ADDRESS)
+  })
+
+  it('isTokenFreeSponsoredConfig is true only when sponsored with no fee token', () => {
+    assert.equal(isTokenFreeSponsoredConfig(TOKEN_FREE_CONFIG), true)
+    assert.equal(isTokenFreeSponsoredConfig(SPONSORED_CONFIG), false)
+    assert.equal(isTokenFreeSponsoredConfig({}), false)
+  })
+
+  it('populate skips getPaymentInstruction, appends no payment, and quotes fee 0', async () => {
+    const manager = createWalletManager('solana', TEST_MNEMONIC, TOKEN_FREE_CONFIG)
+    const account = await manager.getAccount()
+
+    let paymentCalls = 0
+    account._ensureLifetime = async (tx) => tx // avoid the RPC blockhash fetch
+    account._paymaster = {
+      async getBlockhash() {
+        return { blockhash: '11111111111111111111111111111111' }
+      },
+      async getPaymentInstruction() {
+        paymentCalls++
+        throw new Error('token-free must not request a fee-token payment instruction')
+      },
+    }
+
+    const before = pipe(
+      createTransactionMessage({ version: 0 }),
+      (tx) =>
+        appendTransactionMessageInstruction(
+          getTransferSolInstruction({
+            source: createNoopSigner(solanaAddress(GOLDEN_SOLANA_ADDRESS)),
+            destination: solanaAddress(PAYMASTER_ADDRESS),
+            amount: 1n,
+          }),
+          tx,
+        ),
+    )
+
+    const { fee, transactionMessage } = await account._populateTransactionMessage(before)
+
+    assert.equal(fee, 0n)
+    assert.equal(paymentCalls, 0) // never asks for a payment instruction ⇒ no sponsor fee-token ATA needed
+    assert.equal(transactionMessage.instructions.length, before.instructions.length) // nothing appended
   })
 })
 

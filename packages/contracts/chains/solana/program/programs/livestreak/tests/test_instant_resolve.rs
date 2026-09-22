@@ -116,6 +116,7 @@ fn instant_same_side_resolve_pays_out() {
         h.program_id,
         &livestreak::instruction::MintPosition { salt: 7 }.data(),
         livestreak::accounts::MintPosition {
+            payer: bettor.pubkey(),
             minter: bettor.pubkey(),
             protocol_state,
             market,

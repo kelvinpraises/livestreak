@@ -22,6 +22,8 @@
     "@mysten/sui": "^2.19.0",
     "@mysten/walrus": "^1.2.1",
     "@pimlico/alto": "^0.0.20",
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.98.4",
     "@types/express": "^5.0.6",
     "@types/supertest": "^7.2.0",
     "better-sqlite3": "^11.8.1",

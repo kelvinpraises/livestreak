@@ -143,6 +143,16 @@ const dispatchWriterAction = async (
       return writer.mintWithSalt(readArgs(args));
     case "fund":
       return runtime.fundStream(readArgs(args));
+    // Lane-orchestration gestures: the runtime reads its own snapshot to build the setLanes set
+    // (preserving other lanes, applying the balance-first starter deposit, owning the paused
+    // registry). They are runtime verbs, not chain writes — but in the remote/WSS model callAction
+    // is the ONLY write entrypoint, so the app's stream/pause/resume gestures MUST dispatch here.
+    case "streamLane":
+      return runtime.streamLane(readArgs(args));
+    case "pauseLane":
+      return runtime.pauseLane(readArgs(args));
+    case "resumeLane":
+      return runtime.resumeLane(readArgs(args));
     case "setLanes":
       return writer.setLanes(readArgs(args));
     case "addFunds":

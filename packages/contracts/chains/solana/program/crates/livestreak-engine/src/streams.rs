@@ -449,6 +449,14 @@ impl StreamsRegistry {
 // ── Balance & max-end (Move balance_at / calc_balance / calc_max_end) ──────────
 
 impl StreamsRegistry {
+    /// Stored streaming balance for an account (position token) — the remaining shared budget it
+    /// streams from, as of the last set_streams/fund. Matches EVM `streamsState(id).balance` and the
+    /// Move `balance` field (a lower bound between updates; a live read would subtract streamed-since).
+    /// 0 when the account has never been funded.
+    pub fn state_balance(&self, account_id: AccountId) -> u128 {
+        self.states.get(&account_id).map(|st| st.balance).unwrap_or(0)
+    }
+
     /// Account balance at `timestamp` (>= update_time), receivers must match hash.
     pub fn balance_at(
         &self,

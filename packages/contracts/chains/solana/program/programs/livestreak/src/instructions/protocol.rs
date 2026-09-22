@@ -288,7 +288,13 @@ pub fn handle_create_vault_seeded(
 #[derive(Accounts)]
 #[instruction(salt: u64)]
 pub struct MintPosition<'info> {
+    // Funds the PositionOwner rent (and, as the tx fee payer, the fee). Sponsored mode passes the
+    // paymaster here so an end user needs ZERO SOL; self-pay passes the minter (same key in both
+    // slots). Separated from `minter` so account rent — not just the fee — can be sponsor-paid.
     #[account(mut)]
+    pub payer: Signer<'info>,
+    // The position owner/identity: the tokenId PDA and `position.owner` are keyed on this, never on
+    // the payer. Not mut — it authorizes minting but funds nothing.
     pub minter: Signer<'info>,
     #[account(
         mut,
@@ -301,7 +307,7 @@ pub struct MintPosition<'info> {
     pub market: Account<'info, Market>,
     #[account(
         init,
-        payer = minter,
+        payer = payer,
         space = 8 + PositionOwner::INIT_SPACE,
         seeds = [POSITION_SEED, &position_token_id(&protocol_state, &minter.key(), salt)],
         bump
@@ -331,6 +337,7 @@ pub fn handle_mint_position(ctx: Context<MintPosition>, salt: u64) -> Result<()>
     let position = &mut ctx.accounts.position;
     position.token_id = token_id_bytes(token_id);
     position.owner = ctx.accounts.minter.key();
+    position.market_id = ctx.accounts.protocol_state.market_id;
     position.bump = ctx.bumps.position;
     Ok(())
 }

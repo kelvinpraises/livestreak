@@ -51,6 +51,10 @@ export interface SolanaPaymasterService {
   readonly advertise: boolean;
   readonly payerAddress: string | null;
   readonly paymasterPath: typeof SOLANA_PAYMASTER_PATH;
+  /** SPL fee-token mints the paymaster leg accepts, advertised in the AA descriptor. */
+  readonly feeTokens: readonly string[];
+  /** The paymaster leg's configured RPC, advertised so the wallet reuses the same endpoint. */
+  readonly rpcUrl: string | null;
   bootstrap(): Promise<void>;
   handleRpc(body: unknown): Promise<{ readonly status: number; readonly body: unknown }>;
 }
@@ -76,13 +80,19 @@ export const readSolanaPaymasterRuntimeConfig = async (
 
   const payer = await resolveSolanaPayerWallet(config);
   const feeTokensRaw = readOptionalEnv("LIVESTREAK_SOLANA_FEE_TOKENS");
-  const feeTokens =
+  const envFeeTokens =
     feeTokensRaw === null
       ? []
       : feeTokensRaw
           .split(",")
           .map((token) => token.trim())
           .filter((token) => token.length > 0);
+
+  // Token-free by default: the free-price paymaster co-signs as fee payer and takes NOTHING, so it
+  // advertises NO fee token. The app then builds a token-free config (sponsor pays SOL, no fee-token
+  // transfer, no sponsor fee-token ATA needed — the prod-safe path). Set LIVESTREAK_SOLANA_FEE_TOKENS
+  // ONLY to opt a real Kora node into the legacy fee-token flow.
+  const feeTokens = envFeeTokens;
 
   return {
     rpcUrl,
@@ -100,6 +110,8 @@ const createDisabledSolanaPaymaster = (): SolanaPaymasterService => ({
   advertise: false,
   payerAddress: null,
   paymasterPath: SOLANA_PAYMASTER_PATH,
+  feeTokens: [],
+  rpcUrl: null,
   async bootstrap() {
     return;
   },
@@ -207,6 +219,8 @@ const createEnabledSolanaPaymaster = (
     },
     payerAddress: config.payerAddress,
     paymasterPath: SOLANA_PAYMASTER_PATH,
+    feeTokens: [...config.feeTokens],
+    rpcUrl: config.rpcUrl,
 
     async bootstrap() {
       const balance = await rpc.getBalance(solanaAddress(config.payerAddress)).send();

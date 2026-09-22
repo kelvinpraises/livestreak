@@ -159,7 +159,18 @@ describe("aa solana paymaster route", () => {
     const enabled = await request(createSolanaEnabledApp()).get("/aa/descriptor").expect(200);
     expect(enabled.body.solanaSponsorship).toEqual({
       paymasterPath: "/aa/solana/paymaster",
-      payerAddress
+      payerAddress,
+      feeTokens: [FEE_TOKEN],
+      rpcUrl: "http://offline.invalid"
     });
   });
+
+  it("omits feeTokens/rpcUrl when the paymaster leg is not configured", async () => {
+    const bare = await request(createApp(createHostRouteDeps(defaultHostServerConfig())))
+      .get("/aa/descriptor")
+      .expect(200);
+    // With no leg there is no solanaSponsorship block at all — hence no feeTokens/rpcUrl.
+    expect(bare.body.solanaSponsorship).toBeUndefined();
+  });
 });
+

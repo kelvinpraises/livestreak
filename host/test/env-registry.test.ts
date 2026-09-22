@@ -51,6 +51,8 @@ const ALLOWLIST: readonly string[] = [
   "LIVESTREAK_SOLANA_SPONSOR_SEED",
   "LIVESTREAK_SOLANA_SPONSOR_MNEMONIC",
   "LIVESTREAK_SOLANA_FEE_TOKENS",
+  // Dev-only localnet faucet mint-authority keypair path (deploy-snapshot override is registered above).
+  "LIVESTREAK_SOLANA_DEPLOYER_KEYPAIR",
   "LIVESTREAK_KORA_URL",
   "LIVESTREAK_KORA_ENABLED",
   "LIVESTREAK_KORA_BIN",

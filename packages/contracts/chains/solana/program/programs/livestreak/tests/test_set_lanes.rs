@@ -142,6 +142,7 @@ fn set_lanes_reshape_strand_and_guards() {
         h.program_id,
         &livestreak::instruction::MintPosition { salt: SALT }.data(),
         livestreak::accounts::MintPosition {
+            payer: user_a.pubkey(),
             minter: user_a.pubkey(),
             protocol_state,
             market,

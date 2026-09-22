@@ -23,6 +23,7 @@ import {
   buildWithdrawIx,
   computePositionTokenId,
   createWalletManager,
+  isSponsoredSolanaConfig,
   pollUntilUserOperationIncluded,
   type Address,
   type Hex32,
@@ -35,6 +36,7 @@ import { validateOptionsVaultSide } from "../../model/vault.js";
 import { asTokenId, type TokenId, type VaultId } from "../../model/ids.js";
 import {
   asTxId,
+  type AddFundsInput,
   type AdvanceInput,
   type ApproveNftInput,
   type ClaimLossLvstInput,
@@ -57,7 +59,9 @@ import {
 } from "../types.js";
 import { validateSolanaUserAddress } from "./account.js";
 import {
+  readCurrentLanes,
   resolveMarketForToken,
+  resolveMarketForTokenOrOwner,
   resolveMarketForVault,
   resolveSolanaContext,
   tokenIdToHex32,
@@ -91,6 +95,12 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
     }
     return ctxPromise;
   };
+
+  // Account rent (PositionOwner PDA, a fresh LVST ATA) must be paid by a signer holding SOL. In
+  // sponsored (token-free) mode the user has zero SOL, so the paymaster — which co-signs as fee
+  // payer — pays the rent too; self-pay falls back to the signer. Owner/identity stays the signer.
+  const rentPayerFor = (signer: Address): Address =>
+    isSponsoredSolanaConfig(solanaConfig) ? address(solanaConfig.paymasterAddress) : signer;
 
   // Compose instructions into one tx, send, and confirm inclusion via the shared poller (Solana
   // getSignatureStatuses is mapped onto the receipt contract by the wallet account).
@@ -217,6 +227,19 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
     return marketId;
   };
 
+  // Like requireMarketForToken but resolves a LANELESS position via its PositionOwner PDA — addFunds
+  // must work on a freshly minted position (park the deposit as budget) before any lane exists.
+  const requireMarketForTokenOrOwner = async (tokenId: TokenId): Promise<Hex32> => {
+    const marketId = await resolveMarketForTokenOrOwner(ctx, tokenId);
+    if (marketId === undefined) {
+      throw new LiveStreakConfigError({
+        message: "Solana: could not resolve the market for this position (is it minted?)",
+        metadata: { details: tokenId.toString() }
+      });
+    }
+    return marketId;
+  };
+
   const doMint = async (marketId: string, to: string, salt: bigint): Promise<MintResult> => {
     const { account, signer } = await getWriter();
     const recipient = validateSolanaUserAddress(to, "to");
@@ -227,9 +250,13 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         message: "Solana: mint recipient must be the wallet signer (no mint-to-third-party instruction)"
       });
     }
+    // The PositionOwner rent payer must equal the tx fee payer (sponsored → paymaster, self-pay →
+    // signer); minter stays the owner/identity either way.
+    const rentPayer = rentPayerFor(signer);
     const ix = await buildMintPositionIx({
       programId: ctx.programId,
       marketId: marketId as unknown as Hex32,
+      payer: rentPayer,
       minter: signer,
       salt
     });
@@ -393,6 +420,29 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       // advance, so VaultBoardBehind re-throws; only StateFull (grow, from the addDeposit store) recovers.
       return asTxId(await withCapacityRecovery(marketId, undefined, () => send([ix])));
     },
+    // addFunds: balance-first top-up. Read the position's current active lanes and re-send them via
+    // set_lanes with the deposit as add_deposit — the deposit refills the shared Drips balance and
+    // extends every live stream, matching the EVM/Sui composite (read-lanes + setLanes). With no lanes
+    // it just parks the deposit as budget, so it works on a freshly-minted position (the first-bet
+    // top-up); the market then resolves from the PositionOwner PDA rather than an engine footprint.
+    addFunds: async (input: AddFundsInput): Promise<TxId> => {
+      const deposit = requirePositiveBigInt(input.deposit, "deposit");
+      const marketId = await requireMarketForTokenOrOwner(input.tokenId);
+      const lanes: LaneArgInput[] = await readCurrentLanes(ctx, marketId, input.tokenId);
+      const { signer } = await getWriter();
+      const ix = await buildSetLanesIx({
+        programId: ctx.programId,
+        marketId,
+        user: signer,
+        tokenId: tokenIdToHex32(input.tokenId),
+        usdcMint: ctx.usdcMint,
+        lanes,
+        addDeposit: deposit
+      });
+      // Token-scoped (re-sends lanes across many vaults) — no single board to advance, so only
+      // StateFull (grow, from the deposit store) recovers; VaultBoardBehind re-throws.
+      return asTxId(await withCapacityRecovery(marketId, undefined, () => send([ix])));
+    },
     // stop_funding: stop a SINGLE lane (one vault, one side) of a position; no cash moves. Market
     // resolves from the lane's vault exactly like advance/withdraw.
     stopFunding: async (input: StopFundingInput): Promise<TxId> => {
@@ -426,7 +476,13 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         });
       }
       const marketId = await requireMarketForVault(input.vaultId);
-      const ensureAta = await buildCreateAtaIdempotentIx({ payer: signer, owner: signer, mint: lvstMint });
+      // The claimer's LVST ATA is created here (first LVST touch) — its rent follows the same
+      // sponsored-payer rule as mint, so a zero-SOL user's claim doesn't fail funding the ATA.
+      const ensureAta = await buildCreateAtaIdempotentIx({
+        payer: rentPayerFor(signer),
+        owner: signer,
+        mint: lvstMint
+      });
       const ix = await buildClaimLossLvstIx({
         programId: ctx.programId,
         marketId,

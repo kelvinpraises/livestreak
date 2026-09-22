@@ -355,6 +355,8 @@ export async function buildWithdrawSeedIx(input: SeedVaultOpInput): Promise<Inst
 // ── position mint + position-gated engine ops (PositionEngineOp) ───────────────────
 
 export interface MintPositionInput extends MarketScoped {
+  /** Funds the PositionOwner rent + tx fee: the paymaster/sponsor when sponsored, else the minter. */
+  payer: Address
   minter: Address
   salt: bigint
 }
@@ -374,7 +376,10 @@ export async function buildMintPositionIx(input: MintPositionInput): Promise<Ins
   return {
     programAddress: input.programId,
     accounts: [
-      writableSigner(input.minter),
+      // payer funds the PositionOwner rent (the sponsor when sponsored; the minter when self-pay),
+      // so an end user needs zero SOL. minter stays the owner/identity — signer but not writable.
+      writableSigner(input.payer),
+      readonlySigner(input.minter),
       writable(protocolState),
       readonly(market),
       writable(position),

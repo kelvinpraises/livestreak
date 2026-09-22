@@ -11,6 +11,7 @@ import {
   Connection,
   Keypair,
   PublicKey,
+  SystemProgram,
   Transaction,
   TransactionInstruction,
   sendAndConfirmTransaction,
@@ -24,17 +25,26 @@ import { DEPLOYMENTS_DIR } from "./utils.js";
 interface Args {
   steward?: string;
   mints: { recipient: string; amount: bigint }[];
+  // SOL transfers from the deployer to operator wallets (e.g. the paymaster/sponsor). This moves the
+  // deployer's EXISTING localnet SOL — it is NOT an airdrop, and it funds OPERATOR infra (the sponsor
+  // that pays end-user fees), never an end user. On mainnet the operator funds the sponsor directly.
+  fundSol: { recipient: string; lamports: bigint }[];
 }
 
 function parseArgs(): Args {
   const argv = process.argv.slice(2);
-  const args: Args = { mints: [] };
+  const args: Args = { mints: [], fundSol: [] };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--steward") args.steward = argv[++i];
     if (argv[i] === "--mint") {
       const [recipient, amount] = (argv[++i] ?? "").split("=");
       if (!recipient || !amount) throw new Error("--mint expects <base58>=<amount>");
       args.mints.push({ recipient, amount: BigInt(amount) });
+    }
+    if (argv[i] === "--fund-sol") {
+      const [recipient, lamports] = (argv[++i] ?? "").split("=");
+      if (!recipient || !lamports) throw new Error("--fund-sol expects <base58>=<lamports>");
+      args.fundSol.push({ recipient, lamports: BigInt(lamports) });
     }
   }
   return args;
@@ -95,6 +105,26 @@ async function main(): Promise<void> {
     const ata = await getOrCreateAssociatedTokenAccount(connection, deployer, usdcMint, owner);
     await mintTo(connection, deployer, usdcMint, ata.address, deployer, amount);
     console.log(`minted ${amount} USDC → ${owner.toBase58()} (ata ${ata.address.toBase58()})`);
+  }
+
+  // Top up operator wallets (the paymaster/sponsor) to the target from the deployer's existing SOL,
+  // so the host's Solana paymaster passes its funded-balance check and advertises sponsorship. This
+  // is the operator funding its own infra — never an end-user airdrop.
+  for (const { recipient, lamports } of args.fundSol) {
+    const to = new PublicKey(recipient);
+    const balance = BigInt(await connection.getBalance(to));
+    if (balance >= lamports) {
+      console.log(`sponsor ${to.toBase58()} already funded (${balance} lamports)`);
+      continue;
+    }
+    const topUp = lamports - balance;
+    const ix = SystemProgram.transfer({
+      fromPubkey: deployer.publicKey,
+      toPubkey: to,
+      lamports: topUp,
+    });
+    await sendAndConfirmTransaction(connection, new Transaction().add(ix), [deployer]);
+    console.log(`funded sponsor ${to.toBase58()} +${topUp} lamports from deployer (target ${lamports})`);
   }
 }
 

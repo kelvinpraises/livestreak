@@ -126,6 +126,7 @@ fn transfer_moves_the_owner_gate() {
         h.program_id,
         &livestreak::instruction::MintPosition { salt: SALT }.data(),
         livestreak::accounts::MintPosition {
+            payer: user_a.pubkey(),
             minter: user_a.pubkey(),
             protocol_state,
             market,

@@ -72,6 +72,8 @@ export interface MarketStewardAccount {
 export interface PositionOwnerAccount {
   tokenId: Hex32
   owner: Address
+  /** The market this position was minted for — lets a reader attribute a still-laneless position. */
+  marketId: Hex32
   bump: number
 }
 
@@ -112,6 +114,7 @@ const marketStewardBody = getStructDecoder([
 const positionOwnerBody = getStructDecoder([
   ['tokenId', id32],
   ['owner', getAddressDecoder()],
+  ['marketId', id32],
   ['bump', getU8Decoder()],
 ])
 
@@ -145,5 +148,10 @@ export function decodeMarketStewardAccount(data: Uint8Array): MarketStewardAccou
 
 export function decodePositionOwnerAccount(data: Uint8Array): PositionOwnerAccount {
   const raw = positionOwnerBody.decode(stripDiscriminator('PositionOwner', data))
-  return { tokenId: hex32FromBytes(asBytes(raw.tokenId)), owner: raw.owner, bump: raw.bump }
+  return {
+    tokenId: hex32FromBytes(asBytes(raw.tokenId)),
+    owner: raw.owner,
+    marketId: hex32FromBytes(asBytes(raw.marketId)),
+    bump: raw.bump,
+  }
 }

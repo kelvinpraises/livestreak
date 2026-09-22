@@ -77,17 +77,15 @@ export const SolanaWalletInitConfig = Schema.Struct({
   paymasterToken: Schema.optional(Schema.Struct({ address: Schema.String })),
   network: Schema.optional(Schema.Literal("mainnet-beta", "devnet", "testnet", "localnet"))
 }).pipe(
-  // Same contradiction-kill as the EVM arm: the wallet's assertSolanaSponsorshipConfig throws when
-  // sponsored without the paymaster triple — fail at decode instead of first send.
+  // Contradiction-kill (fail at decode, not first send): sponsored needs a paymaster URL + fee-payer
+  // address. paymasterToken is OPTIONAL — absent selects token-free sponsorship (the paymaster pays the
+  // SOL fee and takes nothing); present enables the legacy Kora fee-token flow.
   Schema.filter(
     (config) =>
       config.isSponsored !== true ||
-      (config.paymasterUrl !== undefined &&
-        config.paymasterAddress !== undefined &&
-        config.paymasterToken !== undefined),
+      (config.paymasterUrl !== undefined && config.paymasterAddress !== undefined),
     {
-      message: () =>
-        "paymasterUrl, paymasterAddress and paymasterToken are required when isSponsored is true"
+      message: () => "paymasterUrl and paymasterAddress are required when isSponsored is true"
     }
   )
 );
@@ -124,3 +122,47 @@ export const WalletInit = Schema.Union(
   })
 );
 export type WalletInit = Schema.Schema.Type<typeof WalletInit>;
+
+// --- descriptor → wallet-init (shared edge composition) ---
+
+// The minimal Solana sponsorship shape a host AA descriptor advertises — just the fields the
+// wallet-init mapping reads. Kept structural (NOT an import of @livestreak/host's descriptor) so this
+// foundation stays dependency-free; each edge passes its `descriptor.solanaSponsorship` straight in.
+export interface SolanaSponsorshipInput {
+  readonly paymasterPath: string;
+  readonly payerAddress?: string;
+  readonly feeTokens?: readonly string[];
+  readonly rpcUrl?: string;
+}
+
+// Map a host's advertised Solana sponsorship into a WalletInit — the ONE place both edges (the app
+// provider and the CLI gateway) shape this config, instead of each hand-rolling the same field copy.
+// TOKEN-FREE by default: sponsor whenever a fee-payer address is advertised — the paymaster co-signs as
+// fee payer and takes nothing, so no fee token (and no sponsor fee-token ATA) is needed. If the
+// descriptor also advertises a feeToken it opts into the legacy Kora fee-token flow. With no payer
+// address, a self-pay config so the read-only board still loads and writes fund their own fee.
+// `hostBaseUrl` prefixes the relative paymasterPath; `fallbackRpc` is used when the descriptor has no rpcUrl.
+export function solanaWalletInitFromDescriptor(
+  sponsorship: SolanaSponsorshipInput | undefined,
+  opts: {
+    readonly hostBaseUrl: string;
+    readonly fallbackRpc: string;
+    readonly network?: "mainnet-beta" | "devnet" | "testnet" | "localnet";
+  }
+): WalletInit {
+  const network = opts.network ?? "localnet";
+  const feeToken = sponsorship?.feeTokens?.[0];
+  const raw =
+    sponsorship !== undefined && sponsorship.payerAddress !== undefined
+      ? {
+          provider: sponsorship.rpcUrl ?? opts.fallbackRpc,
+          isSponsored: true,
+          paymasterUrl: `${opts.hostBaseUrl}${sponsorship.paymasterPath}`,
+          paymasterAddress: sponsorship.payerAddress,
+          ...(feeToken !== undefined ? { paymasterToken: { address: feeToken } } : {}),
+          network
+        }
+      : { provider: opts.fallbackRpc, network };
+  const config = Schema.decodeUnknownSync(SolanaWalletInitConfig)(raw);
+  return { chain: "solana", seedSource: "raw", config };
+}

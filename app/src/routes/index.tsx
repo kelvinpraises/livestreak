@@ -6,7 +6,7 @@ import { useHomepageData } from '#/hooks/use-homepage-data'
 import { usePreferFixture } from '#/hooks/use-fixture-mode'
 import { useOptionsContext } from '#/providers/options-provider'
 import { ChainSelector } from '#/components/molecules/chain-selector'
-import { chainLabel } from '#/utils/chain'
+import { chainLabel, firstOtherChainWithVaults } from '#/utils/chain'
 import { isOptionsModeEnabled } from '#/utils/env'
 import { formatUSDCFull } from '#/utils/format'
 
@@ -39,11 +39,15 @@ function HomePage() {
   // empty state can honestly say WHICH chain is empty (A6/S1). The demo fixture predates the tag and
   // is never filtered — that would blank the demo.
   const chainFilterActive = isOptionsModeEnabled() && !preferFixture
-  const otherChain = chain === 'evm' ? 'sui' : 'evm'
   const visibleStreams = chainFilterActive ? streams.filter(s => s.chain === chain) : streams
   const visibleLiveVaults = chainFilterActive ? liveVaults.filter(v => v.chain === chain) : liveVaults
   const visibleLifetime = chainFilterActive ? lifetimeVaults.filter(v => v.chain === chain) : lifetimeVaults
-  const otherChainHasVaults = chainFilterActive && liveVaults.some(v => v.chain === otherChain)
+  // With 3+ chains a binary "other chain" is wrong — offer the FIRST other chain that actually has
+  // open vaults so the empty-state "switch" hint never points at an equally-empty chain (A6/S1).
+  const otherChain = chainFilterActive
+    ? firstOtherChainWithVaults(chain, id => liveVaults.some(v => v.chain === id))
+    : null
+  const otherChainHasVaults = otherChain !== null
 
   return (
     <div style={{ overflowY: 'auto', height: 'calc(100vh - 56px)' }}>
@@ -142,9 +146,9 @@ function HomePage() {
           >
             <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)', marginBottom: otherChainHasVaults ? 14 : 0 }}>
               No live vaults on <strong style={{ color: '#00ff87' }}>{chainLabel(chain)}</strong> right now.
-              {otherChainHasVaults && <> There are open vaults on {chainLabel(otherChain)}.</>}
+              {otherChain !== null && <> There are open vaults on {chainLabel(otherChain)}.</>}
             </p>
-            {otherChainHasVaults && (
+            {otherChain !== null && (
               <button
                 type="button"
                 data-testid="homepage-switch-chain"

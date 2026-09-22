@@ -1,6 +1,7 @@
 import type {
   OptionsFunctionView,
   OptionsMarketPanel,
+  OptionsNftPanel,
   OptionsPanel,
   OptionsVault,
   OptionsVaultPanel,
@@ -78,9 +79,16 @@ export function panelToVaultViews(
 
   for (const market of marketsForStream(panel, streamId)) {
     for (const vault of market.vaults) {
-      const lane = panel.nfts
+      // A vault can carry TWO of the viewer's lanes at once — one side streaming, the other paused with
+      // banked shares (you streamed one side, switched, streamed the other). Prefer the ACTIVELY
+      // STREAMING lane (rate > 0) so the shared side/rate reflects the live stream; fall back to the first
+      // (paused/depleted) lane only when nothing streams. A plain `.find` returned the FIRST lane — often
+      // the paused, rate-0 side — so the rate control read as paused/centre while the OTHER side was
+      // actually streaming, and any side-switch snapped back to that phantom pause location.
+      const lanesForVault = panel.nfts
         .flatMap(n => n.lanes.map(l => ({ ...l, tokenId: n.tokenId })))
-        .find(l => l.vaultId === vault.vaultId)
+        .filter(l => l.vaultId === vault.vaultId)
+      const lane = lanesForVault.find(l => (l.stream?.ratePerMinUSDC ?? 0) > 0) ?? lanesForVault[0]
       const side = lane?.side
 
       views[vault.vaultId] = {
@@ -194,6 +202,15 @@ export function findOptionsFunction(
   match?: (fn: OptionsFunctionView) => boolean,
 ): OptionsFunctionView | undefined {
   return functions.find(fn => fn.name === name && (match ? match(fn) : true))
+}
+
+// The balance/runway readout is DATA-driven, not chain-gated: any chain whose reader populates the
+// account balance emits `balanceUSDC` (EVM today; Sui and Solana omit it — Sui has no shared-Drips
+// account, Solana's reader returns a zeroed placeholder and never sets the model balance). Gating on
+// the field's presence lights the readout up automatically whenever a chain starts supplying it, and
+// keeps the app a thin consumer that never fakes a number.
+export function hasBalanceReadout(account: OptionsNftPanel['account']): boolean {
+  return account.balanceUSDC !== undefined
 }
 
 export function findFundFunction(

@@ -42,6 +42,7 @@ import { validateSolanaUserAddress } from "./account.js";
 import {
   fetchAccountBytes,
   listMarketIds as listMarketIdsCtx,
+  resolveMarketForTokenOrOwner,
   resolveSolanaContext,
   tokenIdToHex32,
   vaultIdHex,
@@ -192,9 +193,18 @@ export const createSolanaOptionsReader = (
     readUsdcAddress: async () => ctx.usdcMint as unknown as `0x${string}`,
     readUsdcBalance: (owner) => readUsdcBalance(ctx, owner),
 
-    // Engine exposes no per-token Drips balance view; PnL remainingUSDC reads 0 on Solana (parity gap
-    // with EVM's streamsState.balance). Documented divergence.
-    readNftBalance: async () => 0n,
+    // Shared streaming balance for a position from the engine's per-token streams state (wasm view
+    // nftBalance). Resolves the market via engine footprint OR the PositionOwner PDA, so it also
+    // reports a parked balance on a laneless position (addFunds with no lanes). EVM parity.
+    readNftBalance: async (tokenId) => {
+      const marketId = await resolveMarketForTokenOrOwner(ctx, tokenId);
+      if (marketId === undefined) return 0n;
+      try {
+        return await withProtocolView(ctx, marketId, (view) => view.nftBalance(tokenIdToHex32(tokenId)));
+      } catch {
+        return 0n; // ProtocolState not allocated for the market yet
+      }
+    },
 
     readOwnerOf: (tokenId) => readOwnerOf(ctx, tokenId),
     readApproved: async () => {
@@ -280,6 +290,20 @@ const listMarketVaults = async (
   }
 };
 
+// Fetch + decode the PositionOwner PDA once. Carries the market the position was minted for (the
+// per-token accessor EVM/Sui already expose), so a laneless token is still attributable. undefined
+// when the PDA doesn't exist (unminted token).
+const readOwnerRecord = async (
+  ctx: SolanaOptionsContext,
+  tokenId: TokenId
+): Promise<{ owner: UserAddress; marketId: Hex32 } | undefined> => {
+  const [posPda] = await findPositionPda(ctx.programId, tokenIdToHex32(tokenId));
+  const bytes = await fetchAccountBytes(ctx.rpc, posPda);
+  if (bytes === undefined) return undefined;
+  const rec = decodePositionOwnerAccount(bytes);
+  return { owner: validateSolanaUserAddress(String(rec.owner), "owner"), marketId: rec.marketId };
+};
+
 const readNft = async (
   ctx: SolanaOptionsContext,
   withTokenView: <T>(
@@ -292,6 +316,7 @@ const readNft = async (
   const now = nowSec();
   const nft = await withTokenView(tokenId, (view, tokenHex, marketId) => {
     const laneCount = view.laneCount(tokenHex);
+    const balance = view.nftBalance(tokenHex);
     const lanes: OptionsLane[] = [];
     for (const vId of view.accountVaultIds(tokenHex)) {
       const vault = view.vault(vId);
@@ -322,13 +347,25 @@ const readNft = async (
         );
       }
     }
-    return mapSolanaNft(tokenId, owner, asMarketId(marketId), laneCount, lanes);
+    return mapSolanaNft(tokenId, owner, asMarketId(marketId), laneCount, lanes, balance);
   });
 
+  if (nft) return nft;
   // Laneless token (minted, not yet funded): no engine shard owns it, so the market can't be derived
-  // from engine state. Return a zero-market NFT (dropped by the snapshot market filter until it funds
-  // — the same tradeoff EVM/Sui's laneless case carried before per-token market accessors). See report.
-  return nft ?? mapSolanaNft(tokenId, owner, asMarketId(ZERO_ID), 0, []);
+  // from engine state. The PositionOwner PDA records the market it was minted for (parity with EVM
+  // MarketDriver.marketIdOf / Sui's NFT market_id), so the snapshot keeps it under its market instead
+  // of dropping it — this is what lets a fresh mint enable its first-bet controls. It can still hold a
+  // parked balance (addFunds with no lanes), so read that too.
+  const rec = await readOwnerRecord(ctx, tokenId);
+  let balance = 0n;
+  if (rec?.marketId !== undefined) {
+    try {
+      balance = await withProtocolView(ctx, rec.marketId, (view) => view.nftBalance(tokenIdToHex32(tokenId)));
+    } catch {
+      // ProtocolState not allocated — no balance to report
+    }
+  }
+  return mapSolanaNft(tokenId, owner, asMarketId(rec?.marketId ?? ZERO_ID), 0, [], balance);
 };
 
 const listOwnerTokens = async (
@@ -361,15 +398,14 @@ const listOwnerTokens = async (
 };
 
 const readOwnerOf = async (ctx: SolanaOptionsContext, tokenId: TokenId): Promise<UserAddress> => {
-  const [posPda] = await findPositionPda(ctx.programId, tokenIdToHex32(tokenId));
-  const bytes = await fetchAccountBytes(ctx.rpc, posPda);
-  if (bytes === undefined) {
+  const rec = await readOwnerRecord(ctx, tokenId);
+  if (rec === undefined) {
     throw new LiveStreakConfigError({
       message: "Solana: position owner not found",
       metadata: { details: tokenId.toString() }
     });
   }
-  return validateSolanaUserAddress(String(decodePositionOwnerAccount(bytes).owner), "owner");
+  return rec.owner;
 };
 
 const readUsdcBalance = async (ctx: SolanaOptionsContext, owner: UserAddress): Promise<bigint> => {

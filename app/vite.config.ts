@@ -115,6 +115,19 @@ const config = defineConfig({
   },
   optimizeDeps: {
     include: ['@livestreak/options'],
+    // Keep @livestreak/contracts OUT of esbuild pre-bundling. Its solana barrel's
+    // engine-wasm reader loads the WASM via `new URL("./wasm/…_bg.wasm",
+    // import.meta.url)`; esbuild pre-bundling flattens that module and silently
+    // breaks the asset URL (same class of bug as the options pre-bundle staleness
+    // incident). Excluded, the module is served as-is so `import.meta.url` points at
+    // its real workspace location and the .wasm resolves. This matters even before
+    // A1 imports the barrel directly, because @livestreak/options (pre-bundled via
+    // `include` above) already imports @livestreak/contracts/solana; without this
+    // exclude esbuild would follow that edge and pre-bundle the wasm URL too.
+    // Dev-server file access to packages/contracts/dist needs no fs.allow entry:
+    // vite's default workspace-root detection resolves to the repo root (the dir
+    // with package-lock.json), which already contains packages/contracts.
+    exclude: ['@livestreak/contracts'],
   },
   plugins: [
     nodePolyfillShimResolver(),

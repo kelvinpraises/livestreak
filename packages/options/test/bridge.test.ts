@@ -683,6 +683,78 @@ describe("autoAdvanceOverflow fund path", () => {
   });
 });
 
+// Regression: the genome refactor (0c756df) dropped streamLane/pauseLane/resumeLane from the bridge
+// dispatch, so the app's primary bet gesture (tap prediction → onStream → streamLane) hit the
+// "Unknown options bridge action" default on EVERY chain. In the remote/WSS model callAction is the
+// only write entrypoint, so these runtime verbs MUST dispatch here. Each reaches runtime.streamLane/
+// pauseLane, which issues a setLanes — so a recorded setLanes proves the dispatch (vs an Unknown throw).
+describe("callAction dispatches runtime lane verbs (regression guard)", () => {
+  const laneUser = fixtureUser();
+  const laneToken = asTokenId(1n);
+  const laneVault = asVaultId("vault_01");
+
+  const bootLaneBridge = async () => {
+    const writer = createFakeChainWriter();
+    const runtime = createOptionsRuntime({
+      config: {
+        runtimeId: "bridge_lane",
+        user: laneUser,
+        marketIds: [asMarketId("market_01")],
+        defaultMarketId: asMarketId("market_01")
+      },
+      chainConfig: createFakeChainConfig(),
+      chain: {
+        reader: createFakeOptionsReader({
+          markets: [fixtureMarket({ vaultIds: [laneVault] })],
+          vaults: [fixtureVault({ vaultId: laneVault })],
+          nfts: [
+            fixtureNft(laneUser, {
+              laneCount: 1,
+              lanes: [
+                {
+                  tokenId: laneToken,
+                  vaultId: laneVault,
+                  side: "yes",
+                  rate: 800_000n,
+                  committedRate: 800_000n,
+                  gPaid: 0n,
+                  sharesAccrued: 0n,
+                  depleted: false
+                }
+              ]
+            })
+          ],
+          lvstAccounts: [fixtureLvstAccount(laneUser)],
+          shareTotals: { vault_01: { yes: 1n, no: 1n } }
+        }),
+        writer
+      }
+    });
+    await runtime.refreshUser(laneUser, asMarketId("market_01"));
+    return { writer, bridge: createOptionsBridge({ runtime }) };
+  };
+
+  it("streamLane reaches the runtime and issues a setLanes (not an Unknown-action throw)", async () => {
+    const { writer, bridge } = await bootLaneBridge();
+    await bridge.callAction(grantedCaller, {
+      scope: bridgeActionScope,
+      action: "streamLane",
+      args: { vaultId: laneVault, side: "yes", ratePerMin: 5 }
+    });
+    expect(writer.requests.some((request) => request.action === "setLanes")).toBe(true);
+  });
+
+  it("pauseLane reaches the runtime and issues a setLanes", async () => {
+    const { writer, bridge } = await bootLaneBridge();
+    await bridge.callAction(grantedCaller, {
+      scope: bridgeActionScope,
+      action: "pauseLane",
+      args: { vaultId: laneVault, side: "yes" }
+    });
+    expect(writer.requests.some((request) => request.action === "setLanes")).toBe(true);
+  });
+});
+
 function findFunction(
   controls: OptionsControlsView,
   name: string,

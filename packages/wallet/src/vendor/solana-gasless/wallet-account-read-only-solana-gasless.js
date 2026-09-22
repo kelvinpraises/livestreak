@@ -53,7 +53,7 @@ import { ConfigurationError } from './errors.js'
  * @typedef {Object} SolanaGaslessWalletPaymasterConfig
  * @property {string | KoraClientOptions | (string | KoraClientOptions)[]} paymasterUrl - The paymaster RPC url, client options, or failover list.
  * @property {string} paymasterAddress - The address of the paymaster program.
- * @property {PaymasterTokenConfig} paymasterToken - The paymaster token configuration.
+ * @property {PaymasterTokenConfig} [paymasterToken] - LiveStreak: OPTIONAL. Absent ⇒ token-free (the paymaster pays the SOL fee and takes nothing, no fee-token transfer). Present ⇒ the Kora fee-token flow.
  */
 
 /** @typedef {Partial<Pick<SolanaGaslessWalletPaymasterConfig, "paymasterToken"> & Pick<SolanaWalletConfig, "transferMaxFee" | "transactionMaxFee">>} SolanaGaslessWalletPaymasterConfigOverrides */
@@ -270,7 +270,7 @@ export default class WalletAccountReadOnlySolanaGasless extends WalletAccountRea
    * @returns {void}
    */
   static _validateConfig (config) {
-    let { paymasterUrl, paymasterAddress, paymasterToken } = config
+    let { paymasterUrl, paymasterAddress } = config
     const missingFields = []
 
     if (!Array.isArray(paymasterUrl)) {
@@ -284,12 +284,11 @@ export default class WalletAccountReadOnlySolanaGasless extends WalletAccountRea
       missingFields.push('paymasterAddress')
     }
 
-    if (!paymasterToken) {
-      missingFields.push('paymasterToken')
-    }
+    // LiveStreak: paymasterToken is NOT required — its absence selects token-free sponsorship (the
+    // paymaster pays the SOL fee and takes nothing). When present it enables the Kora fee-token flow.
 
     if (missingFields.length > 0) {
-      throw new ConfigurationError(`Missing required paymaster token configuration fields: ${missingFields.join(', ')}.`)
+      throw new ConfigurationError(`Missing required paymaster configuration fields: ${missingFields.join(', ')}.`)
     }
   }
 

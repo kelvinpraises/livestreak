@@ -1,7 +1,7 @@
 import { Either, Schema } from "effect";
 import { describe, expect, it } from "vitest";
 
-import { Address, EvmWalletInitConfig } from "../src/wallet.js";
+import { Address, EvmWalletInitConfig, solanaWalletInitFromDescriptor } from "../src/wallet.js";
 
 const decodeAddress = Schema.decodeUnknownEither(Address);
 
@@ -43,5 +43,56 @@ describe("SCH.1 — sponsored config requires paymasterUrl", () => {
 
   it("isSponsored:false WITHOUT paymasterUrl decodes (self-pay/native)", () => {
     expect(Either.isRight(decodeEvm({ ...baseEvm, isSponsored: false }))).toBe(true);
+  });
+});
+
+describe("solanaWalletInitFromDescriptor — shared descriptor→WalletInit mapping", () => {
+  const opts = { hostBaseUrl: "http://host:8787", fallbackRpc: "http://rpc:8899" };
+
+  it("sponsors when the full paymaster triple is advertised", () => {
+    const init = solanaWalletInitFromDescriptor(
+      {
+        paymasterPath: "/aa/solana/paymaster",
+        payerAddress: "oeYfSponsor",
+        feeTokens: ["UsdcMint"],
+        rpcUrl: "http://descriptor-rpc:8899"
+      },
+      opts
+    );
+    expect(init.chain).toBe("solana");
+    const c = init.config as Record<string, unknown>;
+    expect(c.isSponsored).toBe(true);
+    expect(c.provider).toBe("http://descriptor-rpc:8899"); // descriptor rpc wins over fallback
+    expect(c.paymasterUrl).toBe("http://host:8787/aa/solana/paymaster");
+    expect(c.paymasterAddress).toBe("oeYfSponsor");
+    expect(c.paymasterToken).toEqual({ address: "UsdcMint" });
+  });
+
+  it("falls back to self-pay when no sponsorship is advertised", () => {
+    const init = solanaWalletInitFromDescriptor(undefined, opts);
+    const c = init.config as Record<string, unknown>;
+    expect(c.isSponsored).toBeUndefined();
+    expect(c.provider).toBe("http://rpc:8899"); // fallback rpc
+    expect(c.paymasterAddress).toBeUndefined();
+  });
+
+  it("token-free: sponsors with a payer address and NO fee token (no paymasterToken)", () => {
+    const init = solanaWalletInitFromDescriptor(
+      { paymasterPath: "/aa/solana/paymaster", payerAddress: "oeYfSponsor" },
+      opts
+    );
+    const c = init.config as Record<string, unknown>;
+    expect(c.isSponsored).toBe(true); // sponsored — the paymaster pays SOL and takes nothing
+    expect(c.paymasterAddress).toBe("oeYfSponsor");
+    expect(c.paymasterUrl).toBe("http://host:8787/aa/solana/paymaster");
+    expect(c.paymasterToken).toBeUndefined(); // token-free — no fee-token ATA needed in prod
+  });
+
+  it("uses fallbackRpc when the sponsorship omits rpcUrl", () => {
+    const init = solanaWalletInitFromDescriptor(
+      { paymasterPath: "/aa/solana/paymaster", payerAddress: "oeYfSponsor", feeTokens: ["UsdcMint"] },
+      opts
+    );
+    expect((init.config as Record<string, unknown>).provider).toBe("http://rpc:8899");
   });
 });

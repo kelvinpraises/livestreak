@@ -15,6 +15,7 @@ export const protocolview_loss_claimable: (a: number, b: number, c: number, d: n
 export const protocolview_lvst_staked: (a: number, b: number, c: number) => [number, number, number, number];
 export const protocolview_market_vaults: (a: number, b: number, c: number) => [number, number, number, number];
 export const protocolview_mint_rate: (a: number) => [number, number];
+export const protocolview_nft_balance: (a: number, b: number, c: number) => [number, number, number, number];
 export const protocolview_pending_boundaries: (a: number, b: number, c: number, d: number) => [bigint, number, number];
 export const protocolview_pending_dividends: (a: number, b: number, c: number) => [number, number, number, number];
 export const protocolview_pending_shares: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint) => [number, number, number, number];

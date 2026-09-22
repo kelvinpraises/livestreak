@@ -2,7 +2,7 @@
 
 /** Chain tag carried through from the host catalog so the homepage can scope rails by the
  *  active chain. Optional because the demo fixture predates the tag (it is never chain-filtered). */
-export type HomepageChain = 'evm' | 'sui'
+export type HomepageChain = 'evm' | 'sui' | 'solana'
 
 export interface HomepageStreamCard {
   id: string

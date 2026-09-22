@@ -30,6 +30,11 @@ export class ProtocolView {
      */
     market_vaults(market_id: string): string;
     mint_rate(): string;
+    /**
+     * Stored shared streaming balance for a position token (the budget its lanes stream from).
+     * Matches EVM readNftBalance (streamsState.balance). 0 if the token was never funded.
+     */
+    nft_balance(token_id: string): string;
     pending_boundaries(vault_id: string, side: number): bigint;
     pending_dividends(user: string): string;
     pending_shares(vault_id: string, side: number, token_id: string, now: bigint): string;
@@ -69,6 +74,7 @@ export interface InitOutput {
     readonly protocolview_lvst_staked: (a: number, b: number, c: number) => [number, number, number, number];
     readonly protocolview_market_vaults: (a: number, b: number, c: number) => [number, number, number, number];
     readonly protocolview_mint_rate: (a: number) => [number, number];
+    readonly protocolview_nft_balance: (a: number, b: number, c: number) => [number, number, number, number];
     readonly protocolview_pending_boundaries: (a: number, b: number, c: number, d: number) => [bigint, number, number];
     readonly protocolview_pending_dividends: (a: number, b: number, c: number) => [number, number, number, number];
     readonly protocolview_pending_shares: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint) => [number, number, number, number];

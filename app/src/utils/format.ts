@@ -58,3 +58,8 @@ export function calcPoolPct(noTotal: number, yesTotal: number): number {
   const total = noTotal + yesTotal
   return total === 0 ? 0.5 : yesTotal / total
 }
+// Middle-ellipsis for long mono ids (256-bit token ids, 32-byte market ids) so they never overflow their
+// row. Keep the full value in a `title` so hover/select-to-copy still yields the whole id.
+export function shortenId(value: string, head = 6, tail = 6): string {
+  return value.length <= head + tail + 1 ? value : `${value.slice(0, head)}…${value.slice(-tail)}`
+}

@@ -136,6 +136,7 @@ fn loser_mints_lvst_and_guards_hold() {
         h.program_id,
         &livestreak::instruction::MintPosition { salt: SALT }.data(),
         livestreak::accounts::MintPosition {
+            payer: bettor.pubkey(),
             minter: bettor.pubkey(),
             protocol_state,
             market,

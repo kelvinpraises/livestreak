@@ -176,7 +176,7 @@ export function BalanceBar({ flow, wallet, onStake, onUnstake, onClaim, claiming
               <button
                 onClick={() => { void walletActions.topUp().catch(() => {}) }}
                 disabled={walletActions.isToppingUp}
-                title="Dev faucet — mint test USDC to your Safe (local stack only)"
+                title="Dev faucet — get test USDC (local stack only)"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 18, height: 18, marginLeft: 2, borderRadius: 5,

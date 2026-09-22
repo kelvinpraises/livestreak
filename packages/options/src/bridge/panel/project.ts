@@ -393,10 +393,13 @@ const projectVaultFunctions = (
       : disabledFunction(CATALOG.withdraw, vaultTarget, "No winnings to claim")
   );
 
-  const hasLosingClaim = lanesOnVault.some((lane) => lane.settlement?.canClaimLoss === true);
+  // claimLossLvst is side-specific (the writer mints against a losing lane's side), so the target
+  // must carry that side — the app matches on it, exactly like fund/stopFunding. Emitting a side-less
+  // target left the Claim LVST button unmatchable (permanently disabled) on every chain.
+  const losingLane = lanesOnVault.find((lane) => lane.settlement?.canClaimLoss === true);
   functions.push(
-    hasLosingClaim
-      ? enabledFunction(CATALOG.claimLossLvst, vaultTarget)
+    losingLane !== undefined
+      ? enabledFunction(CATALOG.claimLossLvst, { ...vaultTarget, side: losingLane.side })
       : disabledFunction(CATALOG.claimLossLvst, vaultTarget, "No losing position")
   );
 };

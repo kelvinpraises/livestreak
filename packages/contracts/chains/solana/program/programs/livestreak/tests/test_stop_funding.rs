@@ -142,6 +142,7 @@ fn stop_funding_drops_one_lane_and_moves_no_cash() {
         h.program_id,
         &livestreak::instruction::MintPosition { salt: SALT }.data(),
         livestreak::accounts::MintPosition {
+            payer: user_a.pubkey(),
             minter: user_a.pubkey(),
             protocol_state,
             market,

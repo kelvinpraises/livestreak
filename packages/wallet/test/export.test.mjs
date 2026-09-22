@@ -28,6 +28,7 @@ const EXPECTED_EXPORTS = [
   'assertSolanaSponsorshipConfig',
   'guardKoraClient',
   'isSponsoredSolanaConfig',
+  'isTokenFreeSponsoredConfig',
   'readSolanaSignatureReceipt',
   'KoraClient',
   'createSolanaRpc',

@@ -162,6 +162,12 @@ export class EngineView {
     return this.view.lane_count(tokenId);
   }
 
+  /** Stored shared streaming balance for a position token (USDC raw units) — the budget its lanes
+   *  stream from. Matches EVM readNftBalance. 0 if never funded. */
+  nftBalance(tokenId: string): bigint {
+    return BigInt(this.view.nft_balance(tokenId));
+  }
+
   seedAccount(creator: string, vaultId: string): `0x${string}` {
     return this.view.seed_account(creator, vaultId) as `0x${string}`;
   }

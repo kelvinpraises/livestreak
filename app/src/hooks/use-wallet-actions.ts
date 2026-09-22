@@ -11,7 +11,8 @@ import {
 import { privateKeyToAccount } from 'viem/accounts'
 
 import { useOptionsContext } from '#/providers/options-provider'
-import { LOCAL_CHAIN_ID } from '#/utils/env'
+import type { OptionsChainKind } from '#/utils/chain'
+import { HOST_BASE_URL, LOCAL_CHAIN_ID } from '#/utils/env'
 import { LOCALHOST_MOCK_USDC, LOCALHOST_RPC_URL } from '#/utils/deployments'
 
 // The well-known Anvil dev account #0 — a PUBLIC test key, pre-funded with ETH on every localhost
@@ -21,6 +22,12 @@ import { LOCALHOST_MOCK_USDC, LOCALHOST_RPC_URL } from '#/utils/deployments'
 const DEV_FAUCET_KEY = import.meta.env.DEV
   ? '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80'
   : undefined
+
+// The Solana top-up path has no client-held key: it POSTs to the host's dev faucet
+// (POST /aa/solana/faucet), which is itself hard-gated to a localnet leg and only mints if the host
+// holds the deployer/mint-authority keypair. We still gate the affordance on a DEV build so prod ships
+// no faucet UI at all — the host would 404 anyway, but there is no reason to render the button.
+const SOLANA_FAUCET_AVAILABLE = import.meta.env.DEV
 
 // 6-decimal MockUSDC mint (matches the deployed mock — see test/mocks/MockUSDC.sol).
 const MINT_ABI = [
@@ -51,13 +58,13 @@ const localChain = defineChain({
 export interface WalletActions {
   /** The connected Safe (smart-account) address that holds USDC + position NFTs. */
   readonly address: Address | null
-  readonly chain: 'evm' | 'sui'
+  readonly chain: OptionsChainKind
   readonly usdcBalance: number
   readonly isConnected: boolean
   /**
-   * Dev faucet availability. True only on the local EVM dev stack with a connected wallet; false on
-   * Sui, when disconnected, against a non-loopback RPC, or in ANY production build (no `DEV_FAUCET_KEY`).
-   * The UI shows the top-up affordance only when this is true.
+   * Dev faucet availability. True on the local EVM dev stack (anvil dev key) OR the Solana dev stack
+   * (host faucet), with a connected wallet. False on Sui, when disconnected, against a non-loopback EVM
+   * RPC, or in ANY production build. The UI shows the top-up affordance only when this is true.
    */
   readonly canTopUp: boolean
   /** Mint `amountUsd` of test USDC straight to the connected Safe, then refresh the balance. */
@@ -75,7 +82,7 @@ export function useWalletActions(): WalletActions {
   const { address, chain, usdcBalance, isConnected, refresh } = useOptionsContext()
   const [isToppingUp, setIsToppingUp] = useState(false)
 
-  const canTopUp =
+  const canTopUpEvm =
     DEV_FAUCET_KEY !== undefined &&
     chain === 'evm' &&
     isConnected &&
@@ -83,8 +90,43 @@ export function useWalletActions(): WalletActions {
     LOCALHOST_MOCK_USDC !== undefined &&
     isLoopbackRpc(LOCALHOST_RPC_URL)
 
+  const canTopUpSolana =
+    SOLANA_FAUCET_AVAILABLE && chain === 'solana' && isConnected && address !== null
+
+  // Sui has no dev faucet; it stays false. Only EVM (anvil dev key) and Solana (host faucet) fund.
+  const canTopUp = canTopUpEvm || canTopUpSolana
+
   const topUp = useCallback(
     async (amountUsd: number = DEFAULT_TOP_UP_USD): Promise<void> => {
+      // Solana: no client key — POST the connected address to the host's dev faucet and let
+      // usdcAmount + sol default server-side. The faucet returns { error: { message } } on its honest
+      // failure modes (404 non-localnet, 503 no mint authority); surface that message like EVM throws.
+      if (chain === 'solana') {
+        if (!SOLANA_FAUCET_AVAILABLE || !address) {
+          throw new Error('Top up is only available on the local Solana dev stack')
+        }
+        setIsToppingUp(true)
+        try {
+          const res = await fetch(`${HOST_BASE_URL}/aa/solana/faucet`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ address: String(address) }),
+          })
+          if (!res.ok) {
+            const detail = (await res.json().catch(() => null)) as
+              | { error?: { message?: string } }
+              | null
+            throw new Error(
+              detail?.error?.message ?? `Solana faucet failed (HTTP ${res.status})`,
+            )
+          }
+          await refresh()
+        } finally {
+          setIsToppingUp(false)
+        }
+        return
+      }
+
       if (
         DEV_FAUCET_KEY === undefined ||
         chain !== 'evm' ||

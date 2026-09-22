@@ -209,6 +209,7 @@ fn onchain_keynote_loop_with_real_tokens() {
         h.program_id,
         &livestreak::instruction::MintPosition { salt: 42 }.data(),
         livestreak::accounts::MintPosition {
+            payer: bettor.pubkey(),
             minter: bettor.pubkey(),
             protocol_state,
             market,

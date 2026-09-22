@@ -224,6 +224,12 @@ impl ProtocolView {
         Ok(self.p.lane_count(account(token_id)?) as u32)
     }
 
+    /// Stored shared streaming balance for a position token (the budget its lanes stream from).
+    /// Matches EVM readNftBalance (streamsState.balance). 0 if the token was never funded.
+    pub fn nft_balance(&self, token_id: &str) -> Result<String, JsError> {
+        Ok(self.p.streams.state_balance(account(token_id)?).to_string())
+    }
+
     /// The deterministic per-(creator, vault) seed account id.
     pub fn seed_account(&self, creator: &str, vault_id: &str) -> Result<String, JsError> {
         let c = parse_id(creator)?;

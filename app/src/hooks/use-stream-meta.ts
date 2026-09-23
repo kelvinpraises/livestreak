@@ -9,7 +9,7 @@ function emptyStreamMeta(routeId: string): StreamMeta {
   return {
     id: routeId,
     title: routeId,
-    category: 'Tech',
+    category: 'Sports',
     activeVaults: 0,
     totalPooled: 0,
     elapsed: '',
@@ -31,7 +31,7 @@ export function useStreamMeta(routeId: string): StreamMeta {
         return {
           id: market.marketId,
           title: market.title,
-          category: market.category ?? 'Tech',
+          category: market.category ?? 'Sports',
           activeVaults: market.totals.activeVaults,
           // livePooledUSDC = the board-replayed pool (pool + sideRate × Δt at poll time) — it grows as
           // funders stream in. totalPooledUSDC is the settled snapshot and only moves on an on-chain

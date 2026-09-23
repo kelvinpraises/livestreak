@@ -36,7 +36,6 @@ import { validateOptionsVaultSide } from "../../model/vault.js";
 import { asTokenId, type TokenId, type VaultId } from "../../model/ids.js";
 import {
   asTxId,
-  type AddFundsInput,
   type AdvanceInput,
   type ApproveNftInput,
   type ClaimLossLvstInput,
@@ -59,9 +58,7 @@ import {
 } from "../types.js";
 import { validateSolanaUserAddress } from "./account.js";
 import {
-  readCurrentLanes,
   resolveMarketForToken,
-  resolveMarketForTokenOrOwner,
   resolveMarketForVault,
   resolveSolanaContext,
   tokenIdToHex32,
@@ -221,19 +218,6 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
     if (marketId === undefined) {
       throw new LiveStreakConfigError({
         message: "Solana: could not resolve the market shard for this position (no funded lanes yet)",
-        metadata: { details: tokenId.toString() }
-      });
-    }
-    return marketId;
-  };
-
-  // Like requireMarketForToken but resolves a LANELESS position via its PositionOwner PDA — addFunds
-  // must work on a freshly minted position (park the deposit as budget) before any lane exists.
-  const requireMarketForTokenOrOwner = async (tokenId: TokenId): Promise<Hex32> => {
-    const marketId = await resolveMarketForTokenOrOwner(ctx, tokenId);
-    if (marketId === undefined) {
-      throw new LiveStreakConfigError({
-        message: "Solana: could not resolve the market for this position (is it minted?)",
         metadata: { details: tokenId.toString() }
       });
     }
@@ -418,29 +402,6 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       });
       // A lane-set reshape touches every lane's vault board in the market — no single vault to
       // advance, so VaultBoardBehind re-throws; only StateFull (grow, from the addDeposit store) recovers.
-      return asTxId(await withCapacityRecovery(marketId, undefined, () => send([ix])));
-    },
-    // addFunds: balance-first top-up. Read the position's current active lanes and re-send them via
-    // set_lanes with the deposit as add_deposit — the deposit refills the shared Drips balance and
-    // extends every live stream, matching the EVM/Sui composite (read-lanes + setLanes). With no lanes
-    // it just parks the deposit as budget, so it works on a freshly-minted position (the first-bet
-    // top-up); the market then resolves from the PositionOwner PDA rather than an engine footprint.
-    addFunds: async (input: AddFundsInput): Promise<TxId> => {
-      const deposit = requirePositiveBigInt(input.deposit, "deposit");
-      const marketId = await requireMarketForTokenOrOwner(input.tokenId);
-      const lanes: LaneArgInput[] = await readCurrentLanes(ctx, marketId, input.tokenId);
-      const { signer } = await getWriter();
-      const ix = await buildSetLanesIx({
-        programId: ctx.programId,
-        marketId,
-        user: signer,
-        tokenId: tokenIdToHex32(input.tokenId),
-        usdcMint: ctx.usdcMint,
-        lanes,
-        addDeposit: deposit
-      });
-      // Token-scoped (re-sends lanes across many vaults) — no single board to advance, so only
-      // StateFull (grow, from the deposit store) recovers; VaultBoardBehind re-throws.
       return asTxId(await withCapacityRecovery(marketId, undefined, () => send([ix])));
     },
     // stop_funding: stop a SINGLE lane (one vault, one side) of a position; no cash moves. Market

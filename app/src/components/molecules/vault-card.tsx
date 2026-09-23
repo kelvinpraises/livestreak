@@ -197,7 +197,7 @@ export function VaultCard({ vault, index = 0, onStream, onGoToMint }: {
               side={side ?? 'yes'}
               useOptions={useOptions}
               claimLossFn={useOptions && side ? options.findFunction('claimLossLvst', fn => fn.target?.vaultId === vault.vaultId && fn.target?.side === side && fn.target?.kind === 'vault') : undefined}
-              onClaimLoss={async () => { if (side) await options.claimLoss(vault.vaultId, side) }}
+              onClaimLoss={async () => { await options.settleVault(vault.vaultId) }}
             />
           )}
         </AnimatePresence>
@@ -432,9 +432,10 @@ function LossState({ lvstReceived, side, useOptions, claimLossFn, onClaimLoss }:
       <div>
         <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', marginBottom: 1 }}>LOSERS BECOME OWNERS</div>
         <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }}>+{lvstReceived.toLocaleString()} $LVST</span>
+        {useOptions && <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', marginTop: 2 }}>also stops streaming &amp; returns your balance</div>}
       </div>
       {useOptions ? (
-        <OptionsActionButton label="Claim LVST" fn={claimLossFn} onAction={onClaimLoss} variant="red" compact />
+        <OptionsActionButton label="Claim &amp; Exit" fn={claimLossFn} onAction={onClaimLoss} variant="red" compact />
       ) : (
         <button className="btn-ghost" style={{ fontSize: 10, padding: '4px 10px' }}>Stake</button>
       )}

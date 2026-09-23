@@ -4,6 +4,7 @@ import { LiveStreakConfigError } from "@livestreak/core";
 import { createPublicClient, http, type Abi } from "viem";
 
 import { asMarketId, asTokenId } from "../../model/ids.js";
+import { computeOverstreamClaimable, lossBasisToLvst } from "../../model/units.js";
 import type {
   MarketId,
   TokenId,
@@ -521,15 +522,42 @@ const readLossClaimable = async (
 ): Promise<bigint> => {
   const id = validateTokenIdForContracts(tokenId);
   const vaultBytes = validateVaultIdForContracts(vaultId);
+  const sideVal = sideToSolidityValue(side);
 
   try {
-    return await call<bigint>(ctx, ctx.addresses.vault, ctx.abis.Vault, "lossClaimable", [
+    // The EARNED LVST for this loss = Vault.lossClaimable(USDC basis) × Treasury.mintRate / USDC_ONE
+    // (the same figure the on-chain claim mints). Shown even after claiming; the claimed STATE is a
+    // separate flag (readLossClaimed / readNft) so the row can say "claimed". Sui/Solana use the same
+    // shared lossBasisToLvst helper for parity.
+    const [basis, mintRate] = await Promise.all([
+      call<bigint>(ctx, ctx.addresses.vault, ctx.abis.Vault, "lossClaimable", [id, vaultBytes, sideVal]),
+      call<bigint>(ctx, ctx.addresses.treasury, ctx.abis.Treasury, "mintRate", [])
+    ]);
+    return lossBasisToLvst(basis, mintRate);
+  } catch (error) {
+    throw contractsReadFailed("loss claimable", error);
+  }
+};
+
+// Has this NFT account already claimed the loss-mint for (vault, side)? Treasury.lossClaimed is a public
+// mapping getter. Lets the panel show a claimed loss as a settled "claimed" row (earned amount still
+// visible) rather than a re-clickable claim that would revert.
+const readLossClaimed = async (
+  ctx: ReaderContext,
+  tokenId: TokenId,
+  vaultId: VaultId,
+  side: OptionsVaultSide
+): Promise<boolean> => {
+  const id = validateTokenIdForContracts(tokenId);
+  const vaultBytes = validateVaultIdForContracts(vaultId);
+  try {
+    return await call<boolean>(ctx, ctx.addresses.treasury, ctx.abis.Treasury, "lossClaimed", [
       id,
       vaultBytes,
       sideToSolidityValue(side)
     ]);
   } catch (error) {
-    throw contractsReadFailed("loss claimable", error);
+    throw contractsReadFailed("loss claimed", error);
   }
 };
 
@@ -667,17 +695,23 @@ const readNft = async (
     // vault ever funded, never pruned), so a swept / switched-away / depleted side keeps surfacing its
     // banked shares instead of vanishing. Read BOTH sides per vault to show sequential-hedge legs.
     const vaultIds = await readAccountVaultIds(ctx, asTokenId(id));
-    const winningSideByVault = new Map<string, OptionsVaultSide | undefined>();
+    const vaultByVaultId = new Map<string, OptionsVault>();
     const lanes = [];
     let totalActiveRate = 0n;
 
     for (const vaultId of vaultIds) {
       const vaultBytes = validateVaultIdForContracts(vaultId);
-      let winningSide = winningSideByVault.get(vaultId);
-      if (!winningSideByVault.has(vaultId)) {
-        winningSide = await readWinningSide(ctx, vaultId);
-        winningSideByVault.set(vaultId, winningSide);
+      let vault = vaultByVaultId.get(vaultId);
+      if (vault === undefined) {
+        vault = await readVault(ctx, vaultId);
+        vaultByVaultId.set(vaultId, vault);
       }
+      // Winning side from the vault's resolved outcome (parity with the Solana reader — no separate
+      // winningSide() call), and resolvedAt for the overstream (USDC that streamed past resolution).
+      const winningSide: OptionsVaultSide | undefined =
+        vault.outcome === "yes" ? "yes" : vault.outcome === "no" ? "no" : undefined;
+      const resolvedAtSec =
+        vault.timing.resolvedAtMs !== undefined ? Math.floor(vault.timing.resolvedAtMs / 1000) : 0;
 
       for (const side of ["yes", "no"] as const) {
         const positionRaw = await call<unknown>(
@@ -709,8 +743,23 @@ const readNft = async (
         };
         const mapped = mapLane(asTokenId(id), rawLane, position, nowSec);
         const claimable = await readClaimable(ctx, asTokenId(id), vaultId, side);
-        const lossClaimable = await readLossClaimable(ctx, asTokenId(id), vaultId, side);
-        lanes.push(enrichLane(mapped, claimable, lossClaimable, winningSide));
+        // Read the raw USDC loss basis + mintRate here (not via readLossClaimable, which only returns the
+        // LVST) so the lane carries BOTH the earned LVST and the USDC lost (shown as "-$X" under it).
+        const [lossBasis, mintRate] = await Promise.all([
+          call<bigint>(ctx, ctx.addresses.vault, ctx.abis.Vault, "lossClaimable", [
+            id, validateVaultIdForContracts(vaultId), sideToSolidityValue(side)
+          ]),
+          call<bigint>(ctx, ctx.addresses.treasury, ctx.abis.Treasury, "mintRate", [])
+        ]);
+        const lossClaimable = lossBasisToLvst(lossBasis, mintRate);
+        const lossClaimed = lossClaimable > 0n && (await readLossClaimed(ctx, asTokenId(id), vaultId, side));
+        const overstream = computeOverstreamClaimable(
+          committedRate,
+          position.maxEnd,
+          resolvedAtSec,
+          nowSec
+        );
+        lanes.push(enrichLane(mapped, claimable, lossClaimable, winningSide, overstream, lossClaimed, lossBasis));
       }
     }
 

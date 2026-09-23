@@ -7,6 +7,7 @@ import { MODULES, target } from "@livestreak/contracts/sui";
 
 import { asMarketId, asTokenId, asVaultId } from "../../model/ids.js";
 import { priceOf } from "../../model/math/curve.js";
+import { computeOverstreamClaimable, lossBasisToLvst } from "../../model/units.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
 import type { OptionsBoardState } from "../../model/math/accrual.js";
@@ -65,6 +66,7 @@ type ReaderContext = {
   readonly ids: OptionsSuiObjectIds;
   readonly packageId: string;
   readonly coinType: string;
+  mintRate?: bigint; // cached treasury::mint_rate for the loss-basis → LVST conversion (per-reader lifetime)
 };
 
 export const createSuiOptionsReader = (
@@ -710,6 +712,27 @@ const readClaimable = async (
   }
 };
 
+// treasury::mint_rate — LVST minted per whole USDC of loss at the current cumulative pot. Cached for the
+// reader's (short, per-poll) lifetime so a many-lane NFT doesn't re-inspect it per lane.
+const readMintRate = async (ctx: ReaderContext): Promise<bigint> => {
+  if (ctx.mintRate !== undefined) return ctx.mintRate;
+  try {
+    const tx = new Transaction();
+    tx.moveCall({
+      target: target(ctx.packageId, MODULES.treasury, "mint_rate"),
+      typeArguments: [ctx.coinType],
+      arguments: [tx.object(ctx.ids.treasuryRegistry)]
+    });
+    const results = await inspect(ctx, tx);
+    const val = results[0]?.[0];
+    ctx.mintRate = val !== undefined ? readU256(val) : 0n;
+    return ctx.mintRate;
+  } catch (error) {
+    if (error instanceof LiveStreakConfigError) throw error;
+    throw suiReadFailed("mint rate", error);
+  }
+};
+
 const readLossClaimable = async (
   ctx: ReaderContext,
   tokenId: TokenId,
@@ -735,7 +758,11 @@ const readLossClaimable = async (
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
-    return val !== undefined ? readU256(val) : 0n;
+    // vault::loss_claimable returns the USDC loss BASIS; convert to the LVST the claim mints (basis ×
+    // mintRate / USDC_ONE — Sui mint_loss_lvst), matching the EVM/Solana readers so the panel previews
+    // the real minted amount, not the raw basis (the projection scales this by the chain's LVST decimals).
+    const basis = val !== undefined ? readU256(val) : 0n;
+    return basis === 0n ? 0n : lossBasisToLvst(basis, await readMintRate(ctx));
   } catch (error) {
     if (error instanceof LiveStreakConfigError) throw error;
     throw suiReadFailed("loss claimable", error);
@@ -857,7 +884,7 @@ const readNft = async (
     // elapses in real time, matching the UI countdown (chain clock can lag a frozen dev chain).
     const nowSec = Math.floor(Date.now() / 1000);
     const lanes = [];
-    const winningSideByVault = new Map<string, OptionsVaultSide | undefined>();
+    const vaultByVaultId = new Map<string, OptionsVault>();
 
     for (let i = 0; i < laneCount; i += 1) {
       // Get vault ID for this lane.
@@ -921,16 +948,33 @@ const readNft = async (
 
       const lane = mapSuiLane(tokenId, vaultId, side, laneRate, position, nowSec);
 
-      if (!winningSideByVault.has(vaultId)) {
-        const ws = await readWinningSide(ctx, vaultId);
-        winningSideByVault.set(vaultId, ws);
+      // Cache the whole vault (not just the winning side): the resolved outcome gives the winning side
+      // and resolvedAt drives the overstream (USDC that streamed past resolution, refundable via withdraw).
+      let vault = vaultByVaultId.get(vaultId);
+      if (vault === undefined) {
+        vault = await readVault(ctx, vaultId);
+        vaultByVaultId.set(vaultId, vault);
       }
+      const winningSide: OptionsVaultSide | undefined =
+        vault.status === "resolved"
+          ? vault.outcome === "yes"
+            ? "yes"
+            : vault.outcome === "no"
+              ? "no"
+              : undefined
+          : undefined;
+      const resolvedAtSec =
+        vault.timing.resolvedAtMs !== undefined ? Math.floor(vault.timing.resolvedAtMs / 1000) : 0;
 
       const claimable = await readClaimable(ctx, tokenId, vaultId, side);
       const lossClaimable = await readLossClaimable(ctx, tokenId, vaultId, side);
-      lanes.push(
-        enrichSuiLane(lane, claimable, lossClaimable, winningSideByVault.get(vaultId))
+      const overstream = computeOverstreamClaimable(
+        laneRate,
+        Number(position.maxEnd),
+        resolvedAtSec,
+        nowSec
       );
+      lanes.push(enrichSuiLane(lane, claimable, lossClaimable, winningSide, overstream));
     }
 
     // Derive market ID from the first vault's market_id (no public market_id_of accessor).

@@ -188,7 +188,7 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
             </div>
             <span className="display" style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em' }}>LiveStreak</span>
           </Link>
-          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '1px 5px' }}>BETA</span>
+          <span style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '1px 5px' }}>ALPHA</span>
           <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.08)', margin: '0 4px' }} />
           <span style={{
             fontSize: 10, fontWeight: 600, color: getCategoryColor(category),
@@ -216,8 +216,8 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
           {/* NikoNiko floating cards */}
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 10 }}>
             <AnimatePresence>
-              {floatingVaults.map((vault, i) => (
-                <NikoNikoCard key={vault.vaultId} vault={vault} index={i} total={floatingVaults.length} onClickCard={handleNikoClick} />
+              {floatingVaults.map((vault) => (
+                <NikoNikoCard key={vault.vaultId} vault={vault} onClickCard={handleNikoClick} />
               ))}
             </AnimatePresence>
           </div>
@@ -240,6 +240,7 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
 
 function getCategoryColor(category: string): string {
   const colors: Record<string, string> = {
+    Sports: '#00ff87',
     Tech: '#00ff87',
     Esports: '#00c8ff',
     Politics: '#ff7a00',

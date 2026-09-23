@@ -155,14 +155,11 @@ const dispatchWriterAction = async (
       return runtime.resumeLane(readArgs(args));
     case "setLanes":
       return writer.setLanes(readArgs(args));
+    // addFunds is a lane read-modify-write (re-assert lanes + a deposit), exactly like streamLane — so it
+    // is a RUNTIME verb using the overlay-aware lane set, not a raw writer read (which lagged and could
+    // wipe a sibling lane). Chain-agnostic: the runtime calls writer.setLanes, implemented everywhere.
     case "addFunds":
-      if (writer.addFunds === undefined) {
-        throw new LiveStreakConfigError({
-          message: "Options bridge action addFunds is not supported on this chain",
-          metadata: { details: action }
-        });
-      }
-      return writer.addFunds(readArgs(args));
+      return runtime.addFunds(readArgs(args));
     case "stopFunding":
       return writer.stopFunding(readArgs(args));
     case "stopAllFunding":

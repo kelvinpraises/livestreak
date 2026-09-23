@@ -133,6 +133,25 @@ impl TreasuryRegistry {
         Ok((lost_usdc * self.mint_rate()) / U256::from(USDC_ONE))
     }
 
+    /// EVM-parity READ (Treasury.lossLvstClaimable): the LVST an account would mint for this loss
+    /// right now — and 0 once already claimed. Reads the basis from the vault (never a caller literal)
+    /// and applies the same curve as `mint_loss_lvst`, so the panel preview equals what a claim mints
+    /// AND drops to 0 after claiming (honors `loss_claimed`, matching the EVM view — the Solana panel
+    /// otherwise kept showing a claimed loss as still claimable).
+    pub fn loss_lvst_claimable(
+        &self,
+        vault_registry: &VaultRegistry,
+        account: AccountId,
+        vault_id: &VaultId,
+        side: u8,
+    ) -> U256 {
+        if self.loss_claimed.contains_key(&(account, *vault_id, side)) {
+            return U256::ZERO;
+        }
+        let lost_usdc = vault_registry.loss_claimable(account, vault_id, side);
+        (lost_usdc * self.mint_rate()) / U256::from(USDC_ONE)
+    }
+
     /// `amount` LVST already moved into the treasury escrow by the program.
     pub fn stake_lvst(&mut self, user: [u8; 32], amount: u128) -> TreasuryResult<()> {
         if amount == 0 {

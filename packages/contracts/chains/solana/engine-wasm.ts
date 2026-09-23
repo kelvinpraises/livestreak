@@ -141,6 +141,12 @@ export class EngineView {
     return BigInt(this.view.loss_claimable(tokenId, vaultId, side));
   }
 
+  /** LVST a loss would mint right now, 0 once claimed (EVM-parity Treasury.lossLvstClaimable).
+   *  Claimed-aware, so the panel's loss preview equals the mint AND clears after Cash out. */
+  lossLvstClaimable(tokenId: string, vaultId: string, side: number): bigint {
+    return BigInt(this.view.loss_lvst_claimable(tokenId, vaultId, side));
+  }
+
   accountVaultIds(tokenId: string): `0x${string}`[] {
     return JSON.parse(this.view.account_vault_ids(tokenId));
   }

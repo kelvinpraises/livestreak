@@ -246,11 +246,13 @@ export const enrichSuiLane = (
   lane: OptionsLane,
   claimable: bigint,
   lossClaimable: bigint,
-  winningSide?: OptionsVaultSide
+  winningSide?: OptionsVaultSide,
+  overstreamClaimable?: bigint
 ): OptionsLane => ({
   ...lane,
   claimable,
   lossClaimable,
+  ...(overstreamClaimable === undefined ? {} : { overstreamClaimable }),
   ...(winningSide === undefined ? {} : { won: lane.side === winningSide })
 });
 
@@ -328,7 +330,8 @@ export type SuiContractsReadEntity =
   | "NFT balance"
   | "stream state"
   | "treasury lvst_staked"
-  | "treasury pending_dividends";
+  | "treasury pending_dividends"
+  | "mint rate";
 
 export const suiReadNotFound = (
   entity: SuiContractsReadEntity,

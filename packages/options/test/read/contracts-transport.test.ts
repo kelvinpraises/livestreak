@@ -407,6 +407,18 @@ const respond = (request: SimRequest, options: FakeReaderOptions): unknown => {
     if (functionName === "lvstPendingDividends") {
       return 5_000_000n;
     }
+
+    // readLossClaimable = Vault.lossClaimable(0 here) × Treasury.mintRate / USDC_ONE → 0 for this open
+    // vault; lossClaimed is short-circuited when the earned amount is 0. See loss-overstream.test.ts.
+    if (functionName === "mintRate") {
+      return 100n * 10n ** 18n; // 100 LVST per USDC (18-dec)
+    }
+    if (functionName === "lossLvstClaimable") {
+      return 0n;
+    }
+    if (functionName === "lossClaimed") {
+      return false;
+    }
   }
 
   if (address === ADDRESSES.stewardRegistry) {

@@ -33,13 +33,16 @@ describe('readStoredChain', () => {
     expect(readStoredChain()).toBe('solana')
   })
 
-  it('round-trips sui and evm, defaulting unknown to evm', () => {
+  it('round-trips sui and evm; returns null for unset/unknown (the default is decided by initialChain)', () => {
     sessionStorage.setItem(SESSION_CHAIN_KEY, 'sui')
     expect(readStoredChain()).toBe('sui')
     sessionStorage.setItem(SESSION_CHAIN_KEY, 'evm')
     expect(readStoredChain()).toBe('evm')
+    // No hard-coded default here anymore: unknown / unset → null, so a Solana-only run never boots evm.
     sessionStorage.setItem(SESSION_CHAIN_KEY, 'dogecoin')
-    expect(readStoredChain()).toBe('evm')
+    expect(readStoredChain()).toBeNull()
+    sessionStorage.clear()
+    expect(readStoredChain()).toBeNull()
   })
 })
 

@@ -23,6 +23,8 @@ import {
 import { decodeProtocolState, type EngineView } from "@livestreak/contracts/solana";
 
 import { asMarketId, asTokenId, asVaultId } from "../../model/ids.js";
+import { WAD } from "../../model/math/curve.js";
+import { computeWinClaimable, lossBasisToLvst } from "../../model/units.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
 import type { OptionsBoardState } from "../../model/math/accrual.js";
@@ -168,7 +170,12 @@ export const createSolanaOptionsReader = (
       ),
     readLossClaimable: (tokenId, vaultId, side) =>
       withVaultView(vaultId, (view, target) =>
-        view.lossClaimable(tokenIdToHex32(tokenId), target, sideToSolana(side))
+        // The EARNED LVST for this loss (basis × mintRate), shown even after claiming. The claimed state
+        // is a separate flag (readNft derives it from the claimed-aware view) so the row can say "claimed".
+        lossBasisToLvst(
+          view.lossClaimable(tokenIdToHex32(tokenId), target, sideToSolana(side)),
+          BigInt(view.mintRate())
+        )
       ),
     readPot: (vaultId) => withVaultView(vaultId, (view, target) => view.pot(target)),
     readCollected: (vaultId) => withVaultView(vaultId, (view, target) => view.collected(target)),
@@ -184,11 +191,15 @@ export const createSolanaOptionsReader = (
 
     listOwnerTokens: (owner) => listOwnerTokens(ctx, owner),
 
-    readLvstAccount: async (user) =>
-      // LVST staking/dividends have no on-chain instruction set this phase (money-complete engine ops
-      // land later), and LVST balance is a not-yet-deployed SPL mint — return a zeroed account so the
-      // board stays functional. Divergence from EVM/Sui (which read real balances). See report.
-      mapSolanaLvstAccount(validateSolanaUserAddress(user, "user"), 0n, 0n, 0n) as LvstAccount,
+    readLvstAccount: async (user) => {
+      // LVST is a DEPLOYED SPL mint now — read the user's real LVST ATA balance (loss-mint credits it).
+      // Staking/dividends have no on-chain READ wired this phase (per-market treasury; unblocks with the
+      // global-treasury shard), so those stay 0. The projection scales `balance` by the chain's LVST
+      // decimals (9 on Solana).
+      const validated = validateSolanaUserAddress(user, "user");
+      const balance = await readLvstBalance(ctx, validated);
+      return mapSolanaLvstAccount(validated, balance, 0n, 0n) as LvstAccount;
+    },
 
     readUsdcAddress: async () => ctx.usdcMint as unknown as `0x${string}`,
     readUsdcBalance: (owner) => readUsdcBalance(ctx, owner),
@@ -317,6 +328,7 @@ const readNft = async (
   const nft = await withTokenView(tokenId, (view, tokenHex, marketId) => {
     const laneCount = view.laneCount(tokenHex);
     const balance = view.nftBalance(tokenHex);
+    const mintRate = BigInt(view.mintRate()); // protocol-wide; loss basis → earned LVST for the whole NFT
     const lanes: OptionsLane[] = [];
     for (const vId of view.accountVaultIds(tokenHex)) {
       const vault = view.vault(vId);
@@ -328,11 +340,31 @@ const readNft = async (
               ? "no"
               : undefined
           : undefined;
+      // The engine's `claimable()` view is gated to 0 until the vault is `collect`ed (the pot finalize).
+      // Collect is permissionless + idempotent and always runs at cash-out, so a winning position on a
+      // resolved-but-uncollected vault would otherwise read $0 — and, with no cash to claim, its Cash out
+      // button would be disabled, a pure winner stuck. Read the pools ONCE here and project what
+      // collect+withdraw will pay; once collected, the real view value (>0 unclaimed, 0 once claimed) wins.
+      const uncollected = winning !== undefined && !view.collected(vId);
+      const pools = uncollected ? view.vaultPools(vId) : undefined;
       for (const sideNum of [0, 1] as const) {
         const pos = view.position(vId, sideNum, tokenHex);
         if (pos.rate === 0n && pos.sharesAccrued === 0n && pos.gPaid === 0n) continue;
-        const claimable = view.claimable(tokenHex, vId, sideNum);
-        const lossClaimable = view.lossClaimable(tokenHex, vId, sideNum);
+        let claimable = view.claimable(tokenHex, vId, sideNum);
+        if (pools !== undefined && sideFromSolana(sideNum) === winning) {
+          const winPool = winning === "yes" ? pools.yesPool : pools.noPool;
+          const losePool = winning === "yes" ? pools.noPool : pools.yesPool;
+          const winShares = winning === "yes" ? pools.yesShares : pools.noShares;
+          claimable = computeWinClaimable(winPool, losePool, pos.sharesAccrued / WAD, winShares);
+        }
+        // Earned LVST for this loss (basis × mintRate) — shown even after claiming. The claimed-aware view
+        // (loss_lvst_claimable) drops to 0 once claimed, so basis>0 with a zero claimable ⇒ already claimed.
+        const basis = view.lossClaimable(tokenHex, vId, sideNum);
+        const lossClaimable = lossBasisToLvst(basis, mintRate);
+        const lossClaimed = basis > 0n && view.lossLvstClaimable(tokenHex, vId, sideNum) === 0n;
+        // TRUE live shares = settled + real bonding-curve accrual to now (engine pending_shares), so the
+        // absolute "sh" display grows honestly between advances instead of the app guessing with a rate.
+        const livePendingRaw = view.pendingShares(vId, sideNum, tokenHex, now);
         lanes.push(
           mapSolanaLane(
             tokenId,
@@ -342,7 +374,11 @@ const readNft = async (
             now,
             claimable,
             lossClaimable,
-            winning
+            winning,
+            Number(vault.resolvedAt ?? 0),
+            lossClaimed,
+            basis,
+            livePendingRaw
           )
         );
       }
@@ -413,6 +449,20 @@ const readUsdcBalance = async (ctx: SolanaOptionsContext, owner: UserAddress): P
   const bytes = await fetchAccountBytes(ctx.rpc, ata);
   if (bytes === undefined || bytes.length < 72) return 0n;
   // SPL token account: mint(32) owner(32) amount:u64-LE @64.
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  return dv.getBigUint64(64, true);
+};
+
+// Loss preview uses the engine's claimed-aware `lossLvstClaimable` view (EVM parity with
+// Treasury.lossLvstClaimable): it returns the LVST the claim mints AND 0 once claimed, so the panel
+// both matches the mint and clears the row after Cash out.
+
+// Same SPL token-account read as USDC, against the LVST mint's ATA (loss-mint / future staking credit it).
+const readLvstBalance = async (ctx: SolanaOptionsContext, owner: UserAddress): Promise<bigint> => {
+  if (ctx.lvstMint === undefined) return 0n;
+  const [ata] = await findUsdcAta(address(String(owner)), ctx.lvstMint);
+  const bytes = await fetchAccountBytes(ctx.rpc, ata);
+  if (bytes === undefined || bytes.length < 72) return 0n;
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   return dv.getBigUint64(64, true);
 };

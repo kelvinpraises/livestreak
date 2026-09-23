@@ -592,8 +592,10 @@ host_up() {
 
 app_up() {
   log "Starting app client..."
-  # --force: re-bundle the just-rebuilt @livestreak/options dist (stale pre-bundle otherwise)
-  ( cd "$ROOT/app" && npm run dev -- --force ) > /tmp/livestreak-app.log 2>&1 &
+  # --force: re-bundle the just-rebuilt @livestreak/options dist (stale pre-bundle otherwise).
+  # VITE_DEFAULT_CHAIN tells the app which chain THIS run deployed, so it boots on it instead of
+  # hard-defaulting to evm (which a CHAIN=solana/sui run leaves undeployed → a wedged board).
+  ( cd "$ROOT/app" && VITE_DEFAULT_CHAIN="$CHAIN" npm run dev -- --force ) > /tmp/livestreak-app.log 2>&1 &
   APP_PID=$!
   sleep 3
   if kill -0 "$APP_PID" 2>/dev/null; then

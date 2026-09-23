@@ -230,11 +230,27 @@ fn compaction_preserves_winnings_overage_and_loss_mint() {
     // Reads still pay correctly AFTER compaction:
     // - loss basis unchanged, so the treasury loss-mint reads the same value.
     assert_eq!(v.loss_claimable(acct(FUNDER_NO), &vault_id, SIDE_NO), loss_before);
+
+    // The claimed-aware LVST view (EVM-parity Treasury.lossLvstClaimable, what the Solana panel reads):
+    // BEFORE claiming it equals exactly what the claim will mint.
+    let preview = treasury.loss_lvst_claimable(&v, acct(FUNDER_NO), &vault_id, SIDE_NO);
+    assert_eq!(preview, loss_before * treasury.mint_rate() / U256::from(USDC_ONE));
+    assert!(preview > U256::ZERO);
+
     let minted = treasury
         .mint_loss_lvst(&v, acct(FUNDER_NO), &vault_id, SIDE_NO)
         .unwrap();
     assert_eq!(minted, loss_before * treasury.mint_rate() / U256::from(USDC_ONE));
+    assert_eq!(minted, preview, "preview equals the mint");
     assert!(minted > U256::ZERO);
+
+    // AFTER claiming the view drops to 0 (honors loss_claimed) — so the panel's loss row clears after
+    // Cash out instead of lingering as still-claimable (a re-claim would fail AlreadyClaimed).
+    assert_eq!(
+        treasury.loss_lvst_claimable(&v, acct(FUNDER_NO), &vault_id, SIDE_NO),
+        U256::ZERO,
+        "claimed loss no longer previews as claimable"
+    );
 
     // - already-claimed winner is still zero (double-withdraw remains a no-op).
     assert_eq!(v.claimable(acct(FUNDER_YES), &vault_id, SIDE_YES), U256::ZERO);

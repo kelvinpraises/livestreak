@@ -56,9 +56,9 @@ describe("OptionsNftPanel — balanceUSDC + runwayEndMs (Part A)", () => {
     expect(panel.nfts[0]?.account).not.toHaveProperty("endsAtMs");
   });
 
-  it("projects only balanceUSDC when runwayEndMs is absent", async () => {
+  it("computes a runway fallback from balance ÷ active rate when the reader omits runwayEndMs", async () => {
     const user = fixtureUser();
-    const nft = fixtureNft(user, { balance: 1_000_000n });
+    const nft = fixtureNft(user, { balance: 1_000_000n }); // fixture has an active streaming lane (rate 800_000)
     const reader = createFakeOptionsReader({
       ...fixtureSeed(user),
       nfts: [nft]
@@ -67,7 +67,9 @@ describe("OptionsNftPanel — balanceUSDC + runwayEndMs (Part A)", () => {
     const panel = projectOptionsPanel(snapshot);
 
     expect(panel.nfts[0]?.account.balanceUSDC).toBe(1);
-    expect(panel.nfts[0]?.account).not.toHaveProperty("endsAtMs");
+    // A funded, streaming position gets a computed runway (was RUNWAY "—" before the fallback) — now +
+    // balance ÷ drain-rate — instead of being dropped just because the reader (Solana) didn't supply one.
+    expect(panel.nfts[0]?.account.endsAtMs).toBeGreaterThan(1_700_000_000_000);
   });
 
   it("copy.ts gotcha — balance and runwayEndMs survive copyNftSnapshot round-trip", () => {

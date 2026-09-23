@@ -144,11 +144,102 @@ mod tests {
         // end below start clamps to start (empty range).
         assert_eq!(stream_range(&cfg2, 100, 500, 260, 240), (260, 260));
     }
+
+    // The delta-jump `process_cycles` must return the EXACT same (received, rate) as the naive
+    // per-cycle loop it replaced — including across a 100k-cycle idle gap (which the loop walks
+    // one-by-one and the delta form skips in O(1)) — and must NOT leak a neighbouring account's
+    // deltas. The naive loop is kept here as the reference oracle. See the warning on process_cycles.
+    #[test]
+    fn delta_jump_matches_naive_loop() {
+        use alloc::collections::BTreeMap;
+
+        fn naive(
+            amt_deltas: &BTreeMap<(AccountId, u64), AmtDelta>,
+            account_id: AccountId,
+            from_cycle: u64,
+            to_cycle: u64,
+            received_amt: u128,
+            amt_per_cycle: i128,
+        ) -> (u128, i128) {
+            let mut acc_received = received_amt;
+            let mut acc_rate = amt_per_cycle;
+            for cycle in from_cycle..to_cycle {
+                if let Some(delta) = amt_deltas.get(&(account_id, cycle)) {
+                    acc_rate += delta.this_cycle;
+                    acc_received += u128::try_from(acc_rate).expect("negative cycle rate");
+                    acc_rate += delta.next_cycle;
+                } else {
+                    acc_received += u128::try_from(acc_rate).expect("negative cycle rate");
+                }
+            }
+            (acc_received, acc_rate)
+        }
+
+        let acct = U256::from(7u8);
+        let other = U256::from(99u8); // deltas here must be invisible to `acct`'s receive
+        let mut d: BTreeMap<(AccountId, u64), AmtDelta> = BTreeMap::new();
+        // Rate rises at cycle 3 (partial-cycle split), then the stream ends at cycle 100.
+        d.insert((acct, 3), AmtDelta { this_cycle: 10, next_cycle: -2 });
+        d.insert((acct, 100), AmtDelta { this_cycle: -8, next_cycle: 0 });
+        // Neighbour account with big deltas INSIDE the same window — a bad range bound would leak these.
+        d.insert((other, 50), AmtDelta { this_cycle: 500, next_cycle: 500 });
+
+        // (from, to, seed_rate): small window, 100k-cycle idle gap, mid-run start, empty, single-cycle,
+        // pure trailing-zero tail after the stream ended.
+        for &(from, to, seed) in &[
+            (0u64, 6u64, 5i128),
+            (0, 100_000, 5),
+            (4, 120, 13),
+            (200, 200, 0),
+            (3, 4, 0),
+            (101, 100_000, 0),
+        ] {
+            assert_eq!(
+                process_cycles(&d, acct, from, to, 0, seed),
+                naive(&d, acct, from, to, 0, seed),
+                "delta-jump != naive for [{from},{to}) seed={seed}",
+            );
+        }
+    }
 }
 
 // ── Cycle accumulation (Move process_cycles) ────────────────────────────────────
+//
+// ╔══════════════════════════════════════════════════════════════════════════════╗
+// ║  ⚠  SOLANA-ONLY DIVERGENCE — DELTA-JUMP RECEIVE — NOT PARITY WITH EVM / SUI  ⚠ ║
+// ║  ⚠  MONEY MATH: SCRUTINIZE FOR BUGS BEFORE TRUSTING THIS PATH               ⚠ ║
+// ╚══════════════════════════════════════════════════════════════════════════════╝
+//
+// EVM (`Streams.sol::_receiveStreamsResult`) and Sui (Move) still receive by LOOPING
+// EVERY cycle from `from` to `to` — the faithful Radicle Drips shape. That is
+// O(cycles-elapsed): with our cycle_secs = 10, a vault left idle mints ~8,640
+// cycles/day, and the loop replays each as a `+= rate` — the vast majority `+= 0`
+// once every stream has ended. That is what blew Solana's `collect` past the 1.4M CU
+// ceiling ("exceeded CUs meter"): hundreds of iterations adding zero.
+//
+// This Solana version is DELTA-BASED. `amt_deltas` only holds entries where the rate
+// CHANGES (one per fund / depletion — a handful). Between two such entries the rate is
+// constant, so a K-cycle run is ONE multiply (`rate × K`) instead of K identical
+// additions. Repeated addition of a constant IS multiplication, so the RESULT is
+// byte-identical to the loop — only the step count collapses from O(cycles) to
+// O(rate-changes). Idle time and cycle length stop costing compute.
+//
+// ⚠  PARITY: this makes Solana's cycle accounting DIVERGE from the EVM/Sui ports (they
+//    still loop). A FUTURE pass must port the same delta-jump into `Streams.sol` and the
+//    Move engine, then cross-check all three against shared fixtures. Until then Solana
+//    is the odd one out — re-verify any conservation invariant on THIS path specifically.
+//
+// ⚠  BUGS TO WATCH (the `delta_jump_matches_naive_loop` test pins these):
+//    1. the BTreeMap range must select EXACTLY this account's deltas in [from,to) —
+//       a wrong bound leaks another account's cycles or drops one;
+//    2. an empty run must accumulate `acc_rate` as it stood BEFORE the next delta's
+//       `this_cycle` is applied;
+//    3. the TRAILING run (last delta cycle+1 .. to) is easy to forget;
+//    4. a negative `acc_rate` must still panic exactly as the loop's per-cycle
+//       `try_from` did — never silently coerce.
 
-/// Walk cycles [from, to), folding deltas into a running per-cycle rate and total.
+/// Sum the amount received over cycles [from, to), folding rate-change deltas — delta-jump
+/// (O(rate-changes)), byte-identical to the naive per-cycle loop. See the warning above.
 pub fn process_cycles(
     amt_deltas: &alloc::collections::BTreeMap<(AccountId, u64), AmtDelta>,
     account_id: AccountId,
@@ -159,14 +250,25 @@ pub fn process_cycles(
 ) -> (u128, i128) {
     let mut acc_received = received_amt;
     let mut acc_rate = amt_per_cycle;
-    for cycle in from_cycle..to_cycle {
-        if let Some(delta) = amt_deltas.get(&(account_id, cycle)) {
-            acc_rate += delta.this_cycle;
-            acc_received += u128::try_from(acc_rate).expect("negative cycle rate");
-            acc_rate += delta.next_cycle;
-        } else {
-            acc_received += u128::try_from(acc_rate).expect("negative cycle rate");
+    // `next` = first cycle in [from,to) not yet accounted for. Walk ONLY the delta-bearing
+    // cycles for this account; collapse each constant-rate gap between them into one multiply.
+    let mut next = from_cycle;
+    for (&(_, cycle), delta) in amt_deltas.range((account_id, from_cycle)..(account_id, to_cycle)) {
+        // Constant-rate run [next, cycle): `acc_rate` added `cycle - next` times == one multiply.
+        if cycle > next {
+            let rate = u128::try_from(acc_rate).expect("negative cycle rate");
+            acc_received += rate * u128::from(cycle - next);
         }
+        // The delta cycle itself — byte-identical to the loop's `Some(delta)` branch.
+        acc_rate += delta.this_cycle;
+        acc_received += u128::try_from(acc_rate).expect("negative cycle rate");
+        acc_rate += delta.next_cycle;
+        next = cycle + 1;
+    }
+    // Trailing constant-rate run [next, to): the empty tail after the last rate change.
+    if to_cycle > next {
+        let rate = u128::try_from(acc_rate).expect("negative cycle rate");
+        acc_received += rate * u128::from(to_cycle - next);
     }
     (acc_received, acc_rate)
 }

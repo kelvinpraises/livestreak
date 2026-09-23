@@ -56,7 +56,7 @@ export default function RootApp() {
                   <img src="/livestreak-icon.png" alt="LiveStreak" style={{ width: 18, height: 18, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
                 </div>
                 <span className="display app-global-nav-brand-label" style={{ fontSize: 16, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em' }}>LiveStreak</span>
-                <span className="app-global-nav-alpha" style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '1px 5px' }}>BETA</span>
+                <span className="app-global-nav-alpha" style={{ fontSize: 9, fontFamily: 'var(--font-mono)', color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 4, padding: '1px 5px' }}>ALPHA</span>
               </Link>
               <div className="app-global-nav-links" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 {navLinks.map(link => {

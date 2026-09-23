@@ -49,9 +49,19 @@ export interface Position {
   resolved: boolean
   won?: boolean
   payout?: number
-  /** Loss-mint LVST a losing resolved position can claim (from the lane's `lossClaimableLVST`). Drives the
-   *  loss toast's "You received N $LVST". */
+  /** Loss-mint LVST this losing resolved position EARNED (from the lane's `lossClaimableLVST`). Shown even
+   *  after claiming. Drives the loss toast's "You received N $LVST". */
   lvstReceived?: number
+  /** USDC this side LOST (the loss basis) — shown as "-$X" beneath the earned LVST on the settle row. */
+  lossUSDC?: number
+  /** The loss-mint LVST has already been claimed on-chain — the row shows the earned amount as "claimed"
+   *  and the settlement no longer offers it (a re-claim would revert). */
+  lossClaimed?: boolean
+  /** There's still an unclaimed loss to mint here (earned > 0 AND not yet claimed) — feeds Cash out. */
+  canClaimLoss?: boolean
+  /** Overstream: USDC that streamed past resolution on this lane, refundable at cash-out (from the lane's
+   *  `overstreamClaimableUSDC`). Only present when the stream ran past the result. */
+  overstream?: number
   minute: number
   /** Runway: ms-since-epoch when this lane's deposit runs dry (streaming only; drives the time-left readout). */
   runwayEndMs?: number

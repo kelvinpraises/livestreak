@@ -13,6 +13,7 @@ import type {
 
 import { asMarketId, asVaultId } from "../../model/ids.js";
 import { WAD } from "../../model/math/curve.js";
+import { computeOverstreamClaimable } from "../../model/units.js";
 import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { OptionsLane } from "../../model/lane.js";
@@ -108,12 +109,26 @@ export const mapSolanaLane = (
   nowSec: number,
   claimable: bigint,
   lossClaimable: bigint,
-  winningSide?: OptionsVaultSide
+  winningSide?: OptionsVaultSide,
+  resolvedAtSec = 0,
+  lossClaimed = false,
+  lossBasisUSDC = 0n,
+  // Raw live shares (settled + pending) from the engine's pending_shares view — the TRUE current shares,
+  // not a UI guess. Undefined ⇒ caller has no live read; the app falls back to sharesAccrued.
+  livePendingRaw?: bigint
 ): OptionsLane => {
   // Stored `depleted` only flips on a write; also treat maxEnd ≤ wall-clock-now as dry (EVM/Sui parity).
   const depleted =
     position.depleted ||
     (position.rate > 0n && position.maxEnd > 0 && position.maxEnd <= nowSec);
+  // Overstream: USDC that streamed AFTER resolvedAt — the shared, chain-agnostic pay_overage entitlement
+  // (uses the committed rate so a depleted-but-unstopped lane still shows its owed refund).
+  const overstreamClaimable = computeOverstreamClaimable(
+    position.rate,
+    position.maxEnd,
+    resolvedAtSec,
+    nowSec
+  );
   return {
     tokenId,
     vaultId,
@@ -123,10 +138,14 @@ export const mapSolanaLane = (
     gPaid: position.gPaid,
     // WAD·SCALE accumulator precision → canonical SHARE_SCALE, matching board_side_shares' ÷wad.
     sharesAccrued: position.sharesAccrued / WAD,
+    ...(livePendingRaw !== undefined ? { sharesLive: livePendingRaw / WAD } : {}),
     ...(position.maxEnd > 0 ? { maxEndMs: position.maxEnd * 1000 } : {}),
     depleted,
     claimable,
     lossClaimable,
+    lossClaimed,
+    lossBasisUSDC,
+    overstreamClaimable,
     ...(winningSide === undefined ? {} : { won: side === winningSide })
   };
 };

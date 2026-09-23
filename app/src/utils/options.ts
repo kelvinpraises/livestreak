@@ -179,6 +179,10 @@ export function panelToPositions(panel: OptionsPanel, streamId?: string): Positi
         ...(lane.settlement !== undefined ? { won: lane.settlement.won } : {}),
         ...(lane.settlement?.claimableUSDC ? { payout: lane.settlement.claimableUSDC } : {}),
         ...(lane.settlement?.lossClaimableLVST ? { lvstReceived: lane.settlement.lossClaimableLVST } : {}),
+        ...(lane.settlement?.lossUSDC ? { lossUSDC: lane.settlement.lossUSDC } : {}),
+        ...(lane.settlement?.lossClaimed ? { lossClaimed: true } : {}),
+        ...(lane.settlement?.canClaimLoss ? { canClaimLoss: true } : {}),
+        ...(lane.settlement?.overstreamClaimableUSDC ? { overstream: lane.settlement.overstreamClaimableUSDC } : {}),
         minute: Math.max(0, Math.floor((Date.now() - vault.timing.createdAtMs) / 60_000)),
       })
     }
@@ -272,7 +276,7 @@ export function panelToHomepage(panel: OptionsPanel): HomepageData {
         id: routeId,
         marketId: market.marketId,
         title: market.title,
-        category: market.category ?? 'Tech',
+        category: market.category ?? 'Sports',
         activeVaults: market.totals.activeVaults,
         totalPooled: pooled,
         elapsed: streamElapsed(market),

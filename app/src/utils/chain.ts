@@ -40,12 +40,14 @@ const SUI_ADDRESS_RE = /^0x[0-9a-fA-F]{64}$/
 // A base58-encoded 32-byte Solana pubkey renders to 32–44 chars in the base58 alphabet (no 0 O I l).
 const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 
-export function readStoredChain(): OptionsChainKind {
-  if (typeof window === 'undefined') return 'evm'
+// The chain the user last picked, or null if none is stored. The DEFAULT (when null / undeployed) is
+// decided by `initialChain`/`defaultChain` in deployments.ts, which knows which chains actually shipped a
+// deployment — so we never hard-default to a chain (evm) that a Solana-only run can't boot.
+export function readStoredChain(): OptionsChainKind | null {
+  if (typeof window === 'undefined') return null
   const stored = sessionStorage.getItem(SESSION_CHAIN_KEY)
-  if (stored === 'sui') return 'sui'
-  if (stored === 'solana') return 'solana'
-  return 'evm'
+  if (stored === 'sui' || stored === 'solana' || stored === 'evm') return stored
+  return null
 }
 
 // Placeholder for a transfer-recipient input, matched to each chain's address shape (EVM/Sui are

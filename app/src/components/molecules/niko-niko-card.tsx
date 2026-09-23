@@ -6,14 +6,12 @@ import { formatMultiplier } from '#/utils/format'
 
 interface Props {
   vault: OptionsVault
-  index: number
-  total: number
   onClickCard?: (vaultId: string) => void
 }
 
 const CARD_W = 340
 const CARD_H = 42
-const DRIFT_SPEED = 0.3 // px per frame
+const DRIFT_SPEED = 0.3 // px per frame, right → left
 const VERTICAL_WOBBLE = 0.4
 
 /**
@@ -21,89 +19,74 @@ const VERTICAL_WOBBLE = 0.4
  * Shows the question + multiplier. Hovering pauses drift and shows full title.
  * Clicking opens the vault detail in the right panel.
  */
-export function NikoNikoCard({ vault, index, total, onClickCard }: Props) {
+export function NikoNikoCard({ vault, onClickCard }: Props) {
   const view = useVaultView(vault.vaultId)
   const yesTotal = view.poolYes ?? Number(vault.pools.yes)
   const noTotal = view.poolNo ?? Number(vault.pools.no)
   const multiplier = view.multiplier ?? (yesTotal > 0 ? (yesTotal + noTotal) / yesTotal : 1)
   const ref = useRef<HTMLDivElement>(null)
+  // Original organic drift: right → left with a little vertical wobble, bouncing off top/bottom.
   const posRef = useRef({ x: 0, y: 0, dx: -DRIFT_SPEED, dy: 0 })
   const rafRef = useRef<number>(0)
   const hoveredRef = useRef(false)
   const textRef = useRef<HTMLSpanElement>(null)
   const [ready, setReady] = useState(false)
+  const [enterDelay, setEnterDelay] = useState(0)
   const [hovered, setHovered] = useState(false)
   const [isTruncated, setIsTruncated] = useState(false)
 
   const isHot = vault.status === 'hot'
 
-  // Initialize position based on index — spread vertically, start from right edge
+  // Position — random seed, initialized ONCE on mount. Deliberately independent of the vault COUNT: the
+  // ONLY thing the earlier bug fix changed is that an added/removed vault no longer re-inits every card
+  // (which reset the whole field — a jarring CLS). The motion itself is the original organic drift.
   useEffect(() => {
     const parent = ref.current?.parentElement
     if (!parent) return
     const pw = parent.clientWidth
     const ph = parent.clientHeight
 
-    // Distribute vertically with some randomness
-    const slotHeight = Math.max(CARD_H + 16, (ph - 40) / Math.max(total, 1))
-    const baseY = 20 + index * slotHeight
-    const jitter = (Math.random() - 0.5) * 20
-    const y = Math.min(Math.max(8, baseY + jitter), ph - CARD_H - 8)
-
-    // Start from random x spread across the video
-    const x = pw * 0.3 + Math.random() * pw * 0.6
-
     posRef.current = {
-      x,
-      y,
-      dx: -(DRIFT_SPEED + Math.random() * 0.2),
+      x: pw * 0.15 + Math.random() * pw * 0.8,          // random start across the pane
+      y: 8 + Math.random() * Math.max(0, ph - CARD_H - 16),
+      dx: -(DRIFT_SPEED + Math.random() * 0.2),         // right → left, slight per-card variance
       dy: (Math.random() - 0.5) * VERTICAL_WOBBLE,
     }
+    setEnterDelay(Math.random() * 0.4)                  // random fade-in stagger
     setReady(true)
-  }, [index, total])
+    // Mount-once by design (must NOT re-init on count changes). Stable per vaultId key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  // Animation loop — drift + bounce off edges, pause on hover
+  // Drift loop — depends only on `ready`, so a changing vault count never tears it down. Original motion:
+  // drift right → left with a little vertical wobble, bounce off top/bottom, respawn from the right edge.
   useEffect(() => {
     if (!ready) return
-    const parent = ref.current?.parentElement
-    if (!parent) return
-
     function tick() {
       const el = ref.current
       const p = el?.parentElement
       if (!el || !p) return
-
-      // Skip movement when hovered
       if (!hoveredRef.current) {
         const pw = p.clientWidth
         const ph = p.clientHeight
         const pos = posRef.current
-
         pos.x += pos.dx
         pos.y += pos.dy
-
-        // Wrap horizontally: when it goes fully off left, respawn from right
         if (pos.x < -CARD_W - 10) {
           pos.x = pw + 10
-          const slotH = Math.max(CARD_H + 16, (ph - 40) / Math.max(total, 1))
-          pos.y = 20 + index * slotH + (Math.random() - 0.5) * 20
-          pos.y = Math.min(Math.max(8, pos.y), ph - CARD_H - 8)
+          pos.y = 8 + Math.random() * Math.max(0, ph - CARD_H - 16)
         }
-
-        // Bounce vertically
         if (pos.y < 4 || pos.y > ph - CARD_H - 4) {
           pos.dy = -pos.dy
           pos.y = Math.min(Math.max(4, pos.y), ph - CARD_H - 4)
         }
       }
-
       el.style.transform = `translate3d(${posRef.current.x}px, ${posRef.current.y}px, 0)`
       rafRef.current = requestAnimationFrame(tick)
     }
-
     rafRef.current = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(rafRef.current)
-  }, [ready, index, total])
+  }, [ready])
 
   const accentColor = isHot ? 'rgba(255,45,120,0.55)' : 'rgba(0,255,135,0.4)'
   const textColor = isHot ? '#ff7a00' : '#00ff87'
@@ -114,7 +97,7 @@ export function NikoNikoCard({ vault, index, total, onClickCard }: Props) {
       initial={{ opacity: 0, filter: 'blur(4px)' }}
       animate={{ opacity: ready ? 1 : 0, filter: ready ? 'blur(0px)' : 'blur(4px)' }}
       exit={{ opacity: 0, filter: 'blur(4px)' }}
-      transition={{ duration: 0.25, delay: index * 0.06 }}
+      transition={{ duration: 0.25, delay: enterDelay }}
       onClick={() => onClickCard?.(vault.vaultId)}
       onMouseEnter={() => { hoveredRef.current = true; setHovered(true); if (textRef.current) setIsTruncated(textRef.current.scrollWidth > textRef.current.clientWidth) }}
       onMouseLeave={() => { hoveredRef.current = false; setHovered(false) }}
@@ -138,7 +121,7 @@ export function NikoNikoCard({ vault, index, total, onClickCard }: Props) {
           ? `0 0 24px ${accentColor}, 0 4px 16px rgba(0,0,0,0.5)`
           : `0 0 12px ${accentColor}, 0 2px 8px rgba(0,0,0,0.4)`,
         willChange: 'transform',
-        zIndex: hovered ? 100 : 15 + index,
+        zIndex: hovered ? 100 : 15,
         transition: 'background 0.15s, border-color 0.15s, box-shadow 0.2s',
       }}
     >

@@ -184,10 +184,9 @@ export interface OptionsWriter {
   fund(input: FundStreamInput): Promise<TxId>;
   advance(input: AdvanceInput): Promise<TxId>;
   setLanes(input: SetLanesInput): Promise<TxId>;
-  // Balance-first deposit that preserves existing lanes (see AddFundsInput). EVM and Sui both
-  // implement it as a read-lanes + setLanes composite; optional only for chains without deployed
-  // contracts (solana) — the bridge rejects the action on a chain that omits it.
-  addFunds?(input: AddFundsInput): Promise<TxId>;
+  // NOTE: balance-first addFunds is NOT a writer method — it is a runtime verb (runtime.addFunds), built
+  // from the overlay-aware lane set + writer.setLanes(addDeposit), so a lagging read can't wipe a sibling
+  // lane. Keeping it off the writer stops anyone re-introducing the read-lanes-then-setLanes footgun.
   stopFunding(input: StopFundingInput): Promise<TxId>;
   stopAllFunding(input: StopAllFundingInput): Promise<TxId>;
   withdraw(input: WithdrawInput): Promise<TxId>;

@@ -24,6 +24,11 @@ export class ProtocolView {
      */
     list_vault_ids(): string;
     loss_claimable(token_id: string, vault_id: string, side: number): string;
+    /**
+     * EVM-parity view (Treasury.lossLvstClaimable): the LVST a loss would mint right now, 0 once
+     * claimed. Claimed-aware so the panel's loss preview both equals the mint AND clears after Cash out.
+     */
+    loss_lvst_claimable(token_id: string, vault_id: string, side: number): string;
     lvst_staked(user: string): string;
     /**
      * Vault ids belonging to one market (hex array JSON).
@@ -71,6 +76,7 @@ export interface InitOutput {
     readonly protocolview_lane_count: (a: number, b: number, c: number) => [number, number, number];
     readonly protocolview_list_vault_ids: (a: number) => [number, number];
     readonly protocolview_loss_claimable: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+    readonly protocolview_loss_lvst_claimable: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
     readonly protocolview_lvst_staked: (a: number, b: number, c: number) => [number, number, number, number];
     readonly protocolview_market_vaults: (a: number, b: number, c: number) => [number, number, number, number];
     readonly protocolview_mint_rate: (a: number) => [number, number];

@@ -2,7 +2,7 @@
 
 import { LiveStreakConfigError } from "@livestreak/core";
 
-import type { MarketId, UserAddress, VaultId } from "../model/ids.js";
+import type { MarketId, TokenId, UserAddress, VaultId } from "../model/ids.js";
 import type { OptionsNft } from "../model/nft.js";
 import type { OptionsVaultSide } from "../model/vault.js";
 import { lvstDecimalsForChain, perMinUSDCToRate } from "../model/units.js";
@@ -17,6 +17,7 @@ import {
   type PreviewAccrualInput
 } from "../model/math/accrual.js";
 import type {
+  AddFundsInput,
   FundStreamInput,
   LaneWriteInput,
   StopAllFundingInput,
@@ -81,6 +82,9 @@ export interface OptionsRuntime {
   pauseLane: (input: PauseLaneInput) => Promise<TxId>;
   /** Resume a paused stream at the remembered rate. */
   resumeLane: (input: ResumeLaneInput) => Promise<TxId>;
+  /** Balance-first top-up: deposit into the NFT's shared budget, re-asserting its current lanes so a
+   *  full-replacement setLanes never drops one. Works on a laneless mint (parks the deposit as budget). */
+  addFunds: (input: AddFundsInput) => Promise<TxId>;
   /** Sweep to wallet: stop every lane and withdraw the shared balance. Positions persist via the ledger,
    *  now reading `depleted` (the money's gone); clears any paused intent for the NFT. */
   sweepNft: (input: StopAllFundingInput) => Promise<TxId>;
@@ -114,6 +118,13 @@ class OptionsRuntimeFacade implements OptionsRuntime {
   private readonly lvstDecimals: number;
   private readonly persistPausedLanes?: (lanes: readonly OptionsPausedLane[]) => void;
   private pausedLaneRegistry: OptionsPausedLane[];
+  // The token's full lane set from the runtime's OWN last setLanes write. setLanes is FULL-REPLACEMENT,
+  // so `desired` must carry every lane the token still holds — rebuilding it from the polled snapshot
+  // drops a sibling lane funded moments ago whose read hasn't landed yet (Solana read-after-write lag),
+  // silently capping the NFT at one vault. This overlay is the authoritative lane set until a confirmed
+  // read catches up (reconciled in refreshUser), so a second/third vault never wipes the first.
+  // Session-only (a reload re-reads the chain); keyed by tokenId string.
+  private readonly pendingLaneWrites = new Map<string, LaneWriteInput[]>();
   private readonly store: OptionsRuntimeStore;
   private readonly boardSubscriptions = createBoardSubscriptionRegistry();
   private readonly listeners = new Set<(state: OptionsRuntimeState) => void>();
@@ -237,7 +248,7 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     }
 
     const rate = perMinUSDCToRate(input.ratePerMin);
-    const desired = this.existingLaneWrites(nft).filter((lane) => lane.vaultId !== input.vaultId);
+    const desired = this.currentLaneWrites(nft).filter((lane) => lane.vaultId !== input.vaultId);
     desired.push({ vaultId: input.vaultId, side: input.side, rate });
 
     const balance = nft.balance ?? 0n;
@@ -245,7 +256,9 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     const addDeposit = balance > 0n ? 0n : rate * BigInt(Math.max(1, Math.round(starterMinutes * 60)));
 
     this.forgetPaused(nft.tokenId.toString(), input.vaultId);
-    return this.chain.writer.setLanes({ tokenId: nft.tokenId, lanes: desired, addDeposit });
+    const tx = await this.chain.writer.setLanes({ tokenId: nft.tokenId, lanes: desired, addDeposit });
+    this.recordLaneWrites(nft.tokenId, desired);
+    return tx;
   }
 
   async pauseLane(input: PauseLaneInput): Promise<TxId> {
@@ -262,7 +275,7 @@ class OptionsRuntimeFacade implements OptionsRuntime {
       });
     }
 
-    const desired = this.existingLaneWrites(nft).filter(
+    const desired = this.currentLaneWrites(nft).filter(
       (lane) => !(lane.vaultId === input.vaultId && lane.side === input.side)
     );
     // Remember the rate BEFORE the tx so a mid-flight refresh still resumes correctly; roll back on failure.
@@ -273,7 +286,9 @@ class OptionsRuntimeFacade implements OptionsRuntime {
       rate: target.rate
     });
     try {
-      return await this.chain.writer.setLanes({ tokenId: nft.tokenId, lanes: desired, addDeposit: 0n });
+      const tx = await this.chain.writer.setLanes({ tokenId: nft.tokenId, lanes: desired, addDeposit: 0n });
+      this.recordLaneWrites(nft.tokenId, desired);
+      return tx;
     } catch (error) {
       this.forgetPaused(nft.tokenId.toString(), input.vaultId, input.side);
       throw error;
@@ -298,12 +313,44 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     // side-switch has no remembered rate. One lane per vault, so this replaces any side currently on the
     // vault (doubles as switch-back), and re-funds deposit-free while the shared balance lasts.
     const rate = remembered?.rate ?? perMinUSDCToRate(DEFAULT_RESUME_RATE_PER_MIN);
-    const desired = this.existingLaneWrites(nft).filter((lane) => lane.vaultId !== input.vaultId);
+    const desired = this.currentLaneWrites(nft).filter((lane) => lane.vaultId !== input.vaultId);
     desired.push({ vaultId: input.vaultId, side: input.side, rate });
     const balance = nft.balance ?? 0n;
     const addDeposit = balance > 0n ? 0n : rate * BigInt(Math.max(1, Math.round(DEFAULT_STARTER_MINUTES * 60)));
     const tx = await this.chain.writer.setLanes({ tokenId: nft.tokenId, lanes: desired, addDeposit });
+    this.recordLaneWrites(nft.tokenId, desired);
     this.forgetPaused(tokenId, input.vaultId, input.side);
+    return tx;
+  }
+
+  async addFunds(input: AddFundsInput): Promise<TxId> {
+    if (input.deposit <= 0n) {
+      throw new LiveStreakConfigError({
+        message: "addFunds deposit must be positive",
+        metadata: { details: input.deposit.toString() }
+      });
+    }
+    const snapshot = this.requireUserSnapshot();
+    const entry = snapshot.nfts.find(
+      (candidate) => candidate.nft.tokenId.toString() === input.tokenId.toString()
+    );
+    if (entry === undefined) {
+      throw new LiveStreakConfigError({
+        message: "No position NFT for this token — mint one first",
+        metadata: { details: input.tokenId.toString() }
+      });
+    }
+    // Re-assert the token's CURRENT full lane set (overlay-aware) with the deposit as add_deposit. setLanes
+    // is full-replacement, so building this from a snapshot that lags a just-funded lane (Solana
+    // read-after-write) would drop it — the overlay is what makes addFunds safe on every chain. A laneless
+    // mint re-asserts [] and just parks the deposit as budget (the first-bet top-up).
+    const desired = this.currentLaneWrites(entry.nft);
+    const tx = await this.chain.writer.setLanes({
+      tokenId: entry.nft.tokenId,
+      lanes: desired,
+      addDeposit: input.deposit
+    });
+    this.recordLaneWrites(entry.nft.tokenId, desired);
     return tx;
   }
 
@@ -312,6 +359,7 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     // Cashed out — no balance to resume from, so drop any remembered pauses for this NFT. The positions
     // themselves persist via the share ledger, now reading `depleted` (the deposit is gone).
     this.forgetPausedForToken(input.tokenId.toString());
+    this.recordLaneWrites(input.tokenId, []);
     return tx;
   }
 
@@ -343,6 +391,35 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     return nft.lanes
       .filter((lane) => lane.committedRate > 0n)
       .map((lane) => ({ vaultId: lane.vaultId, side: lane.side, rate: lane.committedRate }));
+  }
+
+  // The token's current full lane set for a setLanes rebuild: the runtime's OWN last write when the
+  // polled snapshot hasn't caught up to it yet (Solana read-after-write lag), else the on-chain lanes.
+  // This is what stops a second/third vault fund from wiping the first via full-replacement setLanes.
+  private currentLaneWrites(nft: OptionsNft): LaneWriteInput[] {
+    return this.pendingLaneWrites.get(nft.tokenId.toString()) ?? this.existingLaneWrites(nft);
+  }
+
+  private recordLaneWrites(tokenId: TokenId, lanes: readonly LaneWriteInput[]): void {
+    this.pendingLaneWrites.set(tokenId.toString(), [...lanes]);
+  }
+
+  // Drop the optimistic overlay for a token once a confirmed read reflects the same lane set, handing the
+  // source of truth back to the chain. Compared by (vaultId:side) keys — only which lanes exist matters,
+  // not their rate/deposit. A token absent from this snapshot (another market) keeps its overlay.
+  private reconcilePendingLanes(snapshot: OptionsUserOptionsSnapshot): void {
+    if (this.pendingLaneWrites.size === 0) return;
+    for (const [tokenId, pending] of this.pendingLaneWrites) {
+      const entry = snapshot.nfts.find((e) => e.nft.tokenId.toString() === tokenId);
+      if (entry === undefined) continue;
+      const chainKeys = new Set(
+        this.existingLaneWrites(entry.nft).map((lane) => `${lane.vaultId}:${lane.side}`)
+      );
+      const pendingKeys = pending.map((lane) => `${lane.vaultId}:${lane.side}`);
+      if (chainKeys.size === pendingKeys.length && pendingKeys.every((key) => chainKeys.has(key))) {
+        this.pendingLaneWrites.delete(tokenId);
+      }
+    }
   }
 
   private rememberPaused(lane: OptionsPausedLane): void {
@@ -424,6 +501,7 @@ class OptionsRuntimeFacade implements OptionsRuntime {
   async refreshUser(user: UserAddress, marketId?: MarketId): Promise<OptionsRuntimeState> {
     try {
       const snapshot = await refreshUserSnapshot(this.chain.reader, user, marketId);
+      this.reconcilePendingLanes(snapshot);
       this.store.setUserSnapshot(snapshot);
       return this.publish();
     } catch (error) {

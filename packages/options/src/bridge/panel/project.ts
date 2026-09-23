@@ -644,6 +644,13 @@ const projectNftPanel = (entry: OptionsNftSnapshot, ctx: ProjectPanelContext): O
   const status: OptionsAccountStatus =
     activeRate > 0n ? "streaming" : hasDepleted ? "depleted" : balance > 0n ? "idle" : "empty";
 
+  // Runway = when the shared balance runs dry. EVM's reader supplies the exact Drips maxEnd; Solana's
+  // doesn't, so fall back to now + balance ÷ drain-rate. Without this a funded, streaming Solana position
+  // showed RUNWAY "—" (no endsAtMs) even though it clearly had money left.
+  const runwayEndMs =
+    entry.nft.runwayEndMs ??
+    (activeRate > 0n && balance > 0n ? Date.now() + Number((balance * 1000n) / activeRate) : undefined);
+
   // Paused lanes (session intent) overlay the matching ledger position — forcing "paused" + the remembered
   // resume rate. A paused entry with NO ledger position (paused before any shares accrued) is re-injected.
   const pausedByKey = new Map(
@@ -682,8 +689,8 @@ const projectNftPanel = (entry: OptionsNftSnapshot, ctx: ProjectPanelContext): O
       ...(entry.nft.balance === undefined
         ? {}
         : { balanceUSDC: usdcToNumber(balance), balanceRaw: balance.toString() }),
-      ...(status === "streaming" && entry.nft.runwayEndMs !== undefined
-        ? { endsAtMs: entry.nft.runwayEndMs, drainRatePerSecUSDC: usdcToNumber(activeRate) }
+      ...(status === "streaming" && runwayEndMs !== undefined
+        ? { endsAtMs: runwayEndMs, drainRatePerSecUSDC: usdcToNumber(activeRate) }
         : {})
     },
     pnl: {
@@ -718,8 +725,11 @@ const projectLanePanel = (
       ...(streaming && lane.maxEndMs !== undefined ? { endsAtMs: lane.maxEndMs } : {})
     },
     shares: {
-      accrued: sharesToNumber(lane.sharesAccrued),
-      accruedRaw: lane.sharesAccrued.toString(),
+      // Absolute "sh" uses the LIVE value (settled + real pending) so it grows truthfully; the % stays a
+      // SETTLED ratio (vs the settled side total) — consistent, and it barely moves second-to-second, so
+      // it needs no live projection. Neither is guessed in the UI anymore.
+      accrued: sharesToNumber(lane.sharesLive ?? lane.sharesAccrued),
+      accruedRaw: (lane.sharesLive ?? lane.sharesAccrued).toString(),
       ...(sideShareTotal !== undefined && sideShareTotal > 0n
         ? { percentOfSide: Number((lane.sharesAccrued * 10_000n) / sideShareTotal) / 100 }
         : {})
@@ -730,9 +740,15 @@ const projectLanePanel = (
           settlement: {
             won: lane.won,
             claimableUSDC: usdcToNumber(lane.claimable ?? 0n),
+            // The EARNED LVST — shown even after claiming. `canClaimLoss` (button) additionally requires
+            // the loss to be UNCLAIMED, so a settled loss keeps its amount but isn't re-claimable.
             lossClaimableLVST: lvstToNumber(lane.lossClaimable ?? 0n, lvstDecimals),
+            lossUSDC: usdcToNumber(lane.lossBasisUSDC ?? 0n),
+            overstreamClaimableUSDC: usdcToNumber(lane.overstreamClaimable ?? 0n),
             canClaimWin: (lane.claimable ?? 0n) > 0n,
-            canClaimLoss: (lane.lossClaimable ?? 0n) > 0n
+            canClaimLoss: (lane.lossClaimable ?? 0n) > 0n && lane.lossClaimed !== true,
+            lossClaimed: lane.lossClaimed === true,
+            canClaimOverstream: (lane.overstreamClaimable ?? 0n) > 0n
           }
         })
   };

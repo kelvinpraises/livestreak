@@ -104,20 +104,6 @@ describe("Solana options stopFunding writer", () => {
   });
 });
 
-// addFunds is the balance-first top-up (read current lanes → set_lanes with the deposit). Previously
-// unimplemented on Solana (the bridge rejected it as "not supported on this chain"); now present, so a
-// fresh position can be topped up. The deposit is validated synchronously (before market resolution or
-// any RPC), so a non-positive deposit fails typed without a live shard.
-describe("Solana options addFunds writer", () => {
-  it("is implemented (parity with EVM/Sui — no longer unsupported on this chain)", () => {
-    const chain = solanaChain();
-    expect(chain.writer.addFunds).toBeTypeOf("function");
-  });
-
-  it("rejects a non-positive deposit", async () => {
-    const chain = solanaChain();
-    await expect(
-      chain.writer.addFunds!({ tokenId: asTokenId(1n), deposit: 0n })
-    ).rejects.toBeInstanceOf(LiveStreakConfigError);
-  });
-});
+// addFunds is NOT a writer method any more — it is a runtime verb (overlay-aware, chain-agnostic). Its
+// behaviour is covered in lane-orchestration.test.ts (preserves siblings, parks on a laneless mint,
+// rejects a non-positive deposit).

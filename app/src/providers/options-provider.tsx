@@ -40,12 +40,14 @@ import {
 import { HOST_BASE_URL, LOCAL_CHAIN_ID, isOptionsModeEnabled, testOptionsSeed } from '#/utils/env'
 import {
   buildOptionsContractAddresses,
+  initialChain,
+  isChainDeployed,
   LOCALHOST_AA_CONTRACTS,
   LOCALHOST_RPC_URL,
 } from '#/utils/deployments'
 import {
+  chainLabel,
   isValidRecipientAddress,
-  readStoredChain,
   SESSION_CHAIN_KEY,
   type OptionsChainKind,
 } from '#/utils/chain'
@@ -160,6 +162,8 @@ interface OptionsContextValue {
   hasNftForVault: (vaultId: string) => boolean
   mint: (marketId: string) => Promise<TxId>
   claimLoss: (vaultId: string, side: 'yes' | 'no') => Promise<TxId>
+  /** Cash out ONE resolved vault: stop its streams → mint any loss LVST → withdraw winnings + overstream. */
+  settleVault: (vaultId: string) => Promise<TxId>
   stake: (amountLvst: number) => Promise<TxId>
   unstake: (amountLvst: number) => Promise<TxId>
   claimDividends: () => Promise<TxId>
@@ -309,10 +313,10 @@ function buildChainConfig(
 
 export function OptionsProvider({ children }: { children: ReactNode }) {
   const enabled = isOptionsModeEnabled()
-  const [chain, setChainState] = useState<OptionsChainKind>(() =>
-    enabled ? readStoredChain() : 'evm',
-  )
-  const [ready, setReady] = useState(!enabled || readStoredChain() === 'sui')
+  // Start on the last valid pick, else the smart default (the running chain / first deployed) — never a
+  // hard-coded evm that a Solana-only run can't boot. `initialChain` is deployment-aware.
+  const [chain, setChainState] = useState<OptionsChainKind>(() => initialChain(enabled))
+  const [ready, setReady] = useState(() => !enabled || initialChain(enabled) === 'sui')
   const [isConnected, setIsConnected] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [derivationStep, setDerivationStep] = useState<string | null>(null)
@@ -372,6 +376,11 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     teardownRuntime()
 
     const selectedChain = chainRef.current
+    // Never boot a chain this build has no valid deployment for — fail with a clear message instead of the
+    // cryptic "Invalid contract address" throw that used to wedge the whole board.
+    if (!isChainDeployed(selectedChain)) {
+      throw new Error(`${chainLabel(selectedChain)} isn't deployed in this environment — pick a deployed chain.`)
+    }
     const chainConfig = buildChainConfig(selectedChain, secret, walletInitRef.current)
     const marketId = activeMarketIdRef.current
 
@@ -413,6 +422,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   // secret; the writer is never invoked while disconnected) so the active market's vaults render.
   const bootAnonymous = useCallback(async () => {
     if (!activeMarketIdRef.current) return
+    if (!isChainDeployed(chainRef.current)) return // read-only board: silently skip an undeployed chain
     if (chainRef.current !== 'sui' && !walletInitRef.current) return
     try {
       await bootRuntime(new Uint8Array(32), ANON_VIEWER[chainRef.current] as UserAddress)
@@ -469,8 +479,12 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') return
 
+    // Atomic binding: drop the previous chain's walletInit IMMEDIATELY on any switch, before the async
+    // re-fetch. The boot guards key on `!walletInitRef.current`, so this blocks the board from ever booting
+    // with a stale config that doesn't match the selected chain (the picker↔board race).
+    walletInitRef.current = null
+
     if (chain === 'sui') {
-      walletInitRef.current = null
       setReady(true)
       return
     }
@@ -769,6 +783,41 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     })
   }, [callBridgeAction, requireUser, resolveTokenId])
 
+  // Cash out ONE resolved vault — strictly per-vault, never NFT-wide (leaves your other vaults + the
+  // shared balance alone). Runs the settlement legs in order: (1) stop this vault's still-streaming lanes
+  // so overstream stops growing, (2) mint LVST on the losing side if you lost, (3) withdraw — which runs
+  // the permissionless `collect` (pot finalize) then pays winnings AND overstream for BOTH sides. Withdraw
+  // is last so the now-frozen overstream is fully paid. Each leg is a separate sponsored tx (Solana can't
+  // batch engine ops); only the legs you actually hold run (1–4). `onStep` streams live progress: each
+  // leg's KNOWN amount (from the collect-projected board) is reported as its tx confirms. Chain-agnostic.
+  const settleVault = useCallback(async (vaultId: string): Promise<TxId> => {
+    const user = requireUser()
+    const tokenId = asTokenId(resolveTokenId(vaultId))
+    const vid = asVaultId(vaultId)
+    const panel = requirePanel()
+    const nft = panel.nfts.find(n => n.lanes.some(l => l.vaultId === vaultId))
+    const lanes = nft?.lanes.filter(l => l.vaultId === vaultId) ?? []
+    const lost = lanes.find(l => l.settlement?.won === false && l.settlement.canClaimLoss === true)
+    const won = lanes.find(l => l.settlement?.won === true && (l.settlement.claimableUSDC ?? 0) > 0)
+    const overstreamTotal = lanes.reduce((s, l) => s + (l.settlement?.overstreamClaimableUSDC ?? 0), 0)
+    // 1. stop this vault's still-streaming lanes so overstream stops growing (per-lane stopFunding).
+    for (const lane of lanes) {
+      if (lane.status === 'streaming') {
+        await callBridgeAction('stopFunding', { tokenId, vaultId: vid, side: lane.side })
+      }
+    }
+    // 2. mint the losing side's LVST, if you held one and haven't claimed it yet.
+    let lossTx: TxId | undefined
+    if (lost) lossTx = await callBridgeAction('claimLossLvst', { tokenId, vaultId: vid, side: lost.side, to: user })
+    // 3. withdraw — runs collect (pot finalize) then pays winnings + both sides' overstream. Skipped when
+    // there's neither, so a pure-loss vault doesn't fire a no-op tx.
+    let winTx: TxId | undefined
+    if (won || overstreamTotal > 0) winTx = await callBridgeAction('withdraw', { tokenId, vaultId: vid, to: user })
+    const tx = winTx ?? lossTx
+    if (!tx) throw new Error('Nothing to cash out')
+    return tx
+  }, [requirePanel, callBridgeAction, resolveTokenId, requireUser])
+
   const stake = useCallback(async (amountLvst: number): Promise<TxId> => {
     return callBridgeAction('stakeLvst', {
       amount: parseUnits(String(amountLvst), 18),
@@ -848,6 +897,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     hasNftForVault,
     mint,
     claimLoss,
+    settleVault,
     stake,
     unstake,
     claimDividends,
@@ -858,7 +908,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     enabled, ready, chain, setChain, isConnected, isLoading, derivationStep, claiming, error, address, usdcBalance, board, controls,
     connect, disconnect, afterWrite, setActiveMarketId, findFunction, findFundFunctionForVault,
     findStopFundingFunctionForVault, streamLane, pauseLane, resumeLane,
-    addFundsNft, sweepNft, withdrawAllNft, previewAccrual, claimWin, hasNftForVault, mint, claimLoss,
+    addFundsNft, sweepNft, withdrawAllNft, previewAccrual, claimWin, hasNftForVault, mint, claimLoss, settleVault,
     stake, unstake, claimDividends, transferNft, approveNft, setApprovalForAll,
   ])
 

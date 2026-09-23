@@ -48,8 +48,6 @@ export function NftPanel() {
               fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
             sweepFn={options.findFunction('stopAllFunding', fn =>
               fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
-            withdrawAllFn={options.findFunction('withdrawMany', fn =>
-              fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
             transferFn={options.findFunction('transferNft', fn =>
               fn.target?.kind === 'nft' && fn.target.tokenId === nft.tokenId)}
             approveFn={isEvm
@@ -58,7 +56,6 @@ export function NftPanel() {
               : undefined}
             onAddFunds={(usd) => options.addFundsNft(nft.tokenId, usd)}
             onSweep={() => options.sweepNft(nft.tokenId)}
-            onWithdrawAll={() => options.withdrawAllNft(nft.tokenId)}
             onTransfer={(to) => options.transferNft(nft.tokenId, to)}
             onApprove={(operator) => options.approveNft(nft.tokenId, operator)}
           />
@@ -117,12 +114,10 @@ function NftRow({
   chain,
   addFundsFn,
   sweepFn,
-  withdrawAllFn,
   transferFn,
   approveFn,
   onAddFunds,
   onSweep,
-  onWithdrawAll,
   onTransfer,
   onApprove,
 }: {
@@ -130,12 +125,10 @@ function NftRow({
   chain: OptionsChainKind
   addFundsFn?: OptionsFunctionView
   sweepFn?: OptionsFunctionView
-  withdrawAllFn?: OptionsFunctionView
   transferFn?: OptionsFunctionView
   approveFn?: OptionsFunctionView
   onAddFunds: (depositUsd: number) => Promise<unknown>
   onSweep: () => Promise<unknown>
-  onWithdrawAll: () => Promise<unknown>
   onTransfer: (to: string) => Promise<unknown>
   onApprove: (operator: string) => Promise<unknown>
 }) {
@@ -185,7 +178,10 @@ function NftRow({
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {/* Balance-first add funds: budget the NFT (and resume/extend any streams) — no active lane needed. */}
+        {/* Balance in / out on one row: add to the NFT's budget, or sweep the whole balance back to the
+            wallet (stopAllFunding halts every lane + returns the parked funds). Sweep self-disables when
+            there's nothing to pull. Per-vault winnings are collected by each vault's Cash out — so there's
+            no NFT-wide "withdraw all" here. */}
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input
             type="number"
@@ -203,15 +199,8 @@ function NftRow({
             variant="green"
             compact
           />
+          <OptionsActionButton label="Sweep to wallet" fn={sweepFn} onAction={onSweep} variant="ghost" compact />
         </div>
-
-        {/* Get money out: sweep the remaining balance back to the wallet / collect all winnings. EVM only. */}
-        {chain === 'evm' && (
-          <div style={{ display: 'flex', gap: 6 }}>
-            <OptionsActionButton label="Sweep to wallet" fn={sweepFn} onAction={onSweep} variant="ghost" compact />
-            <OptionsActionButton label="Withdraw all" fn={withdrawAllFn} onAction={onWithdrawAll} variant="green" compact />
-          </div>
-        )}
 
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input

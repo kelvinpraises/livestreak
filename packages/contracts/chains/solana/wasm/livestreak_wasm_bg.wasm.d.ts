@@ -12,6 +12,7 @@ export const protocolview_decode: (a: number, b: number) => [number, number, num
 export const protocolview_lane_count: (a: number, b: number, c: number) => [number, number, number];
 export const protocolview_list_vault_ids: (a: number) => [number, number];
 export const protocolview_loss_claimable: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
+export const protocolview_loss_lvst_claimable: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number, number];
 export const protocolview_lvst_staked: (a: number, b: number, c: number) => [number, number, number, number];
 export const protocolview_market_vaults: (a: number, b: number, c: number) => [number, number, number, number];
 export const protocolview_mint_rate: (a: number) => [number, number];

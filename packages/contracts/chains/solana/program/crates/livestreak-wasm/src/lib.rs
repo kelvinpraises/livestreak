@@ -202,6 +202,22 @@ impl ProtocolView {
             .to_string())
     }
 
+    /// EVM-parity view (Treasury.lossLvstClaimable): the LVST a loss would mint right now, 0 once
+    /// claimed. Claimed-aware so the panel's loss preview both equals the mint AND clears after Cash out.
+    pub fn loss_lvst_claimable(
+        &self,
+        token_id: &str,
+        vault_id: &str,
+        side: u8,
+    ) -> Result<String, JsError> {
+        let vid = parse_id(vault_id)?;
+        Ok(self
+            .p
+            .treasury
+            .loss_lvst_claimable(&self.p.vault, account(token_id)?, &vid, side)
+            .to_string())
+    }
+
     pub fn account_vault_ids(&self, token_id: &str) -> Result<String, JsError> {
         let ids = self.p.vault.get_account_vault_ids(account(token_id)?);
         let out: Vec<Value> = ids.iter().map(|v| s(id_hex(v))).collect();

@@ -2,6 +2,7 @@ import { isOptionsModeEnabled } from '#/utils/env'
 import { useOptionsContext } from '#/providers/options-provider'
 import { Button } from '#/components/atoms/button'
 import { SUPPORTED_CHAINS } from '#/utils/chain'
+import { isChainDeployed } from '#/utils/deployments'
 
 // Segmented two-pill control. This is NOT a hand-rolled overlay (no fragile
 // dismiss logic to fix), so converting it to a DropdownMenu/Select would change
@@ -19,7 +20,9 @@ export function ChainSelector() {
     <div data-testid="chain-selector" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {SUPPORTED_CHAINS.map(item => {
         const active = chain === item.id
-        const pending = !item.deployed
+        // Deployment-aware: grey out any chain this build has no valid deployment for (e.g. EVM/Sui in a
+        // Solana-only run) so it can't be picked into a wedged board.
+        const pending = !isChainDeployed(item.id)
         return (
           <Button
             key={item.id}
@@ -29,7 +32,7 @@ export function ChainSelector() {
             disabled={isLoading || active || pending}
             title={
               pending
-                ? `${item.label} wallet + gas sponsorship are live; contracts port in progress (${item.network})`
+                ? `${item.label} isn’t deployed in this environment (${item.network})`
                 : active
                   ? undefined
                   : 'Switch chain — re-derives this chain’s wallet from your seed'
@@ -55,7 +58,7 @@ export function ChainSelector() {
             {item.label}
             {pending && (
               <span style={{ marginLeft: 5, fontSize: 9, letterSpacing: '0.08em', color: 'rgba(255,255,255,0.22)' }}>
-                SOON
+                OFF
               </span>
             )}
           </Button>

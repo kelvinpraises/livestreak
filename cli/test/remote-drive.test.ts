@@ -11,7 +11,7 @@ const { mockClient } = vi.hoisted(() => ({
   mockClient: {
     connect: vi.fn(async () => {}),
     call: vi.fn(async () => ({ ok: true })),
-    boards: vi.fn(() => ({ observe: { cells: { market: { readonly: { marketId: "0xmarketdeadbeef" } } } } })),
+    boards: vi.fn(() => ({ observe: observeBoardWithMarket("0xmarketdeadbeef") })),
     close: vi.fn()
   }
 }));
@@ -20,9 +20,15 @@ vi.mock("../src/gateway/remote/ui-client.js", () => ({
   createRemoteUiClient: () => mockClient as unknown as RemoteUiClient
 }));
 
+// Family board: the session index names the observation; its market cell carries the id.
 const observeBoardWithMarket = (marketId: string) => ({
   cells: {
-    market: {
+    "system:config": {
+      readonly: {
+        observations: { "obs-drive": { title: "t", chain: "eip155:31337", createdAtMs: 1 } }
+      }
+    },
+    "obs:obs-drive:market": {
       readonly: { marketId }
     }
   }

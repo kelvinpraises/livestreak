@@ -1,22 +1,22 @@
 {
   "chain": "localnet",
   "rpc": "http://127.0.0.1:9000",
-  "deployedAt": "2026-07-17T11:30:19.371Z",
+  "deployedAt": "2026-07-18T19:48:31.321Z",
   "deployer": "0x668cfc490bd30cf8d4666e3ff39cc7fded31deee89d105267011d01abea94e84",
-  "packageId": "0xd2f3d6db8b9f163f8ab41bf52ca694d04ec5d0a668a94ead7179cb8524baa769",
+  "packageId": "0x2dd6ba243b58ac19ce8b379d4849038f688412a2097f5b798af816c57c03b019",
   "objects": {
-    "packageId": "0xd2f3d6db8b9f163f8ab41bf52ca694d04ec5d0a668a94ead7179cb8524baa769",
-    "protocol": "0xb1b4a1b76c7c7c13c8af293481117ef066c529b1d3dfe27d1561ddf60214ae85",
-    "marketRegistry": "0x3f1fac81fe867387a2b713cb5d4d0e20738793f256b14ed3963ab45692a67b77",
-    "vaultRegistry": "0x166396544d0d2196d156e9b20d386376f17b4aad3f019a108795a5f40570a111",
-    "stewardRegistry": "0x036fa4b700d2eaf437239d60e3d53ed46f4a2b6a89279c3f70e490487c54678f",
-    "treasuryRegistry": "0xdd31c8e933ba2dc89b342e336c19992b5f2d4af4cc4ce886fecac127a255a78a",
-    "dripsRegistry": "0x7c4b3f01911f8bf2749c27e63a839e2ae76b233852678a85bf66cf5040d587c7",
-    "streamsRegistry": "0x75b0f00faa7a7d9c06a0c2f45139a725021525c66d8092cf4197587ea60d2ab5",
-    "vaultDriverRegistry": "0x10d798b748d60a597fdf821a71e3d2ecfdde7b26dae0e69b7b919f69b774e733",
-    "marketDriverRegistry": "0x5004d601782d16c1ba34fac8b175c4ca4974bd4e55878fe2a23f55dc66389cdd",
-    "driverRegistry": "0xeae5f7cbba5d26ec4694e0827cf51d5628f7eebdc4a64cce4417003352e930a6",
-    "lvstTreasuryCap": "0x5449f4207c4a88496639f91809bc19aa9b12cdcae7934c0ae0fe74cc2a86c215",
-    "usdcMintCap": "0x5b77fe83be23dc3c8c30fa9110945aaf2f00876f9c3383d23670eeaaf1a27e97"
+    "packageId": "0x2dd6ba243b58ac19ce8b379d4849038f688412a2097f5b798af816c57c03b019",
+    "protocol": "0xb8806f95d9420c8e29d3f8bc267371041cd4709ae8be3df68691ba521916269b",
+    "marketRegistry": "0x6ec9f7083410176e325619bbf99a74052d4764f9d04ce53d9ca0c21dd78b9b5f",
+    "vaultRegistry": "0x0c9a58dae0b1073ac57255553768cafa1956e20eab3344c6f78134bcccc500eb",
+    "stewardRegistry": "0x9a58d76d4ac20be3638763168582ee5a3b34688c60f4648dad4531ee1ba41bc2",
+    "treasuryRegistry": "0x72dc18a140518bd1257494827575db8238cf8aac4967a736f94fb2df8b57bf8d",
+    "dripsRegistry": "0x793862b757b3d42eb608c6c99b6b977cdcb4449647f1a3d3d9bd3f455f421b58",
+    "streamsRegistry": "0x05b41ba9bc55946da580912c8b5593b6d632feede5e22c3af31a705e3592f1a2",
+    "vaultDriverRegistry": "0x037a1444596a83bb125b02c6c37e354d63e88a5cd48e4c171df7d85a31c62dec",
+    "marketDriverRegistry": "0x7fcda45cf8bfaee8d67367627702ff41a9fe08a9728a064d087eba2fc1828d3e",
+    "driverRegistry": "0x340ab7ffe55eacd091f88f674a11d1894d2daa4956eb7400da355d10e10fed58",
+    "lvstTreasuryCap": "0x875af2c8ee9c82b5dd930557f4e31fbaaa1d3e0fd23a48a84d2ed55237d85c4c",
+    "usdcMintCap": "0x5728e0da4a6f5cc6c06633cb85526a8df26ea05c095062f423cbd1ad02d7041d"
   }
 }

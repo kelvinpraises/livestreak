@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { LiveStreakConfigError, type LiveStreakError } from "@livestreak/core";
+import { type LiveStreakError } from "@livestreak/core";
 import type { ControlCallEnvelope } from "#run/control/bus/calls.js";
 import type {
   BoardPatch,
@@ -7,7 +7,6 @@ import type {
   ControlFunctionEntry,
   ControlSurface
 } from "#run/control/bus/types.js";
-import { readLiveConfigurators } from "#run/control/board/visibility.js";
 import {
   liveSinkCloseScope,
   liveSinkConfigureScope
@@ -40,32 +39,25 @@ const closeEntry = (): ControlFunctionEntry => ({
   call: (_envelope, context) => closeCall(context)
 });
 
+// The stream id is board-derived (obsId → streamId → marketId at Prepare); configure only
+// confirms the sink. See board-run-config.ts, which builds the real sink config from the market cell.
 const configureCall = (
-  envelope: ControlCallEnvelope,
-  _context: ControlFunctionContext
+  _envelope: ControlCallEnvelope,
+  context: ControlFunctionContext
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
-  Effect.gen(function* () {
-    const streamId = yield* decodeStreamIdPayload(envelope.payload);
-    const nowMs = Date.now();
-    const channelLabel =
-      typeof (envelope.payload as Record<string, unknown> | undefined)?.channelLabel === "string"
-        ? ((envelope.payload as Record<string, unknown>).channelLabel as string)
-        : `livestreak-video:${streamId}`;
-
+  Effect.sync(() => {
     return {
       boardPatch: {
         cells: {
-          "sink:live": {
+          [context.cellId]: {
             settings: {
               set: {
-                streamId,
-                channelLabel,
                 subscribe: ["publish.video.rendered"],
                 required: true
               }
             },
             readonly: { set: { configured: true } },
-            status: ["configured", null, nowMs]
+            status: ["configured", null, Date.now()]
           }
         }
       }
@@ -76,38 +68,15 @@ const closeCall = (
   context: ControlFunctionContext
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.sync(() => {
-    const live = readLiveConfigurators(context.board).filter(
-      (id) => id !== "observe.sink.live"
-    );
-
     return {
       boardPatch: {
         cells: {
-          "sink:live": { remove: true },
-          "system:config": {
-            readonly: { set: { liveConfigurators: live } }
+          [context.cellId]: {
+            readonly: { set: { configured: false } },
+            status: ["idle", null, Date.now()]
           }
         }
       }
     };
   });
 
-const decodeStreamIdPayload = (payload: unknown): Effect.Effect<string, LiveStreakConfigError> =>
-  Effect.gen(function* () {
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
-      return yield* Effect.fail(
-        new LiveStreakConfigError({ message: "sink:live:configure payload must be an object" })
-      );
-    }
-
-    const streamId = (payload as Record<string, unknown>).streamId;
-    if (typeof streamId !== "string" || streamId.trim().length === 0) {
-      return yield* Effect.fail(
-        new LiveStreakConfigError({
-          message: "sink:live:configure streamId must be a non-empty string"
-        })
-      );
-    }
-
-    return streamId.trim();
-  });

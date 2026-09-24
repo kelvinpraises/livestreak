@@ -49,6 +49,10 @@ export interface OptionsLanePanel {
     /** USDC that streamed past resolution on this lane, refundable via withdraw ("overstream" in UI). */
     readonly overstreamClaimableUSDC: number;
     readonly canClaimWin: boolean;
+    /** Resolved but the pot awaits the (permissionless) `collect` — `claimableUSDC` reads 0 in this
+     *  window BY DESIGN. A winner here must still get an armed Cash out (settleVault runs collect
+     *  itself); rendering "claimed/nothing to collect" would be false and deadlock the payout. */
+    readonly collectPending: boolean;
     /** Only when there's an unclaimed loss (earned > 0 AND not yet claimed). False once claimed. */
     readonly canClaimLoss: boolean;
     /** The loss-mint LVST has already been claimed on-chain (row shows the earned amount as settled). */

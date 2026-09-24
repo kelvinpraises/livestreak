@@ -93,6 +93,11 @@ jobs:
           script: |
             set -e
             IMAGE=ghcr.io/${{ github.repository_owner }}/livestreak-app:latest
+            # Free disk BEFORE pulling: old image layers filled the box (deploys died with
+            # "no space left on device"). -a removes all unused images, builder cache too;
+            # volumes and running/stopped containers are untouched.
+            docker image prune -af || true
+            docker builder prune -af || true
             docker pull "$IMAGE"
             docker network create uburu-network 2>/dev/null || true
             docker stop livestreak-app 2>/dev/null || true

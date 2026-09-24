@@ -4,6 +4,7 @@
 // Effect-typed (observe src stays runPromise-free); the promise boundary is the consumer's.
 
 import { Effect, Scope, Exit } from "effect";
+import { runCellIdOf } from "#run/control/board/index.js";
 import type { LiveStreakError } from "@livestreak/core";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 
@@ -35,13 +36,16 @@ export const openObserveConsoleRuntime = (input: {
     const runtime = yield* createObserveRuntime({ sessionInit: input.sessionInit }).pipe(
       Effect.provideService(Scope.Scope, scope)
     );
-    yield* ensureObserveShellRun(runtime, input);
-
+    // Restore must reach the WIRE, and the wire reads the control bus (readStoredRunBoard →
+    // bus.readBoard), which closes over the board the bus was CONSTRUCTED with. So a saved board has
+    // to seed the bus at mount time. The old post-hoc `store.replace({...run, board})` swapped the
+    // store record but left the bus holding the pristine board it was built with, so nothing
+    // downstream ever saw the restore — and commitBoard couldn't rescue it either, its revision guard
+    // no-ops a board that isn't strictly ahead. Seeding at mount also dissolves the ordering problem.
     const saved = input.boardPersistence?.initial?.[input.runId];
-    if (saved !== undefined) {
-      const run = yield* runtime.store.require(input.runId);
-      yield* runtime.store.replace({ ...run, board: restoreBoard(saved) });
-    }
+    const restoredBoard = saved === undefined ? undefined : restoreBoard(saved);
+    yield* ensureObserveShellRun(runtime, input, restoredBoard);
+
     const onChange = input.boardPersistence?.onChange;
     if (onChange !== undefined) {
       yield* runtime.subscribeBoard(input.runId, (board) => onChange(input.runId, board));
@@ -68,7 +72,8 @@ const ACTIVE_RUN_STATUSES: ReadonlySet<BoardRunStatus> = new Set([
 ]);
 
 const restoreBoard = (board: Board): Board => {
-  const runCell = board.cells["system:run"];
+  const initRunCellId = runCellIdOf(board) ?? "system:run";
+  const runCell = board.cells[initRunCellId];
   if (runCell === undefined || !ACTIVE_RUN_STATUSES.has(runCell.status[0] as BoardRunStatus)) {
     return board;
   }
@@ -77,7 +82,7 @@ const restoreBoard = (board: Board): Board => {
     revision: board.revision + 1,
     cells: {
       ...board.cells,
-      "system:run": {
+      [initRunCellId]: {
         ...runCell,
         status: ["created", "reset after gateway restart", Date.now()]
       }
@@ -85,10 +90,14 @@ const restoreBoard = (board: Board): Board => {
   };
 };
 
-/** Idempotent: mount the pristine T0 shell run for `runId` if the store doesn't hold it yet. */
+/** Idempotent: mount the T0 shell run for `runId` if the store doesn't hold it yet. When resuming a
+ *  gateway, pass the restored board so the bus is SEEDED with it (mountObserveT0Bus builds the bus from
+ *  run.board, and surface mounting preserves restored cell state via mergeExistingBoardCell — keeping
+ *  settings/readonly/status while refreshing only the function catalog). Absent it, the board is pristine. */
 export const ensureObserveShellRun = (
   runtime: ObserveRuntime,
-  input: { readonly sessionInit: PackageRuntimeInit; readonly runId: string }
+  input: { readonly sessionInit: PackageRuntimeInit; readonly runId: string },
+  restoredBoard?: Board
 ): Effect.Effect<void, LiveStreakError> =>
   Effect.gen(function* () {
     const existing = yield* runtime.store.get(input.runId);
@@ -96,6 +105,7 @@ export const ensureObserveShellRun = (
       return;
     }
     const run = yield* makeObserveRun(shellRunConfig(input.runId));
-    const mounted = yield* mountObserveT0Bus(run, { sessionInit: input.sessionInit });
+    const seeded = restoredBoard === undefined ? run : { ...run, board: restoredBoard };
+    const mounted = yield* mountObserveT0Bus(seeded, { sessionInit: input.sessionInit });
     yield* runtime.store.put(mounted);
   });

@@ -7,7 +7,6 @@ import type {
   ControlFunctionEntry,
   ControlSurface
 } from "#run/control/bus/types.js";
-import { readLiveConfigurators } from "#run/control/board/visibility.js";
 import {
   directSinkCloseScope,
   directSinkConfigureScope
@@ -43,7 +42,6 @@ const closeEntry = (): ControlFunctionEntry => ({
 });
 
 interface DirectConfigurePayload {
-  readonly streamId: string;
   readonly port: number;
   readonly maxViewers: number;
   readonly reachability: "require" | "lan";
@@ -51,7 +49,7 @@ interface DirectConfigurePayload {
 
 const configureCall = (
   envelope: ControlCallEnvelope,
-  _context: ControlFunctionContext
+  context: ControlFunctionContext
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.gen(function* () {
     const payload = yield* decodePayload(envelope.payload);
@@ -60,10 +58,9 @@ const configureCall = (
     return {
       boardPatch: {
         cells: {
-          "sink:direct": {
+          [context.cellId]: {
             settings: {
               set: {
-                streamId: payload.streamId,
                 port: payload.port,
                 maxViewers: payload.maxViewers,
                 reachability: payload.reachability,
@@ -83,16 +80,12 @@ const closeCall = (
   context: ControlFunctionContext
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.sync(() => {
-    const live = readLiveConfigurators(context.board).filter(
-      (id) => id !== "observe.sink.direct"
-    );
-
     return {
       boardPatch: {
         cells: {
-          "sink:direct": { remove: true },
-          "system:config": {
-            readonly: { set: { liveConfigurators: live } }
+          [context.cellId]: {
+            readonly: { set: { configured: false } },
+            status: ["idle", null, Date.now()]
           }
         }
       }
@@ -109,15 +102,6 @@ const decodePayload = (
       );
     }
     const record = payload as Record<string, unknown>;
-
-    const streamId = record.streamId;
-    if (typeof streamId !== "string" || streamId.trim().length === 0) {
-      return yield* Effect.fail(
-        new LiveStreakConfigError({
-          message: "sink:direct:configure streamId must be a non-empty string"
-        })
-      );
-    }
 
     const port = record.port ?? DEFAULT_DIRECT_PORT;
     if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) {
@@ -146,5 +130,5 @@ const decodePayload = (
       );
     }
 
-    return { streamId: streamId.trim(), port, maxViewers, reachability };
+    return { port, maxViewers, reachability };
   });

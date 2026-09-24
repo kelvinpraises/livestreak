@@ -43,14 +43,14 @@ export const reclaimTerminalRunHandle = (
   });
 
 export interface RunStore {
-  readonly put: (run: ObserveRun) => Effect.Effect<void, LiveStreakConfigError>;
-  readonly replace: (run: ObserveRun) => Effect.Effect<void, LiveStreakConfigError>;
+  readonly put: (run: ObserveRun, key?: string) => Effect.Effect<void, LiveStreakConfigError>;
+  readonly replace: (run: ObserveRun, key?: string) => Effect.Effect<void, LiveStreakConfigError>;
   readonly get: (runId: string) => Effect.Effect<ObserveRun | undefined>;
   readonly require: (runId: string) => Effect.Effect<ObserveRun, LiveStreakConfigError>;
   readonly remove: (runId: string) => Effect.Effect<void>;
   readonly list: () => Effect.Effect<readonly ObserveRun[]>;
 
-  readonly putHandle: (handle: ObserveRunHandle) => Effect.Effect<void, LiveStreakConfigError>;
+  readonly putHandle: (handle: ObserveRunHandle, key?: string) => Effect.Effect<void, LiveStreakConfigError>;
   readonly getHandle: (runId: string) => Effect.Effect<ObserveRunHandle | undefined>;
   readonly requireHandle: (runId: string) => Effect.Effect<ObserveRunHandle, LiveStreakConfigError>;
   readonly removeHandle: (runId: string) => Effect.Effect<void>;
@@ -64,8 +64,8 @@ export const createRunStore = (): RunStore => {
   const handleInsertionOrder: string[] = [];
 
   return {
-    put: (run) => {
-      const runId = run.config.runId;
+    put: (run, key) => {
+      const runId = key ?? run.config.runId;
       if (runs.has(runId)) {
         return Effect.fail(
           new LiveStreakConfigError({
@@ -80,9 +80,9 @@ export const createRunStore = (): RunStore => {
       });
     },
 
-    replace: (run) =>
+    replace: (run, key) =>
       Effect.sync(() => {
-        const runId = run.config.runId;
+        const runId = key ?? run.config.runId;
         if (!runs.has(runId)) {
           runs.set(runId, run);
           runInsertionOrder.push(runId);
@@ -120,8 +120,8 @@ export const createRunStore = (): RunStore => {
 
     list: () => Effect.succeed(runInsertionOrder.map((id) => runs.get(id)!)),
 
-    putHandle: (handle) => {
-      const runId = handle.runId;
+    putHandle: (handle, key) => {
+      const runId = key ?? handle.runId;
       if (handles.has(runId)) {
         return Effect.fail(activeHandleExistsError(runId));
       }

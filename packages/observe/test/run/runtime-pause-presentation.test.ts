@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { runCellIdOf } from "#run/control/board/model.js";
 import { Effect, Exit } from "effect";
 import { LiveStreakRuntimeError } from "@livestreak/core";
 import {
@@ -55,7 +56,7 @@ describe("ObserveRuntime pause presentation", () => {
     if (Exit.isSuccess(exit)) {
       expect(recording.presentationCalls).toEqual(["pause:hold"]);
       expect(recording.videos.length).toBe(exit.value.videosBeforePause);
-      expect(exit.value.board.cells["system:run"]?.status[0]).toBe("paused");
+      expect(exit.value.board.cells[runCellIdOf(exit.value.board) ?? "system:run"]?.status[0]).toBe("paused");
     }
   });
 
@@ -218,7 +219,7 @@ describe("ObserveRuntime pause presentation", () => {
       expect(recording.presentationCalls).toEqual(["pause:hold"]);
       expect(recording.presentationCalls).not.toContain("resume");
       expect(exit.value.result.outcome).toBe("stopped");
-      expect(exit.value.board.cells["system:run"]?.status[0]).toBe("stopped");
+      expect(exit.value.board.cells[runCellIdOf(exit.value.board) ?? "system:run"]?.status[0]).toBe("stopped");
     }
   });
 
@@ -260,8 +261,8 @@ describe("ObserveRuntime pause presentation", () => {
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
       expect(exit.value.result.outcome).toBe("failed");
-      expect(exit.value.board.cells["system:run"]?.status[0]).toBe("failed");
-      expect(exit.value.board.cells["system:run"]?.status[1]).toContain(
+      expect(exit.value.board.cells[runCellIdOf(exit.value.board) ?? "system:run"]?.status[0]).toBe("failed");
+      expect(exit.value.board.cells[runCellIdOf(exit.value.board) ?? "system:run"]?.status[1]).toContain(
         "Sink presentation pause failed: presentation hook failed"
       );
       expect(exit.value.result.snapshot).toBeDefined();

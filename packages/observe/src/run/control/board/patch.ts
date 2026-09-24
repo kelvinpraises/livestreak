@@ -37,6 +37,8 @@ export const applyBoardPatch = (
     let nextCells = { ...board.cells } as Record<BoardCellId, BoardCell>;
     let changed = false;
     let pipelineConfigChanged = false;
+    const demoteObsIds = new Set<string>();
+    let demoteLegacy = false;
 
     for (const [cellId, cellPatch] of Object.entries(cellPatches)) {
       if (cellPatch.remove === true) {
@@ -71,7 +73,15 @@ export const applyBoardPatch = (
       if (patched.changed) {
         nextCells = { ...nextCells, [cellId]: patched.cell };
         changed = true;
-        if (patchTouchesPipelineConfig(cellId, cellPatch)) pipelineConfigChanged = true;
+        if (patchTouchesPipelineConfig(cellId, cellPatch)) {
+          pipelineConfigChanged = true;
+          const kind = familyKind(cellId);
+          if (kind !== undefined) {
+            demoteObsIds.add(cellId.split(":")[1] ?? "");
+          } else {
+            demoteLegacy = true;
+          }
+        }
       }
     }
 
@@ -86,13 +96,25 @@ export const applyBoardPatch = (
 
     // Prepared is a derivation of the board: a pipeline config change makes it stale, so the
     // run cell demotes honestly instead of letting start run the OLD config. Start re-prepares.
-    if (pipelineConfigChanged && readBoardRunPrepared(nextBoard) === true) {
-      nextBoard = setBoardRunPrepared(nextBoard, false);
-      nextBoard = setBoardRunStatus(
-        nextBoard,
-        "created",
-        "configuration changed — Start will re-prepare"
-      );
+    // The demote targets the TOUCHED family's run cell only — a sibling observation's config
+    // change never demotes another family's run.
+    if (pipelineConfigChanged) {
+      const targets: (string | undefined)[] = [
+        ...(demoteLegacy ? [undefined] : []),
+        ...demoteObsIds
+      ];
+      for (const obsId of targets) {
+        if (readBoardRunPrepared(nextBoard, obsId) === true) {
+          nextBoard = setBoardRunPrepared(nextBoard, false, undefined, obsId);
+          nextBoard = setBoardRunStatus(
+            nextBoard,
+            "created",
+            "configuration changed — Start will re-prepare",
+            Date.now(),
+            obsId
+          );
+        }
+      }
     }
 
     // Shape-only on live patches (see settings.ts): a configure write validates the SHAPE of what it wrote,
@@ -113,14 +135,25 @@ export const applyBoardPatch = (
 
 // Cells whose config feeds runConfigFromBoard: capture/sink settings, and the market cell's
 // marketId (the direct lane's streamId). Changes to these invalidate a prepared run.
-const isPipelineCell = (cellId: string): boolean =>
-  cellId.startsWith("capture:") || cellId.startsWith("sink:");
+// Family ids key obs:<id>:<kind>; legacy stage cells keep the old prefixes.
+const familyKind = (cellId: string): string | undefined => {
+  const parts = cellId.split(":");
+  return parts[0] === "obs" && parts.length === 3 ? parts[2] : undefined;
+};
+
+const isPipelineCell = (cellId: string): boolean => {
+  const kind = familyKind(cellId);
+  if (kind !== undefined) {
+    return kind === "capture" || kind === "publish";
+  }
+  return cellId.startsWith("capture:") || cellId.startsWith("sink:");
+};
 
 const patchTouchesPipelineConfig = (cellId: string, patch: BoardCellPatch): boolean => {
   if (isPipelineCell(cellId)) {
     return patch.settings !== undefined;
   }
-  if (cellId === "market") {
+  if (cellId === "market" || familyKind(cellId) === "market") {
     return patch.readonly?.set !== undefined && Object.hasOwn(patch.readonly.set, "marketId");
   }
   return false;

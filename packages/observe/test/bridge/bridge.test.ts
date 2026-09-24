@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { runCellIdOf } from "#run/control/board/model.js";
 import { Effect, Exit } from "effect";
 import {
   bridgeArtifactReadScope,
@@ -93,7 +94,7 @@ describe("ObserveBridge", () => {
 
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
-      expect(exit.value.cells["system:run"]?.status[0]).toBe("prepared");
+      expect(exit.value.cells[runCellIdOf(exit.value) ?? "system:run"]?.status[0]).toBe("prepared");
     }
   });
 
@@ -533,7 +534,7 @@ describe("ObserveBridge", () => {
 
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
-      expect(exit.value.board.cells["system:run"]?.status[0]).toBe("prepared");
+      expect(exit.value.board.cells[runCellIdOf(exit.value.board) ?? "system:run"]?.status[0]).toBe("prepared");
       expect(exit.value.catalog?.cells["system:pause"]).toBeDefined();
     }
   });

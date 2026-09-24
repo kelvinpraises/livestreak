@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { runCellIdOf } from "#run/control/board/model.js";
 import {
   projectBoardControls,
   projectControlPanelControls
@@ -24,11 +25,17 @@ describe("projectBoardControls", () => {
     expect(controls.revision).toBe(board.revision);
   });
 
-  it("orders cells stably: system, capture, sink, then unknown", () => {
+  it("orders cells stably: system, families in pipeline order, then legacy/unknown", () => {
     const shuffledBoard = {
       ...board,
       cells: {
         ...board.cells,
+        "obs:aaa:publish": {
+          label: "Publish",
+          catalog: "sink:live",
+          status: ["idle", null, Date.now()] as const,
+          functions: ["configure"]
+        },
         "sink:file-export": board.cells["sink:file-export"],
         "process:football": {
           label: "Football",
@@ -40,11 +47,17 @@ describe("projectBoardControls", () => {
         "capture:browser": board.cells["capture:browser"],
         "system:memory": board.cells["system:memory"],
         "system:pause": board.cells["system:pause"],
-        "system:run": board.cells["system:run"],
+        "system:run": board.cells[runCellIdOf(board) ?? "system:run"],
         "future:widget": {
           label: "Widget",
           status: ["idle", null, Date.now()] as const,
           functions: []
+        },
+        "obs:aaa:capture": {
+          label: "Capture",
+          catalog: "capture:file",
+          status: ["idle", null, Date.now()] as const,
+          functions: ["configure"]
         }
       }
     };
@@ -52,17 +65,20 @@ describe("projectBoardControls", () => {
     const ids = projectBoardControls(shuffledBoard).cells.map((cell) => cell.id);
 
     expect(ids).toEqual([
+      "system:config",
       "system:run",
       "system:pause",
       "system:memory",
       "system:tick",
+      "obs:aaa:capture",
+      "obs:aaa:publish",
       "capture:browser",
+      "future:widget",
       "process:football",
-      "sink:file-export",
-      "future:widget"
+      "sink:file-export"
     ]);
     expect(projectBoardControls(shuffledBoard).cells.map((cell) => cell.order)).toEqual([
-      0, 1, 2, 3, 4, 5, 6, 7
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
     ]);
   });
 
@@ -73,7 +89,7 @@ describe("projectBoardControls", () => {
       cells: {
         ...board.cells,
         "system:run": {
-          ...board.cells["system:run"],
+          ...board.cells[runCellIdOf(board) ?? "system:run"],
           catalog: "system:run",
           status: ["running", "All good", updatedAtMs] as const
         }
@@ -408,7 +424,7 @@ describe("panel disabled reasons", () => {
     cells: {
       ...board.cells,
       "system:run": {
-        ...board.cells["system:run"],
+        ...board.cells[runCellIdOf(board) ?? "system:run"],
          
         status: [runStatus, null, Date.now()] as const
       }

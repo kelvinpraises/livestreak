@@ -1,4 +1,4 @@
-import { Effect, Exit, Fiber, Option, type Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Option, type Scope } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import { getBuiltInCaptureDriver, getBuiltInSinkDriver } from "#builtins.js";
@@ -71,11 +71,11 @@ export const prepareObserveRun = (
     let bus = run.bus;
     if (bus !== undefined) {
       yield* bus.commitBoard(
-        setBoardRunStatus(yield* bus.readBoard(), "preparing", "validating observe run")
+        setBoardRunStatus(yield* bus.readBoard(), "preparing", "validating observe run", Date.now(), run.config.obsId)
       );
     } else {
       let board = bootstrapLegacyObserveBoard(run.board, run.config);
-      board = setBoardRunStatus(board, "preparing", "validating observe run");
+      board = setBoardRunStatus(board, "preparing", "validating observe run", Date.now(), run.config.obsId);
       bus = yield* createControlBus({
         runId: run.config.runId,
         board,
@@ -109,8 +109,8 @@ export const prepareObserveRun = (
     let board = yield* bus.readBoard();
     yield* validateBoardSettings(board);
 
-    board = setBoardRunStatus(board, "prepared", "observe run is ready to start");
-    board = setBoardRunPrepared(board, true);
+    board = setBoardRunStatus(board, "prepared", "observe run is ready to start", Date.now(), run.config.obsId);
+    board = setBoardRunPrepared(board, true, undefined, run.config.obsId);
     yield* bus.commitBoard(board);
 
     return {
@@ -141,7 +141,7 @@ export const startObserveRun = (
       const bus = preparedBus;
 
       yield* bus.commitBoard(
-        setBoardRunStatus(yield* bus.readBoard(), "starting", "starting observe run")
+        setBoardRunStatus(yield* bus.readBoard(), "starting", "starting observe run", Date.now(), run.config.obsId)
       );
 
       const captureDriver = yield* resolveCaptureDriver(run.config.capture.driverId, options);
@@ -170,6 +170,7 @@ export const startObserveRun = (
 
       const result = yield* runScopedWorkerUntilStoppedWithBoard({
         runId: run.config.runId,
+        ...(run.config.obsId === undefined ? {} : { obsId: run.config.obsId }),
         manifest: run.manifest,
         sinks,
         bus,
@@ -178,7 +179,7 @@ export const startObserveRun = (
         prepareCapture: captureDriver.create(captureConfig)
       });
 
-      const board = applyWorkerSnapshotToBoard(yield* bus.readBoard(), result.snapshot);
+      const board = applyWorkerSnapshotToBoard(yield* bus.readBoard(), result.snapshot, run.config.obsId);
       yield* bus.commitBoard(board);
 
       return {
@@ -214,12 +215,38 @@ export const startObserveRunAsync = (
     // forking — sequenced with the caller — so a restarted run does not drain on its first worker turn,
     // while a stop issued after start returns is never eaten by the run fiber.
     const board = yield* run.bus.readBoard();
-    const cleared = clearBoardRunStopRequest(board);
+    const cleared = clearBoardRunStopRequest(board, run.config.obsId);
     if (cleared !== board) {
       yield* run.bus.commitBoard(cleared);
     }
 
     const fiber = yield* Effect.forkScoped(startObserveRun(run, options ?? {}));
+
+    // A forked run that DIES must say so on the board — otherwise the family's run cell sits at
+    // "starting" forever with the error parked inside the unobserved fiber. Interruption (a stop)
+    // is not a failure and stays silent; the stop path writes its own status.
+    const bus = run.bus;
+    yield* Effect.forkScoped(
+      Fiber.await(fiber).pipe(
+        Effect.flatMap((exit) => {
+          if (!Exit.isFailure(exit) || Cause.isInterruptedOnly(exit.cause)) {
+            return Effect.void;
+          }
+          const message = Cause.pretty(exit.cause).split("\n")[0] ?? "run failed";
+          return bus
+            .readBoard()
+            .pipe(
+              Effect.flatMap((board) =>
+                bus.commitBoard(
+                  setBoardRunStatus(board, "failed", message, Date.now(), run.config.obsId)
+                )
+              ),
+              Effect.catchAll(() => Effect.void)
+            );
+        })
+      )
+    );
+
     let interrupted = false;
 
     const handle: ObserveRunHandle = {
@@ -252,15 +279,18 @@ export interface StopRunOptions {
 export const stopObserveRun = (
   store: RunStore,
   runId: string,
-  options?: StopRunOptions
+  options?: StopRunOptions,
+  obsId?: string
 ): Effect.Effect<ObserveRunResult, LiveStreakError> =>
   Effect.gen(function* () {
-    const handle = yield* store.requireHandle(runId);
+    const handleKey = obsId === undefined ? runId : `${runId}#${obsId}`;
+    const handle = yield* store.requireHandle(handleKey);
     const timeoutMs = yield* validateStopTimeoutMs(options?.timeoutMs);
 
     yield* callStoredRunFunction(store, {
-      callId: `stop-${runId}`,
+      callId: `stop-${handleKey}`,
       runId,
+      ...(obsId === undefined ? {} : { cellId: `obs:${obsId}:run` }),
       scope: systemRunStopScope,
       ...(options?.reason === undefined ? {} : { payload: { reason: options.reason } })
     });
@@ -385,7 +415,9 @@ const buildInterruptedStopResult = (
   Effect.gen(function* () {
     const message = `Stop timed out after ${timeoutMs}ms; worker interrupted`;
     const currentBoard = yield* handle.bus.readBoard();
-    yield* handle.bus.commitBoard(setBoardRunStatus(currentBoard, "failed", message));
+    yield* handle.bus.commitBoard(
+      setBoardRunStatus(currentBoard, "failed", message, Date.now(), handle.run.config.obsId)
+    );
     const board = yield* handle.bus.readBoard();
 
     return {

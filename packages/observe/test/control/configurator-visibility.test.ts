@@ -2,23 +2,39 @@ import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
 import { buildControlCatalog } from "#run/control/index.js";
 import { createControlBus } from "#run/control/bus/index.js";
+import type { ControlBus } from "#run/control/bus/index.js";
 import { createInitialBoard } from "#run/control/board/index.js";
 import { createObserveControlSurfaces } from "#run/control/surfaces.js";
 import { projectBoardControls, projectObserveDescriptors } from "#bridge/panel/index.js";
 import { isValidFlowPermutation } from "#flows/index.js";
-import { systemConfigConfigureScope } from "#run/control/system/config.js";
+import {
+  observationCellId,
+  readObservationIndex,
+  systemConfigConfigureScope
+} from "#run/control/system/config.js";
 import { fileCaptureConfigureScope } from "#pipeline/capture/file/commands.js";
-import { fileSinkConfigureScope } from "#pipeline/publish/sinks/file/commands.js";
+
+const addObservation = (bus: ControlBus, runId: string) =>
+  Effect.gen(function* () {
+    yield* bus.callFunction({
+      callId: `cfg-${runId}`,
+      runId,
+      scope: systemConfigConfigureScope,
+      payload: { title: "Test stream", chain: "eip155:31337" }
+    });
+    const board = yield* bus.readBoard();
+    const obsId = Object.keys(readObservationIndex(board))[0]!;
+    return { board, obsId };
+  });
 
 describe("board-first configurator visibility", () => {
-  it("T0 board exposes only system:config configure (close hidden until configured)", () => {
+  it("T0 board exposes only session configure (close and remove hidden while empty)", () => {
     const board = createInitialBoard({ runId: "run_t0", nowMs: 1 });
     const controls = projectBoardControls(board);
 
     expect(Object.keys(board.cells)).toEqual(["system:config"]);
     expect(controls.cells.map((cell) => cell.id)).toEqual(["system:config"]);
-    // A pristine (idle) config cell was never configured, so `close` — which tears down mounted
-    // configurators — is nonsensical and stays hidden. Only `configure` is offered at T0.
+    // A pristine session has nothing to close and nothing to remove.
     expect(controls.cells[0]?.functions.map((fn) => fn.name)).toEqual(["configure"]);
   });
 
@@ -35,7 +51,7 @@ describe("board-first configurator visibility", () => {
     );
   });
 
-  it("configure mounts pipeline cells and hides root configurator from live set", async () => {
+  it("Add observation mounts the family; the session stays visible", async () => {
     const exit = await Effect.runPromiseExit(
       Effect.gen(function* () {
         const bus = yield* createControlBus({
@@ -44,58 +60,42 @@ describe("board-first configurator visibility", () => {
           catalog: buildControlCatalog(),
           surfaces: createObserveControlSurfaces()
         });
-
-        yield* bus.callFunction({
-          callId: "cfg-1",
-          runId: "run_configure",
-          scope: systemConfigConfigureScope,
-          payload: {
-            chain: "eip155:31337",
-            capture: "file",
-            process: null,
-            publish: "file-export"
-          }
-        });
-
-        return yield* bus.readBoard();
+        return yield* addObservation(bus, "run_configure");
       })
     );
 
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
-      const board = exit.value;
-      expect(board.cells["capture:file"]).toBeDefined();
-      expect(board.cells["sink:file-export"]).toBeDefined();
-      expect(board.cells["system:run"]).toBeDefined();
-      expect(board.cells.market).toBeDefined();
-      expect(board.cells["system:config"]?.readonly?.liveConfigurators).not.toContain(
-        "observe.system.config"
-      );
+      const { board, obsId } = exit.value;
+      expect(board.cells[observationCellId(obsId, "capture")]).toBeDefined();
+      expect(board.cells[observationCellId(obsId, "publish")]).toBeDefined();
+      expect(board.cells[observationCellId(obsId, "run")]).toBeDefined();
+      expect(board.cells[observationCellId(obsId, "market")]).toBeDefined();
+      expect(board.cells[observationCellId(obsId, "market")]?.readonly?.title).toBe("Test stream");
 
       const controls = projectBoardControls(board);
-      expect(controls.cells.some((cell) => cell.id === "system:config")).toBe(false);
+      // The session is permanent — it can add more observations at any time.
+      const session = controls.cells.find((cell) => cell.id === "system:config");
+      expect(session?.functions.map((fn) => fn.name)).toEqual(["configure", "close", "remove", "publishKind"]);
 
-      // Freshly mounted pipeline cells (readonly.configured === false) expose only `configure`; their
-      // `close` (which removes the cell) stays hidden until the cell carries real config.
-      const captureCell = controls.cells.find((cell) => cell.id === "capture:file");
+      // Fresh family pipeline cells expose only configure; close waits for real config.
+      const captureCell = controls.cells.find(
+        (cell) => cell.id === observationCellId(obsId, "capture")
+      );
       expect(captureCell?.functions.map((fn) => fn.name)).toEqual(["configure"]);
-      const sinkCell = controls.cells.find((cell) => cell.id === "sink:file-export");
-      expect(sinkCell?.functions.map((fn) => fn.name)).toEqual(["configure"]);
 
       const descriptors = projectObserveDescriptors(controls, board);
-      const rootConfigure = descriptors.find((d) => d.id === "observe.system.config.configure");
-      expect(rootConfigure).toBeUndefined();
-      const captureConfigure = descriptors.find((d) => d.id === "observe.capture.file.configure");
+      const captureConfigure = descriptors.find(
+        (d) => d.id === `observe.obs.${obsId}.capture.configure`
+      );
       expect(captureConfigure?.visible).toBe(true);
       expect(captureConfigure?.package).toBe("observe");
-      // `close` is filtered out of the ControlsView before projection, so no close descriptor exists on
-      // an unconfigured pipeline cell (nothing to render).
-      const captureClose = descriptors.find((d) => d.id === "observe.capture.file.close");
+      const captureClose = descriptors.find((d) => d.id === `observe.obs.${obsId}.capture.close`);
       expect(captureClose).toBeUndefined();
     }
   });
 
-  it("a pipeline cell's own configure reveals its close", async () => {
+  it("a family capture cell's own configure reveals its close", async () => {
     const exit = await Effect.runPromiseExit(
       Effect.gen(function* () {
         const bus = yield* createControlBus({
@@ -104,49 +104,40 @@ describe("board-first configurator visibility", () => {
           catalog: buildControlCatalog(),
           surfaces: createObserveControlSurfaces()
         });
-
-        yield* bus.callFunction({
-          callId: "cfg-root",
-          runId: "run_close_reveal",
-          scope: systemConfigConfigureScope,
-          payload: { chain: "eip155:31337", capture: "file", process: null, publish: "file-export" }
-        });
-
-        // Configure the sink first (the bus requires a configured sink policy), then the capture cell.
-        yield* bus.callFunction({
-          callId: "cfg-sink",
-          runId: "run_close_reveal",
-          scope: fileSinkConfigureScope,
-          payload: { path: "/tmp/livestreak-test/out.mp4" }
-        });
+        const { obsId } = yield* addObservation(bus, "run_close_reveal");
 
         yield* bus.callFunction({
           callId: "cfg-capture",
           runId: "run_close_reveal",
+          cellId: observationCellId(obsId, "capture"),
           scope: fileCaptureConfigureScope,
           payload: { path: "/tmp/livestreak-test/capture.mp4" }
         });
 
-        return yield* bus.readBoard();
+        return { board: yield* bus.readBoard(), obsId };
       })
     );
 
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
-      const board = exit.value;
-      expect(board.cells["capture:file"]?.readonly?.configured).toBe(true);
-      expect(board.cells["sink:file-export"]?.readonly?.configured).toBe(true);
+      const { board, obsId } = exit.value;
+      const captureId = observationCellId(obsId, "capture");
+      expect(board.cells[captureId]?.readonly?.configured).toBe(true);
+      expect(board.cells[captureId]?.settings?.path).toBe("/tmp/livestreak-test/capture.mp4");
 
       const controls = projectBoardControls(board);
-      const captureCell = controls.cells.find((cell) => cell.id === "capture:file");
-      // Now configured, both configure and close are offered — the operator can tear the cell back down.
+      const captureCell = controls.cells.find((cell) => cell.id === captureId);
       expect(captureCell?.functions.map((fn) => fn.name)).toEqual(["configure", "close"]);
-      const sinkCell = controls.cells.find((cell) => cell.id === "sink:file-export");
-      expect(sinkCell?.functions.map((fn) => fn.name)).toEqual(["configure", "close"]);
+      // The publish cell is still unconfigured — its close stays hidden.
+      const publishCell = controls.cells.find(
+        (cell) => cell.id === observationCellId(obsId, "publish")
+      );
+      expect(publishCell?.functions.map((fn) => fn.name)).toEqual(["configure"]);
 
       const descriptors = projectObserveDescriptors(controls, board);
-      expect(descriptors.find((d) => d.id === "observe.capture.file.close")?.visible).toBe(true);
-      expect(descriptors.find((d) => d.id === "observe.sink.file-export.close")?.visible).toBe(true);
+      expect(
+        descriptors.find((d) => d.id === `observe.obs.${obsId}.capture.close`)?.visible
+      ).toBe(true);
     }
   });
 });

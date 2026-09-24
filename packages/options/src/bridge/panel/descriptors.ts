@@ -125,10 +125,14 @@ const toActionDescriptor = (
 
 // --- id helpers ---
 
+// Ids must be unique per ENTITY, not just per action name: two vaults both emit `fund.yes`, and
+// the gateway's mergeConsoleDescriptors dedupes by id — without the entity id in here, every
+// vault after the first silently dropped off the wire (single-vault dev flows masked it).
 const actionIdFor = (parentId: string, view: OptionsFunctionView): string => {
-  const suffix =
-    view.target?.side === undefined ? "" : `.${view.target.side}`;
-  return `${parentId}.action.${view.name}${suffix}`;
+  const t = view.target;
+  const entity = t?.vaultId ?? t?.tokenId ?? t?.marketId;
+  const parts = [entity, t?.side].filter((p): p is string => p !== undefined);
+  return [parentId, "action", view.name, ...parts].join(".");
 };
 
 // --- schema builders (canonical JsonSchema) ---

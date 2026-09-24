@@ -37,15 +37,15 @@ jobs:
         run: npm install --no-audit --no-fund
 
       # Build the dist chain in dependency order so every workspace can resolve its
-      # @livestreak/* deps (dist/ is gitignored, no prepare scripts). contracts uses
-      # build:ts (ts bindings only) to keep this lane forge-free.
+      # @livestreak/* deps (dist/ is gitignored, no prepare scripts). The topological
+      # order lives in ONE place — root `build:packages:ts` (forge-free: contracts via
+      # build:ts) — shared with the Dockerfiles' `build:packages:image`. Order matters
+      # on a fresh clone: schema → core → contracts → wallet → the rest. Do not inline
+      # a chain here again; that's how it drifted wrong (core before schema, wallet
+      # before contracts) and CI stayed red while dev's source-resolution hid it.
       - name: Build workspace dist chain
         run: |
-          npm run build -w @livestreak/core -w @livestreak/schema -w @livestreak/wallet
-          npm run build:ts -w @livestreak/contracts
-          npm run build \
-            -w @livestreak/host -w @livestreak/options \
-            -w @livestreak/observe -w @livestreak/bookmaker -w @livestreak/steward
+          npm run build:packages:ts
           npm run build -w @livestreak/host-server
 
       # Typecheck everything (`check` = tsc --noEmit across the workspaces).

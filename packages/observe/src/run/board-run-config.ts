@@ -3,6 +3,7 @@ import { LiveStreakConfigError, type LiveStreakError } from "@livestreak/core";
 import { createHostFmp4IngestTransport } from "#pipeline/publish/sinks/live/transport.js";
 import type { Board } from "./control/board/index.js";
 import type { ObserveRunConfig } from "./run.js";
+import { observationCellId, readObservationIndex } from "./control/system/config.js";
 
 // Read a board cell's settings/readonly maps with safe defaults — the only place that knows the board's
 // cell-id / field-path schema for deriving a run config.
@@ -22,6 +23,8 @@ export interface RunConfigFromBoardInput {
   readonly board: Board;
   /** Host relay base URL for the local WebRTC sink's signaling channel (the gateway's deployment value). */
   readonly hostBaseUrl: string;
+  /** Which observation to derive. Absent = the session's only one; ambiguity fails closed. */
+  readonly obsId?: string;
 }
 
 /**
@@ -40,16 +43,30 @@ export const runConfigFromBoard = (
   Effect.gen(function* () {
     const { runId, board, hostBaseUrl } = input;
 
-    const capturePath = cellRecord(board, "capture:file").settings.path;
-    if (typeof capturePath !== "string" || capturePath.trim().length === 0) {
+    const index = readObservationIndex(board);
+    const obsId =
+      input.obsId ?? (Object.keys(index).length === 1 ? Object.keys(index)[0] : undefined);
+    if (obsId === undefined || index[obsId] === undefined) {
       return yield* Effect.fail(
         new LiveStreakConfigError({
-          message: "Set the capture media file (capture:file → configure) before going live."
+          message:
+            Object.keys(index).length === 0
+              ? "Add an observation before going live."
+              : "Several observations exist — say which one to prepare (obsId)."
         })
       );
     }
 
-    const publish = cellRecord(board, "system:config").readonly.publish;
+    const capturePath = cellRecord(board, observationCellId(obsId, "capture")).settings.path;
+    if (typeof capturePath !== "string" || capturePath.trim().length === 0) {
+      return yield* Effect.fail(
+        new LiveStreakConfigError({
+          message: "Set the capture media file (Configure capture) before going live."
+        })
+      );
+    }
+
+    const publish = cellRecord(board, observationCellId(obsId, "publish")).readonly.kind;
     if (publish !== "live" && publish !== "direct") {
       return yield* Effect.fail(
         new LiveStreakConfigError({
@@ -59,7 +76,7 @@ export const runConfigFromBoard = (
       );
     }
 
-    const marketId = cellRecord(board, "market").readonly.marketId;
+    const marketId = cellRecord(board, observationCellId(obsId, "market")).readonly.marketId;
     if (typeof marketId !== "string" || marketId.trim().length === 0) {
       return yield* Effect.fail(
         new LiveStreakConfigError({ message: "Register a market before going live." })
@@ -76,9 +93,10 @@ export const runConfigFromBoard = (
     if (publish === "direct") {
       // Broadcaster-served fan-out: the sink opens its own viewer door (UPnP + host echo eligibility);
       // the host does signaling only. Operator knobs come from the sink:direct cell.
-      const settings = cellRecord(board, "sink:direct").settings;
+      const settings = cellRecord(board, observationCellId(obsId, "publish")).settings;
       return {
         runId,
+        obsId,
         capture,
         sink: {
           driverId: "direct",
@@ -97,6 +115,7 @@ export const runConfigFromBoard = (
 
     return {
       runId,
+      obsId,
       capture,
       sink: {
         driverId: "live",

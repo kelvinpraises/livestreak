@@ -1,4 +1,5 @@
 import type { WorkerSnapshot } from "#run/worker/snapshot.js";
+import { runCellIdOf } from "./model.js";
 import {
   incrementBoardRevision,
   type Board,
@@ -7,9 +8,11 @@ import {
 
 export const applyWorkerSnapshotToBoard = (
   board: Board,
-  snapshot: WorkerSnapshot
+  snapshot: WorkerSnapshot,
+  obsId?: string
 ): Board => {
-  const runCell = board.cells["system:run"];
+  const workerRunCellId = runCellIdOf(board, undefined, obsId) ?? "system:run";
+  const runCell = board.cells[workerRunCellId];
   if (runCell === undefined) {
     return board;
   }
@@ -31,7 +34,7 @@ export const applyWorkerSnapshotToBoard = (
       ...nextBoard,
       cells: {
         ...nextBoard.cells,
-        "system:run": {
+        [workerRunCellId]: {
           ...runCell,
           status: [nextStatus, nextReason, Date.now()]
         }
@@ -127,7 +130,7 @@ const statusReasonFromWorkerSnapshot = (
   board: Board
 ): string | null => {
   if (nextStatus === "draining") {
-    const runSettings = board.cells["system:run"]?.settings;
+    const runSettings = board.cells[runCellIdOf(board) ?? "system:run"]?.settings;
     if (runSettings?.stopRequested === true) {
       if (typeof runSettings.stopReason === "string") {
         return runSettings.stopReason;
@@ -139,7 +142,7 @@ const statusReasonFromWorkerSnapshot = (
   }
 
   if (nextStatus === "stopping") {
-    const runSettings = board.cells["system:run"]?.settings;
+    const runSettings = board.cells[runCellIdOf(board) ?? "system:run"]?.settings;
     if (typeof runSettings?.stopReason === "string") {
       return runSettings.stopReason;
     }

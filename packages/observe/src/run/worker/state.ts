@@ -87,6 +87,8 @@ export interface SinkStageState {
 
 export interface WorkerState {
   readonly runId: string;
+  /** The observation this worker drives. Absent on legacy single-run boards. */
+  readonly obsId?: string;
   lastAppliedControlRevision: number;
   lifecycle: WorkerLifecycle;
   epoch: number;
@@ -140,6 +142,7 @@ export const createEmptyWorkerState = (input: CreateEmptyWorkerStateInput): Work
 
   return {
     runId: input.runId,
+    ...(input.obsId === undefined ? {} : { obsId: input.obsId }),
     lastAppliedControlRevision: 0,
     lifecycle: "idle",
     epoch: 0,
@@ -313,6 +316,7 @@ export const refreshCaptureStageHealth = (
 
 export interface CreateEmptyWorkerStateInput {
   readonly runId: string;
+  readonly obsId?: string;
   readonly manifest: PublishManifest;
   readonly capture?: CaptureStageState;
   readonly sinks: Record<string, SinkStageState>;

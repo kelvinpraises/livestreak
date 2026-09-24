@@ -12,6 +12,18 @@ import {
   makeRecordingActionPlanSink
 } from "./fakes/runtime-sources.js";
 
+import type { StewardActionResult } from "../src/bridge/types.js";
+import type { StewardActionPlan } from "../src/model/action-plan.js";
+
+// callAction returns a union (plan | ack); decision actions must come back as PLANS —
+// asserting that is part of the test's claim, and it narrows the type for the expects.
+const asPlan = (result: StewardActionResult): StewardActionPlan => {
+  if (!("decision" in result)) {
+    throw new Error(`expected an action plan, got an ack: ${JSON.stringify(result)}`);
+  }
+  return result;
+};
+
 const stewardSubject = { kind: "steward" as const, id: "steward-bad" };
 
 const baseConfig = {
@@ -55,13 +67,12 @@ describe("steward bridge authorization is GRANULAR (S2)", () => {
 
   it("ACCEPTS a caller holding the granular steward:steward:vetoSteward scope", async () => {
     const bridge = makeBridge();
-    const plan = await bridge.callAction(
-      callerWith([bridgeActionScope, "steward:steward:vetoSteward"]),
-      {
+    const plan = asPlan(
+      await bridge.callAction(callerWith([bridgeActionScope, "steward:steward:vetoSteward"]), {
         scope: bridgeActionScope,
         action: "vetoSteward",
         args: { subjectId: "steward-bad", subjectKind: "steward", reason: "misconduct" }
-      }
+      })
     );
     expect(plan.decision.action).toBe("vetoSteward");
     expect(plan.contractCalls[0]?.functionName).toBe("vetoSteward");
@@ -69,11 +80,13 @@ describe("steward bridge authorization is GRANULAR (S2)", () => {
 
   it("a steward:steward:* wildcard also authorizes vetoSteward", async () => {
     const bridge = makeBridge();
-    const plan = await bridge.callAction(callerWith([bridgeActionScope, "steward:steward:*"]), {
-      scope: bridgeActionScope,
-      action: "vetoSteward",
-      args: { subjectId: "steward-bad", subjectKind: "steward", reason: "misconduct" }
-    });
+    const plan = asPlan(
+      await bridge.callAction(callerWith([bridgeActionScope, "steward:steward:*"]), {
+        scope: bridgeActionScope,
+        action: "vetoSteward",
+        args: { subjectId: "steward-bad", subjectKind: "steward", reason: "misconduct" }
+      })
+    );
     expect(plan.decision.action).toBe("vetoSteward");
   });
 

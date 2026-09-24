@@ -33,6 +33,7 @@ export interface RunWorkerUntilStoppedInput {
 
 export interface RunScopedWorkerUntilStoppedInput {
   readonly runId: string;
+  readonly obsId?: string;
   readonly manifest: PublishManifest;
   readonly sinks: Record<string, SinkStageState>;
   readonly bus: ControlBus;
@@ -69,7 +70,7 @@ export const runWorkerUntilStoppedWithBoard = (
 
     const board = yield* input.bus.readBoard();
     const snapshot = projectWorkerSnapshot(loop.state);
-    yield* input.bus.commitBoard(applyWorkerSnapshotToBoard(board, snapshot));
+    yield* input.bus.commitBoard(applyWorkerSnapshotToBoard(board, snapshot, input.state.obsId));
 
     return loop.result;
   });
@@ -88,6 +89,7 @@ export const runScopedWorkerUntilStoppedWithBoard = (
     const capture = yield* createCaptureStageState(source);
     const state = createEmptyWorkerState({
       runId: input.runId,
+      ...(input.obsId === undefined ? {} : { obsId: input.obsId }),
       manifest: input.manifest,
       capture,
       sinks: input.sinks
@@ -137,7 +139,7 @@ const runWorkerLoop = (
 ): Effect.Effect<WorkerLoopOutcome, LiveStreakError> => {
   return Effect.gen(function* () {
     const initialBoard = yield* input.bus.readBoard();
-    yield* validateWorkerPrepare(input.state, projectWorkerControlView(initialBoard));
+    yield* validateWorkerPrepare(input.state, projectWorkerControlView(initialBoard, input.state.obsId));
 
     const maxIdleTurns = resolveMaxIdleTurns(input.maxTurns);
     let turns = 0;
@@ -151,7 +153,7 @@ const runWorkerLoop = (
 
     while (true) {
       const board = yield* input.bus.readBoard();
-      const view = projectWorkerControlView(board);
+      const view = projectWorkerControlView(board, input.state.obsId);
       const turn = yield* supervisorTurn(state, view);
       turns += 1;
 
@@ -165,7 +167,7 @@ const runWorkerLoop = (
       if (input.afterTurn === true) {
         const latestBoard = yield* input.bus.readBoard();
         const snapshot = projectWorkerSnapshot(state);
-        yield* input.bus.commitBoard(applyWorkerSnapshotToBoard(latestBoard, snapshot));
+        yield* input.bus.commitBoard(applyWorkerSnapshotToBoard(latestBoard, snapshot, input.state.obsId));
       }
 
       if (turn.shouldContinue === false) {

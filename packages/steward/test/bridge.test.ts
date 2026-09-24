@@ -8,6 +8,17 @@ import {
   projectStewardControls
 } from "../src/bridge/index.js";
 import { createStewardRuntime } from "../src/runtime/runtime.js";
+import type { StewardActionResult } from "../src/bridge/types.js";
+import type { StewardActionPlan } from "../src/model/action-plan.js";
+
+// callAction returns a union (plan | ack); decision actions must come back as PLANS —
+// asserting that is part of the test's claim, and it narrows the type for the expects.
+const asPlan = (result: StewardActionResult): StewardActionPlan => {
+  if (!("decision" in result)) {
+    throw new Error(`expected an action plan, got an ack: ${JSON.stringify(result)}`);
+  }
+  return result;
+};
 import {
   emptyMemoryPorts,
   makeFakeContractFactSource,
@@ -97,11 +108,13 @@ describe("steward bridge", () => {
     const bridge = createStewardBridge({ runtime });
     const submitSpy = vi.spyOn(actionPlanSink, "submit");
 
-    const plan = await bridge.callAction(trustedCaller, {
-      scope: bridgeActionScope,
-      action: "annotate",
-      args: { subjectId: "vault-1", reason: "Manual annotation" }
-    });
+    const plan = asPlan(
+      await bridge.callAction(trustedCaller, {
+        scope: bridgeActionScope,
+        action: "annotate",
+        args: { subjectId: "vault-1", reason: "Manual annotation" }
+      })
+    );
 
     expect(plan.hostActions[0]?.kind).toBe("annotate");
     expect(submitSpy).toHaveBeenCalledWith([plan]);

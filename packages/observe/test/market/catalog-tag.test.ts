@@ -15,7 +15,11 @@ import {
 // the register used — wallet.walletInit.chain — NOT the top-level sessionInit.chain, which is a separate
 // CAIP-2 field that can diverge (a solana market was once tagged "evm" and never synced into the catalog).
 // Each case sets sessionInit.chain to a DELIBERATELY WRONG value to prove the tag ignores it.
-const CASES = [
+const CASES: ReadonlyArray<{
+  chain: "evm" | "sui" | "solana";
+  wrongTopLevel: string;
+  contracts: Record<string, string>;
+}> = [
   {
     chain: "evm" as const,
     wrongTopLevel: "solana:localnet",

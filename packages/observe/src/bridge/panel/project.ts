@@ -1,8 +1,8 @@
 import type { Board } from "#run/control/board/index.js";
+import { runCellIdOf } from "#run/control/board/index.js";
 import type { CatalogFunction, ControlCatalog } from "#run/control/index.js";
 import type { ControlPanel } from "#run/control/bus/index.js";
 import type { ControlCellView, ControlFunctionView, ControlsView } from "./types.js";
-import { readLiveConfigurators } from "#run/control/board/visibility.js";
 
 export type { ControlCellView, ControlFunctionView, ControlsView } from "./types.js";
 
@@ -39,48 +39,19 @@ const projectReferences = (
   return projected;
 };
 
+// A cell exists on the board only when it is real (families are created whole, removed whole),
+// so presence IS visibility. The configurator-ladder that used to gate this is gone.
 const projectControls = (board: Board, catalog?: ControlCatalog): ControlsView => {
   const runState = readRunState(board);
-  const liveConfigurators = readLiveConfigurators(board);
-  const sortedCellIds = sortCellIds(Object.keys(board.cells)).filter((cellId) =>
-    isCellVisibleOnBoard(cellId, liveConfigurators)
-  );
+  const sortedCellIds = sortCellIds(Object.keys(board.cells));
 
   return {
     runId: readBoardRunId(board),
     revision: board.revision,
     cells: sortedCellIds.map((id, order) =>
-      projectCellView(id, board.cells[id], order, catalog, runState, liveConfigurators)
+      projectCellView(id, board.cells[id], order, catalog, runState)
     )
   };
-};
-
-const isCellVisibleOnBoard = (cellId: string, liveConfigurators: readonly string[]): boolean => {
-  if (cellId === "system:config") {
-    return liveConfigurators.includes("observe.system.config");
-  }
-
-  if (cellId === "system:run") {
-    return liveConfigurators.includes("observe.system.run");
-  }
-
-  if (cellId === "market") {
-    return liveConfigurators.includes("observe.market");
-  }
-
-  if (cellId.startsWith("capture:")) {
-    return liveConfigurators.includes(`observe.capture.${cellId.slice("capture:".length)}`);
-  }
-
-  if (cellId.startsWith("sink:")) {
-    return liveConfigurators.includes(`observe.sink.${cellId.slice("sink:".length)}`);
-  }
-
-  if (cellId.startsWith("system:")) {
-    return liveConfigurators.length > 1;
-  }
-
-  return true;
 };
 
 const projectCellView = (
@@ -88,8 +59,7 @@ const projectCellView = (
   cell: Board["cells"][string],
   order: number,
   catalog: ControlCatalog | undefined,
-  runState: string | undefined,
-  liveConfigurators: readonly string[]
+  runState: string | undefined
 ): ControlCellView => {
   const [state, message, updatedAtMs] = cell.status;
 
@@ -107,7 +77,7 @@ const projectCellView = (
     readonly: cloneJsonRecord(cell.readonly),
     refs: projectReferences(cell.refs),
     functions: cell.functions
-      .filter((name) => isFunctionVisibleOnCell(id, name, cell, liveConfigurators))
+      .filter((name) => isFunctionVisibleOnCell(id, name, cell))
       .map((name) =>
         applyDisabledState(projectFunctionView(id, cell.catalog, name, catalog), state, runState)
       )
@@ -122,28 +92,29 @@ const cellHasBeenConfigured = (cellId: string, cell: Board["cells"][string]): bo
   if (cellId === "system:config") {
     return cell.status[0] === "configured";
   }
-  if (cellId.startsWith("capture:") || cellId.startsWith("sink:")) {
-    return cell.readonly?.configured === true;
+  // Id-blind rule: a cell that TRACKS `configured` gates its close on it; the rest gate themselves.
+  if (cell.readonly !== undefined && "configured" in cell.readonly) {
+    return cell.readonly.configured === true;
   }
-  // market / system:run etc. are not configure/close configurators — their own actions gate themselves.
   return true;
 };
 
 const isFunctionVisibleOnCell = (
   cellId: string,
   fnName: string,
-  cell: Board["cells"][string],
-  liveConfigurators: readonly string[]
+  cell: Board["cells"][string]
 ): boolean => {
-  if (cellId === "system:config" && fnName === "configure") {
-    return liveConfigurators.includes("observe.system.config");
-  }
-
   if (fnName === "close") {
-    if (cellId === "system:config" && !liveConfigurators.includes("observe.system.config")) {
-      return false;
-    }
     return cellHasBeenConfigured(cellId, cell);
+  }
+  // Remove/publishKind target an observation — dead on an empty session.
+  if (cellId === "system:config" && (fnName === "remove" || fnName === "publishKind")) {
+    const observations = cell.readonly?.observations;
+    return (
+      observations !== null &&
+      typeof observations === "object" &&
+      Object.keys(observations as Record<string, unknown>).length > 0
+    );
   }
 
   return true;
@@ -236,7 +207,8 @@ const isMutatingResultKind = (resultKind: string | undefined): boolean =>
   resultKind !== undefined && MUTATING_RESULT_KINDS.has(resultKind);
 
 const readBoardRunId = (board: Board): string => {
-  const fromRun = board.cells["system:run"]?.readonly?.runId;
+  const runCellId = runCellIdOf(board);
+  const fromRun = runCellId === undefined ? undefined : board.cells[runCellId]?.readonly?.runId;
   if (typeof fromRun === "string" && fromRun.length > 0) {
     return fromRun;
   }
@@ -246,31 +218,36 @@ const readBoardRunId = (board: Board): string => {
 };
 
 const readRunState = (board: Board): string | undefined => {
-  const state = board.cells["system:run"]?.status[0];
+  const stateCellId = runCellIdOf(board);
+  const state = stateCellId === undefined ? undefined : board.cells[stateCellId]?.status[0];
   return typeof state === "string" ? state : undefined;
 };
 
-const cellKind = (cellId: string): string => cellId.split(":", 1)[0] ?? "unknown";
+// obs:<id>:capture → capture; system:run → system; market → market.
+const cellKind = (cellId: string): string => {
+  const parts = cellId.split(":");
+  if (parts[0] === "obs" && parts.length === 3) {
+    return parts[2] ?? "unknown";
+  }
+  return parts[0] ?? "unknown";
+};
+
+const FAMILY_KIND_ORDER = ["capture", "publish", "run", "pause", "market"] as const;
 
 const cellGroupOrder = (cellId: string): number => {
+  if (cellId.startsWith("obs:")) {
+    return 1;
+  }
   if (cellId.startsWith("system:")) {
     return 0;
   }
-  if (cellId.startsWith("capture:")) {
-    return 1;
-  }
-  if (cellId.startsWith("process:")) {
-    return 2;
-  }
-  if (cellId.startsWith("sink:") || cellId.startsWith("publish:")) {
-    return 3;
-  }
+  return 2;
+};
 
-  if (cellId === "market") {
-    return 5;
-  }
-
-  return 4;
+const familyKindOrder = (cellId: string): number => {
+  const kind = cellId.split(":")[2] ?? "";
+  const index = FAMILY_KIND_ORDER.indexOf(kind as (typeof FAMILY_KIND_ORDER)[number]);
+  return index === -1 ? Number.MAX_SAFE_INTEGER : index;
 };
 
 const sortCellIds = (cellIds: readonly string[]): readonly string[] =>
@@ -286,6 +263,19 @@ const sortCellIds = (cellIds: readonly string[]): readonly string[] =>
       const rightOrder = systemCellOrder(right);
       if (leftOrder !== rightOrder) {
         return leftOrder - rightOrder;
+      }
+    }
+
+    // Families group by observation, kinds in pipeline order within one.
+    if (cellGroupOrder(left) === 1) {
+      const leftObs = left.split(":")[1] ?? "";
+      const rightObs = right.split(":")[1] ?? "";
+      if (leftObs !== rightObs) {
+        return leftObs.localeCompare(rightObs);
+      }
+      const kindDiff = familyKindOrder(left) - familyKindOrder(right);
+      if (kindDiff !== 0) {
+        return kindDiff;
       }
     }
 

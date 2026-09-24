@@ -4,16 +4,11 @@ export const directSinkCloseScope = "sink:direct:close" as const;
 export const directSinkConfigureCommand = {
   name: "configure",
   scope: directSinkConfigureScope,
-  help: "Bind the direct-serve fMP4 sink to a stream id and viewer port.",
+  help: "Set the direct-serve fMP4 sink's viewer door. The stream id is board-derived from the observation's market.",
   resultKind: "state-patch" as const,
   input: {
     type: "object" as const,
     properties: [
-      {
-        name: "streamId",
-        value: { type: "string" as const, description: "Stream/market id.", required: true },
-        help: "Scopes the direct feed (the path viewers dial: /live/watch/<streamId>)."
-      },
       {
         name: "port",
         value: {

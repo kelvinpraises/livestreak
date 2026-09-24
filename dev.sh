@@ -78,11 +78,44 @@ err()  { echo -e "${R}✗${N} $1"; }
 # Kill the long-lived children by PATTERN: the `npm run dev` wrappers don't forward signals to their
 # tsx/vite/alto child, so killing a wrapper pid alone orphans the real server. kill_servers = the main
 # stack + its ports; kill_sui = the Sui leg. Shared by the startup clean-slate AND by cleanup.
+#
+# ── DEV RESOLVES SOURCE, NOT dist (canonical note for the whole dev loop) ──────────────────────────
+# Host + the four role gateways run under tsx with the `livestreak-dev` export condition (host/cli
+# package.json dev scripts export NODE_OPTIONS=--conditions=livestreak-dev). Every @livestreak/* import
+# then transpiles from src instead of dist — and because the condition also flips each package's
+# `imports` map, so does every internal `#run/*`-style subpath. That is why nothing here rebuilds dist
+# in the steady dev loop; edit a package, restart its gateway, done.
+# INVARIANT (miss none): a package with an `imports` map (observe, wallet, packages/host) must carry the
+# condition on EVERY subpath, or its source imports its own compiled dist — two live instances of the
+# same module (e.g. the observe control bus), which presents as "my edit didn't take."
+#
+# The host runs `tsx watch`, whose launcher (`…/.bin/tsx watch src/main.ts`) MUST be killed by pattern:
+# otherwise, once the lsof sweep frees port 8787, the surviving watcher respawns the server onto it.
+# The plain "tsx src/main.ts" pattern does NOT match a `tsx watch` argv, so "tsx watch src/main.ts" is a
+# distinct entry. assert_kill_patterns() guards this coupling statically at boot.
+KILL_PATTERNS=("remote open" "tsx watch src/main.ts" "tsx src/main.ts" "vite dev --port 3000" "alto --entrypoints" "anvil")
 kill_servers() {
-  for pat in "remote open" "tsx src/main.ts" "vite dev --port 3000" "alto --entrypoints" "anvil"; do
+  local pat p
+  for pat in "${KILL_PATTERNS[@]}"; do
     pkill -9 -f "$pat" 2>/dev/null || true
   done
   for p in 8545 8787 3000 4337; do lsof -ti:$p 2>/dev/null | xargs kill -9 2>/dev/null || true; done
+}
+
+# Static guard (§3.6): every long-lived dev process this script launches must be caught by a
+# KILL_PATTERNS entry, or a stale process orphans / holds a port and the NEXT boot wedges. Pure string
+# containment against each package's dev-script argv — spawns nothing. Fails the boot loudly on drift.
+assert_kill_patterns() {
+  local pkg dev pat covered
+  for pkg in host cli app; do
+    dev="$(node -e "process.stdout.write((require('$ROOT/$pkg/package.json').scripts.dev)||'')" 2>/dev/null)"
+    [ -n "$dev" ] || { err "assert_kill_patterns: $pkg has no dev script"; exit 1; }
+    covered=0
+    for pat in "${KILL_PATTERNS[@]}"; do
+      case "$dev" in *"$pat"*) covered=1; break;; esac
+    done
+    [ "$covered" = 1 ] || { err "kill-pattern gap: no KILL_PATTERNS entry matches $pkg dev argv → '$dev' (update kill_servers)"; exit 1; }
+  done
 }
 kill_sui() {
   pkill -9 -f "sui start" 2>/dev/null || true
@@ -514,17 +547,27 @@ evm_wire() {
 # Shared phases (chain-agnostic) + the helpers the legs lean on.
 # ════════════════════════════════════════════════════════════════════════════════════════════════
 
-# Kill every stale process, then clean + rebuild from source. cli/host/roles import each workspace's
-# BUILT dist (not src) — a stale dist silently runs old descriptors/scopes/addresses, so one clean
-# rebuild is the only guarantee nothing downstream is stale.
+# Kill every stale process, then ensure workspace dist EXISTS — but do not rebuild it every boot.
+# The node side (host + gateways) resolves package SOURCE via the livestreak-dev condition, so it never
+# needs dist. The APP is the exception: `vite dev` resolves the workspace packages it imports (options,
+# schema, host, contracts) from their dist, so dist must exist. It does NOT need rebuilding every boot,
+# though — and `npm run clean` (a fresh rm -rf dist) was itself the stale-dist CAUSE as well as the slow
+# part. So: never clean, and build only when dist is missing (first boot / fresh clone). Set
+# FRESH_BUILD=1 when you changed an APP-consumed package and want vite to see it without waiting on that
+# package's own `tsc -w`. Contracts' forge/wagmi + build:ts run at deploy time (evm_deploy), so a chain
+# flip stays correct regardless of this skip.
 clean_slate() {
   log "Killing stale processes..."
   kill_servers
   rm -rf "$ROLES_DIR" && mkdir -p "$ROLES_DIR"
   sleep 1
-  log "Clean + build all workspaces..."
-  ( cd "$ROOT" && npm run clean && npm run build ) > /tmp/livestreak-build.log 2>&1 \
-    || { err "clean build failed — see /tmp/livestreak-build.log"; exit 1; }
+  if [ "${FRESH_BUILD:-0}" = "1" ] || [ ! -f "$ROOT/packages/options/dist/index.js" ]; then
+    log "Building workspace dist (app resolves dist; node side resolves src)..."
+    ( cd "$ROOT" && npm run build ) > /tmp/livestreak-build.log 2>&1 \
+      || { err "workspace build failed — see /tmp/livestreak-build.log"; exit 1; }
+  else
+    log "Workspace dist present — skipping rebuild (dev resolves src; FRESH_BUILD=1 to force)."
+  fi
 }
 
 # Write the chain-pinned settings.json the consoles + CLI use (contracts FLOAT: the chain adapter
@@ -623,10 +666,15 @@ open_consoles() {
   local role dir cpid
   for role in $ROLES; do
     dir="$ROLES_DIR/$role"
+    # Per-role LIVESTREAK_STATE_DIR (§3.7): the file-backed runtime stores (observe boards, options
+    # paused lanes, bookmaker idempotency) default to ONE shared ~/.livestreak/state, and every gateway
+    # rewrites the whole file per change — so four roles sharing it means last-writer-wins corruption of
+    # money-adjacent state. A dir per role isolates them.
     ( cd "$ROOT/cli" \
       && LIVESTREAK_PASSWORD="$(role_password "$role")" \
          LIVESTREAK_KEYSTORE_PATH="$dir/keystore.json" \
          LIVESTREAK_SESSION_STORE="$dir/sessions.json" \
+         LIVESTREAK_STATE_DIR="$dir/state" \
          npm run dev -- remote open --scopes "$ROLE_SCOPES" --ttl 12h --pair-password "demo-pass-$role" ) \
       > "$dir/console.log" 2>&1 &
     cpid=$!
@@ -672,6 +720,7 @@ print_summary() {
 # Main flow — bring up BOTH chain legs (infra always comes up), then wire + pin the ACTIVE chain.
 # CHAIN only selects which chain the consoles target and which gets demo-wired this run.
 # ════════════════════════════════════════════════════════════════════════════════════════════════
+assert_kill_patterns
 clean_slate
 
 evm_leg_up

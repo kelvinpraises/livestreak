@@ -8,11 +8,12 @@ import type { ControlCatalog } from "#run/control/catalog.js";
 import { applyBoardPatch } from "#run/control/board/index.js";
 import type { BoardPatch } from "#run/control/bus/types.js";
 import type { ControlArtifact, ControlCallResult } from "#run/control/bus/calls.js";
+import { cellIdForScope } from "#run/control/bus/calls.js";
 import { createOpaqueArtifactId } from "./artifacts.js";
 import { mergeBoardCellOnSurfaceMount } from "./mount.js";
 import {
   buildSurfaceFunctionIndex,
-  findSurfaceFunctionByScope,
+  findSurfaceFunction,
   mountSurfaceRegistry
 } from "./registry.js";
 import {
@@ -161,7 +162,9 @@ export const createControlBus = (
           surfaces = yield* mountSurfaceRegistry(surfaces, surface);
           functionIndex = yield* buildSurfaceFunctionIndex(surfaces);
 
-          const mergeResult = mergeBoardCellOnSurfaceMount(board, surface.cell);
+          const mergeResult = mergeBoardCellOnSurfaceMount(board, surface.cell, {
+            allowCreate: true
+          });
           board = mergeResult.board;
 
           if (mergeResult.changed) {
@@ -197,10 +200,25 @@ export const createControlBus = (
             );
           }
 
-          const match = yield* findSurfaceFunctionByScope(functionIndex, envelope.scope);
+          // Family routing: the call targets a cell; the SURFACE serving it is the catalog's one
+          // mounted surface (canonical id). A named cell must exist on the board — fail closed.
+          const targetCell = envelope.cellId ?? cellIdForScope(envelope.scope);
+          if (envelope.cellId !== undefined && board.cells[envelope.cellId] === undefined) {
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message: `Unknown cell ${envelope.cellId} for scope ${envelope.scope}`
+              })
+            );
+          }
+          const match = yield* findSurfaceFunction(functionIndex, targetCell, envelope.scope).pipe(
+            Effect.orElse(() =>
+              findSurfaceFunction(functionIndex, cellIdForScope(envelope.scope), envelope.scope)
+            )
+          );
           const result = yield* match.entry.call(envelope, {
             boardRevision: board.revision,
-            board
+            board,
+            cellId: targetCell
           });
 
           let artifact: ControlArtifact | undefined;

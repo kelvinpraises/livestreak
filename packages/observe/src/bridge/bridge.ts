@@ -13,10 +13,8 @@ import {
   systemRunStartScope,
   systemRunStopScope
 } from "#run/control/index.js";
-import {
-  defaultFileExportConfigure,
-  type SystemConfigConfigurePayload
-} from "#run/board-first.js";
+import { type SystemConfigConfigurePayload } from "#run/board-first.js";
+import { observationIdOf } from "#run/control/system/config.js";
 import { readBoardRunPrepared } from "#run/control/board/index.js";
 import { hasAnyScope, requireAnyScope, type CapabilityScope } from "#scope/scopes.js";
 import type {
@@ -92,6 +90,15 @@ const consoleScopeIndex = (): {
 
 const CONSOLE_SCOPES = consoleScopeIndex();
 
+/** observe.<cell segments…>.<fn> → { cellId: segments joined by ':', fn }. */
+const parseConsoleId = (id: string): { cellId: string; fn: string } | undefined => {
+  const parts = id.split(".");
+  if (parts.length < 3 || parts[0] !== "observe") {
+    return undefined;
+  }
+  return { cellId: parts.slice(1, -1).join(":"), fn: parts[parts.length - 1]! };
+};
+
 export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBridge => {
   const { runtime } = input;
 
@@ -127,12 +134,30 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
     consoleInput: BridgeConsoleCallInput
   ): Effect.Effect<BridgeConsoleCallResult, LiveStreakError> =>
     Effect.gen(function* () {
-      const internalScope =
-        consoleInput.id !== undefined
-          ? CONSOLE_SCOPES.byId.get(consoleInput.id)
-          : consoleInput.action === "configure"
+      // Family routing: a descriptor id names its CELL (observe.obs.<id>.run.prepare →
+      // obs:<id>:run); the scope comes from that cell's live catalog binding. Unknown cells
+      // fail closed — a call can never fall through to another family.
+      const parsed = consoleInput.id === undefined ? undefined : parseConsoleId(consoleInput.id);
+      const liveBoard = yield* runtime.readBoard(consoleInput.runId);
+      let cellId: string | undefined;
+      let internalScope: string | undefined;
+      if (parsed !== undefined) {
+        const cell = liveBoard.cells[parsed.cellId];
+        if (cell === undefined) {
+          return yield* Effect.fail(
+            new LiveStreakConfigError({
+              message: `Unknown observe cell for "${consoleInput.id}"`
+            })
+          );
+        }
+        cellId = parsed.cellId;
+        internalScope = `${cell.catalog ?? parsed.cellId}:${parsed.fn}`;
+      } else {
+        internalScope =
+          consoleInput.action === "configure"
             ? systemConfigConfigureScope
             : CONSOLE_SCOPES.byAction.get(consoleInput.action);
+      }
       if (internalScope === undefined) {
         return yield* Effect.fail(
           new LiveStreakConfigError({
@@ -141,6 +166,7 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
         );
       }
       yield* authorizeConsole(consoleInput.caller, internalScope, consoleInput.action);
+      const obsId = cellId === undefined ? undefined : observationIdOf(cellId);
 
       // Run-execution lifecycle drives the kernel directly (the board-first T0 bus only wires
       // config + market lifecycle); prepare/start build & run the producer from the configured board.
@@ -152,13 +178,21 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
             })
           );
         }
-        yield* runtime.prepareConfiguredRun(consoleInput.runId, { hostBaseUrl: input.hostBaseUrl });
+        yield* runtime.prepareConfiguredRun(consoleInput.runId, {
+          hostBaseUrl: input.hostBaseUrl,
+          ...(obsId === undefined ? {} : { obsId })
+        });
         return { txId: `prepare-${consoleInput.runId}` };
       }
       if (internalScope === systemRunStartScope) {
         // Prepared is a disposable derivation of the board (a pipeline config change demotes
         // it) — start re-derives it instead of failing "must be prepared" at the operator.
-        const run = yield* runtime.store.require(consoleInput.runId);
+        // Per-observation runs live at runId#obsId (the runtime's key scheme).
+        const preparedKey =
+          obsId === undefined ? consoleInput.runId : `${consoleInput.runId}#${obsId}`;
+        const run =
+          (yield* runtime.store.get(preparedKey)) ??
+          (yield* runtime.store.require(consoleInput.runId));
         if (run.prepared !== true) {
           if (input.hostBaseUrl === undefined) {
             return yield* Effect.fail(
@@ -168,17 +202,19 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
             );
           }
           yield* runtime.prepareConfiguredRun(consoleInput.runId, {
-            hostBaseUrl: input.hostBaseUrl
+            hostBaseUrl: input.hostBaseUrl,
+            ...(obsId === undefined ? {} : { obsId })
           });
         }
-        yield* runtime.startRun(consoleInput.runId);
-        return { txId: `start-${consoleInput.runId}` };
+        yield* runtime.startRun(consoleInput.runId, undefined, obsId);
+        return { txId: `start-${preparedKey}` };
       }
       if (internalScope === systemRunStopScope) {
         const reason = readStopReason(consoleInput.args);
         yield* runtime.stopRun(
           consoleInput.runId,
-          reason === undefined ? undefined : { reason }
+          reason === undefined ? undefined : { reason },
+          obsId
         );
         return { txId: `stop-${consoleInput.runId}` };
       }
@@ -190,6 +226,7 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
       const result = yield* runtime.callFunction({
         callId: `remote-${Date.now()}`,
         runId: consoleInput.runId,
+        ...(cellId === undefined ? {} : { cellId }),
         scope: internalScope,
         payload
       });
@@ -319,27 +356,18 @@ const readStopReason = (args: unknown): string | undefined =>
     ? (args as { reason: string }).reason
     : undefined;
 
-// The console auto-form may send a partial/empty configure; fall back to the chain-scoped default
-// board rather than rejecting a pristine go-live.
+// The console may send a partial configure; fall back to the session defaults rather than
+// rejecting a pristine go-live. Configure = create observation: title + chain only.
 const coerceConfigurePayload = (
   args: unknown,
   chain: string | undefined
 ): SystemConfigConfigurePayload => {
-  if (typeof args === "object" && args !== null && !Array.isArray(args)) {
-    const record = args as Record<string, unknown>;
-    if (
-      typeof record.chain === "string" &&
-      typeof record.capture === "string" &&
-      typeof record.publish === "string" &&
-      (record.process === null || record.process === undefined)
-    ) {
-      return {
-        chain: record.chain,
-        capture: record.capture,
-        process: null,
-        publish: record.publish
-      };
-    }
-  }
-  return defaultFileExportConfigure(chain === undefined ? {} : { chain });
+  const record =
+    typeof args === "object" && args !== null && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : {};
+  return {
+    title: typeof record.title === "string" && record.title.trim() !== "" ? record.title : "Observation",
+    chain: typeof record.chain === "string" && record.chain.trim() !== "" ? record.chain : (chain ?? "eip155:31337")
+  };
 };

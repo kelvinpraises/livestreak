@@ -1,55 +1,49 @@
-import {
-  captureConfiguratorId,
-  marketConfiguratorId,
-  publishConfiguratorId,
-  systemRunConfiguratorId
-} from "#flows/permutations.js";
 import type { ObserveRunConfig } from "#run/config/index.js";
 import type { Board } from "./model.js";
 import { incrementBoardRevision } from "./model.js";
 import { defaultControlPause, defaultControlRun } from "./settings.js";
 
-const captureConfiguratorKey = (driverId: string): string => {
-  if (driverId === "synthetic") {
-    return "synthetic";
-  }
+const captureCellIdFor = (driverId: string): string =>
+  driverId === "synthetic" ? "capture:synthetic" : `capture:${driverId}`;
 
-  return driverId;
-};
-
-const publishConfiguratorKey = (config: ObserveRunConfig): string => {
+// MUST mirror the kernel's resolveSinkInstanceId — a mismatch would mint a second sink cell
+// and the worker's policy scan would see a phantom sink.
+const sinkCellIdFor = (config: ObserveRunConfig): string => {
   if (config.sink.instanceId !== undefined) {
-    return config.sink.instanceId;
+    return `sink:${config.sink.instanceId}`;
   }
-
   if (config.sink.driverId === "file") {
-    return "file-export";
+    return "sink:file-export";
   }
-
   if (config.sink.driverId === "memory") {
-    return "memory-sink";
+    return "sink:memory-sink";
   }
-
-  return config.sink.driverId;
+  return `sink:${config.sink.driverId}`;
 };
 
-/** Mount system cells and live configurators when legacy callers skip system:config.configure. */
+const sinkCatalogFor = (config: ObserveRunConfig): string => {
+  if (config.sink.driverId === "live") {
+    return "sink:live";
+  }
+  if (config.sink.driverId === "direct") {
+    return "sink:direct";
+  }
+  return "sink:file-export";
+};
+
+/** Code-first runs skip Add observation: mount the canonical single-run cells that mirror the
+ *  given config, so board reads (worker view, prepared flag, pause) see one coherent world. */
 export const bootstrapLegacyObserveBoard = (board: Board, config: ObserveRunConfig): Board => {
-  if (board.cells["system:run"] !== undefined) {
+  if (
+    board.cells["system:run"] !== undefined ||
+    Object.keys(board.cells).some((id) => id.startsWith("obs:"))
+  ) {
     return board;
   }
 
   const nowMs = Date.now();
-  const capture = captureConfiguratorKey(config.capture.driverId);
-  const publish = publishConfiguratorKey(config);
-  const liveConfigurators = [
-    captureConfiguratorId(capture),
-    publishConfiguratorId(publish),
-    systemRunConfiguratorId,
-    marketConfiguratorId
-  ];
-
   const configCell = board.cells["system:config"];
+  const capturePath = (config.capture.config as { path?: unknown } | undefined)?.path;
 
   return incrementBoardRevision({
     ...board,
@@ -60,10 +54,6 @@ export const bootstrapLegacyObserveBoard = (board: Board, config: ObserveRunConf
         : {
             "system:config": {
               ...configCell,
-              readonly: {
-                ...configCell.readonly,
-                liveConfigurators
-              },
               status: ["configured", null, nowMs]
             }
           }),
@@ -95,6 +85,25 @@ export const bootstrapLegacyObserveBoard = (board: Board, config: ObserveRunConf
         status: ["idle", null, nowMs],
         readonly: {},
         functions: []
+      },
+      [captureCellIdFor(config.capture.driverId)]: {
+        label: "Capture",
+        catalog: captureCellIdFor(config.capture.driverId),
+        status: ["configured", null, nowMs],
+        settings: {
+          maxPumpMs: 4,
+          ...(typeof capturePath === "string" ? { path: capturePath } : {})
+        },
+        readonly: { configured: true },
+        functions: ["configure", "close"]
+      },
+      [sinkCellIdFor(config)]: {
+        label: "Publish",
+        catalog: sinkCatalogFor(config),
+        status: ["configured", null, nowMs],
+        settings: { subscribe: ["publish.video.rendered"], required: true },
+        readonly: { configured: true },
+        functions: ["configure", "close"]
       },
       market: {
         label: "Market",

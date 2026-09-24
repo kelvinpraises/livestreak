@@ -18,10 +18,16 @@ export const systemRunAwaitScope = "system:run:await" as const;
 export const systemRunStopScope = "system:run:stop" as const;
 
 export interface SystemRunHooks {
-  readonly prepare?: (runId: string) => Effect.Effect<ObserveRun, LiveStreakError>;
-  readonly start?: (runId: string) => Effect.Effect<ObserveRunHandle, LiveStreakError>;
-  readonly await?: (runId: string) => Effect.Effect<ObserveRunResult, LiveStreakError>;
+  readonly prepare?: (runId: string, obsId?: string) => Effect.Effect<ObserveRun, LiveStreakError>;
+  readonly start?: (runId: string, obsId?: string) => Effect.Effect<ObserveRunHandle, LiveStreakError>;
+  readonly await?: (runId: string, obsId?: string) => Effect.Effect<ObserveRunResult, LiveStreakError>;
 }
+
+/** obs:<id>:run → <id>; undefined for the legacy cell. */
+const hookObsId = (cellId: string): string | undefined => {
+  const parts = cellId.split(":");
+  return parts[0] === "obs" && parts.length === 3 ? parts[1] : undefined;
+};
 
 export const createSystemRunSurface = (hooks: SystemRunHooks = {}): ControlSurface => ({
   cell: {
@@ -77,13 +83,13 @@ const prepareCall = (
     }
 
     const runId = readRunId(context);
-    yield* hooks.prepare(runId);
+    yield* hooks.prepare(runId, hookObsId(context.cellId));
 
     const nowMs = Date.now();
     return {
       boardPatch: {
         cells: {
-          "system:run": {
+          [context.cellId]: {
             readonly: { set: { prepared: true } },
             status: ["prepared", "observe run is ready to start", nowMs]
           }
@@ -103,7 +109,7 @@ const startCall = (
       );
     }
 
-    const prepared = context.board.cells["system:run"]?.readonly?.prepared === true;
+    const prepared = context.board.cells[context.cellId]?.readonly?.prepared === true;
     if (!prepared) {
       return yield* Effect.fail(
         new LiveStreakConfigError({ message: "system:run:start requires a prepared run" })
@@ -111,13 +117,13 @@ const startCall = (
     }
 
     const runId = readRunId(context);
-    yield* hooks.start(runId);
+    yield* hooks.start(runId, hookObsId(context.cellId));
 
     const nowMs = Date.now();
     return {
       boardPatch: {
         cells: {
-          "system:run": {
+          [context.cellId]: {
             status: ["starting", "starting observe run", nowMs]
           }
         }
@@ -137,14 +143,14 @@ const awaitCall = (
     }
 
     const runId = readRunId(context);
-    const result = yield* hooks.await(runId);
+    const result = yield* hooks.await(runId, hookObsId(context.cellId));
     const nowMs = Date.now();
     const terminalStatus = result.outcome === "stopped" ? "stopped" : "failed";
 
     return {
       boardPatch: {
         cells: {
-          "system:run": {
+          [context.cellId]: {
             status: [terminalStatus, `outcome=${result.outcome}`, nowMs],
             readonly: {
               set: {
@@ -164,7 +170,7 @@ const stopCall = (
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.gen(function* () {
     const reason = yield* decodeStopPayload(envelope.payload);
-    const runCell = context.board.cells["system:run"];
+    const runCell = context.board.cells[context.cellId];
     const settings = runCell?.settings ?? {};
 
     if (settings.stopRequested === true) {
@@ -172,13 +178,13 @@ const stopCall = (
     }
 
     return {
-      boardPatch: stopPatch(reason)
+      boardPatch: stopPatch(context.cellId, reason)
     };
   });
 
-const stopPatch = (reason: string | undefined): BoardPatch => ({
+const stopPatch = (cellId: string, reason: string | undefined): BoardPatch => ({
   cells: {
-    "system:run": {
+    [cellId]: {
       settings: {
         set: {
           stopRequested: true,
@@ -190,7 +196,7 @@ const stopPatch = (reason: string | undefined): BoardPatch => ({
 });
 
 const readRunId = (context: ControlFunctionContext): string => {
-  const fromRun = context.board.cells["system:run"]?.readonly?.runId;
+  const fromRun = context.board.cells[context.cellId]?.readonly?.runId;
   if (typeof fromRun === "string" && fromRun.length > 0) {
     return fromRun;
   }

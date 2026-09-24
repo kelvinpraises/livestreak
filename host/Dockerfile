@@ -57,10 +57,7 @@ COPY packages/contracts ./packages/contracts
 COPY packages/host ./packages/host
 COPY packages/options ./packages/options
 COPY packages/wallet ./packages/wallet
-RUN npm run build -w @livestreak/core -w @livestreak/schema -w @livestreak/wallet \
- && npm run build:ts -w @livestreak/contracts \
- && npm run build -w @livestreak/host \
- && npm run build -w @livestreak/options
+RUN npm run build:packages:image
 
 # 4) Host server source + build.
 COPY host ./host

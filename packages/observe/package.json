@@ -7,18 +7,19 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "livestreak-dev": "./src/index.ts",
       "import": "./dist/index.js"
     }
   },
   "imports": {
-    "#pipeline/*": "./dist/pipeline/*",
-    "#adapters/*": "./dist/adapters/*",
-    "#run/*": "./dist/run/*",
-    "#bridge/*": "./dist/bridge/*",
-    "#scope/*": "./dist/scope/*",
-    "#market/*": "./dist/market/*",
-    "#flows/*": "./dist/flows/*",
-    "#builtins.js": "./dist/builtins.js"
+    "#pipeline/*": { "livestreak-dev": "./src/pipeline/*", "default": "./dist/pipeline/*" },
+    "#adapters/*": { "livestreak-dev": "./src/adapters/*", "default": "./dist/adapters/*" },
+    "#run/*": { "livestreak-dev": "./src/run/*", "default": "./dist/run/*" },
+    "#bridge/*": { "livestreak-dev": "./src/bridge/*", "default": "./dist/bridge/*" },
+    "#scope/*": { "livestreak-dev": "./src/scope/*", "default": "./dist/scope/*" },
+    "#market/*": { "livestreak-dev": "./src/market/*", "default": "./dist/market/*" },
+    "#flows/*": { "livestreak-dev": "./src/flows/*", "default": "./dist/flows/*" },
+    "#builtins.js": { "livestreak-dev": "./src/builtins.ts", "default": "./dist/builtins.js" }
   },
   "files": [
     "dist"

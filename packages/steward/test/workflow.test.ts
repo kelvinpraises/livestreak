@@ -86,7 +86,7 @@ describe("steward pure workflow", () => {
             {
               contract: "vault" as const,
               functionName: "triggerHot",
-              args: ["vault-1", "Escalate hot market"]
+              args: ["vault-1", "Escalate hot market", "critical"] as const
             }
           ],
           hostActions: []

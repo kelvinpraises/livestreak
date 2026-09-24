@@ -1,4 +1,5 @@
 import type { Board, BoardRunStatus } from "#run/control/board/model.js";
+import { pauseCellIdOf, runCellIdOf } from "./model.js";
 import type { PausePresentation } from "#pipeline/capture/index.js";
 import { isPausePresentation } from "#pipeline/capture/index.js";
 import { defaultControlPause } from "./settings.js";
@@ -33,9 +34,9 @@ export interface WorkerControlView {
   readonly sinks: readonly WorkerControlSinkPolicy[];
 }
 
-export const projectWorkerControlView = (board: Board): WorkerControlView => {
-  const runCell = board.cells["system:run"];
-  const pauseCell = board.cells["system:pause"];
+export const projectWorkerControlView = (board: Board, obsId?: string): WorkerControlView => {
+  const runCell = board.cells[runCellIdOf(board, undefined, obsId) ?? "system:run"];
+  const pauseCell = board.cells[pauseCellIdOf(board, undefined, obsId) ?? "system:pause"];
 
   const status = (runCell?.status[0] ?? "created") as ControlRunStatus;
   const statusReason = runCell?.status[1] ?? undefined;
@@ -73,6 +74,10 @@ const projectSinkPolicies = (board: Board): readonly WorkerControlSinkPolicy[] =
   const policies: WorkerControlSinkPolicy[] = [];
 
   for (const [cellId, cell] of Object.entries(board.cells)) {
+    // STAGE cells only (id `sink:<kind>`, mounted by the kernel at attach) — the worker's sinks.
+    // Family publish cells (`obs:<id>:publish`) share the sink CATALOG but are configuration,
+    // consumed by prepare's run-config derivation; matching them here sliced their cell id into
+    // a garbage sinkId and killed worker prepare (found live 2026-07-22).
     if (!cellId.startsWith("sink:")) {
       continue;
     }
@@ -99,7 +104,7 @@ const projectSinkPolicies = (board: Board): readonly WorkerControlSinkPolicy[] =
 };
 
 const catalogKindToSinkKind = (catalog: string | undefined): string => {
-  if (catalog === "sink:file") {
+  if (catalog === "sink:file" || catalog === "sink:file-export") {
     return "file";
   }
   if (catalog === "sink:live") {

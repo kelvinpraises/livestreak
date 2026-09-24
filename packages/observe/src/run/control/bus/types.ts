@@ -51,6 +51,9 @@ export interface ControlCellDefinition {
 export interface ControlFunctionContext {
   readonly boardRevision: number;
   readonly board: import("#run/control/board/index.js").Board;
+  /** The cell this call was matched to. Implementations patch THIS id, never a literal —
+   *  one catalog serves every family (obs:<id>:run …). */
+  readonly cellId: string;
 }
 
 export interface ControlFunctionArtifactDraft {

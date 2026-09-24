@@ -7,7 +7,6 @@ import type {
   ControlFunctionEntry,
   ControlSurface
 } from "#run/control/bus/types.js";
-import { readLiveConfigurators } from "#run/control/board/visibility.js";
 import {
   fileSinkCloseScope,
   fileSinkConfigureScope
@@ -20,7 +19,7 @@ export const createFileSinkControlSurface = (
     id: `sink:${instanceId}`,
     cell: {
       label: "File Export",
-      catalog: "sink:file",
+      catalog: "sink:file-export",
       status: ["idle", null, Date.now()],
       settings: { subscribe: ["publish.video.rendered"], required: true },
       readonly: { configured: false },
@@ -44,18 +43,17 @@ const closeEntry = (instanceId: string): ControlFunctionEntry => ({
 
 const configureCall = (
   envelope: ControlCallEnvelope,
-  _context: ControlFunctionContext,
+  context: ControlFunctionContext,
   instanceId: string
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.gen(function* () {
     const path = yield* decodePathPayload(envelope.payload);
     const nowMs = Date.now();
-    const cellId = `sink:${instanceId}`;
 
     return {
       boardPatch: {
         cells: {
-          [cellId]: {
+          [context.cellId]: {
             settings: {
               set: { path, subscribe: ["publish.video.rendered"], required: true }
             },
@@ -72,16 +70,12 @@ const closeCall = (
   instanceId: string
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.sync(() => {
-    const live = readLiveConfigurators(context.board).filter(
-      (id) => id !== `observe.sink.${instanceId}`
-    );
-
     return {
       boardPatch: {
         cells: {
-          [`sink:${instanceId}`]: { remove: true },
-          "system:config": {
-            readonly: { set: { liveConfigurators: live } }
+          [context.cellId]: {
+            readonly: { set: { configured: false } },
+            status: ["idle", null, Date.now()]
           }
         }
       }

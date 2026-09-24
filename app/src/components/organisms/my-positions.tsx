@@ -305,9 +305,15 @@ function ResolvedVaultCard({ group, index = 0 }: { group: VaultGroup; index?: nu
   // Enabled when there's anything left to collect: unclaimed winnings, an UNCLAIMED loss-mint, or overstream.
   // A loss whose LVST was already claimed (canClaimLoss false) still shows its earned amount but no longer
   // arms Cash out. Label softens to "Claim" for a pure-loss vault (LVST only, no cash).
-  const hasCash = sides.some(p => p.won && (p.payout ?? 0) > 0) || overstream > 0
+  // A winner whose vault awaits `collect` previews payout 0 BY DESIGN (pot not final yet) — Cash out
+  // must still arm, because settleVault runs collect as its own first step. Without this, the card
+  // reads "CLAIMED" on a never-claimed win and the payout deadlocks (the disabled button IS the only
+  // in-app path to collect).
+  const wonPending = (p: { won?: boolean; payout?: number; collectPending?: boolean }) =>
+    p.won === true && ((p.payout ?? 0) > 0 || p.collectPending === true)
+  const hasCash = sides.some(wonPending) || overstream > 0
   const canSettle = useOptions && (
-    sides.some(p => (p.won && (p.payout ?? 0) > 0) || (!p.won && p.canClaimLoss === true)) || overstream > 0
+    sides.some(p => wonPending(p) || (!p.won && p.canClaimLoss === true)) || overstream > 0
   )
   const [claimed, setClaimed] = useState(false)
   const onSettle = async () => {

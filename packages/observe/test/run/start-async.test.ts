@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { runCellIdOf } from "#run/control/board/model.js";
 import { Effect, Exit } from "effect";
 import { prepareObserveRun, startObserveRun, startObserveRunAsync } from "#run/kernel.js";
 import { systemRunStopScope } from "#run/control/index.js";
@@ -43,7 +44,7 @@ describe("startObserveRunAsync", () => {
     expect(exit.value.handle.startedAtMs).toBeLessThanOrEqual(Date.now());
     expect(exit.value.asyncResult.outcome).toBe("stopped");
     expect(exit.value.asyncResult.outcome).toBe(exit.value.blockingResult.outcome);
-    expect(exit.value.asyncResult.board.cells["system:run"]?.status[0]).toBe("stopped");
+    expect(exit.value.asyncResult.board.cells[runCellIdOf(exit.value.asyncResult.board) ?? "system:run"]?.status[0]).toBe("stopped");
   });
 
   it("exposes the bus for board reads during an async run", async () => {
@@ -66,9 +67,9 @@ describe("startObserveRunAsync", () => {
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
       expect(["prepared", "starting", "running", "draining", "stopped"]).toContain(
-        exit.value.during.cells["system:run"]?.status[0]
+        exit.value.during.cells[runCellIdOf(exit.value.during) ?? "system:run"]?.status[0]
       );
-      expect(exit.value.after.cells["system:run"]?.status[0]).toBe("stopped");
+      expect(exit.value.after.cells[runCellIdOf(exit.value.after) ?? "system:run"]?.status[0]).toBe("stopped");
       expect(exit.value.result.outcome).toBe("stopped");
     }
   });

@@ -7,7 +7,6 @@ import type {
   ControlFunctionEntry,
   ControlSurface
 } from "#run/control/bus/types.js";
-import { readLiveConfigurators } from "#run/control/board/visibility.js";
 import {
   fileCaptureCloseScope,
   fileCaptureConfigureScope
@@ -53,7 +52,7 @@ const configureCall = (
     return {
       boardPatch: {
         cells: {
-          "capture:file": {
+          [context.cellId]: {
             settings: { set: { path, maxPumpMs: 4 } },
             readonly: { set: { configured: true, sourceType: "file", sourceMode: "file" } },
             status: ["configured", null, nowMs]
@@ -67,16 +66,12 @@ const closeCall = (
   context: ControlFunctionContext
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.sync(() => {
-    const live = readLiveConfigurators(context.board).filter(
-      (id) => id !== FILE_CAPTURE_CONFIGURATOR_ID
-    );
-
     return {
       boardPatch: {
         cells: {
-          "capture:file": { remove: true },
-          "system:config": {
-            readonly: { set: { liveConfigurators: live } }
+          [context.cellId]: {
+            readonly: { set: { configured: false } },
+            status: ["idle", null, Date.now()]
           }
         }
       }

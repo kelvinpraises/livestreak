@@ -32,7 +32,8 @@ const ALL_MARKET_READONLY_KEYS = [
  */
 export const marketLifecyclePatch = (
   lifecycle: MarketLifecycleState,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  cellId: string = "market"
 ): BoardPatch => {
   const nextReadonly = marketReadonlyFromLifecycle(lifecycle);
   const presentKeys = new Set(Object.keys(nextReadonly));
@@ -40,7 +41,7 @@ export const marketLifecyclePatch = (
 
   return {
     cells: {
-      market: {
+      [cellId]: {
         status: [lifecycle.status, lifecycleReason(lifecycle), nowMs],
         readonly: {
           set: nextReadonly,
@@ -54,9 +55,10 @@ export const marketLifecyclePatch = (
 export const applyMarketLifecycleToBoard = (
   board: Board,
   lifecycle: MarketLifecycleState,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  cellId: string = "market"
 ): Board => {
-  const cell = board.cells["market"];
+  const cell = board.cells[cellId];
   if (cell === undefined) {
     return board;
   }
@@ -68,7 +70,7 @@ export const applyMarketLifecycleToBoard = (
   if (
     cell.status[0] === nextStatus &&
     cell.status[1] === nextReason &&
-    jsonEqual(cell.readonly ?? {}, nextReadonly)
+    jsonEqual(pickLifecycleKeys(cell.readonly ?? {}), nextReadonly)
   ) {
     return board;
   }
@@ -77,14 +79,29 @@ export const applyMarketLifecycleToBoard = (
     ...board,
     cells: {
       ...board.cells,
-      market: {
+      [cellId]: {
         ...cell,
         status: [nextStatus, nextReason, nowMs],
-        readonly: nextReadonly
+        // Lifecycle owns only ITS keys — the family identity (obsId, title, chain) survives.
+        readonly: { ...stripLifecycleKeys(cell.readonly ?? {}), ...nextReadonly }
       }
     }
   });
 };
+
+const pickLifecycleKeys = (
+  readonly_: Readonly<Record<string, unknown>>
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(readonly_).filter(([key]) => ALL_MARKET_READONLY_KEYS.includes(key as never))
+  );
+
+const stripLifecycleKeys = (
+  readonly_: Readonly<Record<string, unknown>>
+): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(readonly_).filter(([key]) => !ALL_MARKET_READONLY_KEYS.includes(key as never))
+  );
 
 // --- helpers ---
 

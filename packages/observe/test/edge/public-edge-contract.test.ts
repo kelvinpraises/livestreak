@@ -22,8 +22,7 @@ import {
   type ControlCallResult,
   type ControlsView,
   type ObserveRunConfig,
-  type ObserveRunResult
-} from "#index.js";
+  type ObserveRunResult, runCellIdOf } from "#index.js";
 import {
   createBrowserRuntimeKernelOptions,
   waitForBrowserPreviewCall
@@ -61,7 +60,7 @@ describe("public edge contract", () => {
             const runtimePanel = yield* runtime.readPanel(runId, { includeCatalog: true });
             const bridgeControls = yield* bridge.readControls({ caller: trustedCaller, runId });
 
-            expect(runtimeBoard.cells["system:run"]).toBeDefined();
+            expect(runtimeBoard.cells[runCellIdOf(runtimeBoard) ?? "system:run"]).toBeDefined();
             expect(runtimeBoard.cells["capture:browser"]).toBeDefined();
             expect(runtimePanel.board.cells["system:pause"]).toBeDefined();
             expect(bridgeControls.cells.some((cell) => cell.id === "capture:browser")).toBe(true);
@@ -163,7 +162,7 @@ describe("public edge contract", () => {
       expect(Exit.isSuccess(exit)).toBe(true);
       if (Exit.isSuccess(exit)) {
         expect(exit.value.result.outcome).toBe("stopped");
-        expect(exit.value.finalBoard.cells["system:run"]?.status[0]).toBe("stopped");
+        expect(exit.value.finalBoard.cells[runCellIdOf(exit.value.finalBoard) ?? "system:run"]?.status[0]).toBe("stopped");
         expect(exit.value.boardEvents.length).toBeGreaterThan(0);
       }
     });
@@ -196,7 +195,7 @@ describe("public edge contract", () => {
       if (Exit.isSuccess(exit)) {
         expect(exit.value.result.outcome).toBe("stopped");
         expect(exit.value.result.outputUri).toBe(outputPath);
-        expect(exit.value.boardAfter.cells["system:run"]?.status[0]).toBe("stopped");
+        expect(exit.value.boardAfter.cells[runCellIdOf(exit.value.boardAfter) ?? "system:run"]?.status[0]).toBe("stopped");
       }
     });
   });

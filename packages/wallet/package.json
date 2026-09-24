@@ -17,11 +17,11 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "imports": {
-    "#chains/*": "./dist/chains/*",
-    "#vendor/*": "./dist/vendor/*",
-    "#types.js": "./dist/types.js",
-    "#create-wallet-manager.js": "./dist/create-wallet-manager.js",
-    "#index.js": "./dist/index.js"
+    "#chains/*": { "livestreak-dev": "./src/chains/*", "default": "./dist/chains/*" },
+    "#vendor/*": { "livestreak-dev": "./src/vendor/*", "default": "./dist/vendor/*" },
+    "#types.js": { "livestreak-dev": "./src/types.ts", "default": "./dist/types.js" },
+    "#create-wallet-manager.js": { "livestreak-dev": "./src/create-wallet-manager.ts", "default": "./dist/create-wallet-manager.js" },
+    "#index.js": { "livestreak-dev": "./src/index.ts", "default": "./dist/index.js" }
   },
   "files": [
     "dist",
@@ -75,11 +75,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "livestreak-dev": "./src/index.ts",
       "bare": "./bare.js",
       "default": "./dist/index.js"
     },
     "./keystore": {
       "types": "./dist/keystore.d.ts",
+      "livestreak-dev": "./src/keystore.ts",
       "default": "./dist/keystore.js"
     },
     "./package": {

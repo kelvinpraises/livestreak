@@ -634,15 +634,18 @@ const projectNftPanel = (entry: OptionsNftSnapshot, ctx: ProjectPanelContext): O
     }
   }
 
-  // Canonical account status from the LIVE balance + active lanes. The reader already drains the balance,
-  // so depleted ⇒ ~0 with no special-case flooring. activeRate doubles as the UI's drain rate.
+  // Canonical account status from the LIVE balance + active lanes. activeRate doubles as the UI's
+  // drain rate. PRECEDENCE: a positive balance outranks a dry lane — "depleted" previously won over
+  // `balance > 0n`, so an NFT with dead lanes but money still parked (topped up after lanes ran dry,
+  // or partially drained) read "depleted", which disarms Sweep in the function catalog and stranded
+  // the balance. Depleted now means what it says: a lane ran dry AND the money is actually gone.
   const balance = entry.nft.balance ?? 0n;
   const activeRate = realLanes
     .filter((lane) => lane.rate > 0n && !lane.depleted)
     .reduce((sum, lane) => sum + lane.rate, 0n);
   const hasDepleted = realLanes.some((lane) => lane.depleted);
   const status: OptionsAccountStatus =
-    activeRate > 0n ? "streaming" : hasDepleted ? "depleted" : balance > 0n ? "idle" : "empty";
+    activeRate > 0n ? "streaming" : balance > 0n ? "idle" : hasDepleted ? "depleted" : "empty";
 
   // Runway = when the shared balance runs dry. EVM's reader supplies the exact Drips maxEnd; Solana's
   // doesn't, so fall back to now + balance ÷ drain-rate. Without this a funded, streaming Solana position
@@ -745,7 +748,8 @@ const projectLanePanel = (
             lossClaimableLVST: lvstToNumber(lane.lossClaimable ?? 0n, lvstDecimals),
             lossUSDC: usdcToNumber(lane.lossBasisUSDC ?? 0n),
             overstreamClaimableUSDC: usdcToNumber(lane.overstreamClaimable ?? 0n),
-            canClaimWin: (lane.claimable ?? 0n) > 0n,
+            canClaimWin: (lane.claimable ?? 0n) > 0n || (lane.won === true && lane.collectPending === true),
+            collectPending: lane.collectPending === true,
             canClaimLoss: (lane.lossClaimable ?? 0n) > 0n && lane.lossClaimed !== true,
             lossClaimed: lane.lossClaimed === true,
             canClaimOverstream: (lane.overstreamClaimable ?? 0n) > 0n

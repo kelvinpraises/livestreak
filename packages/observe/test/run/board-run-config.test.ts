@@ -9,6 +9,8 @@ import type { Board } from "#run/control/board/index.js";
  * transport, and that missing prerequisites fail with operator-facing messages.
  */
 
+// Family board: one observation, its cells carrying the pipeline state the config derives from.
+const OBS = "obs-test";
 const boardWith = (over: {
   capturePath?: string;
   publish?: string;
@@ -18,9 +20,20 @@ const boardWith = (over: {
     revision: 1,
     catalogVersion: "0.1.0",
     cells: {
-      "capture:file": { settings: over.capturePath === undefined ? {} : { path: over.capturePath } },
-      "system:config": { readonly: over.publish === undefined ? {} : { publish: over.publish } },
-      market: { readonly: over.marketId === undefined ? {} : { marketId: over.marketId } }
+      "system:config": {
+        readonly: {
+          observations: { [OBS]: { title: "Test", chain: "eip155:31337", createdAtMs: 1 } }
+        }
+      },
+      [`obs:${OBS}:capture`]: {
+        settings: over.capturePath === undefined ? {} : { path: over.capturePath }
+      },
+      [`obs:${OBS}:publish`]: {
+        readonly: over.publish === undefined ? {} : { kind: over.publish }
+      },
+      [`obs:${OBS}:market`]: {
+        readonly: over.marketId === undefined ? {} : { marketId: over.marketId }
+      }
     }
   }) as unknown as Board;
 

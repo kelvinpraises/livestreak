@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { runCellIdOf } from "#run/control/board/model.js";
 import { Effect, Exit } from "effect";
 import { Address } from "@livestreak/schema";
 import { buildControlCatalog } from "#run/control/index.js";
@@ -121,7 +122,7 @@ describe("market registration lifecycle", () => {
     if (Exit.isSuccess(exit)) {
       expect(exit.value.cells["market"]?.status[0]).toBe("failed");
       expect(exit.value.cells["market"]?.readonly).toMatchObject({ phase: "paymaster" });
-      expect(exit.value.cells["system:run"]?.status[0]).toBe("created");
+      expect(exit.value.cells[runCellIdOf(exit.value) ?? "system:run"]?.status[0]).toBe("created");
     }
   });
 

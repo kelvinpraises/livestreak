@@ -36,4 +36,10 @@ export interface OptionsLane {
    *  now) − resolvedAt)), refundable via withdraw. 0 on an open lane. Each chain reader fills it. */
   readonly overstreamClaimable?: bigint;
   readonly won?: boolean;
+  /** True when the vault has RESOLVED but its pot has not been `collect`ed yet — in that window the
+   *  on-chain `claimable` view returns 0 BY DESIGN ("the pot is final only after collect"), so a winner
+   *  would otherwise read as having nothing to claim. `collect` is permissionless and is settleVault's
+   *  own first step, so the UI must arm Cash out on `won && collectPending` instead of showing a
+   *  false "claimed" state. Undefined ⇒ reader can't observe it (or vault not resolved). */
+  readonly collectPending?: boolean;
 }

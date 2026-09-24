@@ -59,9 +59,7 @@ COPY packages/contracts ./packages/contracts
 COPY packages/host ./packages/host
 COPY packages/options ./packages/options
 COPY packages/wallet ./packages/wallet
-RUN npm run build -w @livestreak/core -w @livestreak/schema -w @livestreak/wallet \
- && npm run build:ts -w @livestreak/contracts \
- && npm run build -w @livestreak/host -w @livestreak/options
+RUN npm run build:packages:image
 
 # 4) App source + build. Public config (chain id, RPC/bundler/paymaster URLs,
 #    contract addresses) is committed in app/src/config/contracts.ts, so there are

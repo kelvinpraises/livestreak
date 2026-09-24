@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { runCellIdOf } from "#run/control/board/index.js";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import type { ControlCallEnvelope } from "#run/control/bus/index.js";
@@ -9,6 +10,7 @@ import type {
   ControlSurface
 } from "#run/control/bus/index.js";
 import { marketLifecyclePatch } from "#market/board.js";
+import { RECORDING_POINTER_KEY } from "#market/keys.js";
 import { createMarketRegistrar } from "#market/chains/index.js";
 import type {
   MarketFailurePhase,
@@ -18,7 +20,6 @@ import type {
   ObserveRunMarketConfig,
   StreamId
 } from "#market/types.js";
-import { readLiveConfigurators } from "#run/control/board/visibility.js";
 
 export const marketRegisterScope = "market:register" as const;
 export const marketGoLiveScope = "market:goLive" as const;
@@ -30,7 +31,13 @@ export interface MarketControlDeps {
   readonly resolveRegistrar?: (
     registration: ObserveRunMarketConfig
   ) => Effect.Effect<MarketRegistrar, LiveStreakError>;
+  /** Storage scheme used when a lifecycle call carries none. Config-sourced (never a literal in
+   *  logic) so a deployment on a different content substrate resolves its own. */
+  readonly defaultPointerScheme?: MarketStorageScheme;
 }
+
+/** Scheme of last resort: 0 = WalrusTestnet, the substrate the dev/e2e stack runs on. */
+const FALLBACK_POINTER_SCHEME: MarketStorageScheme = 0;
 
 export const createMarketControlSurface = (deps: MarketControlDeps = {}): ControlSurface => ({
   cell: {
@@ -81,12 +88,23 @@ const registerCall = (
   deps: MarketControlDeps
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.gen(function* () {
-    const title = yield* decodeRegisterPayload(envelope.payload);
+    const payloadTitle = yield* decodeRegisterPayload(envelope.payload);
+    const cellTitle = context.board.cells[context.cellId]?.readonly?.title;
+    const title =
+      payloadTitle.trim() !== ""
+        ? payloadTitle
+        : typeof cellTitle === "string"
+          ? cellTitle
+          : "";
     const runId = readRunId(context);
     const registration = yield* buildMarketConfig(deps, title);
     const registrar = yield* resolveRegistrar(deps, registration);
 
-    const result = yield* registrar.registerMarket({ runId, title }).pipe(
+    // The streamId (and so marketId = hash(observer, streamId)) derives from the registrar's
+    // runId — scope it PER OBSERVATION or two families would mint the SAME market.
+    const obsId = context.cellId.startsWith("obs:") ? context.cellId.split(":")[1] : undefined;
+    const familyRunId = obsId === undefined ? runId : `${runId}#${obsId}`;
+    const result = yield* registrar.registerMarket({ runId: familyRunId, title }).pipe(
       Effect.matchEffect({
         onFailure: (error) => Effect.succeed(failureFromError(error)),
         onSuccess: (registered) =>
@@ -107,7 +125,7 @@ const registerCall = (
       yield* notifyCatalogFailOpen(deps.sessionInit, result.marketId, registration.walletInit.chain);
     }
 
-    return { boardPatch: marketLifecyclePatch(result) };
+    return { boardPatch: marketLifecyclePatch(result, Date.now(), context.cellId) };
   });
 
 // Instant catalog ingest: a fresh market appears in the app catalog without waiting for the
@@ -133,7 +151,7 @@ const lifecycleCall = (
   phase: "goLive" | "setEnded"
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.gen(function* () {
-    const input = yield* decodeLifecyclePayload(envelope.payload, context);
+    const input = yield* decodeLifecyclePayload(envelope.payload, context, deps);
     const registration = yield* buildMarketConfig(deps, "");
     const registrar = yield* resolveRegistrar(deps, registration);
 
@@ -161,24 +179,17 @@ const lifecycleCall = (
             endedAtMs: Date.now()
           };
 
-    return { boardPatch: marketLifecyclePatch(lifecycle) };
+    return { boardPatch: marketLifecyclePatch(lifecycle, Date.now(), context.cellId) };
   });
 
 const closeCall = (
   context: ControlFunctionContext
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.sync(() => {
-    const live = readLiveConfigurators(context.board).filter((id) => id !== "observe.market");
-
     return {
       boardPatch: {
         cells: {
-          market: { remove: true },
-          "system:config": {
-            readonly: {
-              set: { liveConfigurators: live }
-            }
-          }
+          [context.cellId]: { remove: true }
         }
       }
     };
@@ -255,7 +266,8 @@ const buildMarketConfig = (
   });
 
 const readRunId = (context: ControlFunctionContext): string => {
-  const fromRun = context.board.cells["system:run"]?.readonly?.runId;
+  const runCellId = runCellIdOf(context.board);
+  const fromRun = runCellId === undefined ? undefined : context.board.cells[runCellId]?.readonly?.runId;
   if (typeof fromRun === "string" && fromRun.length > 0) {
     return fromRun;
   }
@@ -292,22 +304,34 @@ const decodeRegisterPayload = (
     return record.title.trim();
   });
 
+// The pointer and scheme are BOARD-DERIVED, never operator-typed — the same design-out the live
+// sink's streamId got (see sinks/live/commands.ts, board-run-config.ts). Derivation order:
+//
+//   pointer := explicit payload (pointerId | id)   — CLI, tests, Slice-2 tooling
+//           ?? board-saved recording pointer        — the Slice-2 seam; nothing writes it yet
+//           ?? the market cell's marketId sans 0x   — the honest formality
+//   scheme  := explicit payload ?? deps default ?? FALLBACK_POINTER_SCHEME
+//
+// Chain-agnostic on purpose: it sits ABOVE the per-chain registrar dispatch, and marketId is a
+// 0x-bytes32 on all three chains (keccak on Solana too, not a base58 pubkey), so `.slice(2)` is
+// exactly the 64 chars every registrar's 1..64 guard accepts.
 const decodeLifecyclePayload = (
   payload: unknown,
-  context: ControlFunctionContext
+  context: ControlFunctionContext,
+  deps: MarketControlDeps = {}
 ): Effect.Effect<
   { readonly marketId: StreamId; readonly scheme: MarketStorageScheme; readonly id: string },
   LiveStreakConfigError
 > =>
   Effect.gen(function* () {
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    if (payload !== undefined && (typeof payload !== "object" || payload === null || Array.isArray(payload))) {
       return yield* Effect.fail(
         new LiveStreakConfigError({ message: "market lifecycle payload must be an object" })
       );
     }
 
-    const record = payload as Record<string, unknown>;
-    const marketReadonly = context.board.cells.market?.readonly;
+    const record = (payload ?? {}) as Record<string, unknown>;
+    const marketReadonly = context.board.cells[context.cellId]?.readonly;
     const marketId =
       typeof record.marketId === "string"
         ? record.marketId
@@ -321,21 +345,42 @@ const decodeLifecyclePayload = (
       );
     }
 
-    const scheme = record.scheme;
+    const scheme = record.scheme ?? deps.defaultPointerScheme ?? FALLBACK_POINTER_SCHEME;
     if (scheme !== 0 && scheme !== 1 && scheme !== 2 && scheme !== 3) {
       return yield* Effect.fail(
         new LiveStreakConfigError({ message: "market lifecycle scheme must be 0..3" })
       );
     }
 
-    const pointer =
-      typeof record.pointerId === "string"
+    const explicitPointer =
+      typeof record.pointerId === "string" && record.pointerId.length > 0
         ? record.pointerId
-        : typeof record.id === "string"
+        : typeof record.id === "string" && record.id.length > 0
           ? record.id
           : undefined;
 
-    if (pointer === undefined || pointer.length === 0 || pointer.length > 64) {
+    // Slice-2 seam: the recording upload will save its blob id under RECORDING_POINTER_KEY and
+    // this reads it with no further change. Nothing writes the key today — do not build upload
+    // logic for it. The key is a shared constant (market/keys.ts) so the future writer cannot
+    // pick a different literal and leave this silently falling back to the formality.
+    const recorded = marketReadonly?.[RECORDING_POINTER_KEY];
+    const recordedPointer = typeof recorded === "string" && recorded.length > 0 ? recorded : undefined;
+
+    const derivedPointer = marketId.slice(2);
+    const pointer = explicitPointer ?? recordedPointer ?? derivedPointer;
+
+    // Guard the formality branch only: an explicit or recorded pointer is legitimately any 1..64
+    // bytes, but the marketId-derived one must be a full bytes32 body. If a chain ever mints a
+    // native-address marketId this fails loudly instead of emitting a short/long pointer.
+    if (explicitPointer === undefined && recordedPointer === undefined && derivedPointer.length !== 64) {
+      return yield* Effect.fail(
+        new LiveStreakConfigError({
+          message: `market lifecycle derived pointer must be exactly 64 chars, got ${derivedPointer.length} from marketId ${marketId}`
+        })
+      );
+    }
+
+    if (pointer.length === 0 || pointer.length > 64) {
       return yield* Effect.fail(
         new LiveStreakConfigError({ message: "market lifecycle pointer id must be 1..64 bytes" })
       );
@@ -396,47 +441,19 @@ export const marketCatalogFunctions = (): Readonly<
       ]
     }
   },
+  // No `input`: the pointer and scheme are board-derived (see decodeLifecyclePayload), so the
+  // console renders these as plain rows with nothing to type. An explicit payload still wins.
   goLive: {
     scope: marketGoLiveScope,
     label: "Go live",
-    description: "Transition the registered market to live with a storage pointer.",
-    result: "patch",
-    input: {
-      type: "object",
-      properties: [
-        {
-          name: "scheme",
-          value: { type: "integer", description: "StorageScheme enum (0..3).", required: true },
-          help: "0=WalrusTestnet, 1=WalrusMainnet, 2=Ipfs, 3=Arweave"
-        },
-        {
-          name: "pointerId",
-          value: { type: "string", description: "Storage pointer id (1..64 bytes).", required: true },
-          help: "Walrus blob id or IPFS CID fragment."
-        }
-      ]
-    }
+    description: "Transition the registered market to live. The storage pointer is board-derived.",
+    result: "patch"
   },
   setEnded: {
     scope: marketSetEndedScope,
     label: "Set ended",
-    description: "Mark the market stream as ended on-chain.",
-    result: "patch",
-    input: {
-      type: "object",
-      properties: [
-        {
-          name: "scheme",
-          value: { type: "integer", description: "StorageScheme enum (0..3).", required: true },
-          help: "Must match goLive pointer scheme."
-        },
-        {
-          name: "pointerId",
-          value: { type: "string", description: "Final storage pointer id.", required: true },
-          help: "Pointer recorded when the stream ended."
-        }
-      ]
-    }
+    description: "Mark the market stream as ended on-chain. The storage pointer is board-derived.",
+    result: "patch"
   },
   close: {
     scope: marketCloseScope,

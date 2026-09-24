@@ -37,15 +37,14 @@ export const createInitialBoard = (input: CreateInitialBoardInput): Board => {
     catalogVersion: "0.1.0",
     cells: {
       "system:config": {
-        label: "Config",
+        label: "Session",
         catalog: "system:config",
         status: ["idle", null, nowMs],
         settings: {},
         readonly: {
-          runId: input.runId,
-          liveConfigurators: ["observe.system.config"]
+          runId: input.runId
         },
-        functions: ["configure", "close"]
+        functions: ["configure", "close", "remove", "publishKind"]
       }
     }
   };
@@ -56,14 +55,67 @@ export const incrementBoardRevision = (board: Board): Board => ({
   revision: board.revision + 1
 });
 
+/** The board's active run cell. Families key run cells obs:<id>:run; the kernel drives one run,
+ *  so resolution prefers a runId match, then the sole family, then the legacy id. */
+export const runCellIdOf = (board: Board, runId?: string, obsId?: string): string | undefined => {
+  if (obsId !== undefined) {
+    const direct = `obs:${obsId}:run`;
+    return board.cells[direct] !== undefined ? direct : undefined;
+  }
+  const familyIds = Object.keys(board.cells).filter(
+    (id) => id.startsWith("obs:") && id.endsWith(":run")
+  );
+  if (runId !== undefined) {
+    const match = familyIds.find((id) => board.cells[id]?.readonly?.runId === runId);
+    if (match !== undefined) {
+      return match;
+    }
+  }
+  if (familyIds.length === 1) {
+    return familyIds[0];
+  }
+  if (board.cells["system:run"] !== undefined) {
+    return "system:run";
+  }
+  return familyIds[0];
+};
+
+/** The board's active pause cell — same resolution rules as the run cell. */
+export const pauseCellIdOf = (board: Board, runId?: string, obsId?: string): string | undefined => {
+  if (obsId !== undefined) {
+    const direct = `obs:${obsId}:pause`;
+    return board.cells[direct] !== undefined ? direct : undefined;
+  }
+  const familyIds = Object.keys(board.cells).filter(
+    (id) => id.startsWith("obs:") && id.endsWith(":pause")
+  );
+  if (runId !== undefined) {
+    const runCellId = runCellIdOf(board, runId);
+    const obsPrefix = runCellId?.startsWith("obs:") === true ? runCellId.slice(0, -":run".length) : undefined;
+    const match = obsPrefix === undefined ? undefined : familyIds.find((id) => id.startsWith(obsPrefix));
+    if (match !== undefined) {
+      return match;
+    }
+  }
+  if (familyIds.length === 1) {
+    return familyIds[0];
+  }
+  if (board.cells["system:pause"] !== undefined) {
+    return "system:pause";
+  }
+  return familyIds[0];
+};
+
 export const setBoardRunStatus = (
   board: Board,
   status: BoardRunStatus,
   message: string | null = null,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  obsId?: string
 ): Board => {
-  const runCell = board.cells["system:run"];
-  if (runCell === undefined) {
+  const runCellId = runCellIdOf(board, undefined, obsId);
+  const runCell = runCellId === undefined ? undefined : board.cells[runCellId];
+  if (runCellId === undefined || runCell === undefined) {
     return board;
   }
 
@@ -71,7 +123,7 @@ export const setBoardRunStatus = (
     ...board,
     cells: {
       ...board.cells,
-      "system:run": {
+      [runCellId]: {
         ...runCell,
         status: [status, message, nowMs]
       }
@@ -80,9 +132,10 @@ export const setBoardRunStatus = (
 };
 
 /** Consume a stale stop request so a restarted run does not inherit the previous cycle's stop command. */
-export const clearBoardRunStopRequest = (board: Board): Board => {
-  const runCell = board.cells["system:run"];
-  if (runCell?.settings?.stopRequested !== true) {
+export const clearBoardRunStopRequest = (board: Board, obsId?: string): Board => {
+  const runCellId = runCellIdOf(board, undefined, obsId);
+  const runCell = runCellId === undefined ? undefined : board.cells[runCellId];
+  if (runCellId === undefined || runCell?.settings?.stopRequested !== true) {
     return board;
   }
 
@@ -92,7 +145,7 @@ export const clearBoardRunStopRequest = (board: Board): Board => {
     ...board,
     cells: {
       ...board.cells,
-      "system:run": {
+      [runCellId]: {
         ...runCell,
         settings: { ...settings, stopRequested: false }
       }
@@ -101,18 +154,21 @@ export const clearBoardRunStopRequest = (board: Board): Board => {
 };
 
 /** Read the run cell's prepared flag; undefined when the run cell (or flag) isn't on the board. */
-export const readBoardRunPrepared = (board: Board): boolean | undefined => {
-  const prepared = board.cells["system:run"]?.readonly?.prepared;
+export const readBoardRunPrepared = (board: Board, obsId?: string): boolean | undefined => {
+  const runCellId = runCellIdOf(board, undefined, obsId);
+  const prepared = runCellId === undefined ? undefined : board.cells[runCellId]?.readonly?.prepared;
   return typeof prepared === "boolean" ? prepared : undefined;
 };
 
 export const setBoardRunPrepared = (
   board: Board,
   prepared: boolean,
-  manifestId?: string
+  manifestId?: string,
+  obsId?: string
 ): Board => {
-  const runCell = board.cells["system:run"];
-  if (runCell === undefined) {
+  const runCellId = runCellIdOf(board, undefined, obsId);
+  const runCell = runCellId === undefined ? undefined : board.cells[runCellId];
+  if (runCellId === undefined || runCell === undefined) {
     return board;
   }
 
@@ -127,7 +183,7 @@ export const setBoardRunPrepared = (
     ...board,
     cells: {
       ...board.cells,
-      "system:run": {
+      [runCellId]: {
         ...runCell,
         readonly
       }

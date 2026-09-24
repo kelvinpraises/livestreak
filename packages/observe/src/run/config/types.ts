@@ -14,6 +14,8 @@ export interface ObserveRunProcessConfig {
 
 export interface ObserveRunConfig {
   readonly runId: string;
+  /** The observation this run drives. Absent on legacy code-first runs (single family). */
+  readonly obsId?: string;
   readonly capture: ObserveRunStageConfig;
   readonly sink: ObserveRunSinkConfig;
   readonly process: null | ObserveRunProcessConfig;

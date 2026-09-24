@@ -21,8 +21,12 @@ import {
   type BridgeCaller,
   type ObserveRuntime
 } from "#index.js";
-import { readBoardRunPrepared, type Board } from "#run/control/board/index.js";
-import { systemConfigConfigureScope } from "#run/control/system/config.js";
+import { readBoardRunPrepared, runCellIdOf, type Board } from "#run/control/board/index.js";
+import {
+  observationCellId,
+  readObservationIndex,
+  systemConfigConfigureScope
+} from "#run/control/system/config.js";
 import { fileCaptureConfigureScope } from "#pipeline/capture/file/commands.js";
 import { liveSinkConfigureScope } from "#pipeline/publish/sinks/live/commands.js";
 import { marketRegisterScope } from "#market/control.js";
@@ -32,6 +36,7 @@ import {
 } from "#test/helpers/fake-market-registrar.js";
 
 const capturePath = "/tmp/livestreak-prepared-derivation/capture.mp4";
+const capturePathV2 = "/tmp/livestreak-prepared-derivation/capture-v2.mp4";
 const hostBaseUrl = "http://127.0.0.1:8787";
 const trustedCaller: BridgeCaller = { id: "trusted-local", trusted: true };
 
@@ -51,6 +56,7 @@ const sessionInit = {
 beforeAll(async () => {
   await mkdir("/tmp/livestreak-prepared-derivation", { recursive: true });
   await writeFile(capturePath, "stub"); // validate() only checks readability; decode happens at start
+  await writeFile(capturePathV2, "stub");
 });
 
 // Console-shaped runtime: shell run + T0 bus (with a fake market registrar) in the store —
@@ -76,24 +82,47 @@ const openConsoleRuntime = (
     return runtime;
   });
 
+let callSeq = 0;
 const call = (
   runtime: ObserveRuntime,
   runId: string,
   scope: string,
-  payload: Record<string, unknown>
-) => runtime.callFunction({ callId: `${scope}-${payload.streamId ?? "x"}`, runId, scope, payload });
+  payload: Record<string, unknown>,
+  cellId?: string
+) =>
+  runtime.callFunction({
+    callId: `${scope}-${++callSeq}`,
+    runId,
+    ...(cellId === undefined ? {} : { cellId }),
+    scope,
+    payload
+  });
+
+const addObservation = (runtime: ObserveRuntime, runId: string) =>
+  Effect.gen(function* () {
+    yield* call(runtime, runId, systemConfigConfigureScope, {
+      title: "demo",
+      chain: "eip155:31337"
+    });
+    const board = yield* runtime.readBoard(runId);
+    return Object.keys(readObservationIndex(board))[0]!;
+  });
 
 const configureLivePermutation = (runtime: ObserveRuntime, runId: string) =>
   Effect.gen(function* () {
-    yield* call(runtime, runId, systemConfigConfigureScope, {
-      chain: "eip155:31337",
-      capture: "file",
-      process: null,
-      publish: "live"
-    });
-    yield* call(runtime, runId, liveSinkConfigureScope, { streamId: "stream-v1" });
-    yield* call(runtime, runId, fileCaptureConfigureScope, { path: capturePath });
-    yield* call(runtime, runId, marketRegisterScope, { title: "demo" });
+    const obsId = yield* addObservation(runtime, runId);
+    // streamId is board-derived (obsId → streamId → marketId) — configure carries no fields.
+    yield* call(runtime, runId, liveSinkConfigureScope, {}, observationCellId(obsId, "publish"));
+    yield* call(
+      runtime,
+      runId,
+      fileCaptureConfigureScope,
+      { path: capturePath },
+      observationCellId(obsId, "capture")
+    );
+    // Register takes NO title — the board carries it from Add observation.
+    yield* call(runtime, runId, marketRegisterScope, {}, observationCellId(obsId, "market"));
+    return obsId;
   });
 
 describe("prepared is a disposable derivation of the board", () => {
@@ -106,7 +135,7 @@ describe("prepared is a disposable derivation of the board", () => {
           const seen: Board[] = [];
           yield* runtime.subscribeBoard(runId, (board) => seen.push(board));
 
-          yield* configureLivePermutation(runtime, runId);
+          const obsId = yield* configureLivePermutation(runtime, runId);
           const busBefore = (yield* runtime.store.require(runId)).bus;
 
           const prepared = yield* runtime.prepareConfiguredRun(runId, { hostBaseUrl });
@@ -114,12 +143,25 @@ describe("prepared is a disposable derivation of the board", () => {
           // Same bus object — prepare derived on the run's live bus instead of replacing it.
           expect(prepared.bus).toBe(busBefore);
           // The subscription (bound pre-prepare) observed the prepared status — no severed rail.
-          expect(seen.some((b) => b.cells["system:run"]?.status[0] === "prepared")).toBe(true);
+          expect(
+            seen.some((b) => {
+              const id = runCellIdOf(b);
+              return id !== undefined && b.cells[id]?.status[0] === "prepared";
+            })
+          ).toBe(true);
 
           // Reconfigure AFTER prepare: the configurator must still be live on the bus.
-          yield* call(runtime, runId, liveSinkConfigureScope, { streamId: "stream-v2" });
+          yield* call(
+            runtime,
+            runId,
+            fileCaptureConfigureScope,
+            { path: capturePathV2 },
+            observationCellId(obsId, "capture")
+          );
           const board = yield* runtime.readBoard(runId);
-          expect(board.cells["sink:live"]?.settings?.streamId).toBe("stream-v2");
+          expect(board.cells[observationCellId(obsId, "capture")]?.settings?.path).toBe(
+            capturePathV2
+          );
           return true;
         })
       )
@@ -133,21 +175,27 @@ describe("prepared is a disposable derivation of the board", () => {
       Effect.scoped(
         Effect.gen(function* () {
           const runtime = yield* openConsoleRuntime(runId);
-          yield* configureLivePermutation(runtime, runId);
+          const obsId = yield* configureLivePermutation(runtime, runId);
           yield* runtime.prepareConfiguredRun(runId, { hostBaseUrl });
 
-          yield* call(runtime, runId, liveSinkConfigureScope, { streamId: "stream-v2" });
+          yield* call(
+            runtime,
+            runId,
+            fileCaptureConfigureScope,
+            { path: capturePathV2 },
+            observationCellId(obsId, "capture")
+          );
           const demoted = yield* runtime.readBoard(runId);
+          const demotedRunId = runCellIdOf(demoted)!;
           expect(readBoardRunPrepared(demoted)).toBe(false);
-          expect(demoted.cells["system:run"]?.status[0]).toBe("created");
-          expect(demoted.cells["system:run"]?.status[1]).toContain("re-prepare");
+          expect(demoted.cells[demotedRunId]?.status[0]).toBe("created");
+          expect(demoted.cells[demotedRunId]?.status[1]).toContain("re-prepare");
 
           const reprepared = yield* runtime.prepareConfiguredRun(runId, { hostBaseUrl });
           expect(reprepared.prepared).toBe(true);
-          // The market cell owns the live streamId (streamId := marketId), so pin the sink
-          // settings path instead: the re-derived board carries the v2 sink config.
+          // The re-derived config carries the NEW capture path — prepare read the changed board.
+          expect((reprepared.config.capture.config as { path?: string }).path).toBe(capturePathV2);
           const board = yield* runtime.readBoard(runId);
-          expect(board.cells["sink:live"]?.settings?.streamId).toBe("stream-v2");
           expect(readBoardRunPrepared(board)).toBe(true);
           return true;
         })
@@ -163,21 +211,16 @@ describe("prepared is a disposable derivation of the board", () => {
         Effect.gen(function* () {
           const runtime = yield* openConsoleRuntime(runId);
           const bridge = createObserveBridge({ runtime, sessionInit, hostBaseUrl });
-          // Configure the permutation but do NOT register a market and do NOT prepare: start's
-          // auto-prepare must run and surface prepare's own gate error.
-          yield* call(runtime, runId, systemConfigConfigureScope, {
-            chain: "eip155:31337",
-            capture: "file",
-            process: null,
-            publish: "live"
-          });
-          yield* call(runtime, runId, liveSinkConfigureScope, { streamId: "stream-v1" });
-          yield* call(runtime, runId, fileCaptureConfigureScope, { path: capturePath });
+          // Add the observation but leave the CAPTURE unset and do NOT prepare: start's
+          // auto-prepare must run and surface prepare's own gate error. (Registration is
+          // auto-satisfied at prepare now — the capture gate is the first real one.)
+          const obsId = yield* addObservation(runtime, runId);
+          yield* call(runtime, runId, liveSinkConfigureScope, {}, observationCellId(obsId, "publish"));
 
           return yield* bridge.callConsoleAction({
             caller: trustedCaller,
             runId,
-            id: "observe.system.run.start",
+            id: `observe.obs.${obsId}.run.start`,
             action: "start",
             args: {}
           });
@@ -190,7 +233,7 @@ describe("prepared is a disposable derivation of the board", () => {
       const message = String(exit.cause);
       // The auto-prepare path ran runConfigFromBoard (its gate fired) — the operator never sees
       // the dead-end "must be prepared before start".
-      expect(message).toContain("Register a market");
+      expect(message).toContain("capture media file");
       expect(message).not.toContain("must be prepared");
     }
   });

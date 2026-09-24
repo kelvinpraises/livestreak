@@ -9,7 +9,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "dev": "tsx src/main.ts",
+    "dev": "NODE_OPTIONS=--conditions=livestreak-dev tsx watch src/main.ts",
     "start": "node dist/main.js"
   },
   "dependencies": {

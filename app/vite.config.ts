@@ -114,20 +114,20 @@ const config = defineConfig({
     },
   },
   optimizeDeps: {
-    include: ['@livestreak/options'],
-    // Keep @livestreak/contracts OUT of esbuild pre-bundling. Its solana barrel's
-    // engine-wasm reader loads the WASM via `new URL("./wasm/…_bg.wasm",
-    // import.meta.url)`; esbuild pre-bundling flattens that module and silently
-    // breaks the asset URL (same class of bug as the options pre-bundle staleness
-    // incident). Excluded, the module is served as-is so `import.meta.url` points at
-    // its real workspace location and the .wasm resolves. This matters even before
-    // A1 imports the barrel directly, because @livestreak/options (pre-bundled via
-    // `include` above) already imports @livestreak/contracts/solana; without this
-    // exclude esbuild would follow that edge and pre-bundle the wasm URL too.
-    // Dev-server file access to packages/contracts/dist needs no fs.allow entry:
-    // vite's default workspace-root detection resolves to the repo root (the dir
-    // with package-lock.json), which already contains packages/contracts.
-    exclude: ['@livestreak/contracts'],
+    // Both workspace packages the app imports are served UNBUNDLED (from their dist), never esbuild
+    // pre-bundled. @livestreak/options used to sit in `include`, which forced a re-bundle on every
+    // dist rebuild — the "options pre-bundle staleness incident" that dev.sh papered over with
+    // `--force`. Excluding it retires that workaround: dev serves packages/options/dist/*.js directly,
+    // so a package rebuild is picked up with no forced re-optimize (schema and host already resolve
+    // this way). @livestreak/contracts stays excluded for a second, independent reason: its solana
+    // barrel's engine-wasm reader loads the WASM via `new URL("./wasm/…_bg.wasm", import.meta.url)`,
+    // and esbuild pre-bundling flattens that module and silently breaks the asset URL. Served as-is,
+    // `import.meta.url` points at its real workspace location and the .wasm resolves — and since
+    // options (which imports @livestreak/contracts/solana) is no longer pre-bundled, nothing drags
+    // the wasm edge into esbuild either. Dev-server file access to packages/*/dist needs no fs.allow
+    // entry: vite's default workspace-root detection resolves to the repo root (the dir with
+    // package-lock.json), which already contains the workspace packages.
+    exclude: ['@livestreak/options', '@livestreak/contracts'],
   },
   plugins: [
     nodePolyfillShimResolver(),

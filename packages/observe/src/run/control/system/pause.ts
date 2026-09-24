@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { pauseCellIdOf } from "#run/control/board/model.js";
 import { LiveStreakConfigError, type LiveStreakError } from "@livestreak/core";
 import type { ControlCallEnvelope } from "#run/control/bus/index.js";
 import type {
@@ -60,24 +61,24 @@ const setPresentationFunctionEntry = (): ControlFunctionEntry => ({
 });
 
 const pauseCall = (_envelope: ControlCallEnvelope, context: ControlFunctionContext) => {
-  const settings = context.board.cells["system:pause"]?.settings ?? {};
+  const settings = context.board.cells[context.cellId]?.settings ?? {};
   if (settings.requested === true) {
     return Effect.succeed({ boardPatch: {} });
   }
 
   return Effect.succeed({
-    boardPatch: pauseRequestedPatch(true)
+    boardPatch: pauseRequestedPatch(context.cellId, true)
   });
 };
 
 const resumeCall = (_envelope: ControlCallEnvelope, context: ControlFunctionContext) => {
-  const settings = context.board.cells["system:pause"]?.settings ?? {};
+  const settings = context.board.cells[context.cellId]?.settings ?? {};
   if (settings.requested !== true) {
     return Effect.succeed({ boardPatch: {} });
   }
 
   return Effect.succeed({
-    boardPatch: pauseRequestedPatch(false)
+    boardPatch: pauseRequestedPatch(context.cellId, false)
   });
 };
 
@@ -86,7 +87,7 @@ const setPresentationCall = (
   context: ControlFunctionContext
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.gen(function* () {
-    const pauseSettings = context.board.cells["system:pause"]?.settings ?? {};
+    const pauseSettings = context.board.cells[context.cellId]?.settings ?? {};
     if (pauseSettings.requested === true) {
       return yield* Effect.fail(
         new LiveStreakConfigError({
@@ -95,7 +96,10 @@ const setPresentationCall = (
       );
     }
 
-    const currentView = projectWorkerControlView(context.board);
+    const currentView = projectWorkerControlView(
+      context.board,
+      context.cellId.startsWith("obs:") ? context.cellId.split(":")[1] : undefined
+    );
     const patch = yield* decodePausePresentationPayload(envelope.payload);
     const merged = mergePausePresentation(currentView.pause, patch);
     yield* validateMergedPresentation(merged);
@@ -110,7 +114,7 @@ const setPresentationCall = (
     return {
       boardPatch: {
         cells: {
-          "system:pause": {
+          [context.cellId]: {
             settings: presentationToSettingsSectionPatch(merged)
           }
         }
@@ -118,9 +122,9 @@ const setPresentationCall = (
     };
   });
 
-const pauseRequestedPatch = (requested: boolean): BoardPatch => ({
+const pauseRequestedPatch = (cellId: string, requested: boolean): BoardPatch => ({
   cells: {
-    "system:pause": {
+    [cellId]: {
       settings: {
         set: { requested }
       }
@@ -271,6 +275,6 @@ const boardHasStaleSlateAssetId = (
     return false;
   }
 
-  const slateAssetId = board.cells["system:pause"]?.settings?.slateAssetId;
+  const slateAssetId = board.cells[pauseCellIdOf(board) ?? "system:pause"]?.settings?.slateAssetId;
   return typeof slateAssetId === "string" && slateAssetId.length > 0;
 };

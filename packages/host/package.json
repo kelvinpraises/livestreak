@@ -7,11 +7,12 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "livestreak-dev": "./src/index.ts",
       "import": "./dist/index.js"
     }
   },
   "imports": {
-    "#index.js": "./dist/index.js",
+    "#index.js": { "livestreak-dev": "./src/index.ts", "default": "./dist/index.js" },
     "#test/*": "./test/*"
   },
   "files": [

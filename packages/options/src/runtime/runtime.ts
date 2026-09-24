@@ -396,8 +396,25 @@ class OptionsRuntimeFacade implements OptionsRuntime {
   // The token's current full lane set for a setLanes rebuild: the runtime's OWN last write when the
   // polled snapshot hasn't caught up to it yet (Solana read-after-write lag), else the on-chain lanes.
   // This is what stops a second/third vault fund from wiping the first via full-replacement setLanes.
+  //
+  // Lanes whose vault reached a TERMINAL state (resolved/disputed) are dropped from the rebuild: once
+  // such a lane runs dry (maxEnd passes), MarketDriver.setLanes' run-dry revive routes it back through
+  // Vault.onFund, whose `Status.Open` gate reverts the whole call — bricking every top-up AND new bet
+  // on the NFT. Dropped, the driver diffs the lane as removed and settles it via Vault.onStop, which
+  // has no Open gate and banks against resolvedAt. Depleted lanes on OPEN vaults still re-assert per
+  // the existingLaneWrites note — this filter is terminal-vault-only.
   private currentLaneWrites(nft: OptionsNft): LaneWriteInput[] {
-    return this.pendingLaneWrites.get(nft.tokenId.toString()) ?? this.existingLaneWrites(nft);
+    const lanes =
+      this.pendingLaneWrites.get(nft.tokenId.toString()) ?? this.existingLaneWrites(nft);
+    const snapshot = this.store.readState().userSnapshot;
+    if (snapshot === undefined) return lanes;
+    const terminal = new Set(
+      snapshot.vaults
+        .filter((entry) => entry.vault.status === "resolved" || entry.vault.status === "disputed")
+        .map((entry) => entry.vault.vaultId.toString())
+    );
+    if (terminal.size === 0) return lanes;
+    return lanes.filter((lane) => !terminal.has(lane.vaultId.toString()));
   }
 
   private recordLaneWrites(tokenId: TokenId, lanes: readonly LaneWriteInput[]): void {

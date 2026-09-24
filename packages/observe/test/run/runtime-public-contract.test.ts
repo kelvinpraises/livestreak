@@ -113,7 +113,7 @@ describe("ObserveRuntime public contract", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      expect(exit.cause.toString()).toContain("No live surface advertises function scope");
+      expect(exit.cause.toString()).toContain("No live surface advertises");
     }
   });
 

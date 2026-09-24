@@ -49,11 +49,22 @@ export const loadPausedLanesPort = async (): Promise<PausedLanesPort> => {
   };
 };
 
-export const loadObserveBoardsPort = async (): Promise<ObserveBoardPersistencePort> => {
+// A gateway mounts exactly ONE runId per session, so the persisted file should hold exactly that one
+// board — not an archive. We prune to `activeRunId` on load: `initial` exposes only that runId (restore
+// reads initial[runId] anyway), and if the stored file carried any other runId we rewrite it once now,
+// so prior boots' orphan boards can't accumulate (one per boot, forever, otherwise).
+export const loadObserveBoardsPort = async (
+  activeRunId: string
+): Promise<ObserveBoardPersistencePort> => {
   const path = stateFilePath(OBSERVE_BOARDS_FILE);
-  const initial = await readStateFile<Record<string, Board>>(path);
+  const stored = await readStateFile<Record<string, Board>>(path);
   const write = makeChainedWriter(path, OBSERVE_BOARDS_FILE);
+  const savedBoard = stored?.[activeRunId];
+  const initial = savedBoard === undefined ? undefined : { [activeRunId]: savedBoard };
   const boards: Record<string, Board> = { ...(initial ?? {}) };
+  if (stored !== undefined && Object.keys(stored).some((id) => id !== activeRunId)) {
+    write(boards);
+  }
   return {
     ...(initial === undefined ? {} : { initial }),
     onChange: (runId, board) => {

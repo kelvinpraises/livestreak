@@ -1,4 +1,5 @@
 import path from "node:path";
+import { runCellIdOf } from "#run/control/board/model.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { Effect } from "effect";
@@ -55,7 +56,7 @@ const assertBrowserPassthroughResult = (
   captureFps: number
 ) => {
   expect(result.outcome).toBe("stopped");
-  expect(result.board.cells["system:run"]?.status[0]).toBe("stopped");
+  expect(result.board.cells[runCellIdOf(result.board) ?? "system:run"]?.status[0]).toBe("stopped");
   expect(result.outputUri).toBe(outputPath);
   expect(result.snapshot).toBeDefined();
   expect(result.snapshot!.sinks["file-export"]?.finalized).toBe(true);

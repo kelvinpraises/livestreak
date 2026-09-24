@@ -59,6 +59,8 @@ export interface Position {
   lossClaimed?: boolean
   /** There's still an unclaimed loss to mint here (earned > 0 AND not yet claimed) — feeds Cash out. */
   canClaimLoss?: boolean
+  /** Vault resolved but pot not yet collected — payout previews 0 by design; Cash out must still arm. */
+  collectPending?: boolean
   /** Overstream: USDC that streamed past resolution on this lane, refundable at cash-out (from the lane's
    *  `overstreamClaimableUSDC`). Only present when the stream ran past the result. */
   overstream?: number

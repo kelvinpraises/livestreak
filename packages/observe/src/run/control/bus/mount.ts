@@ -9,11 +9,19 @@ export interface MergeBoardCellOnSurfaceMountResult {
 
 export const mergeBoardCellOnSurfaceMount = (
   board: Board,
-  definition: ControlCellDefinition
+  definition: ControlCellDefinition,
+  options: { readonly allowCreate?: boolean } = {}
 ): MergeBoardCellOnSurfaceMountResult => {
   const existingCell = board.cells[definition.id];
 
   if (existingCell === undefined) {
+    // Configurator surfaces provide FUNCTIONS; boards own CELLS (one canonical surface serves
+    // every family cell), so surface mounting never mints ghost cells — the session cell exists
+    // from board creation, family cells from Add observation. Stage-cell mounting (the kernel
+    // attaching REAL capture/sink state) is the sanctioned creator and passes allowCreate.
+    if (options.allowCreate !== true && definition.id !== "system:config") {
+      return { board, changed: false };
+    }
     return {
       board: incrementBoardRevision({
         ...board,

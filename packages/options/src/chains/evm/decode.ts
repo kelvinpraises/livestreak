@@ -237,7 +237,8 @@ export const enrichLane = (
   winningSide?: OptionsVaultSide,
   overstreamClaimable?: bigint,
   lossClaimed?: boolean,
-  lossBasisUSDC?: bigint
+  lossBasisUSDC?: bigint,
+  collectPending?: boolean
 ): OptionsLane => ({
   ...lane,
   claimable,
@@ -245,7 +246,8 @@ export const enrichLane = (
   ...(overstreamClaimable === undefined ? {} : { overstreamClaimable }),
   ...(lossClaimed === undefined ? {} : { lossClaimed }),
   ...(lossBasisUSDC === undefined ? {} : { lossBasisUSDC }),
-  ...(winningSide === undefined ? {} : { won: lane.side === winningSide })
+  ...(winningSide === undefined ? {} : { won: lane.side === winningSide }),
+  ...(collectPending === undefined ? {} : { collectPending })
 });
 
 export type RawBoard = {

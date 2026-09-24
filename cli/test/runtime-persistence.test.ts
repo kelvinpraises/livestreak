@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { readStateFile, stateFilePath, writeStateFile } from "../src/gateway/state/file-store.js";
 import {
   loadIdempotencyPersistencePort,
+  loadObserveBoardsPort,
   loadPausedLanesPort
 } from "../src/gateway/state/runtime-persistence.js";
 
@@ -31,6 +32,17 @@ const readEventually = async <T>(path: string): Promise<T> => {
     await new Promise((r) => setTimeout(r, 10));
   }
   throw new Error(`state file never appeared: ${path}`);
+};
+
+// Poll until the file satisfies a predicate — the file may already exist with STALE content (a prune
+// rewrites it in place), so "exists" is not enough to observe the new state.
+const readUntil = async <T>(path: string, pred: (value: T) => boolean): Promise<T> => {
+  for (let i = 0; i < 50; i += 1) {
+    const value = await readStateFile<T>(path);
+    if (value !== undefined && pred(value)) return value;
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  throw new Error(`state file never satisfied predicate: ${path}`);
 };
 
 describe("gateway/state file-store", () => {
@@ -76,5 +88,65 @@ describe("paused-lanes persistence port (file-backed)", () => {
 
     const second = await loadPausedLanesPort();
     expect(second.initial).toEqual(lanes);
+  });
+});
+
+describe("observe boards persistence port (file-backed)", () => {
+  const boardsPath = (): string => stateFilePath("observe-boards.json");
+  const board = (marker: string): unknown => ({
+    revision: 3,
+    cells: {
+      "system:config": {
+        label: "Session",
+        catalog: "system:config",
+        status: ["idle", null, 0],
+        settings: { marker },
+        readonly: {},
+        functions: []
+      }
+    }
+  });
+
+  it("exposes initial only for the active runId and restores it", async () => {
+    await writeStateFile(boardsPath(), { "remote-A": board("A"), "remote-B": board("B") });
+    const port = await loadObserveBoardsPort("remote-A");
+    expect(port.initial).toEqual({ "remote-A": board("A") });
+  });
+
+  it("prunes prior boots' orphan boards on load — the file never becomes an archive", async () => {
+    // The §1.1 receipt: unpruned, observe-boards.json grew one orphan board per boot, forever.
+    await writeStateFile(boardsPath(), {
+      "remote-old-1": board("1"),
+      "remote-old-2": board("2"),
+      "remote-current": board("cur")
+    });
+    await loadObserveBoardsPort("remote-current");
+    const onDisk = await readUntil<Record<string, unknown>>(
+      boardsPath(),
+      (value) => Object.keys(value).length === 1
+    );
+    expect(Object.keys(onDisk)).toEqual(["remote-current"]);
+  });
+
+  it("has no initial when the active runId is absent, and still drops the stale orphan", async () => {
+    await writeStateFile(boardsPath(), { "remote-stale": board("s") });
+    const port = await loadObserveBoardsPort("remote-fresh");
+    expect(port.initial).toBeUndefined();
+    const onDisk = await readUntil<Record<string, unknown>>(
+      boardsPath(),
+      (value) => Object.keys(value).length === 0
+    );
+    expect(onDisk).toEqual({});
+  });
+
+  it("persists onChange and stringifies bigint cell settings (JSON has no bigint)", async () => {
+    const port = await loadObserveBoardsPort("remote-C");
+    expect(port.initial).toBeUndefined();
+    const withBigint = { revision: 1, cells: { x: { settings: { atomicUsdc: 42n } } } };
+    port.onChange?.("remote-C", withBigint as never);
+    const onDisk = await readEventually<Record<string, { cells: { x: { settings: { atomicUsdc: unknown } } } }>>(
+      boardsPath()
+    );
+    expect(onDisk["remote-C"]?.cells.x.settings.atomicUsdc).toBe("42");
   });
 });

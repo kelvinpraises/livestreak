@@ -712,6 +712,13 @@ const readNft = async (
         vault.outcome === "yes" ? "yes" : vault.outcome === "no" ? "no" : undefined;
       const resolvedAtSec =
         vault.timing.resolvedAtMs !== undefined ? Math.floor(vault.timing.resolvedAtMs / 1000) : 0;
+      // Pot-finalization state (resolved vaults only): `claimable` previews 0 until the permissionless
+      // `collect` runs (settleVault's own first step), so surface the window to the UI — a winner in it
+      // must see an armed Cash out, not a false "nothing to claim". See OptionsLane.collectPending.
+      const collectPending: boolean | undefined =
+        winningSide === undefined
+          ? undefined
+          : !(await call<boolean>(ctx, ctx.addresses.vault, ctx.abis.Vault, "collected", [vaultBytes]));
 
       for (const side of ["yes", "no"] as const) {
         const positionRaw = await call<unknown>(
@@ -759,7 +766,7 @@ const readNft = async (
           resolvedAtSec,
           nowSec
         );
-        lanes.push(enrichLane(mapped, claimable, lossClaimable, winningSide, overstream, lossClaimed, lossBasis));
+        lanes.push(enrichLane(mapped, claimable, lossClaimable, winningSide, overstream, lossClaimed, lossBasis, collectPending));
       }
     }
 

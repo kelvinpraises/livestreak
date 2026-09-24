@@ -16,13 +16,25 @@ export default function RootApp() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const isStreamPage = pathname.startsWith('/stream/')
   // Remote Bridge Console (P5) is a standalone, full-screen surface — it brings its
-  // own RemoteProvider + layout and needs no global nav/wallet chrome.
-  const isBarePage = isStreamPage || pathname.startsWith('/remote/')
+  // own RemoteProvider + layout and needs no global nav/wallet chrome. Covers /remote/<session>
+  // and the /remote-test bed, which must share the same root format.
+  const isRemotePage = pathname.startsWith('/remote')
+  const isBarePage = isStreamPage || isRemotePage
 
   return (
     <AppProviders>
       {isBarePage ? (
-        <Outlet />
+        isRemotePage ? (
+          // Remote console root: chrome-less, but with the app's grid backdrop.
+          <div style={{ minHeight: '100vh', background: 'var(--color-bg)', position: 'relative' }}>
+            <div className="grid-bg" />
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              <Outlet />
+            </div>
+          </div>
+        ) : (
+          <Outlet />
+        )
       ) : (
         <div style={{
           display: 'flex',

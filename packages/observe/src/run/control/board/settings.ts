@@ -1,6 +1,8 @@
 import { Effect } from "effect";
+import { pauseCellIdOf } from "./model.js";
 import { LiveStreakConfigError } from "@livestreak/core";
 import type { Board } from "#run/control/board/model.js";
+import { runCellIdOf } from "#run/control/board/model.js";
 import {
   assertPausePresentationValue,
   defaultCapturePausePresentation,
@@ -92,7 +94,8 @@ export const validateBoardSettings = (
 
 const validateSystemRunSettings = (board: Board): Effect.Effect<void, LiveStreakConfigError> =>
   Effect.gen(function* () {
-    const settings = board.cells["system:run"]?.settings;
+    const runCellId = runCellIdOf(board);
+    const settings = runCellId === undefined ? undefined : board.cells[runCellId]?.settings;
     if (settings === undefined) {
       return;
     }
@@ -113,7 +116,7 @@ const validateSystemRunSettings = (board: Board): Effect.Effect<void, LiveStreak
 
 const validateSystemPauseSettings = (board: Board): Effect.Effect<void, LiveStreakConfigError> =>
   Effect.gen(function* () {
-    const settings = board.cells["system:pause"]?.settings;
+    const settings = board.cells[pauseCellIdOf(board) ?? "system:pause"]?.settings;
     if (settings === undefined) {
       return;
     }
@@ -232,7 +235,7 @@ const validateCaptureBrowserSettings = (board: Board): Effect.Effect<void, LiveS
 const validateSinkCellSettings = (board: Board): Effect.Effect<void, LiveStreakConfigError> =>
   Effect.gen(function* () {
     for (const [cellId, cell] of Object.entries(board.cells)) {
-      if (!cellId.startsWith("sink:")) {
+      if (!(cell.catalog ?? cellId).startsWith("sink:")) {
         continue;
       }
 

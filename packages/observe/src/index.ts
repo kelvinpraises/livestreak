@@ -67,6 +67,8 @@ export {
 
 export {
   createInitialBoard,
+  pauseCellIdOf,
+  runCellIdOf,
   type Board,
   type BoardCell,
   type BoardCellId,
@@ -287,3 +289,6 @@ export type {
 
 export { observeRunStreamId } from "./market/index.js";
 export { createMarketControlSurface } from "./market/control.js";
+// The market cell key the lifecycle pointer is read from — exported so the Slice-2 writer binds
+// to the same literal as the reader instead of restating it.
+export { RECORDING_POINTER_KEY } from "./market/keys.js";

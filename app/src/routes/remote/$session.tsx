@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef } from 'react'
 import { RemoteProvider, useRemote } from '#/providers/remote-provider'
-import { RemoteConsole } from '#/components/template/remote-console'
+import { RemoteConsoleShell } from '#/components/template/remote-console-shell'
 
 // Password-gated Remote Bridge Console at /remote/<session> (P5). Opens leg B via
 // HostWssTransport against the host relay, redeems the session behind a password gate,
-// then renders auto-forms from the gateway's in-scope functions[].
+// then renders the Desk · Focus · Attention console over the gateway's in-scope functions[].
 export const Route = createFileRoute('/remote/$session')({
   component: RemoteConsolePage,
 })
@@ -54,7 +54,7 @@ function RemoteSessionGate({ session }: { readonly session: string }) {
   // Without this the console clips everything below the fold (board, revealed functions) with no scroll.
   return (
     <div style={{ height: '100vh', overflowY: 'auto' }}>
-      <RemoteConsole />
+      <RemoteConsoleShell />
     </div>
   )
 }

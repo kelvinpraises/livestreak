@@ -182,6 +182,7 @@ export function panelToPositions(panel: OptionsPanel, streamId?: string): Positi
         ...(lane.settlement?.lossUSDC ? { lossUSDC: lane.settlement.lossUSDC } : {}),
         ...(lane.settlement?.lossClaimed ? { lossClaimed: true } : {}),
         ...(lane.settlement?.canClaimLoss ? { canClaimLoss: true } : {}),
+        ...(lane.settlement?.collectPending ? { collectPending: true } : {}),
         ...(lane.settlement?.overstreamClaimableUSDC ? { overstream: lane.settlement.overstreamClaimableUSDC } : {}),
         minute: Math.max(0, Math.floor((Date.now() - vault.timing.createdAtMs) / 60_000)),
       })

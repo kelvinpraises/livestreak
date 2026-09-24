@@ -1,12 +1,12 @@
 // Canonical FunctionDescriptor projection for the Remote Bridge Console auto-UI (Objective 4, P1).
 //
-// Emits id, parentId, package, and visible flags derived from liveConfigurators on the board.
+// Emits id/package identity per cell function. Presence IS visibility: the controls view only
+// carries real cells (families are created whole, removed whole) — no reveal ladder.
 
 import type { FunctionDescriptor, JsonSchema, CapabilityScope } from "@livestreak/schema";
 import { bridgeActionScope, withDescriptorIdentity } from "@livestreak/schema";
 
 import type { Board } from "#run/control/board/model.js";
-import { isDescriptorVisibleForBoard } from "#run/control/board/visibility.js";
 import type { JsonSchema as ObserveJsonSchema } from "#run/control/catalog.js";
 import type { ControlFunctionView, ControlsView } from "./types.js";
 
@@ -36,7 +36,7 @@ const toDescriptor = (
 ): FunctionDescriptor => {
   const id = descriptorId(cell.id, fn.name);
   const parentId = parentConfiguratorId(cell.id);
-  const visible = board === undefined ? true : isDescriptorVisibleForBoard(id, board);
+  const visible = true;
 
   return withDescriptorIdentity(
     {

@@ -39,7 +39,7 @@ export const createConsoleEdges = async (input: {
   const [pausedLanes, idempotencyPersistence, observeBoards] = await Promise.all([
     loadPausedLanesPort(),
     loadIdempotencyPersistencePort(),
-    loadObserveBoardsPort()
+    loadObserveBoardsPort(input.runId)
   ]);
 
   const observeRuntime = (

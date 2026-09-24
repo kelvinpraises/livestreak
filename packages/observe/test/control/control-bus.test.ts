@@ -112,7 +112,7 @@ describe("control bus", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      expect(exit.cause.toString()).toContain("Duplicate live surface function scope");
+      expect(exit.cause.toString()).toContain("Duplicate function scope");
       expect(exit.cause.toString()).toContain("LiveStreakConfigError");
     }
   });
@@ -152,7 +152,7 @@ describe("control bus", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      expect(exit.cause.toString()).toContain("No live surface advertises function scope");
+      expect(exit.cause.toString()).toContain("No live surface advertises");
     }
   });
 

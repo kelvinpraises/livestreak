@@ -65,7 +65,7 @@ describe("browser capture controls", () => {
               scope: browserCaptureSetCropScope,
               payload: { x: 12, y: 24, width: 320, height: 180 }
             },
-            { boardRevision: 0, board: { revision: 0, catalogVersion: "0.1.0", cells: {} } }
+            { boardRevision: 0, board: { revision: 0, catalogVersion: "0.1.0", cells: {} }, cellId: "capture:browser" }
           );
           yield* setCaptureFps.call(
             {
@@ -74,7 +74,7 @@ describe("browser capture controls", () => {
               scope: browserCaptureSetCaptureFpsScope,
               payload: { captureFps: 15 }
             },
-            { boardRevision: 0, board: { revision: 0, catalogVersion: "0.1.0", cells: {} } }
+            { boardRevision: 0, board: { revision: 0, catalogVersion: "0.1.0", cells: {} }, cellId: "capture:browser" }
           );
 
           const frames = yield* source.frames.pipe(Stream.take(2), Stream.runCollect);
@@ -85,7 +85,7 @@ describe("browser capture controls", () => {
               scope: browserCaptureClearCropScope,
               payload: undefined
             },
-            { boardRevision: 0, board: { revision: 0, catalogVersion: "0.1.0", cells: {} } }
+            { boardRevision: 0, board: { revision: 0, catalogVersion: "0.1.0", cells: {} }, cellId: "capture:browser" }
           );
 
           return {

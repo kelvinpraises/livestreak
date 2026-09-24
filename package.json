@@ -20,7 +20,9 @@
     "postinstall": "patch-package --patch-dir packages/wallet/patches",
     "clean": "npm run clean --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
-    "build:packages": "npm run build --workspace=packages/schema --workspace=packages/core --workspace=packages/wallet --workspace=packages/observe --workspace=packages/options --workspace=packages/bookmaker --workspace=packages/steward",
+    "build:packages": "npm run build --workspace=packages/schema --workspace=packages/core --workspace=packages/contracts --workspace=packages/wallet --workspace=packages/host --workspace=packages/observe --workspace=packages/options --workspace=packages/bookmaker --workspace=packages/steward",
+    "build:packages:ts": "npm run build --workspace=packages/schema --workspace=packages/core && npm run build:ts --workspace=packages/contracts && npm run build --workspace=packages/wallet --workspace=packages/host --workspace=packages/observe --workspace=packages/options --workspace=packages/bookmaker --workspace=packages/steward",
+    "build:packages:image": "npm run build --workspace=packages/schema --workspace=packages/core && npm run build:ts --workspace=packages/contracts && npm run build --workspace=packages/wallet --workspace=packages/host --workspace=packages/options",
     "check": "npm run check --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present"

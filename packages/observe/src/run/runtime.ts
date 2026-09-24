@@ -18,6 +18,7 @@ import {
 } from "./kernel.js";
 import { makeObserveRun, type ObserveRun, type ObserveRunConfig } from "./run.js";
 import { runConfigFromBoard } from "./board-run-config.js";
+import { observationCellId, readObservationIndex } from "./control/system/config.js";
 import { createLiveSinkDriver } from "#pipeline/publish/sinks/live/driver.js";
 import { createDirectSinkDriver } from "#pipeline/publish/sinks/direct/driver.js";
 import {
@@ -63,12 +64,13 @@ export interface ObserveRuntime {
    */
   readonly prepareConfiguredRun: (
     runId: string,
-    options: { readonly hostBaseUrl: string }
+    options: { readonly hostBaseUrl: string; readonly obsId?: string }
   ) => Effect.Effect<ObserveRun, LiveStreakError>;
 
   readonly startRun: (
     runId: string,
-    options?: RuntimeKernelOptions
+    options?: RuntimeKernelOptions,
+    obsId?: string
   ) => Effect.Effect<ObserveRunHandle, LiveStreakError>;
 
   readonly listRuns: () => Effect.Effect<readonly ObserveRun[]>;
@@ -100,16 +102,22 @@ export interface ObserveRuntime {
     listener: (artifact: ControlArtifact) => void
   ) => Effect.Effect<ArtifactSubscription, LiveStreakError>;
 
-  readonly awaitRun: (runId: string) => Effect.Effect<ObserveRunResult, LiveStreakError>;
+  readonly awaitRun: (runId: string, obsId?: string) => Effect.Effect<ObserveRunResult, LiveStreakError>;
 
   readonly stopRun: (
     runId: string,
-    options?: StopRunOptions
+    options?: StopRunOptions,
+    obsId?: string
   ) => Effect.Effect<ObserveRunResult, LiveStreakError>;
 
   readonly removeRun: (runId: string) => Effect.Effect<void>;
   readonly removeHandle: (runId: string) => Effect.Effect<void>;
 }
+
+/** Per-observation run/handle addressing: the base bus entry lives at runId; each observation's
+ *  prepared run and worker handle live at runId#obsId. Legacy single-run flows keep the bare key. */
+const runKey = (runId: string, obsId?: string): string =>
+  obsId === undefined ? runId : `${runId}#${obsId}`;
 
 const mergeKernelOptions = (
   defaults: RuntimeKernelOptions | undefined,
@@ -141,9 +149,11 @@ const buildObserveRuntime = (
   };
 
   const runHooks: import("./control/system/run.js").SystemRunHooks = {
-    prepare: (runId: string) =>
+    prepare: (runId: string, obsId?: string) =>
       Effect.gen(function* () {
-        const run = yield* store.require(runId);
+        const key = runKey(runId, obsId);
+        const existing = yield* store.get(key);
+        const run = existing ?? (yield* store.require(runId));
         if (run.prepared === true && run.bus !== undefined) {
           return run;
         }
@@ -151,14 +161,19 @@ const buildObserveRuntime = (
           run,
           mergeKernelOptions(defaultKernelOptions, { sessionInit, runHooks })
         );
-        yield* store.replace(prepared);
+        yield* store.replace(prepared, key);
         return prepared;
       }),
-    start: (runId: string) =>
-      startRunEffect(store, scope, runId, mergeKernelOptions(defaultKernelOptions, { sessionInit, runHooks })),
-    await: (runId: string) =>
+    start: (runId: string, obsId?: string) =>
+      startRunEffect(
+        store,
+        scope,
+        runKey(runId, obsId),
+        mergeKernelOptions(defaultKernelOptions, { sessionInit, runHooks })
+      ),
+    await: (runId: string, obsId?: string) =>
       Effect.gen(function* () {
-        const handle = yield* store.requireHandle(runId);
+        const handle = yield* store.requireHandle(runKey(runId, obsId));
         return yield* handle.awaitResult();
       })
   };
@@ -180,15 +195,42 @@ const buildObserveRuntime = (
     prepareConfiguredRun: (runId, options) =>
       Effect.gen(function* () {
         const run = yield* store.require(runId);
+        // Resolve WHICH observation this prepare drives: the caller's, or the session's only one.
+        const boardForObs = yield* readStoredRunBoard(store, runId);
+        const index = readObservationIndex(boardForObs);
+        const obsId =
+          options.obsId ?? (Object.keys(index).length === 1 ? Object.keys(index)[0] : undefined);
+        const key = runKey(runId, obsId);
         // Re-preparing a finished run reclaims its terminal handle (so reads route to the fresh bus,
-        // not the dead run's); an ACTIVE run refuses re-prepare.
-        yield* reclaimTerminalRunHandle(store, runId);
+        // not the dead run's); an ACTIVE run of THIS observation refuses re-prepare. Other
+        // observations' runs are untouched — that is the whole point of the key.
+        yield* reclaimTerminalRunHandle(store, key);
+        // Prepare composes registration: an unregistered family market registers here, with the
+        // title saved at birth. Idempotent by board state — a registered market is skipped.
+        {
+          const marketCell =
+            obsId === undefined ? undefined : boardForObs.cells[observationCellId(obsId, "market")];
+          if (
+            obsId !== undefined &&
+            marketCell !== undefined &&
+            marketCell.readonly?.registrationState === "none"
+          ) {
+            yield* callStoredRunFunction(store, {
+              callId: `prepare-register-${runId}-${obsId}`,
+              runId,
+              cellId: observationCellId(obsId, "market"),
+              scope: "market:register",
+              payload: {}
+            });
+          }
+        }
         // Config derives from the BUS board (canonical) — the stored run's board copy can lag
         // behind configure calls that haven't been synced back yet.
         const config = yield* runConfigFromBoard({
           runId,
           board: yield* readStoredRunBoard(store, runId),
-          hostBaseUrl: options.hostBaseUrl
+          hostBaseUrl: options.hostBaseUrl,
+          ...(obsId === undefined ? {} : { obsId })
         });
         const sinkDriver = streamingSinkFor(config.sink.driverId);
         const prepared = yield* prepareObserveRun(
@@ -199,22 +241,25 @@ const buildObserveRuntime = (
             runHooks
           })
         );
-        yield* store.replace(prepared);
+        yield* store.replace(prepared, key);
         return prepared;
       }),
 
-    startRun: (runId, options) =>
+    startRun: (runId, options, obsId) =>
       Effect.gen(function* () {
         // Re-supply the injected streaming sink for a board-configured run (the kernel re-resolves the
         // driver at start). For every other sink, leave sinkDriver unset — writing an `undefined` key into
         // the overrides would clobber defaultKernelOptions.sinkDriver, so the kernel fails to resolve the
         // driver (e.g. the in-memory test sink) and the worker hangs.
-        const run = yield* store.require(runId);
+        const key = runKey(runId, obsId);
+        const run = yield* store.get(key).pipe(
+          Effect.flatMap((entry) => (entry !== undefined ? Effect.succeed(entry) : store.require(runId)))
+        );
         const streamingSink = streamingSinkFor(run.config.sink.driverId);
         return yield* startRunEffect(
           store,
           scope,
-          runId,
+          key,
           mergeKernelOptions(defaultKernelOptions, {
             ...options,
             ...(streamingSink === undefined ? {} : { sinkDriver: streamingSink }),
@@ -239,13 +284,13 @@ const buildObserveRuntime = (
 
     subscribeArtifacts: (runId, listener) => subscribeStoredRunArtifacts(store, runId, listener),
 
-    awaitRun: (runId) =>
+    awaitRun: (runId, obsId) =>
       Effect.gen(function* () {
-        const handle = yield* store.requireHandle(runId);
+        const handle = yield* store.requireHandle(runKey(runId, obsId));
         return yield* handle.awaitResult();
       }),
 
-    stopRun: (runId, options) => stopObserveRun(store, runId, options),
+    stopRun: (runId, options, obsId) => stopObserveRun(store, runId, options, obsId),
 
     removeRun: (runId) => store.remove(runId),
     removeHandle: (runId) => store.removeHandle(runId)
@@ -255,17 +300,17 @@ const buildObserveRuntime = (
 const startRunEffect = (
   store: RunStore,
   scope: Scope.Scope,
-  runId: string,
+  key: string,
   options: RuntimeKernelOptions
 ) =>
   Effect.gen(function* () {
-    yield* reclaimTerminalRunHandle(store, runId);
-    const run = yield* store.require(runId);
+    yield* reclaimTerminalRunHandle(store, key);
+    const run = yield* store.require(key);
     const handle = yield* startObserveRunAsync({
       run,
       options
     }).pipe(Effect.provideService(Scope.Scope, scope));
-    yield* store.putHandle(handle);
+    yield* store.putHandle(handle, key);
     return handle;
   });
 

@@ -61,12 +61,21 @@ export const createFakeMarketRegistrar = (
     })
 });
 
+// Mirrors the real registrar's contract: the market/stream ids are FUNCTIONS of the register
+// input's runId — two different (family-scoped) runIds must yield two different markets.
+const hexOf = (value: string, salt: string): `0x${string}` => {
+  const hex = Array.from(`${salt}:${value}`)
+    .map((c) => c.charCodeAt(0).toString(16).padStart(2, "0"))
+    .join("");
+  return `0x${hex.slice(0, 64).padEnd(64, "0")}` as `0x${string}`;
+};
+
 export const defaultFakeRegisterResult = (
   input: MarketRegisterInput
 ): MarketRegisterResult => ({
   userOpHash: "0xuserop",
-  marketId: "0x0000000000000000000000000000000000000000000000000000000000000001",
-  streamId: "0x00000000000000000000000000000000000000000000000000000000000000aa",
+  marketId: hexOf(input.runId, "m"),
+  streamId: hexOf(input.runId, "s"),
   title: input.title
 });
 

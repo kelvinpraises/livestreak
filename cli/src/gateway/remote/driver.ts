@@ -1,4 +1,3 @@
-import { defaultFileExportConfigure } from "@livestreak/observe";
 import { defaultSettingsPath, ensureSettings } from "../../prefs/settings.js";
 import { createRemoteUiClient, type RemoteDriveTarget, type RemoteUiClient } from "./ui-client.js";
 
@@ -35,17 +34,33 @@ export interface RemoteDriveResult {
   readonly steps: readonly RemoteDriveStep[];
 }
 
-export const readMarketIdFromBoard = (board: unknown): string | undefined => {
-  if (board === null || typeof board !== "object") {
+const boardCells = (board: unknown): Record<string, unknown> =>
+  board !== null && typeof board === "object"
+    ? ((board as { cells?: Record<string, unknown> }).cells ?? {})
+    : {};
+
+const cellReadonly = (cell: unknown): Record<string, unknown> =>
+  cell !== null && typeof cell === "object"
+    ? ((cell as { readonly?: Record<string, unknown> }).readonly ?? {})
+    : {};
+
+/** The newest observation on the family board (the one this drive just created). */
+export const readObservationIdFromBoard = (board: unknown): string | undefined => {
+  const config = boardCells(board)["system:config"];
+  const observations = cellReadonly(config).observations;
+  if (observations === null || typeof observations !== "object") {
     return undefined;
   }
-  const cells = (board as { cells?: Record<string, unknown> }).cells;
-  const market = cells?.market;
-  if (market === null || typeof market !== "object") {
-    return undefined;
-  }
-  const readonly = (market as { readonly?: Record<string, unknown> }).readonly;
-  const marketId = readonly?.marketId;
+  const entries = Object.entries(observations as Record<string, { createdAtMs?: number }>);
+  entries.sort((a, z) => (a[1]?.createdAtMs ?? 0) - (z[1]?.createdAtMs ?? 0));
+  return entries[entries.length - 1]?.[0];
+};
+
+export const readMarketIdFromBoard = (board: unknown, obsId?: string): string | undefined => {
+  const cells = boardCells(board);
+  const family = obsId ?? readObservationIdFromBoard(board);
+  const market = family !== undefined ? cells[`obs:${family}:market`] : cells.market;
+  const marketId = cellReadonly(market).marketId;
   return typeof marketId === "string" && marketId.length > 0 ? marketId : undefined;
 };
 
@@ -55,30 +70,44 @@ const runObserveLeg = async (
   title: string,
   record: (step: RemoteDriveStep) => void,
   publish?: "direct"
-): Promise<string> => {
-  const configureResult = await client.call(
-    "observe",
-    "configure",
-    publish === "direct"
-      ? { chain, capture: "file", process: null, publish: "direct" }
-      : defaultFileExportConfigure({ chain })
-  );
+): Promise<{ marketId: string; obsId: string | undefined }> => {
+  // Add observation: title + chain only — the board saves them; kinds live on the family cells.
+  const configureResult = await client.call("observe", "configure", { title, chain });
   record({ target: "observe", action: "configure", ok: configureResult.ok, error: configureResult.error });
   if (!configureResult.ok) {
     throw new Error(configureResult.error ?? "observe configure failed");
   }
 
-  const registerResult = await client.call("observe", "register", { title });
+  const obsId = readObservationIdFromBoard(client.boards().observe);
+  if (obsId === undefined) {
+    throw new Error("observation not found on observe board after configure");
+  }
+
+  if (publish === "direct") {
+    const kindResult = await client.call("observe", "publishKind", { obsId, kind: "direct" });
+    record({ target: "observe", action: "publishKind", ok: kindResult.ok, error: kindResult.error });
+    if (!kindResult.ok) {
+      throw new Error(kindResult.error ?? "observe publishKind failed");
+    }
+  }
+
+  // Register takes NO title — the board carries it from Add observation.
+  const registerResult = await client.call(
+    "observe",
+    "register",
+    {},
+    `observe.obs.${obsId}.market.register`
+  );
   record({ target: "observe", action: "register", ok: registerResult.ok, error: registerResult.error });
   if (!registerResult.ok) {
     throw new Error(registerResult.error ?? "observe register failed");
   }
 
-  const marketId = readMarketIdFromBoard(client.boards().observe);
+  const marketId = readMarketIdFromBoard(client.boards().observe, obsId);
   if (marketId === undefined) {
     throw new Error("marketId not found on observe board after register");
   }
-  return marketId;
+  return { marketId, obsId };
 };
 
 // --- direct video leg -------------------------------------------------------
@@ -151,7 +180,7 @@ const consumeDirectFrames = async (
 // that never transited the host.
 const runDirectVideoLeg = async (
   client: RemoteUiClient,
-  input: { marketId: string; videoPath: string; port?: number; hostBaseUrl: string },
+  input: { marketId: string; obsId: string; videoPath: string; port?: number; hostBaseUrl: string },
   record: (step: RemoteDriveStep) => void,
   log: (line: string) => void
 ): Promise<void> => {
@@ -168,7 +197,8 @@ const runDirectVideoLeg = async (
     }
   };
 
-  await step("captureConfigure", "configure", { path: input.videoPath }, "observe.capture.file.configure");
+  const family = (cell: string, fn: string): string => `observe.obs.${input.obsId}.${cell}.${fn}`;
+  await step("captureConfigure", "configure", { path: input.videoPath }, family("capture", "configure"));
   await step(
     "directConfigure",
     "configure",
@@ -177,10 +207,10 @@ const runDirectVideoLeg = async (
       reachability: "lan",
       ...(input.port === undefined ? {} : { port: input.port })
     },
-    "observe.sink.direct.configure"
+    family("publish", "configure")
   );
-  await step("prepare", "prepare", {}, "observe.system.run.prepare");
-  await step("start", "start", {}, "observe.system.run.start");
+  await step("prepare", "prepare", {}, family("run", "prepare"));
+  await step("start", "start", {}, family("run", "start"));
 
   try {
     const watchUrl = await pollDirectAnnounce(input.hostBaseUrl, input.marketId, 30_000);
@@ -198,7 +228,7 @@ const runDirectVideoLeg = async (
     throw cause;
   } finally {
     // Best-effort stop either way so the producer never outlives the drive.
-    const stop = await client.call("observe", "stop", {}, "observe.system.run.stop");
+    const stop = await client.call("observe", "stop", {}, family("run", "stop"));
     record({ target: "observe", action: "stop", ok: stop.ok, error: stop.error });
   }
 };
@@ -238,22 +268,28 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
     }
     const stewardLeg = stewardClient ?? client;
 
-    const marketId =
-      input.marketId ??
-      (await runObserveLeg(
-        client,
-        settings.defaultChain,
-        input.observeTitle ?? `remote-drive-${input.sessionId}`,
-        record,
-        input.directVideoPath === undefined ? undefined : "direct"
-      ));
+    const observed =
+      input.marketId !== undefined
+        ? { marketId: input.marketId, obsId: undefined }
+        : await runObserveLeg(
+            client,
+            settings.defaultChain,
+            input.observeTitle ?? `remote-drive-${input.sessionId}`,
+            record,
+            input.directVideoPath === undefined ? undefined : "direct"
+          );
+    const marketId = observed.marketId;
     log(`marketId: ${marketId}`);
 
     if (input.directVideoPath !== undefined) {
+      if (observed.obsId === undefined) {
+        throw new Error("direct video leg needs the observation this drive created");
+      }
       await runDirectVideoLeg(
         client,
         {
           marketId,
+          obsId: observed.obsId,
           videoPath: input.directVideoPath,
           ...(input.directPort === undefined ? {} : { port: input.directPort }),
           hostBaseUrl

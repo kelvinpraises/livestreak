@@ -1,17 +1,9 @@
 // Pristine-board OPERATOR FLOW — the regression guard for the live-operator remote console.
 //
-// This drives the SAME control surface the observe console edge wraps (createControlBus + the surfaces,
-// then projectControlPanelControls → projectObserveDescriptors, and bus.callFunction for dispatch) on a
-// pristine T0 board. It pins the invariant that following ONLY what the console renders leads to a
-// successful go-live derivation:
-//
-//   1. Every VISIBLE `configure` descriptor exposes the input fields its own validator demands — a form can
-//      supply them. (Catches the catalog-key regression where sink:file-export.configure lost its `path`
-//      field because the catalog is keyed by cell id but the projector looked up by cell.catalog.)
-//   2. Configure cells in ANY order — capture BEFORE sink — without hard-failing. (Catches the ≥1-sink
-//      "At least one sink policy is required" rule firing on every settings write and trapping the operator.)
-//   3. The full live sequence (system:config → sink:live → capture:file → market → prepare) derives a valid
-//      live run config via runConfigFromBoard, the console prepare gate — using only form-suppliable values.
+// Drives the SAME control surface the observe console edge wraps, on a pristine T0 board, in the
+// FAMILY world: Add observation (title + chain) mints the family, cell configures carry details,
+// register takes its title from the board, and the prepare gate derives a valid live run config
+// from ONLY what a rendered form could supply.
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
 import type { FunctionDescriptor } from "@livestreak/schema";
@@ -21,7 +13,12 @@ import type { ControlBus, ControlPanel } from "#run/control/bus/index.js";
 import { createInitialBoard, type Board } from "#run/control/board/index.js";
 import { createObserveControlSurfaces } from "#run/control/surfaces.js";
 import { projectControlPanelControls, projectObserveDescriptors } from "#bridge/panel/index.js";
-import { systemConfigConfigureScope } from "#run/control/system/config.js";
+import {
+  observationCellId,
+  observationPublishKindPatch,
+  readObservationIndex,
+  systemConfigConfigureScope
+} from "#run/control/system/config.js";
 import { fileCaptureConfigureScope } from "#pipeline/capture/file/commands.js";
 import { fileSinkConfigureScope } from "#pipeline/publish/sinks/file/commands.js";
 import { liveSinkConfigureScope } from "#pipeline/publish/sinks/live/commands.js";
@@ -63,7 +60,6 @@ const makeBus = (runId: string): Effect.Effect<ControlBus, unknown> =>
     })
   });
 
-// Descriptors the operator's console would render, built exactly like the edge's describeFunctions.
 const describeConsole = (bus: ControlBus): Effect.Effect<readonly FunctionDescriptor[], unknown> =>
   Effect.gen(function* () {
     const board: Board = yield* bus.readBoard();
@@ -78,13 +74,17 @@ const fieldNames = (descriptor: FunctionDescriptor | undefined): readonly string
     : []
   ).map((property) => property.name);
 
-const configure = (
-  bus: ControlBus,
-  callId: string,
-  runId: string,
-  scope: string,
-  payload: Record<string, unknown>
-) => bus.callFunction({ callId, runId, scope, payload });
+const addObservation = (bus: ControlBus, runId: string) =>
+  Effect.gen(function* () {
+    yield* bus.callFunction({
+      callId: `add-${runId}`,
+      runId,
+      scope: systemConfigConfigureScope,
+      payload: { title: "demo", chain: "eip155:31337" }
+    });
+    const board = yield* bus.readBoard();
+    return Object.keys(readObservationIndex(board))[0]!;
+  });
 
 describe("pristine-board operator flow", () => {
   it("every visible configure descriptor exposes its validator's required fields", async () => {
@@ -93,26 +93,25 @@ describe("pristine-board operator flow", () => {
       Effect.gen(function* () {
         const bus = yield* makeBus(runId);
 
-        // system:config configure renders its own fields at T0 (chain/capture/process/publish).
+        // Add observation renders its own fields at T0 (title + chain).
         const t0 = yield* describeConsole(bus);
         const t0Config = t0.find((d) => d.id === "observe.system.config.configure");
         expect(t0Config?.visible).toBe(true);
-        expect(fieldNames(t0Config)).toContain("publish");
+        expect(fieldNames(t0Config)).toEqual(["title", "chain"]);
 
-        // Mount the FILE-EXPORT permutation — the surface the broken operator hit.
-        yield* configure(bus, "cfg-fe", runId, systemConfigConfigureScope, {
-          chain: "eip155:31337",
-          capture: "file",
-          process: null,
-          publish: "file-export"
-        });
+        const obsId = yield* addObservation(bus, runId);
+        // Flip the family publish kind to file-export (the console's kind switch).
+        yield* bus.applyBoardPatch(observationPublishKindPatch(obsId, "file-export", 2));
 
-        const afterFileExport = yield* describeConsole(bus);
-        const captureConfigure = afterFileExport.find((d) => d.id === "observe.capture.file.configure");
-        const sinkConfigure = afterFileExport.find((d) => d.id === "observe.sink.file-export.configure");
+        const after = yield* describeConsole(bus);
+        const captureConfigure = after.find(
+          (d) => d.id === `observe.obs.${obsId}.capture.configure`
+        );
+        const sinkConfigure = after.find(
+          (d) => d.id === `observe.obs.${obsId}.publish.configure`
+        );
 
-        // The regression: the file-export sink's configure must expose its `path` field so a form can
-        // satisfy "sink:file-export:configure path must be a non-empty string" — no fieldless dead end.
+        // The regression guard: a form can satisfy each validator — no fieldless dead end.
         expect(sinkConfigure?.visible).toBe(true);
         expect(fieldNames(sinkConfigure)).toEqual(["path"]);
         expect(fieldNames(captureConfigure)).toEqual(["path"]);
@@ -123,25 +122,19 @@ describe("pristine-board operator flow", () => {
     expect(Exit.isSuccess(exit)).toBe(true);
   });
 
-  it("sink:live configure exposes its streamId field on the live permutation", async () => {
+  it("the live publish configure takes NO fields — streamId is board-derived, never typed", async () => {
     const runId = "run_flow_live_field";
     const exit = await Effect.runPromiseExit(
       Effect.gen(function* () {
         const bus = yield* makeBus(runId);
-        yield* configure(bus, "cfg-live", runId, systemConfigConfigureScope, {
-          chain: "eip155:31337",
-          capture: "file",
-          process: null,
-          publish: "live"
-        });
+        const obsId = yield* addObservation(bus, runId);
 
         const descriptors = yield* describeConsole(bus);
-        const liveConfigure = descriptors.find((d) => d.id === "observe.sink.live.configure");
+        const liveConfigure = descriptors.find(
+          (d) => d.id === `observe.obs.${obsId}.publish.configure`
+        );
         expect(liveConfigure?.visible).toBe(true);
-        expect(fieldNames(liveConfigure)).toEqual(["streamId"]);
-
-        // sink:file-export must NOT be reachable on the live permutation (only one publish sink mounts).
-        expect(descriptors.some((d) => d.id === "observe.sink.file-export.configure")).toBe(false);
+        expect(fieldNames(liveConfigure)).toEqual([]);
         return true;
       })
     );
@@ -153,64 +146,70 @@ describe("pristine-board operator flow", () => {
     const exit = await Effect.runPromiseExit(
       Effect.gen(function* () {
         const bus = yield* makeBus(runId);
-        yield* configure(bus, "cfg-fe", runId, systemConfigConfigureScope, {
-          chain: "eip155:31337",
-          capture: "file",
-          process: null,
-          publish: "file-export"
-        });
+        const obsId = yield* addObservation(bus, runId);
+        yield* bus.applyBoardPatch(observationPublishKindPatch(obsId, "file-export", 2));
 
         // Capture first — this previously hard-failed with "At least one sink policy is required".
-        yield* configure(bus, "cfg-cap", runId, fileCaptureConfigureScope, {
-          path: "/tmp/livestreak-flow/capture.mp4"
+        yield* bus.callFunction({
+          callId: "cfg-cap",
+          runId,
+          cellId: observationCellId(obsId, "capture"),
+          scope: fileCaptureConfigureScope,
+          payload: { path: "/tmp/livestreak-flow/capture.mp4" }
         });
-        // Then the sink — both orders must be legal now.
-        yield* configure(bus, "cfg-sink", runId, fileSinkConfigureScope, {
-          path: "/tmp/livestreak-flow/out.mp4"
+        yield* bus.callFunction({
+          callId: "cfg-sink",
+          runId,
+          cellId: observationCellId(obsId, "publish"),
+          scope: fileSinkConfigureScope,
+          payload: { path: "/tmp/livestreak-flow/out.mp4" }
         });
 
         const board = yield* bus.readBoard();
-        expect(board.cells["capture:file"]?.readonly?.configured).toBe(true);
-        expect(board.cells["sink:file-export"]?.readonly?.configured).toBe(true);
+        expect(board.cells[observationCellId(obsId, "capture")]?.readonly?.configured).toBe(true);
+        expect(board.cells[observationCellId(obsId, "publish")]?.readonly?.configured).toBe(true);
         return true;
       })
     );
     expect(Exit.isSuccess(exit)).toBe(true);
   });
 
-  it("full live sequence (config → sink:live → capture → market) derives a valid live run config", async () => {
+  it("full live sequence derives a valid live run config from the family board", async () => {
     const runId = "run_flow_full";
     const exit = await Effect.runPromiseExit(
       Effect.gen(function* () {
         const bus = yield* makeBus(runId);
+        const obsId = yield* addObservation(bus, runId);
 
-        // Only values a rendered form could supply, dispatched in the order the console presents.
-        yield* configure(bus, "cfg-live", runId, systemConfigConfigureScope, {
-          chain: "eip155:31337",
-          capture: "file",
-          process: null,
-          publish: "live"
+        yield* bus.callFunction({
+          callId: "cfg-sink",
+          runId,
+          cellId: observationCellId(obsId, "publish"),
+          scope: liveSinkConfigureScope,
+          payload: {}
         });
-        yield* configure(bus, "cfg-sink", runId, liveSinkConfigureScope, {
-          streamId: "market-abc"
+        yield* bus.callFunction({
+          callId: "cfg-cap",
+          runId,
+          cellId: observationCellId(obsId, "capture"),
+          scope: fileCaptureConfigureScope,
+          payload: { path: "/tmp/livestreak-flow/capture.mp4" }
         });
-        yield* configure(bus, "cfg-cap", runId, fileCaptureConfigureScope, {
-          path: "/tmp/livestreak-flow/capture.mp4"
-        });
+        // Register takes NO title — the board carries it from Add observation.
         yield* bus.callFunction({
           callId: "cfg-market",
           runId,
+          cellId: observationCellId(obsId, "market"),
           scope: marketRegisterScope,
-          payload: { title: "demo" }
+          payload: {}
         });
 
         const board = yield* bus.readBoard();
-        // The console prepare gate (prepareConfiguredRun → runConfigFromBoard). Succeeding here is exactly
-        // what "prepare succeeds" means for the operator — a valid live run config off the configured board.
         return yield* runConfigFromBoard({
           runId,
           board,
-          hostBaseUrl: "http://127.0.0.1:8787"
+          hostBaseUrl: "http://127.0.0.1:8787",
+          obsId
         });
       })
     );
@@ -224,7 +223,7 @@ describe("pristine-board operator flow", () => {
         "/tmp/livestreak-flow/capture.mp4"
       );
       expect((config.sink.config as { streamId?: string }).streamId).toBe(
-        defaultFakeRegisterResult({ runId, title: "demo" }).marketId
+        defaultFakeRegisterResult({ runId: "run_flow_full", title: "demo" }).marketId
       );
     }
   });

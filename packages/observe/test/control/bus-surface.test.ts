@@ -37,7 +37,10 @@ describe("control bus surfaces", () => {
 
     expect(board.cells["capture:fake-control"]).toBeUndefined();
 
+    // Surfaces provide functions; STAGE mounting creates the cell (the no-ghost contract).
     await Effect.runPromise(bus.mountSurface(stageCellSurface(cell)));
+    expect((await Effect.runPromise(bus.readBoard())).cells["capture:fake-control"]).toBeUndefined();
+    await Effect.runPromise(bus.mountStageCell(cell));
 
     const mounted = await Effect.runPromise(bus.readBoard());
     expect(mounted.cells["capture:fake-control"]?.label).toBe("Fake Control Capture");
@@ -243,6 +246,10 @@ describe("control bus surfaces", () => {
       })
     );
 
+    // Initial surfaces no longer mint ghost cells; the stage mount is the sanctioned creator.
+    const beforeStage = await Effect.runPromise(bus.readBoard());
+    expect(beforeStage.cells["capture:fake-control"]).toBeUndefined();
+    await Effect.runPromise(bus.mountStageCell(cell));
     const mounted = await Effect.runPromise(bus.readBoard());
     expect(mounted.cells["capture:fake-control"]?.label).toBe("Fake Control Capture");
     expect(mounted.cells["capture:fake-control"]?.functions).toEqual(["ping"]);
@@ -277,7 +284,7 @@ describe("control bus surfaces", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      expect(exit.cause.toString()).toContain("Duplicate live surface function scope");
+      expect(exit.cause.toString()).toContain("Duplicate function scope");
     }
   });
 
@@ -301,7 +308,7 @@ describe("control bus surfaces", () => {
 
     expect(Exit.isFailure(exit)).toBe(true);
     if (Exit.isFailure(exit)) {
-      expect(exit.cause.toString()).toContain("No live surface advertises function scope");
+      expect(exit.cause.toString()).toContain("No live surface advertises");
     }
   });
 

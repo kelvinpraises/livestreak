@@ -7,6 +7,16 @@ import {
   type FileCaptureDriverOptions
 } from "./pipeline/capture/file/driver.js";
 import { browserCaptureDescriptor } from "./pipeline/capture/browser/driver.js";
+import {
+  createIngestCaptureDriver,
+  ingestCaptureDescriptor,
+  type IngestCaptureConfig
+} from "./pipeline/capture/ingest/driver.js";
+import {
+  createSyntheticCaptureDriver,
+  syntheticCaptureDescriptor,
+  type SyntheticCaptureConfig
+} from "./pipeline/capture/synthetic/driver.js";
 import type { CaptureDriver } from "./pipeline/capture/types.js";
 import {
   createFileSinkDriver,
@@ -28,12 +38,17 @@ import {
 } from "./pipeline/publish/sinks/direct/driver.js";
 import type { SinkDriver } from "./pipeline/publish/types.js";
 
-export type BuiltInCaptureDriverId = "file";
+export type BuiltInCaptureDriverId = "file" | "synthetic" | "ingest";
 export type BuiltInSinkDriverId = "file" | "live" | "direct";
 
 export const builtInObserveRegistry = createObserveRegistry({
   capture: {
-    drivers: [{ descriptor: fileCaptureDescriptor }, { descriptor: browserCaptureDescriptor }]
+    drivers: [
+      { descriptor: fileCaptureDescriptor },
+      { descriptor: browserCaptureDescriptor },
+      { descriptor: syntheticCaptureDescriptor },
+      { descriptor: ingestCaptureDescriptor }
+    ]
   },
   publish: {
     sinks: [
@@ -47,9 +62,17 @@ export const builtInObserveRegistry = createObserveRegistry({
 export const getBuiltInCaptureDriver = (
   id: BuiltInCaptureDriverId,
   options: FileCaptureDriverOptions = {}
-): CaptureDriver<FileCaptureConfig> => {
+): CaptureDriver<FileCaptureConfig> | CaptureDriver<SyntheticCaptureConfig> | CaptureDriver<IngestCaptureConfig> => {
   if (id === "file") {
     return createFileCaptureDriver(options);
+  }
+
+  if (id === "synthetic") {
+    return createSyntheticCaptureDriver();
+  }
+
+  if (id === "ingest") {
+    return createIngestCaptureDriver();
   }
 
   return missingCaptureDriver(id);

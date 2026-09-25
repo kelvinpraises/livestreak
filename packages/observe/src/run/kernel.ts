@@ -389,8 +389,8 @@ const resolveCaptureDriver = (
     return Effect.succeed(options.captureDriver);
   }
 
-  if (captureDriverId === "file") {
-    return Effect.succeed(getBuiltInCaptureDriver("file"));
+  if (captureDriverId === "file" || captureDriverId === "synthetic" || captureDriverId === "ingest") {
+    return Effect.succeed(getBuiltInCaptureDriver(captureDriverId));
   }
 
   return Effect.fail(

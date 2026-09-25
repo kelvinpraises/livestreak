@@ -76,7 +76,13 @@ describe("board-first configurator visibility", () => {
       const controls = projectBoardControls(board);
       // The session is permanent — it can add more observations at any time.
       const session = controls.cells.find((cell) => cell.id === "system:config");
-      expect(session?.functions.map((fn) => fn.name)).toEqual(["configure", "close", "remove", "publishKind"]);
+      expect(session?.functions.map((fn) => fn.name)).toEqual([
+        "configure",
+        "close",
+        "remove",
+        "publishKind",
+        "captureKind"
+      ]);
 
       // Fresh family pipeline cells expose only configure; close waits for real config.
       const captureCell = controls.cells.find(

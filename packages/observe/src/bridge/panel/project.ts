@@ -107,8 +107,11 @@ const isFunctionVisibleOnCell = (
   if (fnName === "close") {
     return cellHasBeenConfigured(cellId, cell);
   }
-  // Remove/publishKind target an observation — dead on an empty session.
-  if (cellId === "system:config" && (fnName === "remove" || fnName === "publishKind")) {
+  // Remove/publishKind/captureKind target an observation — dead on an empty session.
+  if (
+    cellId === "system:config" &&
+    (fnName === "remove" || fnName === "publishKind" || fnName === "captureKind")
+  ) {
     const observations = cell.readonly?.observations;
     return (
       observations !== null &&

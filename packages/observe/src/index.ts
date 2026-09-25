@@ -66,6 +66,12 @@ export {
 } from "./run/board-run-config.js";
 
 export {
+  assertWatchableProof,
+  type AssertWatchableInput,
+  type WatchableProof
+} from "./run/go-live-guard.js";
+
+export {
   createInitialBoard,
   pauseCellIdOf,
   runCellIdOf,

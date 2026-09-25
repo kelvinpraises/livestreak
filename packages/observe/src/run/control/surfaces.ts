@@ -1,5 +1,6 @@
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import { createFileCaptureControlSurface } from "./drivers/file-capture.js";
+import { createIngestCaptureControlSurface } from "./drivers/ingest-capture.js";
 import { createFileSinkControlSurface } from "./drivers/file-sink.js";
 import { createLiveSinkControlSurface } from "./drivers/live-sink.js";
 import { createDirectSinkControlSurface } from "./drivers/direct-sink.js";
@@ -26,6 +27,7 @@ export const createObserveControlSurfaces = (
     ...input.market
   }),
   createFileCaptureControlSurface(),
+  createIngestCaptureControlSurface(),
   createFileSinkControlSurface("file-export"),
   createLiveSinkControlSurface(),
   createDirectSinkControlSurface()

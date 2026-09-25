@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { LiveStreakConfigError, type LiveStreakError } from "@livestreak/core";
 import { createHostFmp4IngestTransport } from "#pipeline/publish/sinks/live/transport.js";
+import { defaultSyntheticCaptureConfig } from "#pipeline/capture/synthetic/driver.js";
 import type { Board } from "./control/board/index.js";
 import type { ObserveRunConfig } from "./run.js";
 import { observationCellId, readObservationIndex } from "./control/system/config.js";
@@ -57,14 +58,20 @@ export const runConfigFromBoard = (
       );
     }
 
-    const capturePath = cellRecord(board, observationCellId(obsId, "capture")).settings.path;
-    if (typeof capturePath !== "string" || capturePath.trim().length === 0) {
+    const captureCell = cellRecord(board, observationCellId(obsId, "capture"));
+    // Authoritative capture gate (B4-R01): fresh mounts and post-switch cells carry
+    // configured:false, so derivation refuses stale input in both directions until the
+    // destination configure lands. This is the console path's choke point into prepare.
+    if (captureCell.readonly.configured !== true) {
       return yield* Effect.fail(
         new LiveStreakConfigError({
-          message: "Set the capture media file (Configure capture) before going live."
+          message: "Configure capture before going live."
         })
       );
     }
+    const captureSettings = captureCell.settings;
+    const syntheticSelected = captureSettings.source === "synthetic";
+    const ingestSelected = captureSettings.source === "ingest";
 
     const publish = cellRecord(board, observationCellId(obsId, "publish")).readonly.kind;
     if (publish !== "live" && publish !== "direct") {
@@ -85,10 +92,54 @@ export const runConfigFromBoard = (
 
     // Decode straight to I420 at real time (`-re`) so frames feed the fMP4 encode with no color conversion
     // and stream paced at wall-clock FPS (see the live/direct sinks + file capture).
-    const capture = {
-      driverId: "file",
-      config: { path: capturePath, pixelFormat: "yuv420p", realtime: true }
-    };
+    // Supported generated-frame input for producer bots (C's example): the board selects it
+    // with `source: "synthetic"` on the capture cell; dimensions/fps/continuity ride alongside.
+    // The default is the continuous producer input; pass `continuous: false` for a bounded take.
+    // Driver validation still rejects non-positive dimensions/fps downstream.
+    let capture: { readonly driverId: string; readonly config: unknown };
+    if (syntheticSelected) {
+      capture = {
+        driverId: "synthetic",
+        config: {
+          ...defaultSyntheticCaptureConfig,
+          ...(typeof captureSettings.frameCount === "number" ? { frameCount: captureSettings.frameCount } : {}),
+          ...(typeof captureSettings.width === "number" ? { width: captureSettings.width } : {}),
+          ...(typeof captureSettings.height === "number" ? { height: captureSettings.height } : {}),
+          ...(typeof captureSettings.fps === "number" ? { fps: captureSettings.fps } : {}),
+          continuous:
+            typeof captureSettings.continuous === "boolean" ? captureSettings.continuous : true
+        }
+      };
+    } else if (ingestSelected) {
+      // Bot-pushed generated show: the producer bot renders arbitrary frames and POSTs them
+      // to the driver's loopback endpoint (see capture/ingest/driver.ts for the contract).
+      // Width/height/fps are required — the board carries the bot's contract, no guessing.
+      // Driver validation fails closed with an operator-facing message when they are missing.
+      capture = {
+        driverId: "ingest",
+        config: {
+          ...(typeof captureSettings.port === "number" ? { port: captureSettings.port } : {}),
+          ...(typeof captureSettings.path === "string" ? { path: captureSettings.path } : {}),
+          ...(typeof captureSettings.width === "number" ? { width: captureSettings.width } : {}),
+          ...(typeof captureSettings.height === "number" ? { height: captureSettings.height } : {}),
+          ...(typeof captureSettings.fps === "number" ? { fps: captureSettings.fps } : {}),
+          ...(typeof captureSettings.byteFormat === "string" ? { byteFormat: captureSettings.byteFormat } : {})
+        }
+      };
+    } else {
+      const filePath = captureSettings.path;
+      if (typeof filePath !== "string" || filePath.trim().length === 0) {
+        return yield* Effect.fail(
+          new LiveStreakConfigError({
+            message: "Set the capture media file (Configure capture) before going live."
+          })
+        );
+      }
+      capture = {
+        driverId: "file",
+        config: { path: filePath, pixelFormat: "yuv420p", realtime: true }
+      };
+    }
 
     if (publish === "direct") {
       // Broadcaster-served fan-out: the sink opens its own viewer door (UPnP + host echo eligibility);

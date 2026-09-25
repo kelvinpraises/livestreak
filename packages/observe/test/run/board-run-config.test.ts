@@ -26,7 +26,10 @@ const boardWith = (over: {
         }
       },
       [`obs:${OBS}:capture`]: {
-        settings: over.capturePath === undefined ? {} : { path: over.capturePath }
+        settings: over.capturePath === undefined ? {} : { path: over.capturePath },
+        // Configured shell: derivation's file branch checks the path, not the flag. The
+        // unconfigured gate has its own test below with a flagless cell.
+        readonly: { configured: true }
       },
       [`obs:${OBS}:publish`]: {
         readonly: over.publish === undefined ? {} : { kind: over.publish }
@@ -86,5 +89,82 @@ describe("runConfigFromBoard → live fMP4 sink", () => {
       )
     );
     expect(result).toContain("capture media file");
+  });
+
+  it("refuses derivation while capture is unconfigured", async () => {
+    const configured = boardWith({ capturePath: "/tmp/clip.mp4", publish: "live", marketId: "m" });
+    const board: Board = {
+      ...configured,
+      cells: {
+        ...configured.cells,
+        [`obs:${OBS}:capture`]: {
+          ...configured.cells[`obs:${OBS}:capture`]!,
+          readonly: { configured: false }
+        }
+      }
+    };
+    const result = await Effect.runPromise(
+      runConfigFromBoard({
+        runId: "run1",
+        board,
+        hostBaseUrl: "http://127.0.0.1:8787"
+      }).pipe(
+        Effect.map(() => "ok"),
+        Effect.catchAll((e) => Effect.succeed(e.message))
+      )
+    );
+    expect(result).toContain("Configure capture");
+  });
+
+  it("selects the continuous synthetic producer input when the board asks for it", async () => {
+    const board = {
+      revision: 1,
+      catalogVersion: "0.1.0",
+      cells: {
+        "system:config": {
+          readonly: { observations: { ["obs-test"]: { title: "Test", chain: "eip155:31337", createdAtMs: 1 } } }
+        },
+        "obs:obs-test:capture": {
+          settings: { source: "synthetic", width: 32, height: 32, fps: 10 },
+          readonly: { configured: true }
+        },
+        "obs:obs-test:publish": { readonly: { kind: "live" } },
+        "obs:obs-test:market": { readonly: { marketId: "market-xyz" } }
+      }
+    } as unknown as Board;
+
+    const config = await Effect.runPromise(
+      runConfigFromBoard({ runId: "run1", board, hostBaseUrl: "http://127.0.0.1:8787" })
+    );
+
+    expect(config.capture.driverId).toBe("synthetic");
+    expect(config.capture.config).toMatchObject({ width: 32, height: 32, fps: 10, continuous: true });
+    // File prerequisites no longer apply, and the live sink still keys to the market.
+    expect((config.sink.config as { streamId: string }).streamId).toBe("market-xyz");
+  });
+
+  it("selects the bot ingest input with the board-carried frame contract", async () => {
+    const board = {
+      revision: 1,
+      catalogVersion: "0.1.0",
+      cells: {
+        "system:config": {
+          readonly: { observations: { ["obs-test"]: { title: "Test", chain: "eip155:31337", createdAtMs: 1 } } }
+        },
+        "obs:obs-test:capture": {
+          settings: { source: "ingest", port: 48710, path: "/bot", width: 1280, height: 720, fps: 30 },
+          readonly: { configured: true }
+        },
+        "obs:obs-test:publish": { readonly: { kind: "live" } },
+        "obs:obs-test:market": { readonly: { marketId: "market-xyz" } }
+      }
+    } as unknown as Board;
+
+    const config = await Effect.runPromise(
+      runConfigFromBoard({ runId: "run1", board, hostBaseUrl: "http://127.0.0.1:8787" })
+    );
+
+    expect(config.capture.driverId).toBe("ingest");
+    expect(config.capture.config).toMatchObject({ port: 48710, path: "/bot", width: 1280, height: 720, fps: 30 });
   });
 });

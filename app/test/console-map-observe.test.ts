@@ -40,6 +40,9 @@ const wireFunctions: FunctionDescriptor[] = [
     inputSchema: obj([{ name: 'obsId' }, { name: 'kind', type: 'enum', values: ['live', 'direct', 'file-export'] }]),
   }),
   fn(`observe.obs.${OBS}.capture.configure`, 'configure', { inputSchema: obj([{ name: 'path' }]) }),
+  fn('observe.system.config.captureKind', 'captureKind', {
+    inputSchema: obj([{ name: 'obsId' }, { name: 'kind', type: 'enum', values: ['file', 'ingest'] }]),
+  }),
   // The live sink's configure carries NO fields — streamId is board-derived from the market cell.
   fn(`observe.obs.${OBS}.publish.configure`, 'configure'),
   fn(`observe.obs.${OBS}.run.prepare`, 'prepare'),
@@ -139,7 +142,14 @@ describe('mapObserve (families)', () => {
     // Configure capture is a DISCRIMINANT: source segments up top, the wire fields in the arm.
     const captureVerb = byName.get('Configure capture')
     expect(captureVerb?.fields?.[0]).toMatchObject({ name: 'source', value: 'file', kind: 'select' })
+    expect(captureVerb?.fields?.[0]?.options?.map((o) => o.label)).toEqual(['file', 'ingest'])
     expect(captureVerb?.fields?.[0]?.arms?.file?.map((f) => f.name)).toEqual(['path'])
+    expect(captureVerb?.switchRef).toMatchObject({
+      callRef: 'observe.system.config.captureKind',
+      field: 'source',
+      current: 'file',
+    })
+    expect(captureVerb?.switchRef?.presetArgs).toEqual({ obsId: OBS })
 
     // The kind switch rides Configure publish — a discriminant whose ACTIVE arm carries the
     // mounted sink's wire fields; the other arms fill after a segment flip lands publishKind.

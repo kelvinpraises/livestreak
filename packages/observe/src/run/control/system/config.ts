@@ -14,6 +14,7 @@ export const systemConfigConfigureScope = "system:config:configure" as const;
 export const systemConfigCloseScope = "system:config:close" as const;
 export const systemConfigRemoveScope = "system:config:remove" as const;
 export const systemConfigPublishKindScope = "system:config:publishKind" as const;
+export const systemConfigCaptureKindScope = "system:config:captureKind" as const;
 
 /** Add observation: the session saves WHAT is observed (title) and WHERE it settles (chain).
  *  Pipeline choices live on the family's own cells — nothing fires at birth (board = state). */
@@ -62,6 +63,44 @@ export const observationPublishKindPatch = (
   }
 });
 
+/** Capture kind → the capture catalog serving it. The cell id never changes on a kind switch. */
+export const captureKindCatalog = (kind: string): string =>
+  kind === "ingest" ? "capture:ingest" : "capture:file";
+
+/** One patch flips a family's capture kind: same cell, new catalog, details reset. */
+export const observationCaptureKindPatch = (
+  obsId: string,
+  kind: string,
+  nowMs: number = Date.now()
+): BoardPatch => ({
+  cells: {
+    [observationCellId(obsId, "capture")]: {
+      catalog: captureKindCatalog(kind),
+      // Stamp settings.source too: derivation reads it, and a merge would otherwise leave
+      // the previous kind's source behind across a switch (B3-R02). Unset every detail key:
+      // a configured file path must not become the ingest endpoint (bot gets 404) nor may
+      // ingest dims leak into a file derive — the destination configures onto a clean cell.
+      // Keep this list beside the configure surfaces that write these keys (B4-R01).
+      settings: {
+        set: { source: kind },
+        unset: [
+          "path",
+          "maxPumpMs",
+          "width",
+          "height",
+          "fps",
+          "port",
+          "byteFormat",
+          "frameCount",
+          "continuous"
+        ]
+      },
+      readonly: { set: { kind, configured: false } },
+      status: ["idle", null, nowMs]
+    }
+  }
+});
+
 export const readObservationIndex = (
   board: ControlFunctionContext["board"]
 ): Readonly<Record<string, ObservationIndexEntry>> => {
@@ -80,10 +119,10 @@ export const createSystemConfigSurface = (): ControlSurface => ({
       status: ["idle", null, Date.now()],
       settings: {},
       readonly: {},
-      functions: ["configure", "close", "remove", "publishKind"]
+      functions: ["configure", "close", "remove", "publishKind", "captureKind"]
     }
   },
-  functions: [configureFunctionEntry(), closeFunctionEntry(), removeFunctionEntry(), publishKindFunctionEntry()]
+  functions: [configureFunctionEntry(), closeFunctionEntry(), removeFunctionEntry(), publishKindFunctionEntry(), captureKindFunctionEntry()]
 });
 
 const configureFunctionEntry = (): ControlFunctionEntry => ({
@@ -108,6 +147,12 @@ const publishKindFunctionEntry = (): ControlFunctionEntry => ({
   name: "publishKind",
   scope: systemConfigPublishKindScope,
   call: (envelope, context) => publishKindCall(envelope, context)
+});
+
+const captureKindFunctionEntry = (): ControlFunctionEntry => ({
+  name: "captureKind",
+  scope: systemConfigCaptureKindScope,
+  call: (envelope, context) => captureKindCall(envelope, context)
 });
 
 /** Console-reachable kind switch: one call flips a family's publish kind (same cell, new
@@ -138,6 +183,36 @@ const publishKindCall = (
     }
 
     return { boardPatch: observationPublishKindPatch(obsId, kind) };
+  });
+
+/** Console-reachable kind switch: one call flips a family's capture kind (same cell, new
+ *  catalog, details reset). The discriminant UI dispatches this when the kind changes. */
+const captureKindCall = (
+  envelope: ControlCallEnvelope,
+  context: ControlFunctionContext
+): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
+  Effect.gen(function* () {
+    const record =
+      typeof envelope.payload === "object" && envelope.payload !== null
+        ? (envelope.payload as Record<string, unknown>)
+        : {};
+    const obsId = typeof record.obsId === "string" ? record.obsId.trim() : "";
+    const kind = typeof record.kind === "string" ? record.kind.trim() : "";
+    const index = readObservationIndex(context.board);
+    if (obsId === "" || index[obsId] === undefined) {
+      return yield* Effect.fail(
+        new LiveStreakConfigError({ message: `system:config:captureKind unknown observation ${obsId}` })
+      );
+    }
+    if (kind !== "file" && kind !== "ingest") {
+      return yield* Effect.fail(
+        new LiveStreakConfigError({
+          message: 'system:config:captureKind kind must be "file" or "ingest"'
+        })
+      );
+    }
+
+    return { boardPatch: observationCaptureKindPatch(obsId, kind) };
   });
 
 const configureCall = (
@@ -436,6 +511,32 @@ export const systemConfigCatalogFunctions = (): Readonly<
             required: true
           },
           help: "live = host fan-out; direct = broadcaster-served; file-export = MP4."
+        }
+      ]
+    }
+  },
+  captureKind: {
+    scope: systemConfigCaptureKindScope,
+    label: "Capture kind",
+    description: "Switch an observation's capture kind. Details reset; configure them next.",
+    result: "patch",
+    input: {
+      type: "object",
+      properties: [
+        {
+          name: "obsId",
+          value: { type: "string", description: "Observation id.", required: true },
+          help: "Supplied by the console from the focused observation."
+        },
+        {
+          name: "kind",
+          value: {
+            type: "enum",
+            description: "Capture kind.",
+            values: ["file", "ingest"],
+            required: true
+          },
+          help: "file = replay a media file; ingest = bot-posted rendered frames."
         }
       ]
     }

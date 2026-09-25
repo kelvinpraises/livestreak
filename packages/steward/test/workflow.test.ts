@@ -54,6 +54,34 @@ describe("steward pure workflow", () => {
     expect(plans[0]?.contractCalls).toEqual([]);
   });
 
+  it("resolve without an outcome plans zero calls plus attention", () => {
+    const finding = {
+      id: "finding-resolve",
+      kind: "bad_resolution" as const,
+      subject,
+      severity: "critical" as const,
+      message: "Resolve vault"
+    };
+    const decision = { action: "resolve" as const, finding, reason: "Decide outcome" };
+
+    const missing = planStewardActions([decision], { stewardId: "steward-1" });
+    expect(missing[0]?.contractCalls).toEqual([]);
+    expect(missing[0]?.hostActions[0]?.kind).toBe("annotate");
+
+    const invalid = planStewardActions([decision], { stewardId: "steward-1", resolveOutcome: 3 });
+    expect(invalid[0]?.contractCalls).toEqual([]);
+    expect(invalid[0]?.hostActions[0]?.kind).toBe("annotate");
+
+    const yes = planStewardActions([decision], { stewardId: "steward-1", resolveOutcome: 1 });
+    expect(yes[0]?.contractCalls).toHaveLength(1);
+    expect(yes[0]?.contractCalls[0]?.functionName).toBe("resolve");
+    expect(yes[0]?.hostActions).toEqual([]);
+
+    const no = planStewardActions([decision], { stewardId: "steward-1", resolveOutcome: 2 });
+    expect(no[0]?.contractCalls).toHaveLength(1);
+    expect(no[0]?.hostActions).toEqual([]);
+  });
+
   it("projects panel summary from a runtime snapshot", () => {
     const finding = {
       id: "finding-1",

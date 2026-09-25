@@ -233,7 +233,7 @@ describe("prepared is a disposable derivation of the board", () => {
       const message = String(exit.cause);
       // The auto-prepare path ran runConfigFromBoard (its gate fired) — the operator never sees
       // the dead-end "must be prepared before start".
-      expect(message).toContain("capture media file");
+      expect(message).toContain("Configure capture");
       expect(message).not.toContain("must be prepared");
     }
   });

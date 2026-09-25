@@ -44,7 +44,7 @@ export const createInitialBoard = (input: CreateInitialBoardInput): Board => {
         readonly: {
           runId: input.runId
         },
-        functions: ["configure", "close", "remove", "publishKind"]
+        functions: ["configure", "close", "remove", "publishKind", "captureKind"]
       }
     }
   };

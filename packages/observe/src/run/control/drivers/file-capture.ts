@@ -53,7 +53,8 @@ const configureCall = (
       boardPatch: {
         cells: {
           [context.cellId]: {
-            settings: { set: { path, maxPumpMs: 4 } },
+            // Stamp source: a Merge-set would otherwise keep a previous kind's source (B3-R02).
+            settings: { set: { source: "file", path, maxPumpMs: 4 } },
             readonly: { set: { configured: true, sourceType: "file", sourceMode: "file" } },
             status: ["configured", null, nowMs]
           }

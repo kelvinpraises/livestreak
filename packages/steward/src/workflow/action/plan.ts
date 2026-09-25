@@ -54,16 +54,21 @@ const contractCallsForDecision = (
         }
       ];
     case "resolve":
-      return subject.vaultId === undefined
-        ? []
-        : [
-            {
-              contract: "vault",
-              functionName: "resolve",
-              // YES = 1 by default if the caller did not specify an outcome.
-              args: [subject.vaultId, actionContext.resolveOutcome ?? 1]
-            }
-          ];
+      if (subject.vaultId === undefined) {
+        return [];
+      }
+      // No default outcome: missing/invalid resolveOutcome plans zero calls;
+      // the attention annotate below makes the no-op auditable.
+      if (actionContext.resolveOutcome !== 1 && actionContext.resolveOutcome !== 2) {
+        return [];
+      }
+      return [
+        {
+          contract: "vault",
+          functionName: "resolve",
+          args: [subject.vaultId, actionContext.resolveOutcome]
+        }
+      ];
     case "proposePenalty":
       return [
         {
@@ -135,8 +140,7 @@ const hostActionsForDecision = (
         }
       ];
     case "triggerHot":
-    case "resolve":
-      // S4: a triggerHot/resolve whose subject has no vaultId cannot emit a contract call. Instead of
+      // S4: a triggerHot whose subject has no vaultId cannot emit a contract call. Instead of
       // a SILENT empty plan, surface a visible annotate signal so the no-op is auditable on the board.
       return subject.vaultId === undefined
         ? [
@@ -150,6 +154,32 @@ const hostActionsForDecision = (
             }
           ]
         : [];
+    case "resolve":
+      if (subject.vaultId === undefined) {
+        return [
+          {
+            kind: "annotate",
+            payload: {
+              subject,
+              message: `Cannot resolve: subject has no vaultId — ${decision.reason}`,
+              findingId: decision.finding.id
+            }
+          }
+        ];
+      }
+      if (actionContext.resolveOutcome !== 1 && actionContext.resolveOutcome !== 2) {
+        return [
+          {
+            kind: "annotate",
+            payload: {
+              subject,
+              message: `Cannot resolve: missing-outcome — ${decision.reason}`,
+              findingId: decision.finding.id
+            }
+          }
+        ];
+      }
+      return [];
     case "challenge":
     case "proposePenalty":
     case "vetoSteward":

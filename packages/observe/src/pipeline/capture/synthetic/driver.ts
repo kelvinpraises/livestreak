@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect";
+import { Effect, Option, Stream } from "effect";
 import { LiveStreakConfigError } from "@livestreak/core";
 import { nowTimePoint } from "@livestreak/schema";
 import type {
@@ -16,6 +16,13 @@ export interface SyntheticCaptureConfig {
   readonly width: number;
   readonly height: number;
   readonly fps: number;
+  /**
+   * Continuous generated-frame input: an unbounded advancing sequence (same RawFrame/I420
+   * contract the live and direct sinks consume) for producer bots and long-running video
+   * proofs. frameCount is ignored when true. The per-frame shade advances with the sequence
+   * so a viewer can see frames move.
+   */
+  readonly continuous?: boolean;
 }
 
 export const syntheticCaptureDescriptor: CaptureDriverDescriptor = {
@@ -89,9 +96,12 @@ export const createSyntheticCaptureDriver = (): CaptureDriver<SyntheticCaptureCo
       };
 
       const sourceId = "capture:synthetic";
-      const frames = Stream.range(0, config.frameCount - 1).pipe(
-        Stream.map((index) => makeSyntheticFrame(sourceId, config, index))
-      );
+      const frames = (config.continuous === true
+        ? Stream.unfold(0, (index: number) =>
+            Option.some([makeSyntheticFrame(sourceId, config, index), index + 1] as const))
+        : Stream.range(0, config.frameCount - 1).pipe(
+            Stream.map((index) => makeSyntheticFrame(sourceId, config, index))
+          ));
 
       const health: Effect.Effect<CaptureStageHealth, never> = Effect.sync(() => ({
         stage: "capture",

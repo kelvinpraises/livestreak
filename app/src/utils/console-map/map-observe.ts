@@ -153,7 +153,12 @@ export const mapObserve: PackageMapper = ({ functions, board, pending }) => {
     // top, its detail fields hanging off the rail beneath. The group value never reaches the
     // wire — coercion is schema-keyed.
     const captureFn = familyFn(obsId, 'capture', 'configure')
+    const captureKindFn = sessionFn('captureKind')
+    const captureKind = typeof capture?.readonly?.kind === 'string' ? capture.readonly.kind : 'file'
     if (captureFn !== undefined) {
+      // The wire ships only the MOUNTED capture's schema, so the active arm carries its real
+      // fields and the others sit empty until a segment flip lands captureKind (details
+      // reset on a kind switch by design — the new arm's fields arrive on the next push).
       const captureFields = schemaToFields(captureFn.inputSchema, {
         ...(typeof capture?.settings?.path === 'string' ? { path: capture.settings.path } : {}),
       })
@@ -161,17 +166,26 @@ export const mapObserve: PackageMapper = ({ functions, board, pending }) => {
         verbFor(captureFn, {
           name: 'Configure capture',
           state: 'ready',
-          // One source kind in v0 (file); the discriminant shape stands so a browser driver
-          // lands as one more segment, no UI change.
           fields: [
             {
               name: 'source',
-              value: 'file',
+              value: captureKind,
               kind: 'select',
-              options: [{ label: 'file' }],
-              arms: { file: captureFields },
+              options: [{ label: 'file' }, { label: 'ingest' }],
+              arms: { file: [], ingest: [], [captureKind]: captureFields },
             },
           ],
+          // A changed source re-shapes the cell first; details configure on the next Run.
+          ...(captureKindFn !== undefined
+            ? {
+                switchRef: {
+                  callRef: captureKindFn.id,
+                  field: 'source',
+                  current: captureKind,
+                  presetArgs: { obsId },
+                },
+              }
+            : {}),
         })
       )
     }

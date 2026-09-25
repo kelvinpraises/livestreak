@@ -23,4 +23,31 @@ describe("synthetic capture driver", () => {
       defaultSyntheticCaptureConfig.width * defaultSyntheticCaptureConfig.height * 4
     );
   });
+
+  it("continuous mode emits an unbounded advancing sequence", async () => {
+    const driver = createSyntheticCaptureDriver();
+    const config = await Effect.runPromise(
+      driver.validate({ ...defaultSyntheticCaptureConfig, continuous: true })
+    );
+    const source = await Effect.runPromise(Effect.scoped(driver.create(config)));
+    const frames = await Effect.runPromise(
+      source.frames.pipe(
+        Stream.take(4),
+        Stream.runCollect,
+        Effect.map((chunk) => [...chunk])
+      )
+    );
+
+    expect(frames).toHaveLength(4);
+    // Advancing sequence: ids order and the frame shade moves with the index.
+    expect(frames.map((frame) => frame.id)).toEqual([
+      "capture:synthetic:0",
+      "capture:synthetic:1",
+      "capture:synthetic:2",
+      "capture:synthetic:3"
+    ]);
+    expect(frames[0]?.payload.data[0]).toBe(0);
+    expect(frames[3]?.payload.data[0]).toBe(3);
+    expect(frames[3]?.cadence.sequence).toBe(3);
+  });
 });

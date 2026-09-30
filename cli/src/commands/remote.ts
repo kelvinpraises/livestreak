@@ -1,5 +1,6 @@
 import { Command, Options } from "@effect/cli";
 import { Console, Effect, Option } from "effect";
+import { readFile } from "node:fs/promises";
 import type { BridgeCaller, CallActionEnvelope } from "@livestreak/schema";
 import { createConsoleEdges } from "../gateway/console/edges.js";
 import {
@@ -26,6 +27,7 @@ import {
 } from "../gateway/session/store.js";
 import { connectGateway } from "../gateway/remote/wss-client.js";
 import { runRemoteDrive as executeRemoteDrive } from "../gateway/remote/driver.js";
+import { createRemoteUiClient, type RemoteDriveTarget } from "../gateway/remote/ui-client.js";
 import { ensureSettings, defaultSettingsPath } from "../prefs/settings.js";
 import { passwordOpt } from "./args.js";
 
@@ -319,6 +321,102 @@ export const runRemoteDrive = async (input: {
   return `remote drive complete marketId=${result.marketId ?? "n/a"} ${summary}`;
 };
 
+// Pairing-password resolution for consumer commands: explicit flag wins, then file,
+// then env. Errors never echo the secret.
+export const resolvePairPassword = async (input: {
+  readonly pairPassword?: string;
+  readonly pairPasswordFile?: string;
+}): Promise<string> => {
+  if (input.pairPassword !== undefined && input.pairPassword.length > 0) {
+    return input.pairPassword;
+  }
+  if (input.pairPasswordFile !== undefined) {
+    try {
+      const secret = (await readFile(input.pairPasswordFile, "utf8")).trim();
+      if (secret.length > 0) {
+        return secret;
+      }
+    } catch {
+      throw new Error(`cannot read --pair-password-file ${input.pairPasswordFile}`);
+    }
+  }
+  const env = process.env["LIVESTREAK_PAIR_PASSWORD"];
+  if (env !== undefined && env.length > 0) {
+    return env;
+  }
+  throw new Error(
+    "pairing password required (pass --pair-password, --pair-password-file, or LIVESTREAK_PAIR_PASSWORD)"
+  );
+};
+
+export const runRemoteBoard = async (input: {
+  readonly session: string;
+  readonly pairPassword?: string;
+  readonly pairPasswordFile?: string;
+  readonly hostUrl?: string;
+  readonly settingsPath?: string;
+}): Promise<string> => {
+  const settings = await ensureSettings(input.settingsPath ?? defaultSettingsPath());
+  const pairingPassword = await resolvePairPassword(input);
+  const client = createRemoteUiClient({
+    hostBaseUrl: input.hostUrl ?? settings.host.url,
+    sessionId: input.session,
+    pairingPassword
+  });
+  try {
+    await client.connect();
+    return JSON.stringify(
+      { functions: client.functions(), boards: client.boards() },
+      (_key, value) => (typeof value === "bigint" ? value.toString() : value)
+    );
+  } finally {
+    client.close();
+  }
+};
+
+export const runRemoteCall = async (input: {
+  readonly session: string;
+  readonly pairPassword?: string;
+  readonly pairPasswordFile?: string;
+  readonly target: string;
+  readonly action: string;
+  readonly argsJson?: string;
+  readonly id?: string;
+  readonly hostUrl?: string;
+  readonly settingsPath?: string;
+}): Promise<string> => {
+  let args: unknown = {};
+  if (input.argsJson !== undefined) {
+    try {
+      args = JSON.parse(input.argsJson) as unknown;
+    } catch {
+      throw new Error("invalid --args-json (must be JSON)");
+    }
+  }
+  const settings = await ensureSettings(input.settingsPath ?? defaultSettingsPath());
+  const pairingPassword = await resolvePairPassword(input);
+  const client = createRemoteUiClient({
+    hostBaseUrl: input.hostUrl ?? settings.host.url,
+    sessionId: input.session,
+    pairingPassword
+  });
+  try {
+    await client.connect();
+    const outcome = await client.call(
+      input.target as RemoteDriveTarget,
+      input.action,
+      args,
+      input.id
+    );
+    if (!outcome.ok) {
+      throw new Error(outcome.error ?? "remote call failed");
+    }
+    return JSON.stringify(outcome.result ?? { ok: true });
+  } finally {
+    client.close();
+  }
+};
+
 const scopesOpt = Options.text("scopes").pipe(
   Options.withDescription("Comma-separated granular scopes, e.g. bridge:action:fund,bridge:board:read")
 );
@@ -327,6 +425,10 @@ const spendCapOpt = Options.text("spend-cap").pipe(Options.optional);
 const hostWssOpt = Options.text("host-wss").pipe(Options.optional);
 const appOriginOpt = Options.text("app-origin").pipe(
   Options.withDescription("App origin for the printed remote console URL (default http://localhost:3000)"),
+  Options.optional
+);
+const pairPasswordFileOpt = Options.text("pair-password-file").pipe(
+  Options.withDescription("File holding the pairing password (preferred over --pair-password)"),
   Options.optional
 );
 const pairPasswordOpt = Options.text("pair-password").pipe(
@@ -426,8 +528,69 @@ const remoteDriveCommand = Command.make(
     }).pipe(Effect.flatMap((output) => Console.log(output)))
 );
 
+const remoteBoardCommand = Command.make(
+  "board",
+  {
+    session: Options.text("session"),
+    pairPassword: Options.text("pair-password").pipe(Options.optional),
+    pairPasswordFile: pairPasswordFileOpt,
+    hostUrl: Options.text("host-url").pipe(Options.optional),
+    settings: settingsPathOpt
+  },
+  ({ session, pairPassword, pairPasswordFile, hostUrl, settings }) =>
+    Effect.tryPromise({
+      try: () =>
+        runRemoteBoard({
+          session,
+          ...(Option.isSome(pairPassword) ? { pairPassword: pairPassword.value } : {}),
+          ...(Option.isSome(pairPasswordFile) ? { pairPasswordFile: pairPasswordFile.value } : {}),
+          ...(Option.isSome(hostUrl) ? { hostUrl: hostUrl.value } : {}),
+          ...(Option.isSome(settings) ? { settingsPath: settings.value } : {})
+        }),
+      catch: (error) => (error instanceof Error ? error : new Error(String(error)))
+    }).pipe(Effect.flatMap((output) => Console.log(output)))
+);
+
+const remoteCallCommand = Command.make(
+  "call",
+  {
+    session: Options.text("session"),
+    pairPassword: Options.text("pair-password").pipe(Options.optional),
+    pairPasswordFile: pairPasswordFileOpt,
+    target: Options.text("target"),
+    action: Options.text("action"),
+    argsJson: Options.text("args-json").pipe(Options.optional),
+    id: Options.text("id").pipe(Options.optional),
+    hostUrl: Options.text("host-url").pipe(Options.optional),
+    settings: settingsPathOpt
+  },
+  ({ session, pairPassword, pairPasswordFile, target, action, argsJson, id, hostUrl, settings }) =>
+    Effect.tryPromise({
+      try: () =>
+        runRemoteCall({
+          session,
+          ...(Option.isSome(pairPassword) ? { pairPassword: pairPassword.value } : {}),
+          ...(Option.isSome(pairPasswordFile) ? { pairPasswordFile: pairPasswordFile.value } : {}),
+          target,
+          action,
+          ...(Option.isSome(argsJson) ? { argsJson: argsJson.value } : {}),
+          ...(Option.isSome(id) ? { id: id.value } : {}),
+          ...(Option.isSome(hostUrl) ? { hostUrl: hostUrl.value } : {}),
+          ...(Option.isSome(settings) ? { settingsPath: settings.value } : {})
+        }),
+      catch: (error) => (error instanceof Error ? error : new Error(String(error)))
+    }).pipe(Effect.flatMap((output) => Console.log(output)))
+);
+
 export const remoteCommand = Command.make("remote", {}).pipe(
-  Command.withSubcommands([remoteOpenCommand, remoteDriveCommand, remoteListCommand, remoteRevokeCommand])
+  Command.withSubcommands([
+    remoteOpenCommand,
+    remoteBoardCommand,
+    remoteCallCommand,
+    remoteDriveCommand,
+    remoteListCommand,
+    remoteRevokeCommand
+  ])
 );
 
 export const remoteCommands = [remoteCommand];

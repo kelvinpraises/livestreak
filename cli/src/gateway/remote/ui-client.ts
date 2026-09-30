@@ -1,4 +1,6 @@
-// Leg-B WSS client for headless remote-console automation (agent-5 driver).
+// Leg-B client for headless remote-console automation and the public agent surface.
+// The gateway keeps the signer; this client only redeems a pairing grant and calls
+// scope-permitted actions through Host. Re-exported via src/agent-client.ts.
 
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
@@ -7,6 +9,7 @@ import {
   isUiServerFrame,
   type CallActionEnvelope,
   type CapabilityGrant,
+  type FunctionDescriptor,
   type UiServerFrame
 } from "@livestreak/schema";
 import { enrichRelayErrorMessage } from "../decode-revert.js";
@@ -32,8 +35,22 @@ export interface RemoteUiClient {
    *  needed when a package's cells share a fn name; authz stays keyed on the bare action. */
   call(target: RemoteDriveTarget, action: string, args?: unknown, id?: string): Promise<RemoteCallOutcome>;
   boards(): Readonly<Record<string, unknown>>;
+  /** Scope-filtered function catalog last pushed by Host (empty until `ready`). */
+  functions(): ReadonlyArray<FunctionDescriptor>;
   close(): void;
 }
+
+// ponytail: prefix-match classifier, richer codes only if Host starts sending them.
+/** Classify a failed-call message so callers can tell denial from revocation without parsing. */
+export const classifyRemoteError = (message: string): string => {
+  if (/revok|expir|grant.*no longer|session.*clos|session.*end/i.test(message)) {
+    return `revoked-or-expired: ${message}`;
+  }
+  if (/denied|not permitted|out of scope|forbidden|unauthorized|scope/i.test(message)) {
+    return `scope-denied: ${message}`;
+  }
+  return message;
+};
 
 const toWsBase = (httpBase: string): string => httpBase.replace(/^http/, "ws").replace(/\/$/, "");
 
@@ -45,9 +62,18 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
   const wsBase = toWsBase(opts.hostBaseUrl);
   let ws: WebSocket | undefined;
   let grant: CapabilityGrant | undefined;
+  // Set on an explicit host `revoked` frame; survives socket close so later
+  // calls report revocation instead of generic transport loss.
+  let closedReason: "revoked" | undefined;
   let seq = 0;
   const boards: Record<string, unknown> = {};
+  let seenFunctions: readonly FunctionDescriptor[] = [];
   const pending = new Map<string, (outcome: RemoteCallOutcome) => void>();
+
+  // ponytail: clock check only, richer server expiry codes if Host ever sends them.
+  const grantExpired = (): boolean =>
+    grant?.expiresAt !== undefined && Date.now() >= grant.expiresAt;
+
 
   const applyBoardPatch = (target: string | undefined, patch: unknown): void => {
     if (target !== undefined) {
@@ -74,16 +100,20 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
       case "board_patch":
         applyBoardPatch(f.target, f.board);
         return;
+      case "functions":
+        seenFunctions = f.functions;
+        return;
       case "call_result": {
         const resolve = pending.get(f.callId);
         if (resolve === undefined) {
           return;
         }
         pending.delete(f.callId);
-        const message =
+        const rawMessage =
           f.ok === false && f.error?.message !== undefined
             ? enrichRelayErrorMessage(f.error.message)
             : f.error?.message;
+        const message = rawMessage === undefined ? undefined : classifyRemoteError(rawMessage);
         resolve({
           ok: f.ok,
           ...(f.result === undefined ? {} : { result: f.result }),
@@ -93,6 +123,11 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
       }
       case "revoked":
         log("session revoked");
+        closedReason = "revoked";
+        for (const [, resolvePending] of pending) {
+          resolvePending({ ok: false, error: "revoked-or-expired: session revoked by host" });
+        }
+        pending.clear();
         ws?.close();
         return;
       case "error":
@@ -118,6 +153,7 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
 
   return {
     connect: async () => {
+      closedReason = undefined;
       grant = await redeem();
       const url = `${wsBase}/remote/${encodeURIComponent(opts.sessionId)}/ui`;
       ws = new WebSocket(url);
@@ -146,6 +182,10 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
             typeof frame === "object" &&
             (frame as { type?: string }).type === "ready"
           ) {
+            const readyFunctions = (frame as { functions?: readonly FunctionDescriptor[] }).functions;
+            if (readyFunctions !== undefined) {
+              seenFunctions = readyFunctions;
+            }
             clearTimeout(timer);
             resolve();
             return;
@@ -157,8 +197,12 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
           reject(new Error("leg-B socket error"));
         });
         ws!.on("close", () => {
+          const reason =
+            closedReason === "revoked"
+              ? "revoked-or-expired: session revoked by host"
+              : "connection closed";
           for (const [, resolvePending] of pending) {
-            resolvePending({ ok: false, error: "connection closed" });
+            resolvePending({ ok: false, error: reason });
           }
           pending.clear();
         });
@@ -168,7 +212,16 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
 
     call: async (target, action, args = {}, id) => {
       if (ws === undefined || ws.readyState !== WebSocket.OPEN) {
+        if (closedReason === "revoked") {
+          return { ok: false, error: "revoked-or-expired: session revoked by host" };
+        }
+        if (grantExpired()) {
+          return { ok: false, error: "revoked-or-expired: grant expired" };
+        }
         return { ok: false, error: "not connected" };
+      }
+      if (grantExpired()) {
+        return { ok: false, error: "revoked-or-expired: grant expired" };
       }
       const callId = randomUUID();
       seq += 1;
@@ -194,6 +247,8 @@ export const createRemoteUiClient = (opts: RemoteUiClientOptions): RemoteUiClien
     },
 
     boards: () => ({ ...boards }),
+
+    functions: () => [...seenFunctions],
 
     close: () => {
       ws?.close();

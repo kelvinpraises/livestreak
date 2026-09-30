@@ -6,12 +6,25 @@
     "livestreak": "dist/main.js"
   },
   "main": "dist/main.js",
+  "exports": {
+    ".": {
+      "types": "./dist/main.d.ts",
+      "default": "./dist/main.js"
+    },
+    "./agent-client": {
+      "types": "./agent-client.d.ts",
+      "default": "./dist/agent-client.js"
+    }
+  },
   "files": [
-    "dist"
+    "dist/main.js",
+    "dist/agent-client.js",
+    "agent-client.d.ts"
   ],
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/bundle.mjs",
+    "prepack": "npm run build",
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run",
@@ -20,6 +33,12 @@
   "dependencies": {
     "@effect/cli": "0.69.2",
     "@effect/platform-node": "0.96.1",
+    "effect": "3.21.3",
+    "sodium-universal": "5.0.1",
+    "viem": "^2.23.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
     "@livestreak/bookmaker": "file:../packages/bookmaker",
     "@livestreak/contracts": "file:../packages/contracts",
     "@livestreak/host": "file:../packages/host",
@@ -27,13 +46,9 @@
     "@livestreak/options": "file:../packages/options",
     "@livestreak/schema": "file:../packages/schema",
     "@livestreak/wallet": "file:../packages/wallet",
-    "effect": "3.21.3",
-    "viem": "^2.23.0",
-    "ws": "^8.18.0"
-  },
-  "devDependencies": {
     "@types/node": "^22.15.30",
     "@types/ws": "^8.5.12",
+    "esbuild": "0.28.1",
     "typescript": "6.0.3",
     "vitest": "^4.1.8"
   }

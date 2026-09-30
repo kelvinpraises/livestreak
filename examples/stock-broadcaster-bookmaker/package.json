@@ -1,0 +1,14 @@
+{
+  "name": "stock-broadcaster-bookmaker-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Flow 01 read-only bootstrap: read a role catalog/board via the packed public client. Not a working stock broadcaster.",
+  "scripts": {
+    "read": "node src/read-boards.mjs",
+    "verify": "node scripts/verify-readonly-consumer.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

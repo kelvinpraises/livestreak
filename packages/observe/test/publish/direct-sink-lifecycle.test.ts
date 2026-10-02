@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Deferred, Effect, Fiber } from "effect";
 import type { SinkDeliveryItem } from "#pipeline/publish/index.js";
 import type { TimelineMarker } from "#pipeline/timeline/index.js";
+import type { Fmp4EncoderFactory } from "#pipeline/publish/sinks/live/driver.js";
 import type { Fmp4Encoder } from "#pipeline/publish/encoder/fmp4.js";
 import {
   createDirectSinkDriver,
@@ -147,6 +148,28 @@ const attachConfig = {
 };
 
 describe("direct sink lifecycle", () => {
+  it("owns an encoder when cancellation arrives during acquisition", async () => {
+    const fakes = makeFakes({ grade: "upnp", verified: true, ip: "84.12.9.3" });
+    let finalized = 0;
+    await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const gate = yield* Deferred.make<void>();
+      const encoderFactory: Fmp4EncoderFactory = () => Effect.gen(function* () {
+        yield* Deferred.succeed(entered, undefined);
+        yield* Deferred.await(gate);
+        return { writeFrame: () => Effect.void, finalize: Effect.sync(() => { finalized++; }) };
+      });
+      const attachment = yield* createDirectSinkDriver({ ...fakes.options, encoderFactory }).attach(attachConfig);
+      const delivery = yield* Effect.forkScoped(attachment.deliver(makeI420Item(0)));
+      yield* Deferred.await(entered);
+      const cancellation = yield* Effect.forkScoped(Fiber.interrupt(delivery));
+      yield* Effect.yieldNow();
+      yield* Deferred.succeed(gate, undefined);
+      yield* Fiber.join(cancellation);
+    })));
+    expect(finalized).toBe(1);
+  });
+
   it("gates go-live: unreachable fails attach and closes the server", async () => {
     const fakes = makeFakes({ grade: "unreachable", verified: false });
     const exit = await Effect.runPromiseExit(
@@ -243,5 +266,114 @@ describe("direct sink lifecycle", () => {
     expect(bad._tag).toBe("Failure");
     const lan = await Effect.runPromiseExit(driver.validate({ streamId: "m1", reachability: "lan" }));
     expect(lan._tag).toBe("Success");
+  });
+
+  it("rejects video after finalize without resurrecting the encoder", async () => {
+    let creations = 0;
+    let writes = 0;
+    const countingFactory: DirectSinkDriverOptions["encoderFactory"] = () =>
+      Effect.sync(() => {
+        creations += 1;
+        return {
+          writeFrame: () =>
+            Effect.sync(() => {
+              writes += 1;
+            }),
+          finalize: Effect.void
+        };
+      });
+    // Empty finalize first, then ordinary finalize: both late videos fail.
+    const fakesEmpty = makeFakes({ grade: "upnp", verified: true, ip: "84.12.9.3" });
+    const emptyResult = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const attachment = yield* createDirectSinkDriver({
+            ...fakesEmpty.options,
+            encoderFactory: countingFactory
+          }).attach(attachConfig);
+          yield* attachment.finalize;
+          return yield* attachment.deliver(makeI420Item(9)).pipe(
+            Effect.map(() => "ok" as const),
+            Effect.catchAll(() => Effect.succeed("failed" as const))
+          );
+        })
+      )
+    );
+    expect(emptyResult).toBe("failed");
+    const fakesLate = makeFakes({ grade: "upnp", verified: true, ip: "84.12.9.3" });
+    const lateResult = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const attachment = yield* createDirectSinkDriver({
+            ...fakesLate.options,
+            encoderFactory: countingFactory
+          }).attach(attachConfig);
+          yield* attachment.deliver(makeI420Item(0));
+          yield* attachment.deliver(eosItem());
+          return yield* attachment.deliver(makeI420Item(1)).pipe(
+            Effect.map(() => "ok" as const),
+            Effect.catchAll(() => Effect.succeed("failed" as const))
+          );
+        })
+      )
+    );
+    expect(lateResult).toBe("failed");
+    // Exactly one encoder (the ordinary run) with one write.
+    expect(creations).toBe(1);
+    expect(writes).toBe(1);
+  });
+
+  it("normalizes RGBA and pins the encoder layout like the live lane", async () => {
+    const seen: number[] = [];
+    const recordingFactory: DirectSinkDriverOptions["encoderFactory"] = () =>
+      Effect.sync(() => ({
+        writeFrame: (data: Uint8Array) =>
+          Effect.sync(() => {
+            seen.push(data.byteLength);
+          }),
+        finalize: Effect.void
+      }));
+    const attempt = (payload: unknown): Promise<string> => {
+      const fakes = makeFakes({ grade: "upnp", verified: true, ip: "84.12.9.3" });
+      return Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const attachment = yield* createDirectSinkDriver({
+              ...fakes.options,
+              encoderFactory: recordingFactory
+            }).attach(attachConfig);
+            yield* attachment.deliver({ ...makeI420Item(0), payload } as SinkDeliveryItem);
+            return "ok";
+          })
+        )
+      ).then(
+        () => "ok",
+        () => "failed"
+      );
+    };
+
+    const rgba = new Uint8Array(W * H * 4);
+    rgba.fill(200);
+    expect(await attempt({ data: rgba, width: W, height: H, byteFormat: "rgba", encoding: "raw", expectedFps: 30 })).toBe("ok");
+    expect(seen).toEqual([(W * H * 3) / 2]);
+    expect(await attempt({ data: rgba, width: W, height: H, byteFormat: "rgba", encoding: "jpeg", expectedFps: 30 })).toBe("failed");
+    // Same byte count, different layout: pinned layout rejects before writeFrame.
+    const reshaped = new Uint8Array((W * H * 3) / 2);
+    const fakes = makeFakes({ grade: "upnp", verified: true, ip: "84.12.9.3" });
+    const reshapedResult = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const attachment = yield* createDirectSinkDriver(fakes.options).attach(attachConfig);
+          yield* attachment.deliver(makeI420Item(0));
+          return yield* attachment
+            .deliver({ ...makeI420Item(1), payload: { data: reshaped, width: 480, height: 160, byteFormat: "yuv420p", encoding: "raw", expectedFps: 30 } } as SinkDeliveryItem)
+            .pipe(
+              Effect.map(() => "ok"),
+              Effect.catchAll(() => Effect.succeed("failed"))
+            );
+        })
+      )
+    );
+    expect(reshapedResult).toBe("failed");
   });
 });

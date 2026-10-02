@@ -22,16 +22,23 @@ import {
   type WorkerState
 } from "./state.js";
 import { finalizeSinks, pumpCapture, pumpProcess, pumpSinks } from "./pumps.js";
+import type { WorkerBoardWake } from "./wake.js";
 
 export interface SupervisorTurnResult {
   readonly lifecycle: WorkerLifecycle;
   readonly shouldContinue: boolean;
   readonly didWork: boolean;
+  /**
+   * True when capture waited on control instead of media (see PumpResult). The worker loop
+   * rereads the board immediately and counts neither an idle turn nor a snapshot for it.
+   */
+  readonly wokeForControl?: boolean;
 }
 
 export const supervisorTurn = (
   state: WorkerState,
-  control: WorkerControlView
+  control: WorkerControlView,
+  wake?: WorkerBoardWake
 ): Effect.Effect<SupervisorTurnResult, LiveStreakError> => {
   return Effect.gen(function* () {
     state.lastAppliedControlRevision = control.revision;
@@ -67,7 +74,7 @@ export const supervisorTurn = (
     }
 
     if (state.lifecycle === "running") {
-      return yield* turnRunning(state, control);
+      return yield* turnRunning(state, control, wake);
     }
 
     if (state.lifecycle === "pausing") {
@@ -94,7 +101,8 @@ export const supervisorTurn = (
 
 const turnRunning = (
   state: WorkerState,
-  control: WorkerControlView
+  control: WorkerControlView,
+  wake?: WorkerBoardWake
 ): Effect.Effect<SupervisorTurnResult, LiveStreakError> =>
   Effect.gen(function* () {
     if (shouldPumpCapture(state, control) === false) {
@@ -105,7 +113,40 @@ const turnRunning = (
       });
     }
 
-    const capture = yield* pumpCapture(state, control);
+    // G18-B01: drain at most ONE eligible downstream pass, then return for a canonical control
+    // reread — never the whole backlog under one stale view. A productive drain returns
+    // didWork WITHOUT pulling: the next turn rereads the board first, so control latency stays
+    // bounded (pause acknowledged within ~a turn, not after 16 slow deliveries). The pull only
+    // runs on quiescent downstream, so nothing deliverable is stranded behind a blocked pull.
+    // Drain always outpaces production here (microsecond turns vs paced frames, bounded tracks,
+    // queue backpressure beyond that), so capture cannot starve: an empty drain means empty tracks.
+    const drain = yield* pumpSinks(state, control);
+    if (workerTurnFailed(state)) {
+      return yield* completeSupervisorTurn(state, {
+        lifecycle: state.lifecycle,
+        shouldContinue: false,
+        didWork: drain.didWork
+      });
+    }
+    if (drain.didWork) {
+      return yield* completeSupervisorTurn(state, {
+        lifecycle: state.lifecycle,
+        shouldContinue: true,
+        didWork: true
+      });
+    }
+
+    const capture = yield* pumpCapture(state, control, wake);
+    // A capture-control wake returns from the running branch BEFORE further work under the
+    // old control view: reread the board promptly without racing/cancelling downstream effects.
+    if (capture.wokeForControl === true) {
+      return yield* completeSupervisorTurn(state, {
+        lifecycle: state.lifecycle,
+        shouldContinue: true,
+        didWork: false,
+        wokeForControl: true as const
+      });
+    }
     if (workerTurnFailed(state)) {
       return yield* completeSupervisorTurn(state, {
         lifecycle: state.lifecycle,
@@ -295,7 +336,14 @@ const completeSupervisorTurn = (
       };
     }
 
-    return result;
+    // A capture-control wake is not media work: propagate the flag so the worker loop rereads
+    // immediately without idle counting or snapshot publishing. Terminal results publish anyway.
+    return {
+      lifecycle: result.lifecycle,
+      shouldContinue: result.shouldContinue,
+      didWork: result.didWork,
+      ...(result.wokeForControl === true ? { wokeForControl: true as const } : {})
+    };
   });
 };
 

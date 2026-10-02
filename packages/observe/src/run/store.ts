@@ -2,7 +2,13 @@ import { Effect } from "effect";
 import { LiveStreakConfigError, type LiveStreakError } from "@livestreak/core";
 import { validateArtifactIdInput } from "./control/bus/artifacts.js";
 import type { ControlArtifact, ControlCallEnvelope, ControlCallResult } from "./control/bus/index.js";
-import type { ArtifactSubscription, BoardSubscription, ControlBus } from "./control/bus/index.js";
+import type {
+  ArtifactSubscription,
+  BoardSubscription,
+  ControlBus,
+  ExecutionLease,
+  UpdateAuthority
+} from "./control/bus/index.js";
 import type { ControlPanel } from "./control/bus/index.js";
 import type { Board } from "./control/board/index.js";
 import type { ObserveRunResult } from "./kernel.js";
@@ -12,6 +18,11 @@ export interface ObserveRunHandle {
   readonly runId: string;
   readonly run: ObserveRun;
   readonly bus: ControlBus;
+  /**
+   * Execution identity captured at start. Stop uses it for generation-fenced writes;
+   * absent on legacy fixture handles, which fall back to entry tickets.
+   */
+  readonly execution?: ExecutionLease;
   readonly startedAtMs: number;
   readonly awaitResult: () => Effect.Effect<ObserveRunResult, LiveStreakError>;
   readonly interrupt: Effect.Effect<void, LiveStreakError>;
@@ -37,7 +48,7 @@ export const reclaimTerminalRunHandle = (
       return;
     }
     if (yield* existing.isDone) {
-      return yield* store.removeHandle(runId);
+      return yield* store.removeHandleIfCurrent(existing, runId);
     }
     return yield* Effect.fail(activeHandleExistsError(runId));
   });
@@ -54,6 +65,11 @@ export interface RunStore {
   readonly getHandle: (runId: string) => Effect.Effect<ObserveRunHandle | undefined>;
   readonly requireHandle: (runId: string) => Effect.Effect<ObserveRunHandle, LiveStreakConfigError>;
   readonly removeHandle: (runId: string) => Effect.Effect<void>;
+  /**
+   * Identity-checked retirement: removes only when the stored handle is still the expected
+   * one, so a stale removal (reclaim raced by a restart) cannot retire the new handle.
+   */
+  readonly removeHandleIfCurrent: (handle: ObserveRunHandle, key?: string) => Effect.Effect<void>;
   readonly listHandles: () => Effect.Effect<readonly ObserveRunHandle[]>;
 }
 
@@ -64,21 +80,30 @@ export const createRunStore = (): RunStore => {
   const handleInsertionOrder: string[] = [];
 
   return {
-    put: (run, key) => {
-      const runId = key ?? run.config.runId;
-      if (runs.has(runId)) {
-        return Effect.fail(
-          new LiveStreakConfigError({
-            message: `Run ${runId} already exists in store`
-          })
-        );
-      }
-
-      return Effect.sync(() => {
+    // Reads evaluate at execution (not construction): the registry is mutable and shared
+    // across fibers, so a construction-time read is a stale snapshot. Check-plus-insertion is
+    // ONE synchronous action (decide and mutate in the same block); only the error mapping
+    // happens outside, which cannot resurrect the race.
+    put: (run, key) =>
+      Effect.sync(() => {
+        const runId = key ?? run.config.runId;
+        if (runs.has(runId)) {
+          return false;
+        }
         runs.set(runId, run);
         runInsertionOrder.push(runId);
-      });
-    },
+        return true;
+      }).pipe(
+        Effect.flatMap((inserted) =>
+          inserted
+            ? Effect.void
+            : Effect.fail(
+                new LiveStreakConfigError({
+                  message: `Run ${(key ?? run.config.runId)} already exists in store`
+                })
+              )
+        )
+      ),
 
     replace: (run, key) =>
       Effect.sync(() => {
@@ -91,20 +116,21 @@ export const createRunStore = (): RunStore => {
         runs.set(runId, run);
       }),
 
-    get: (runId) => Effect.succeed(runs.get(runId)),
+    get: (runId) => Effect.sync(() => runs.get(runId)),
 
-    require: (runId) => {
-      const run = runs.get(runId);
-      if (run === undefined) {
-        return Effect.fail(
-          new LiveStreakConfigError({
-            message: `Run ${runId} not found in store`
-          })
-        );
-      }
+    require: (runId) =>
+      Effect.suspend(() => {
+        const run = runs.get(runId);
+        if (run === undefined) {
+          return Effect.fail(
+            new LiveStreakConfigError({
+              message: `Run ${runId} not found in store`
+            })
+          );
+        }
 
-      return Effect.succeed(run);
-    },
+        return Effect.succeed(run);
+      }),
 
     remove: (runId) =>
       Effect.sync(() => {
@@ -118,34 +144,38 @@ export const createRunStore = (): RunStore => {
         }
       }),
 
-    list: () => Effect.succeed(runInsertionOrder.map((id) => runs.get(id)!)),
+    list: () => Effect.sync(() => runInsertionOrder.map((id) => runs.get(id)!)),
 
-    putHandle: (handle, key) => {
-      const runId = key ?? handle.runId;
-      if (handles.has(runId)) {
-        return Effect.fail(activeHandleExistsError(runId));
-      }
-
-      return Effect.sync(() => {
+    putHandle: (handle, key) =>
+      Effect.sync(() => {
+        const runId = key ?? handle.runId;
+        if (handles.has(runId)) {
+          return false;
+        }
         handles.set(runId, handle);
         handleInsertionOrder.push(runId);
-      });
-    },
+        return true;
+      }).pipe(
+        Effect.flatMap((inserted) =>
+          inserted ? Effect.void : Effect.fail(activeHandleExistsError(key ?? handle.runId))
+        )
+      ),
 
-    getHandle: (runId) => Effect.succeed(handles.get(runId)),
+    getHandle: (runId) => Effect.sync(() => handles.get(runId)),
 
-    requireHandle: (runId) => {
-      const handle = handles.get(runId);
-      if (handle === undefined) {
-        return Effect.fail(
-          new LiveStreakConfigError({
-            message: `Active handle for run ${runId} not found in store`
-          })
-        );
-      }
+    requireHandle: (runId) =>
+      Effect.suspend(() => {
+        const handle = handles.get(runId);
+        if (handle === undefined) {
+          return Effect.fail(
+            new LiveStreakConfigError({
+              message: `Active handle for run ${runId} not found in store`
+            })
+          );
+        }
 
-      return Effect.succeed(handle);
-    },
+        return Effect.succeed(handle);
+      }),
 
     removeHandle: (runId) =>
       Effect.sync(() => {
@@ -159,7 +189,22 @@ export const createRunStore = (): RunStore => {
         }
       }),
 
-    listHandles: () => Effect.succeed(handleInsertionOrder.map((id) => handles.get(id)!))
+    removeHandleIfCurrent: (handle, key) =>
+      Effect.sync(() => {
+        const runId = key ?? handle.runId;
+        if (handles.get(runId) !== handle) {
+          return;
+        }
+        if (!handles.delete(runId)) {
+          return;
+        }
+        const index = handleInsertionOrder.indexOf(runId);
+        if (index !== -1) {
+          handleInsertionOrder.splice(index, 1);
+        }
+      }),
+
+    listHandles: () => Effect.sync(() => handleInsertionOrder.map((id) => handles.get(id)!))
   };
 };
 
@@ -225,11 +270,12 @@ export const subscribeStoredRunArtifacts = (
 
 export const callStoredRunFunction = (
   store: RunStore,
-  envelope: ControlCallEnvelope
+  envelope: ControlCallEnvelope,
+  authority?: UpdateAuthority
 ): Effect.Effect<ControlCallResult, LiveStreakError> =>
   Effect.gen(function* () {
     const bus = yield* resolveStoredRunBus(store, envelope.runId);
-    return yield* bus.callFunction(envelope);
+    return yield* bus.dispatchCall(envelope, authority);
   });
 
 const resolveStoredRunBus = (

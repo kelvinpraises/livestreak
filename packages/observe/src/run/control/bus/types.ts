@@ -93,6 +93,97 @@ export interface BoardSubscription {
   readonly unsubscribe: () => import("effect").Effect.Effect<void>;
 }
 
+/**
+ * An execution lease binds one running observation execution to a monotonically advancing
+ * generation token. Tokens advance on every reserve AND every release, so a write carrying
+ * an old token can never match a live or future generation. Tokens stay internal — never
+ * producer config, never an authorization credential.
+ */
+export interface ExecutionLease {
+  readonly obsKey: string;
+  readonly token: number;
+}
+
+/** Protected phase of one observation's admission entry. Stopping is part of executing: the
+ *  lease is retained through awaited resource cleanup and terminal publication. */
+export type ExecutionPhase = "inactive" | "configuring" | "preparing" | "executing";
+
+/**
+ * Per-observation admission gate plus generation owner (see bus/execution.ts). One instance
+ * per control bus; observations are keyed independently so siblings never block each other.
+ * Every acquire AND every release advances the token atomically, so ABA reuse is impossible.
+ */
+export interface ExecutionOwner {
+  /** Reserve execution; fails unless the entry is inactive (atomic check-and-set). */
+  readonly reserve: (
+    obsKey: string
+  ) => import("effect").Effect.Effect<number, import("@livestreak/core").LiveStreakError>;
+  /** Claim an operator configuration interval; fails unless inactive (atomic). */
+  readonly claimConfig: (
+    obsKey: string
+  ) => import("effect").Effect.Effect<number, import("@livestreak/core").LiveStreakError>;
+  /** Claim a preparation interval (creates the entry for brand-new families); atomic. */
+  readonly claimPrepare: (
+    obsKey: string
+  ) => import("effect").Effect.Effect<number, import("@livestreak/core").LiveStreakError>;
+  /** Release a claim/reservation; only the matching token retires it (stale releases no-op). */
+  readonly release: (
+    obsKey: string,
+    token: number
+  ) => import("effect").Effect.Effect<void>;
+  /** Snapshot {token, phase} for ExpectedGeneration tickets: no claim, no bump. */
+  readonly readEntry: (obsKey: string) => import("effect").Effect.Effect<
+    { readonly token: number; readonly phase: ExecutionPhase },
+    never
+  >;
+  /** True when the token is the observation's current generation. */
+  readonly isCurrent: (obsKey: string, token: number) => import("effect").Effect.Effect<boolean>;
+  /** True while any protected phase owns the observation (configuring/preparing/executing). */
+  readonly isActive: (obsKey: string) => import("effect").Effect.Effect<boolean>;
+  /** True while ANY observation (family or legacy bare key) holds a protected phase. */
+  readonly anyOwned: () => import("effect").Effect.Effect<boolean>;
+}
+
+/**
+ * Authority for one guarded board transaction. OwnerLease = a held configuring/preparing/
+ * executing token (nested internal work reuses the holder's token, never reserves twice).
+ * ExpectedTicket = generation read at entry without claiming (pause/market lifecycle, handle-less
+ * stop): any reserve/retire since capture makes the commit stale, even back to inactive.
+ * SessionClearance = session add/remove/close, whose rules are checked atomically at commit.
+ * Tokens are internal consistency facts, never client-supplied credentials.
+ */
+export type UpdateAuthority =
+  | { readonly kind: "owner"; readonly lease: ExecutionLease }
+  | { readonly kind: "ticket"; readonly ticket: ExecutionLease }
+  | { readonly kind: "session" };
+
+/**
+ * What a guarded board update is allowed to change. Snapshot/lifecycle updates are derived
+ * from the current board inside the guard (never a stale caller board). Call updates carry the
+ * invoked scope/target so the return footprint is enforced against the operation table.
+ */
+export type UpdateOperation =
+  | { readonly kind: "snapshot"; readonly obsId?: string }
+  | { readonly kind: "lifecycle"; readonly obsId?: string }
+  | {
+      readonly kind: "call";
+      readonly scope: string;
+      readonly targetCell?: string;
+      readonly obsId?: string;
+      /** Surface patch cell keys (pre-derivation intent) for footprint validation. */
+      readonly patchCellIds: ReadonlyArray<string>;
+      readonly payload?: unknown;
+    }
+  | { readonly kind: "sessionAdd" }
+  | { readonly kind: "sessionRemove"; readonly obsId: string }
+  | { readonly kind: "sessionClose" }
+  | { readonly kind: "prepareMeta"; readonly obsId: string };
+
+/** Board wake fan-out subscription: lifetime-bound, unregistered on release. */
+export interface WakeSubscription {
+  readonly unsubscribe: () => import("effect").Effect.Effect<void>;
+}
+
 export interface ArtifactSubscription {
   readonly unsubscribe: () => import("effect").Effect.Effect<void>;
 }
@@ -148,9 +239,43 @@ export interface ControlBus {
     import("#run/control/board/index.js").Board,
     import("@livestreak/core").LiveStreakError
   >;
+  /**
+   * Guarded board transaction: authority check (owner lease / expected ticket / session rules)
+   * plus return-footprint validation plus board rebase/commit happen atomically under the bus's
+   * short transaction guard. The update derives from the CURRENT board inside the guard — never
+   * a stale caller board. Notifications fire after commit with the committed receipt.
+   */
+  readonly commitGuardedUpdate: (
+    authority: UpdateAuthority,
+    operation: UpdateOperation,
+    update: (
+      current: import("#run/control/board/index.js").Board
+    ) => import("effect").Effect.Effect<
+      import("#run/control/board/index.js").Board,
+      import("@livestreak/core").LiveStreakError
+    >
+  ) => import("effect").Effect.Effect<
+    import("#run/control/board/index.js").Board,
+    import("@livestreak/core").LiveStreakError
+  >;
+  /**
+   * Dispatch with explicit authority (nested internal work reuses a held token; stop uses its
+   * handle lease). Same validated route, admission, footprint and guarded commit as callFunction.
+   */
+  readonly dispatchCall: (
+    envelope: ControlCallEnvelope,
+    authority?: UpdateAuthority
+  ) => import("effect").Effect.Effect<ControlCallResult, import("@livestreak/core").LiveStreakError>;
+  /** Per-observation admission/lease owner for this bus. */
+  readonly execution: ExecutionOwner;
+  /**
+   * Lifetime-bound wake subscription: additive fan-out, never replacement. Returns the
+   * subscription — the caller unsubscribes on release. Callers that ignore the receipt stay
+   * subscribed (documented behavior, not a leak in short-lived tests).
+   */
   readonly registerWakeWorker: (
-    wakeWorker: () => import("effect").Effect.Effect<void>
-  ) => import("effect").Effect.Effect<void>;
+    wakeWorker: () => import("effect").Effect.Effect<void, import("@livestreak/core").LiveStreakError, never>
+  ) => import("effect").Effect.Effect<WakeSubscription, never>;
 }
 
 export interface CreateControlBusInput {
@@ -158,5 +283,5 @@ export interface CreateControlBusInput {
   readonly board: import("#run/control/board/index.js").Board;
   readonly catalog: import("#run/control/catalog.js").ControlCatalog;
   readonly surfaces?: readonly ControlSurface[];
-  readonly wakeWorker?: () => import("effect").Effect.Effect<void>;
+  readonly wakeWorker?: () => import("effect").Effect.Effect<void, import("@livestreak/core").LiveStreakError, never>;
 }

@@ -1,11 +1,17 @@
-import { Effect } from "effect";
-import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
+import { Effect, Exit } from "effect";
+import {
+  LiveStreakConfigError,
+  LiveStreakRuntimeError,
+  type LiveStreakError,
+} from "@livestreak/core";
 import {
   spawnChild,
+  killProcess,
   validateVideoDimensions,
   waitForProcessClose,
   writeStdinWithBackpressure,
-  type FfmpegBinaries
+  type NodeWritable,
+  type FfmpegBinaries,
 } from "#adapters/ffmpeg/index.js";
 import { createFmp4Chunker, type Fmp4Chunk } from "./fmp4-boxes.js";
 
@@ -23,6 +29,7 @@ import { createFmp4Chunker, type Fmp4Chunk } from "./fmp4-boxes.js";
  * a valid late-join point).
  */
 export interface Fmp4EncoderConfig {
+  readonly audio?: boolean;
   readonly width: number;
   readonly height: number;
   readonly fps: number;
@@ -35,13 +42,14 @@ export interface Fmp4EncoderConfig {
 
 export interface Fmp4Encoder {
   /** Push one raw I420 (yuv420p) frame; bytes must be width*height*3/2. */
+  readonly writeAudio?: (data: Uint8Array) => Effect.Effect<void, LiveStreakError>;
   readonly writeFrame: (data: Uint8Array) => Effect.Effect<void, LiveStreakError>;
   /** Flush + close ffmpeg, drain the last fragment, and stop. Idempotent. */
   readonly finalize: Effect.Effect<void, LiveStreakError>;
 }
 
 export const createFmp4Encoder = (
-  config: Fmp4EncoderConfig
+  config: Fmp4EncoderConfig,
 ): Effect.Effect<Fmp4Encoder, LiveStreakError> =>
   Effect.gen(function* () {
     yield* validateVideoDimensions(config.width, config.height);
@@ -49,7 +57,14 @@ export const createFmp4Encoder = (
 
     const frameSize = (config.width * config.height * 3) / 2;
     const ffmpeg = config.binaries?.ffmpegPath ?? "ffmpeg";
-    const child = yield* spawnChild(ffmpeg, makeFfmpegFmp4Arguments(config));
+    const child = yield* spawnChild(
+      ffmpeg,
+      makeFfmpegFmp4Arguments(config),
+      config.audio ? "pipe-audio" : "pipe",
+    );
+    const audioInput = config.audio
+      ? (child.stdio?.[3] as NodeWritable | undefined)
+      : undefined;
     const stderr: Uint8Array[] = [];
     child.stderr.on("data", (chunk) => stderr.push(chunk));
 
@@ -66,17 +81,21 @@ export const createFmp4Encoder = (
 
     const writeFrame = (data: Uint8Array): Effect.Effect<void, LiveStreakError> => {
       if (finalized) {
-        return Effect.fail(new LiveStreakRuntimeError({ message: "fMP4 encoder is finalized" }));
+        return Effect.fail(
+          new LiveStreakRuntimeError({ message: "fMP4 encoder is finalized" }),
+        );
       }
       if (data.byteLength !== frameSize) {
         return Effect.fail(
           new LiveStreakRuntimeError({
             message: "fMP4 encoder received a frame with the wrong byte length",
-            metadata: { details: `expected ${frameSize}, received ${data.byteLength}` }
-          })
+            metadata: { details: `expected ${frameSize}, received ${data.byteLength}` },
+          }),
         );
       }
-      return writeStdinWithBackpressure(child.stdin, data, "fMP4 encoder");
+      return writeStdinWithBackpressure(child.stdin, data, "fMP4 encoder").pipe(
+        Effect.onInterrupt(() => Effect.sync(() => killProcess(child))),
+      );
     };
 
     const finalize = Effect.gen(function* () {
@@ -85,17 +104,45 @@ export const createFmp4Encoder = (
       }
       finalized = true;
       child.stdin.end();
+      audioInput?.end();
       if (!closed) {
-        yield* waitForProcessClose(child, stderr, "fMP4 encoder");
+        yield* waitForProcessClose(child, stderr, "fMP4 encoder").pipe(
+          Effect.timeoutFail({
+            duration: "10 seconds",
+            onTimeout: () =>
+              new LiveStreakRuntimeError({
+                message: "fMP4 encoder did not finish within ten seconds",
+              }),
+          }),
+        );
         closed = true;
       }
       // Drain any whole trailing fragment ffmpeg wrote as it closed the moov/moof at EOS.
       for (const chunk of chunker.flush()) {
         config.onChunk(chunk);
       }
-    });
+    }).pipe(
+      Effect.onExit((exit) =>
+        Exit.isFailure(exit) ? Effect.sync(() => killProcess(child)) : Effect.void,
+      ),
+    );
 
-    return { writeFrame, finalize };
+    return {
+      writeFrame,
+      finalize,
+      ...(audioInput
+        ? {
+            writeAudio: (data: Uint8Array) =>
+              finalized
+                ? Effect.fail(
+                    new LiveStreakRuntimeError({ message: "fMP4 encoder is finalized" }),
+                  )
+                : writeStdinWithBackpressure(audioInput, data, "fMP4 audio").pipe(
+                    Effect.onInterrupt(() => Effect.sync(() => killProcess(child))),
+                  ),
+          }
+        : {}),
+    };
   });
 
 // fMP4 to stdout: fragment on keyframe at the GOP boundary. `-g == fps*fragmentSeconds` + `-force_key_frames`
@@ -107,6 +154,10 @@ export const makeFfmpegFmp4Arguments = (config: Fmp4EncoderConfig): readonly str
     "-hide_banner",
     "-loglevel",
     "error",
+    "-probesize",
+    "32",
+    "-analyzeduration",
+    "1",
     "-f",
     "rawvideo",
     "-pix_fmt",
@@ -117,7 +168,30 @@ export const makeFfmpegFmp4Arguments = (config: Fmp4EncoderConfig): readonly str
     config.fps.toString(),
     "-i",
     "pipe:0",
-    "-an",
+    ...(config.audio
+      ? [
+          "-probesize",
+          "32",
+          "-analyzeduration",
+          "1",
+          "-f",
+          "s16le",
+          "-ar",
+          "48000",
+          "-ac",
+          "2",
+          "-i",
+          "pipe:3",
+          "-map",
+          "0:v:0",
+          "-map",
+          "1:a:0",
+          "-c:a",
+          "aac",
+          "-b:a",
+          "128k",
+        ]
+      : ["-an"]),
     "-c:v",
     "libx264",
     "-preset",
@@ -140,7 +214,7 @@ export const makeFfmpegFmp4Arguments = (config: Fmp4EncoderConfig): readonly str
     Math.max(1, Math.round(config.fragmentSeconds * 1_000_000)).toString(),
     "-f",
     "mp4",
-    "pipe:1"
+    "pipe:1",
   ];
 };
 
@@ -148,14 +222,18 @@ export const makeFfmpegFmp4Arguments = (config: Fmp4EncoderConfig): readonly str
 
 const validateFragment = (
   fps: number,
-  fragmentSeconds: number
+  fragmentSeconds: number,
 ): Effect.Effect<void, LiveStreakConfigError> => {
   if (!Number.isFinite(fps) || fps <= 0) {
-    return Effect.fail(new LiveStreakConfigError({ message: "fMP4 encoder fps must be a positive number" }));
+    return Effect.fail(
+      new LiveStreakConfigError({ message: "fMP4 encoder fps must be a positive number" }),
+    );
   }
   if (!Number.isFinite(fragmentSeconds) || fragmentSeconds <= 0) {
     return Effect.fail(
-      new LiveStreakConfigError({ message: "fMP4 encoder fragmentSeconds must be a positive number" })
+      new LiveStreakConfigError({
+        message: "fMP4 encoder fragmentSeconds must be a positive number",
+      }),
     );
   }
   return Effect.void;

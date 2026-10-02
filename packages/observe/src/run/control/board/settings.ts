@@ -9,6 +9,34 @@ import {
   type PausePresentation
 } from "#pipeline/capture/index.js";
 import { projectWorkerControlView } from "./worker-view.js";
+import { observationCellId } from "#run/control/system/config.js";
+
+export interface ObservationCompleteness {
+  readonly capture: boolean;
+  readonly publish: boolean;
+  readonly market: boolean;
+}
+
+/**
+ * Per-observation completeness for the SELECTED family only: a sibling's configured cells
+ * or a global stage cell can never satisfy it. Partial writes stay valid — this reports
+ * state, it does not gate (gates live in derivation/admission with operator-facing messages).
+ */
+export const observationCompleteness = (board: Board, obsId: string): ObservationCompleteness => {
+  const capture = board.cells[observationCellId(obsId, "capture")];
+  const publish = board.cells[observationCellId(obsId, "publish")];
+  const marketId = board.cells[observationCellId(obsId, "market")]?.readonly?.marketId;
+  return {
+    capture: capture?.readonly?.configured === true,
+    publish: publish?.readonly?.configured === true,
+    market: typeof marketId === "string" && marketId.trim().length > 0
+  };
+};
+
+export const isObservationConfigured = (board: Board, obsId: string): boolean => {
+  const completeness = observationCompleteness(board, obsId);
+  return completeness.capture && completeness.publish && completeness.market;
+};
 
 export type { PausePresentation } from "#pipeline/capture/index.js";
 
@@ -47,6 +75,12 @@ export interface ValidateBoardSettingsOptions {
    * write path passes `false` (shape-only), and prepare (kernel) leaves it `true` (the default).
    */
   readonly requireComplete?: boolean;
+  /**
+   * Which observation completeness belongs to at prepare/start. Set: that family's own
+   * policy must exist and subscribe (never a sibling's or a global cell). Absent: the
+   * legacy global rule (≥1 stage policy). Completeness is per-family, never global.
+   */
+  readonly obsId?: string;
 }
 
 export const validateBoardSettings = (
@@ -55,13 +89,17 @@ export const validateBoardSettings = (
 ): Effect.Effect<Board, LiveStreakConfigError> =>
   Effect.gen(function* () {
     const requireComplete = options.requireComplete ?? true;
-    const view = projectWorkerControlView(board);
+    const view =
+      options.obsId === undefined
+        ? projectWorkerControlView(board)
+        : projectWorkerControlView(board, options.obsId);
 
     yield* validateSystemRunSettings(board);
     yield* validateSystemPauseSettings(board);
     yield* validateCaptureFileSettings(board);
     yield* validateCaptureBrowserSettings(board);
     yield* validateSinkCellSettings(board);
+    yield* validateFamilyCellSettings(board);
 
     if (!requireComplete) {
       return board;
@@ -94,45 +132,102 @@ export const validateBoardSettings = (
 
 const validateSystemRunSettings = (board: Board): Effect.Effect<void, LiveStreakConfigError> =>
   Effect.gen(function* () {
-    const runCellId = runCellIdOf(board);
-    const settings = runCellId === undefined ? undefined : board.cells[runCellId]?.settings;
+    // Every family's run cell validates (a second family's invalid shape must not store),
+    // not just the legacy-resolved one. Partial writes pass: only present fields are shaped.
+    for (const cellId of runCellIds(board)) {
+      yield* validateRunSettingsAt(board, cellId);
+    }
+  });
+
+const runCellIds = (board: Board): string[] => {
+  const ids = new Set<string>();
+  const legacy = runCellIdOf(board);
+  if (legacy !== undefined) {
+    ids.add(legacy);
+  }
+  for (const id of Object.keys(board.cells)) {
+    if (id.startsWith("obs:") && id.endsWith(":run")) {
+      ids.add(id);
+    }
+  }
+  return [...ids];
+};
+
+const validateRunSettingsAt = (board: Board, cellId: string): Effect.Effect<void, LiveStreakConfigError> =>
+  Effect.gen(function* () {
+    const settings = board.cells[cellId]?.settings;
     if (settings === undefined) {
       return;
     }
 
-    const runSettings = yield* assertPlainSettingsObject(settings, "system:run.settings");
-    yield* assertOptionalBoolean(
-      runSettings.stopRequested,
-      "system:run.settings.stopRequested"
-    );
+    const fieldPath = `${cellId}.settings`;
+    const runSettings = yield* assertPlainSettingsObject(settings, fieldPath);
+    yield* assertOptionalBoolean(runSettings.stopRequested, `${fieldPath}.stopRequested`);
 
     if (runSettings.stopReason !== undefined) {
-      yield* assertNonEmptyTrimmedString(
-        runSettings.stopReason,
-        "system:run.settings.stopReason"
-      );
+      yield* assertNonEmptyTrimmedString(runSettings.stopReason, `${fieldPath}.stopReason`);
     }
   });
 
 const validateSystemPauseSettings = (board: Board): Effect.Effect<void, LiveStreakConfigError> =>
   Effect.gen(function* () {
-    const settings = board.cells[pauseCellIdOf(board) ?? "system:pause"]?.settings;
+    for (const cellId of pauseCellIds(board)) {
+      yield* validatePauseSettingsAt(board, cellId);
+    }
+  });
+
+const pauseCellIds = (board: Board): string[] => {
+  const ids = new Set<string>([pauseCellIdOf(board) ?? "system:pause"]);
+  for (const id of Object.keys(board.cells)) {
+    if (id.startsWith("obs:") && id.endsWith(":pause")) {
+      ids.add(id);
+    }
+  }
+  return [...ids];
+};
+
+const validatePauseSettingsAt = (board: Board, cellId: string): Effect.Effect<void, LiveStreakConfigError> =>
+  Effect.gen(function* () {
+    const settings = board.cells[cellId]?.settings;
     if (settings === undefined) {
       return;
     }
 
-    const pauseSettings = yield* assertPlainSettingsObject(settings, "system:pause.settings");
-    yield* assertOptionalBoolean(pauseSettings.requested, "system:pause.settings.requested");
+    const fieldPath = `${cellId}.settings`;
+    const pauseSettings = yield* assertPlainSettingsObject(settings, fieldPath);
+    yield* assertOptionalBoolean(pauseSettings.requested, `${fieldPath}.requested`);
 
     if (pauseSettings.whilePaused !== undefined) {
-      yield* assertPausePresentationValue(
-        pauseSettings.whilePaused,
-        "system:pause.settings.whilePaused"
-      );
+      yield* assertPausePresentationValue(pauseSettings.whilePaused, `${fieldPath}.whilePaused`);
     }
 
-    yield* validateSlateAssetIdSettings(pauseSettings, "system:pause.settings");
-    yield* rejectLegacyPauseFields(pauseSettings, "system:pause.settings");
+    yield* validateSlateAssetIdSettings(pauseSettings, fieldPath);
+    yield* rejectLegacyPauseFields(pauseSettings, fieldPath);
+  });
+
+// Family shape validation: every observation's capture cell validates like its global
+// counterpart (file shape by catalog; other catalogs keep the plain-object shape the
+// configure decoders complete). Second-family garbage must not store.
+const validateFamilyCellSettings = (board: Board): Effect.Effect<void, LiveStreakConfigError> =>
+  Effect.gen(function* () {
+    for (const [cellId, cell] of Object.entries(board.cells)) {
+      const parts = cellId.split(":");
+      if (parts[0] !== "obs" || parts.length !== 3 || parts[2] !== "capture") {
+        continue;
+      }
+      const settings = cell.settings;
+      if (settings === undefined) {
+        continue;
+      }
+      const fieldPath = `${cellId}.settings`;
+      yield* assertPlainSettingsObject(settings, fieldPath);
+      if (cell.catalog === "capture:file" && typeof settings === "object" && settings !== null) {
+        yield* assertOptionalString(
+          (settings as Record<string, unknown>).path,
+          `${fieldPath}.path`
+        );
+      }
+    }
   });
 
 const validateCaptureFileSettings = (board: Board): Effect.Effect<void, LiveStreakConfigError> =>

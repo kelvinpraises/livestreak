@@ -6,30 +6,33 @@ import type {
   SinkDriver,
   SinkDriverDescriptor,
   SinkFinalizeResult,
-  SinkStageHealth
+  SinkStageHealth,
 } from "#pipeline/publish/index.js";
-import type { DescribeControlContext, ControlCellDefinition } from "#run/control/bus/types.js";
+import type {
+  DescribeControlContext,
+  ControlCellDefinition,
+} from "#run/control/bus/types.js";
 import {
   createFmp4Encoder,
   type Fmp4Encoder,
-  type Fmp4EncoderConfig
+  type Fmp4EncoderConfig,
 } from "#pipeline/publish/encoder/fmp4.js";
 import type { FfmpegBinaries } from "#adapters/ffmpeg/index.js";
-import { readI420Frame } from "#pipeline/publish/sinks/i420.js";
+import { normalizeToI420, type I420Frame } from "#pipeline/publish/sinks/i420.js";
 import { localIpv4 } from "./upnp.js";
 import { probeReachability, type ProbeInput, type ReachabilityResult } from "./probe.js";
 import { createDirectFanout, DEFAULT_DIRECT_FANOUT, type DirectFanout } from "./fanout.js";
 import {
   createWsDirectViewerServer,
   directWatchUrl,
-  type DirectServerFactory
+  type DirectServerFactory,
 } from "./transport.js";
 import { createDirectSignalClient, type DirectSignalClient } from "./signal.js";
 import { directSinkCloseCommand, directSinkConfigureCommand } from "./commands.js";
 
 /** Factory for the fMP4 encoder; the real one spawns ffmpeg, tests inject a synthetic one. */
 type Fmp4EncoderFactory = (
-  config: Fmp4EncoderConfig
+  config: Fmp4EncoderConfig,
 ) => Effect.Effect<Fmp4Encoder, LiveStreakError>;
 
 export type ReachabilityProber = (input: ProbeInput) => Promise<ReachabilityResult>;
@@ -91,28 +94,36 @@ export const directSinkDescriptor: SinkDriverDescriptor = {
   id: "direct",
   version: "0.1.0",
   displayName: "Direct Stream Sink",
-  summary: "Encode-once fMP4 served to viewers DIRECTLY by the broadcaster; host does signaling only.",
+  summary:
+    "Encode-once fMP4 served to viewers DIRECTLY by the broadcaster; host does signaling only.",
   capabilityScopes: ["sink:direct:*"],
   flags: [
     {
       name: "streamId",
-      value: { type: "string", description: "Stream/market id this direct feed is scoped to." },
-      help: "Scope the direct fMP4 feed to a stream id."
+      value: {
+        type: "string",
+        description: "Stream/market id this direct feed is scoped to.",
+      },
+      help: "Scope the direct fMP4 feed to a stream id.",
     },
     {
       name: "port",
-      value: { type: "number", description: "TCP port viewers dial.", default: DEFAULT_DIRECT_PORT },
-      help: "UPnP-mapped on the router; viewers connect to it directly."
-    }
+      value: {
+        type: "number",
+        description: "TCP port viewers dial.",
+        default: DEFAULT_DIRECT_PORT,
+      },
+      help: "UPnP-mapped on the router; viewers connect to it directly.",
+    },
   ],
   commands: [directSinkConfigureCommand, directSinkCloseCommand],
   mode: "local",
   requiresHost: false,
-  debugOnly: false
+  debugOnly: false,
 };
 
 export const validateDirectSinkConfig = (
-  config: DirectSinkConfig
+  config: DirectSinkConfig,
 ): Effect.Effect<DirectSinkConfig, LiveStreakError> =>
   Effect.gen(function* () {
     if (typeof config.streamId !== "string" || config.streamId.trim().length === 0) {
@@ -122,31 +133,41 @@ export const validateDirectSinkConfig = (
       config.port !== undefined &&
       (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535)
     ) {
-      return yield* Effect.fail(configError("Direct sink port must be an integer in 1..65535"));
+      return yield* Effect.fail(
+        configError("Direct sink port must be an integer in 1..65535"),
+      );
     }
     if (
       config.maxViewers !== undefined &&
       (!Number.isInteger(config.maxViewers) || config.maxViewers < 1)
     ) {
-      return yield* Effect.fail(configError("Direct sink maxViewers must be a positive integer"));
+      return yield* Effect.fail(
+        configError("Direct sink maxViewers must be a positive integer"),
+      );
     }
     if (
       config.reachability !== undefined &&
       config.reachability !== "require" &&
       config.reachability !== "lan"
     ) {
-      return yield* Effect.fail(configError('Direct sink reachability must be "require" or "lan"'));
+      return yield* Effect.fail(
+        configError('Direct sink reachability must be "require" or "lan"'),
+      );
     }
     if (config.reachability !== "lan" && config.hostBaseUrl === undefined) {
       return yield* Effect.fail(
-        configError("Direct sink requires hostBaseUrl for the reachability echo (or reachability: 'lan')")
+        configError(
+          "Direct sink requires hostBaseUrl for the reachability echo (or reachability: 'lan')",
+        ),
       );
     }
     if (
       config.fragmentSeconds !== undefined &&
       (!Number.isFinite(config.fragmentSeconds) || config.fragmentSeconds <= 0)
     ) {
-      return yield* Effect.fail(configError("Direct sink fragmentSeconds must be a positive number"));
+      return yield* Effect.fail(
+        configError("Direct sink fragmentSeconds must be a positive number"),
+      );
     }
     return config;
   });
@@ -162,12 +183,13 @@ interface ServeState {
 }
 
 export const createDirectSinkDriver = (
-  options: DirectSinkDriverOptions = {}
+  options: DirectSinkDriverOptions = {},
 ): SinkDriver<DirectSinkConfig> => ({
   descriptor: directSinkDescriptor,
   mode: "local",
   validate: validateDirectSinkConfig,
-  describeControl: (config, context) => Effect.succeed(describeDirectSinkCell(config, context)),
+  describeControl: (config, context) =>
+    Effect.succeed(describeDirectSinkCell(config, context)),
   attach: (config) =>
     Effect.gen(function* () {
       const fragmentSeconds =
@@ -185,15 +207,19 @@ export const createDirectSinkDriver = (
         maxViewers,
         signal,
         serverFactory: options.serverFactory ?? createWsDirectViewerServer,
-        prober: options.prober ?? probeReachability
+        prober: options.prober ?? probeReachability,
       });
 
       const stats = {
         deliveredItems: 0,
-        status: "running" as "running" | "stopped" | "failed"
+        status: "running" as "running" | "stopped" | "failed",
       };
 
       let encoder: Fmp4Encoder | undefined;
+      let encoderHasAudio: boolean | undefined;
+      // Encoder layout pinned from the first accepted frame (M2-04): the encoder checks only
+      // byte length, so a same-area layout or FPS change would silently corrupt the stream.
+      let pinnedLayout: { width: number; height: number; fps: number } | undefined;
       let fragmentSeq = 0;
       let finalized = false;
 
@@ -204,9 +230,12 @@ export const createDirectSinkDriver = (
         signal === undefined
           ? undefined
           : setInterval(() => {
-              void signal.announce(config.streamId, serve.watchUrl, announceKey).then((result) => {
-                if (result.status === "ok" && result.key !== undefined) announceKey = result.key;
-              });
+              void signal
+                .announce(config.streamId, serve.watchUrl, announceKey)
+                .then((result) => {
+                  if (result.status === "ok" && result.key !== undefined)
+                    announceKey = result.key;
+                });
             }, ANNOUNCE_HEARTBEAT_MS);
       (heartbeat as { unref?: () => void } | undefined)?.unref?.();
 
@@ -228,10 +257,12 @@ export const createDirectSinkDriver = (
         serve.fanout.end("stream_ended");
         // Let viewer pipelines ship the queued tail + end signal before sockets are force-closed.
         yield* Effect.promise(() =>
-          Promise.race([serve.fanout.drained(), delay(DRAIN_TIMEOUT_MS)])
+          Promise.race([serve.fanout.drained(), delay(DRAIN_TIMEOUT_MS)]),
         );
         if (signal !== undefined) {
-          yield* Effect.promise(() => signal.withdraw(config.streamId, announceKey).catch(() => undefined));
+          yield* Effect.promise(() =>
+            signal.withdraw(config.streamId, announceKey).catch(() => undefined),
+          );
         }
         yield* Effect.promise(() => serve.closeServer().catch(() => undefined));
         yield* Effect.promise(() => serve.closeProbe().catch(() => undefined));
@@ -248,26 +279,105 @@ export const createDirectSinkDriver = (
             }
             return;
           }
-          const frame = yield* readI420Frame(item.payload, "Direct");
+          // G14-B04: video after finalization is rejected BEFORE normalization/encoder
+          // creation — an empty-finalized sink must never resurrect an encoder. Repeated EOS
+          // stays idempotent through the marker branch above; the drain tail flushes inside
+          // encoder.finalize during teardown, never via late deliver calls.
+          if (finalized) {
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message: "Direct sink already ended — video after finalize is rejected",
+              }),
+            );
+          }
+          const audio = (
+            item.payload as {
+              audio?: {
+                data: Uint8Array;
+                sampleRate: number;
+                channels: number;
+                format: string;
+              };
+            }
+          ).audio;
+          if (
+            audio !== undefined &&
+            (!(audio.data instanceof Uint8Array) ||
+              audio.sampleRate !== 48000 ||
+              audio.channels !== 2 ||
+              audio.format !== "s16le" ||
+              audio.data.length === 0 ||
+              audio.data.length % 4 !== 0)
+          ) {
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message: "Streaming audio requires stereo 48kHz s16le PCM",
+              }),
+            );
+          }
+          const frame = yield* normalizeToI420(item.payload, "Direct");
+          yield* rejectEncoderLayoutChange(pinnedLayout, frame, "Direct");
           if (encoder === undefined) {
             const makeEncoder = options.encoderFactory ?? createFmp4Encoder;
-            encoder = yield* makeEncoder({
-              width: frame.width,
-              height: frame.height,
-              fps: frame.fps,
-              fragmentSeconds,
-              onChunk: shipChunk,
-              binaries: config.binaries ?? options.binaries
-            });
+            yield* Effect.uninterruptible(
+              makeEncoder({
+                audio: audio !== undefined,
+                width: frame.width,
+                height: frame.height,
+                fps: frame.fps,
+                fragmentSeconds,
+                onChunk: shipChunk,
+                binaries: config.binaries ?? options.binaries,
+              }).pipe(
+                Effect.tap((created) =>
+                  Effect.sync(() => {
+                    // Install the owned encoder before a pending cancellation can escape delivery.
+                    encoder = created;
+                    encoderHasAudio = audio !== undefined;
+                    pinnedLayout = {
+                      width: frame.width,
+                      height: frame.height,
+                      fps: frame.fps,
+                    };
+                  }),
+                ),
+              ),
+            );
           }
-          yield* encoder.writeFrame(frame.data);
+          if (encoder === undefined)
+            return yield* Effect.fail(
+              new LiveStreakConfigError({ message: "Encoder acquisition failed" }),
+            );
+          if (encoderHasAudio !== (audio !== undefined))
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message:
+                  "Audio layout changed during a stream; restart with a consistent audio layout",
+              }),
+            );
+          if (audio !== undefined && encoder.writeAudio === undefined)
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message:
+                  "Audio appeared after a video-only encoder started; restart with a consistent audio layout",
+              }),
+            );
+          yield* Effect.all(
+            [
+              encoder.writeFrame(frame.data),
+              ...(audio && encoder.writeAudio ? [encoder.writeAudio(audio.data)] : []),
+            ],
+            { concurrency: 2 },
+          );
           stats.deliveredItems += 1;
         });
 
-      const finalize: Effect.Effect<SinkFinalizeResult, LiveStreakError> = Effect.gen(function* () {
-        yield* teardown;
-        return { deliveredItems: stats.deliveredItems, output: { kind: "memory" } };
-      });
+      const finalize: Effect.Effect<SinkFinalizeResult, LiveStreakError> = Effect.gen(
+        function* () {
+          yield* teardown;
+          return { deliveredItems: stats.deliveredItems, output: { kind: "memory" } };
+        },
+      );
 
       const health: Effect.Effect<SinkStageHealth, LiveStreakError> = Effect.sync(() => ({
         stage: "publish",
@@ -276,7 +386,7 @@ export const createDirectSinkDriver = (
         message: `direct serve [${serve.grade}] ${serve.watchUrl} viewers=${serve.fanout.viewerCount()}/${maxViewers}`,
         updatedAtMs: Date.now(),
         attachmentId,
-        deliveredItems: stats.deliveredItems
+        deliveredItems: stats.deliveredItems,
       }));
 
       const attachment: SinkAttachment = {
@@ -284,15 +394,37 @@ export const createDirectSinkDriver = (
         deliver,
         finalize,
         health,
-        detach: Effect.void
+        detach: Effect.void,
       };
 
       return attachment;
-    })
+    }),
 });
 
 // --- helpers ---
 
+// M2-04: pin encoder layout from the first accepted frame and reject any later change before
+// writeFrame. RGBA↔I420 switches at the same shape/FPS stay legal — normalization already gives
+// the identical encoder layout — but a dimension or FPS change never respawns the encoder silently.
+const rejectEncoderLayoutChange = (
+  pinned: { width: number; height: number; fps: number } | undefined,
+  frame: I420Frame,
+  sinkName: string,
+): Effect.Effect<void, LiveStreakError> =>
+  pinned === undefined ||
+  (pinned.width === frame.width &&
+    pinned.height === frame.height &&
+    pinned.fps === frame.fps)
+    ? Effect.void
+    : Effect.fail(
+        new LiveStreakConfigError({
+          message:
+            `${sinkName} sink frame layout changed mid-stream ` +
+            `(was ${pinned.width}x${pinned.height}@${pinned.fps}, ` +
+            `got ${frame.width}x${frame.height}@${frame.fps}) — ` +
+            "reconfigure the sink instead of changing the source",
+        }),
+      );
 interface OpenDoorInput {
   readonly config: DirectSinkConfig;
   readonly port: number;
@@ -306,18 +438,22 @@ interface OpenDoorInput {
 // start server → open the door (UPnP) → verify from outside → announce. Any gate failure
 // closes what was opened and fails attach with the exact reason — that IS the go-live gate.
 const openDoorAndServe = (
-  input: OpenDoorInput
+  input: OpenDoorInput,
 ): Effect.Effect<ServeState, LiveStreakError> =>
   Effect.gen(function* () {
     const { config } = input;
-    const fanout = createDirectFanout({ ...DEFAULT_DIRECT_FANOUT, maxViewers: input.maxViewers });
+    const fanout = createDirectFanout({
+      ...DEFAULT_DIRECT_FANOUT,
+      maxViewers: input.maxViewers,
+    });
 
     const server = yield* Effect.tryPromise({
-      try: () => input.serverFactory({ port: input.port, streamId: config.streamId, fanout }),
+      try: () =>
+        input.serverFactory({ port: input.port, streamId: config.streamId, fanout }),
       catch: (cause) =>
         configError(
-          `Direct sink could not open its viewer server on port ${input.port} — ${String(cause)}`
-        )
+          `Direct sink could not open its viewer server on port ${input.port} — ${String(cause)}`,
+        ),
     });
 
     if (config.reachability === "lan") {
@@ -327,7 +463,7 @@ const openDoorAndServe = (
         signal: input.signal,
         streamId: config.streamId,
         watchUrl,
-        cleanup: () => Promise.allSettled([server.close()])
+        cleanup: () => Promise.allSettled([server.close()]),
       });
       return {
         fanout,
@@ -335,7 +471,7 @@ const openDoorAndServe = (
         grade: "lan",
         announceKey,
         closeServer: server.close,
-        closeProbe: async () => {}
+        closeProbe: async () => {},
       };
     }
 
@@ -346,34 +482,41 @@ const openDoorAndServe = (
         mappingDescription: `livestreak-direct-${config.streamId}`,
         ...(input.signal === undefined
           ? {}
-          : { verify: (_ip: string, publicPort: number) => input.signal!.verifyReachable(publicPort) })
-      })
+          : {
+              verify: (_ip: string, publicPort: number) =>
+                input.signal!.verifyReachable(publicPort),
+            }),
+      }),
     );
 
     const failGate = (reason: string): Effect.Effect<never, LiveStreakError> =>
       Effect.promise(() => Promise.allSettled([server.close(), probe.close()])).pipe(
-        Effect.flatMap(() => Effect.fail(configError(reason)))
+        Effect.flatMap(() => Effect.fail(configError(reason))),
       );
 
     if (probe.grade === "unreachable" || probe.publicIp === undefined) {
       return yield* failGate(
         `Not eligible to go live on the direct lane: ${probe.detail}. ` +
-          "Fix the router (enable UPnP), broadcast from a reachable box, or use the host live sink."
+          "Fix the router (enable UPnP), broadcast from a reachable box, or use the host live sink.",
       );
     }
     if (input.signal !== undefined && !probe.verified) {
       return yield* failGate(
         `Not eligible to go live on the direct lane: the door looked open (${probe.detail}) but the host ` +
-          "could not dial it back from outside. Check the router's port mapping and firewall."
+          "could not dial it back from outside. Check the router's port mapping and firewall.",
       );
     }
 
-    const watchUrl = directWatchUrl(probe.publicIp, probe.publicPort ?? server.port, config.streamId);
+    const watchUrl = directWatchUrl(
+      probe.publicIp,
+      probe.publicPort ?? server.port,
+      config.streamId,
+    );
     const announceKey = yield* announceOrFail({
       signal: input.signal,
       streamId: config.streamId,
       watchUrl,
-      cleanup: () => Promise.allSettled([server.close(), probe.close()])
+      cleanup: () => Promise.allSettled([server.close(), probe.close()]),
     });
     return {
       fanout,
@@ -381,7 +524,7 @@ const openDoorAndServe = (
       grade: probe.grade,
       announceKey,
       closeServer: server.close,
-      closeProbe: probe.close
+      closeProbe: probe.close,
     };
   });
 
@@ -399,15 +542,15 @@ const announceOrFail = (input: {
       return undefined;
     }
     const announced = yield* Effect.promise(() =>
-      input.signal!.announce(input.streamId, input.watchUrl)
+      input.signal!.announce(input.streamId, input.watchUrl),
     );
     if (announced.status === "conflict") {
       yield* Effect.promise(input.cleanup);
       return yield* Effect.fail(
         configError(
           `Not eligible to go live on the direct lane: stream "${input.streamId}" is already ` +
-            "announced by another broadcaster. Stop the other node or wait for its announce to expire."
-        )
+            "announced by another broadcaster. Stop the other node or wait for its announce to expire.",
+        ),
       );
     }
     return announced.status === "ok" ? announced.key : undefined;
@@ -415,7 +558,7 @@ const announceOrFail = (input: {
 
 const describeDirectSinkCell = (
   config: DirectSinkConfig,
-  context: DescribeControlContext
+  context: DescribeControlContext,
 ): ControlCellDefinition => {
   const nowMs = context.nowMs ?? Date.now();
   const instanceId = context.instanceId ?? "direct";
@@ -427,10 +570,10 @@ const describeDirectSinkCell = (
       status: ["idle", null, nowMs],
       settings: {
         transport: "fmp4-direct",
-        subscribe: ["publish.video.rendered"]
+        subscribe: ["publish.video.rendered"],
       },
       readonly: config.streamId === undefined ? {} : { streamId: config.streamId },
-      functions: []
-    }
+      functions: [],
+    },
   };
 };

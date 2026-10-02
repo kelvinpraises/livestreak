@@ -8,22 +8,25 @@ import type {
   SinkDriver,
   SinkDriverDescriptor,
   SinkFinalizeResult,
-  SinkStageHealth
+  SinkStageHealth,
 } from "#pipeline/publish/index.js";
-import type { DescribeControlContext, ControlCellDefinition } from "#run/control/bus/types.js";
+import type {
+  DescribeControlContext,
+  ControlCellDefinition,
+} from "#run/control/bus/types.js";
 import {
   createFmp4Encoder,
   type Fmp4Encoder,
-  type Fmp4EncoderConfig
+  type Fmp4EncoderConfig,
 } from "#pipeline/publish/encoder/fmp4.js";
 import type { FfmpegBinaries } from "#adapters/ffmpeg/index.js";
-import { readI420Frame } from "#pipeline/publish/sinks/i420.js";
+import { normalizeToI420, type I420Frame } from "#pipeline/publish/sinks/i420.js";
 import { liveSinkCloseCommand, liveSinkConfigureCommand } from "./commands.js";
 import type { Fmp4IngestTransport } from "./transport.js";
 
 /** Factory for the fMP4 encoder; the real one spawns ffmpeg, tests inject a synthetic one. */
 export type Fmp4EncoderFactory = (
-  config: Fmp4EncoderConfig
+  config: Fmp4EncoderConfig,
 ) => Effect.Effect<Fmp4Encoder, LiveStreakError>;
 
 /**
@@ -60,18 +63,21 @@ const defaultFragmentSeconds = 1;
 const stringValue = (description: string, required = false): DescriptorValueSchema => ({
   type: "string",
   description,
-  required
+  required,
 });
 
 const flag = (
   name: string,
   value: DescriptorValueSchema,
   help: string,
-  extras: Omit<RegistryFlagDescriptor, "name" | "value" | "help"> = {}
+  extras: Omit<RegistryFlagDescriptor, "name" | "value" | "help"> = {},
 ): RegistryFlagDescriptor => ({ name, value, help, ...extras });
 
 const configError = (message: string, details?: string): LiveStreakConfigError =>
-  new LiveStreakConfigError({ message, metadata: details === undefined ? undefined : { details } });
+  new LiveStreakConfigError({
+    message,
+    metadata: details === undefined ? undefined : { details },
+  });
 
 export const liveSinkDescriptor: SinkDriverDescriptor = {
   kind: "publish",
@@ -84,17 +90,17 @@ export const liveSinkDescriptor: SinkDriverDescriptor = {
     flag(
       "streamId",
       stringValue("Stream/market id this live feed is scoped to."),
-      "Scope the live fMP4 feed to a stream id."
-    )
+      "Scope the live fMP4 feed to a stream id.",
+    ),
   ],
   commands: [liveSinkConfigureCommand, liveSinkCloseCommand],
   mode: "local",
   requiresHost: true,
-  debugOnly: false
+  debugOnly: false,
 };
 
 export const validateLiveSinkConfig = (
-  config: LiveSinkConfig
+  config: LiveSinkConfig,
 ): Effect.Effect<LiveSinkConfig, LiveStreakError> =>
   Effect.gen(function* () {
     if (config.transport === null || typeof config.transport !== "object") {
@@ -107,25 +113,30 @@ export const validateLiveSinkConfig = (
       typeof config.transport.onError !== "function"
     ) {
       return yield* Effect.fail(
-        configError("Live sink transport must provide sendInit / sendFragment / end / onError")
+        configError(
+          "Live sink transport must provide sendInit / sendFragment / end / onError",
+        ),
       );
     }
     if (
       config.fragmentSeconds !== undefined &&
       (!Number.isFinite(config.fragmentSeconds) || config.fragmentSeconds <= 0)
     ) {
-      return yield* Effect.fail(configError("Live sink fragmentSeconds must be a positive number"));
+      return yield* Effect.fail(
+        configError("Live sink fragmentSeconds must be a positive number"),
+      );
     }
     return config;
   });
 
 export const createLiveSinkDriver = (
-  options: LiveSinkDriverOptions = {}
+  options: LiveSinkDriverOptions = {},
 ): SinkDriver<LiveSinkConfig> => ({
   descriptor: liveSinkDescriptor,
   mode: "local",
   validate: validateLiveSinkConfig,
-  describeControl: (config, context) => Effect.succeed(describeLiveSinkCell(config, context)),
+  describeControl: (config, context) =>
+    Effect.succeed(describeLiveSinkCell(config, context)),
   attach: (config) =>
     Effect.gen(function* () {
       const fragmentSeconds =
@@ -134,10 +145,14 @@ export const createLiveSinkDriver = (
       const stats = {
         deliveredItems: 0,
         status: "starting" as "starting" | "running" | "stopped" | "failed",
-        message: "live sink encoding one fMP4 stream for host fan-out"
+        message: "live sink encoding one fMP4 stream for host fan-out",
       };
 
       let encoder: Fmp4Encoder | undefined;
+      let encoderHasAudio: boolean | undefined;
+      // Encoder layout pinned from the first accepted frame (M2-04): the encoder checks only
+      // byte length, so a same-area layout or FPS change would silently corrupt the stream.
+      let pinnedLayout: { width: number; height: number; fps: number } | undefined;
       let finalized = false;
 
       // Surface transport send/connect errors on the health path without interrupting the encode (the host
@@ -162,7 +177,9 @@ export const createLiveSinkDriver = (
         if (encoder !== undefined) {
           yield* encoder.finalize.pipe(Effect.catchAll(() => Effect.void));
         }
-        yield* config.transport.end("stream_ended").pipe(Effect.catchAll(() => Effect.void));
+        yield* config.transport
+          .end("stream_ended")
+          .pipe(Effect.catchAll(() => Effect.void));
         if (stats.status !== "failed") stats.status = "stopped";
       });
 
@@ -179,26 +196,105 @@ export const createLiveSinkDriver = (
             }
             return;
           }
-          const frame = yield* readI420Frame(item.payload, "Live");
+          // G14-B04: video after finalization is rejected BEFORE normalization/encoder
+          // creation — an empty-finalized sink must never resurrect an encoder. Repeated EOS
+          // stays idempotent through the marker branch above; the drain tail flushes inside
+          // encoder.finalize during teardown, never via late deliver calls.
+          if (finalized) {
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message: "Live sink already ended — video after finalize is rejected",
+              }),
+            );
+          }
+          const audio = (
+            item.payload as {
+              audio?: {
+                data: Uint8Array;
+                sampleRate: number;
+                channels: number;
+                format: string;
+              };
+            }
+          ).audio;
+          if (
+            audio !== undefined &&
+            (!(audio.data instanceof Uint8Array) ||
+              audio.sampleRate !== 48000 ||
+              audio.channels !== 2 ||
+              audio.format !== "s16le" ||
+              audio.data.length === 0 ||
+              audio.data.length % 4 !== 0)
+          ) {
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message: "Streaming audio requires stereo 48kHz s16le PCM",
+              }),
+            );
+          }
+          const frame = yield* normalizeToI420(item.payload, "Live");
+          yield* rejectEncoderLayoutChange(pinnedLayout, frame, "Live");
           if (encoder === undefined) {
             const makeEncoder = options.encoderFactory ?? createFmp4Encoder;
-            encoder = yield* makeEncoder({
-              width: frame.width,
-              height: frame.height,
-              fps: frame.fps,
-              fragmentSeconds,
-              onChunk: shipChunk,
-              binaries: options.binaries
-            });
+            yield* Effect.uninterruptible(
+              makeEncoder({
+                audio: audio !== undefined,
+                width: frame.width,
+                height: frame.height,
+                fps: frame.fps,
+                fragmentSeconds,
+                onChunk: shipChunk,
+                binaries: options.binaries,
+              }).pipe(
+                Effect.tap((created) =>
+                  Effect.sync(() => {
+                    // Install the owned encoder before a pending cancellation can escape delivery.
+                    encoder = created;
+                    encoderHasAudio = audio !== undefined;
+                    pinnedLayout = {
+                      width: frame.width,
+                      height: frame.height,
+                      fps: frame.fps,
+                    };
+                  }),
+                ),
+              ),
+            );
           }
-          yield* encoder.writeFrame(frame.data);
+          if (encoder === undefined)
+            return yield* Effect.fail(
+              new LiveStreakConfigError({ message: "Encoder acquisition failed" }),
+            );
+          if (encoderHasAudio !== (audio !== undefined))
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message:
+                  "Audio layout changed during a stream; restart with a consistent audio layout",
+              }),
+            );
+          if (audio !== undefined && encoder.writeAudio === undefined)
+            return yield* Effect.fail(
+              new LiveStreakConfigError({
+                message:
+                  "Audio appeared after a video-only encoder started; restart with a consistent audio layout",
+              }),
+            );
+          yield* Effect.all(
+            [
+              encoder.writeFrame(frame.data),
+              ...(audio && encoder.writeAudio ? [encoder.writeAudio(audio.data)] : []),
+            ],
+            { concurrency: 2 },
+          );
           stats.deliveredItems += 1;
         });
 
-      const finalize: Effect.Effect<SinkFinalizeResult, LiveStreakError> = Effect.gen(function* () {
-        yield* teardown;
-        return { deliveredItems: stats.deliveredItems, output: { kind: "memory" } };
-      });
+      const finalize: Effect.Effect<SinkFinalizeResult, LiveStreakError> = Effect.gen(
+        function* () {
+          yield* teardown;
+          return { deliveredItems: stats.deliveredItems, output: { kind: "memory" } };
+        },
+      );
 
       const health: Effect.Effect<SinkStageHealth, LiveStreakError> = Effect.sync(() => ({
         stage: "publish",
@@ -207,7 +303,7 @@ export const createLiveSinkDriver = (
         message: stats.message,
         updatedAtMs: Date.now(),
         attachmentId,
-        deliveredItems: stats.deliveredItems
+        deliveredItems: stats.deliveredItems,
       }));
 
       const attachment: SinkAttachment = {
@@ -215,18 +311,40 @@ export const createLiveSinkDriver = (
         deliver,
         finalize,
         health,
-        detach: Effect.void
+        detach: Effect.void,
       };
 
       return attachment;
-    })
+    }),
 });
 
 // --- helpers ---
 
+// M2-04: pin encoder layout from the first accepted frame and reject any later change before
+// writeFrame. RGBA↔I420 switches at the same shape/FPS stay legal — normalization already gives
+// the identical encoder layout — but a dimension or FPS change never respawns the encoder silently.
+const rejectEncoderLayoutChange = (
+  pinned: { width: number; height: number; fps: number } | undefined,
+  frame: I420Frame,
+  sinkName: string,
+): Effect.Effect<void, LiveStreakError> =>
+  pinned === undefined ||
+  (pinned.width === frame.width &&
+    pinned.height === frame.height &&
+    pinned.fps === frame.fps)
+    ? Effect.void
+    : Effect.fail(
+        new LiveStreakConfigError({
+          message:
+            `${sinkName} sink frame layout changed mid-stream ` +
+            `(was ${pinned.width}x${pinned.height}@${pinned.fps}, ` +
+            `got ${frame.width}x${frame.height}@${frame.fps}) — ` +
+            "reconfigure the sink instead of changing the source",
+        }),
+      );
 const describeLiveSinkCell = (
   config: LiveSinkConfig,
-  context: DescribeControlContext
+  context: DescribeControlContext,
 ): ControlCellDefinition => {
   const nowMs = context.nowMs ?? Date.now();
   const instanceId = context.instanceId ?? config.streamId ?? "live-fmp4";
@@ -238,11 +356,10 @@ const describeLiveSinkCell = (
       status: ["idle", null, nowMs],
       settings: {
         transport: "fmp4-fanout",
-        subscribe: ["publish.video.rendered"]
+        subscribe: ["publish.video.rendered"],
       },
       readonly: config.streamId === undefined ? {} : { streamId: config.streamId },
-      functions: []
-    }
+      functions: [],
+    },
   };
 };
-

@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import type { LiveStreakError } from "@livestreak/core";
 import type { WorkerControlView } from "#run/control/board/index.js";
 import type { RawFrame } from "#pipeline/capture/index.js";
+import type { WorkerBoardWake } from "./wake.js";
 import type { MarkerSinkDeliveryItem, VideoSinkDeliveryItem } from "#pipeline/publish/index.js";
 import {
   appendEosMarker,
@@ -19,11 +20,18 @@ import { shouldPumpCapture, shouldPumpSinks } from "./lifecycle.js";
 
 export interface PumpResult {
   readonly didWork: boolean;
+  /**
+   * True when the turn waited on control instead of media: the pump blocked in a
+   * control-aware pull and a board wake won. Not media work — the worker loop must neither
+   * count it toward the idle budget nor publish a no-progress snapshot for it.
+   */
+  readonly wokeForControl?: boolean;
 }
 
 export const pumpCapture = (
   state: WorkerState,
-  control: WorkerControlView
+  control: WorkerControlView,
+  wake?: WorkerBoardWake
 ): Effect.Effect<PumpResult, LiveStreakError> => {
   if (shouldPumpCapture(state, control) === false) {
     return Effect.succeed({ didWork: false });
@@ -48,6 +56,24 @@ export const pumpCapture = (
   }
 
   return Effect.gen(function* () {
+    // Control-aware path (worker loop always supplies the board wake): a board wake wins
+    // the blocked pull without consuming media, and the turn reports it distinctly.
+    // Hand-built stages without the optional method take the legacy path below.
+    if (wake !== undefined && capture.pull.pullNextAware !== undefined) {
+      const outcome = yield* capture.pull.pullNextAware(wake);
+      if (outcome._tag === "wake") {
+        return { didWork: false, wokeForControl: true as const };
+      }
+      if (outcome._tag === "end") {
+        capture.exhausted = true;
+        appendEosMarker(state, CAPTURE_VIDEO_RAW_TRACK_ID);
+        capture.eosAppended = true;
+        return { didWork: true };
+      }
+      const item = rawFrameToTrackItem(state, outcome.frame);
+      appendTrackItem(state, item);
+      return { didWork: true };
+    }
     const frame = yield* capture.pull.pullNext();
 
     if (frame === undefined) {

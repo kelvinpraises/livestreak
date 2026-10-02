@@ -32,7 +32,8 @@ const boardWith = (over: {
         readonly: { configured: true }
       },
       [`obs:${OBS}:publish`]: {
-        readonly: over.publish === undefined ? {} : { kind: over.publish }
+        readonly:
+          over.publish === undefined ? {} : { kind: over.publish, configured: true }
       },
       [`obs:${OBS}:market`]: {
         readonly: over.marketId === undefined ? {} : { marketId: over.marketId }
@@ -51,7 +52,7 @@ describe("runConfigFromBoard → live fMP4 sink", () => {
     );
 
     expect(config.sink.driverId).toBe("live");
-    expect(config.sink.instanceId).toBe("live");
+    expect(config.sink.instanceId).toBe("obs-test:live");
     const sinkConfig = config.sink.config as { streamId: string; transport: unknown };
     expect(sinkConfig.streamId).toBe("market-xyz");
     // The transport is the single ingest connection object (sendInit/sendFragment/end).
@@ -116,6 +117,31 @@ describe("runConfigFromBoard → live fMP4 sink", () => {
     expect(result).toContain("Configure capture");
   });
 
+  it("refuses derivation while publish is unconfigured", async () => {
+    const configured = boardWith({ capturePath: "/tmp/clip.mp4", publish: "live", marketId: "m" });
+    const board: Board = {
+      ...configured,
+      cells: {
+        ...configured.cells,
+        [`obs:${OBS}:publish`]: {
+          ...configured.cells[`obs:${OBS}:publish`]!,
+          readonly: { kind: "live", configured: false }
+        }
+      }
+    };
+    const result = await Effect.runPromise(
+      runConfigFromBoard({
+        runId: "run1",
+        board,
+        hostBaseUrl: "http://127.0.0.1:8787"
+      }).pipe(
+        Effect.map(() => "ok"),
+        Effect.catchAll((e) => Effect.succeed(e.message))
+      )
+    );
+    expect(result).toContain("Configure publish");
+  });
+
   it("selects the continuous synthetic producer input when the board asks for it", async () => {
     const board = {
       revision: 1,
@@ -128,7 +154,7 @@ describe("runConfigFromBoard → live fMP4 sink", () => {
           settings: { source: "synthetic", width: 32, height: 32, fps: 10 },
           readonly: { configured: true }
         },
-        "obs:obs-test:publish": { readonly: { kind: "live" } },
+        "obs:obs-test:publish": { readonly: { kind: "live", configured: true } },
         "obs:obs-test:market": { readonly: { marketId: "market-xyz" } }
       }
     } as unknown as Board;
@@ -155,7 +181,7 @@ describe("runConfigFromBoard → live fMP4 sink", () => {
           settings: { source: "ingest", port: 48710, path: "/bot", width: 1280, height: 720, fps: 30 },
           readonly: { configured: true }
         },
-        "obs:obs-test:publish": { readonly: { kind: "live" } },
+        "obs:obs-test:publish": { readonly: { kind: "live", configured: true } },
         "obs:obs-test:market": { readonly: { marketId: "market-xyz" } }
       }
     } as unknown as Board;

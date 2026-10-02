@@ -10,8 +10,20 @@
  * in this pass — older iOS viewers get the recording path (native <video src>) via the offline/vod branch.
  */
 
-// H.264 (baseline/main) + no audio, in an fMP4 container — matches observe's libx264 yuv420p encode.
-const FMP4_MIME = 'video/mp4; codecs="avc1.42E01E"'
+// The init segment supplies the actual H.264 profile and optional AAC track.
+
+
+export const fmp4MimeFromInit = (bytes: Uint8Array): string => {
+  let video = 'avc1.42E01E'
+  let audio = false
+  for (let i = 4; i + 7 < bytes.length; i++) {
+    if (bytes[i] === 0x61 && bytes[i + 1] === 0x76 && bytes[i + 2] === 0x63 && bytes[i + 3] === 0x43 && bytes[i + 4] === 1) {
+      video = 'avc1.' + Array.from(bytes.subarray(i + 5, i + 8), n => n.toString(16).padStart(2, '0')).join('')
+    }
+    if (bytes[i] === 0x6d && bytes[i + 1] === 0x70 && bytes[i + 2] === 0x34 && bytes[i + 3] === 0x61) audio = true
+  }
+  return `video/mp4; codecs="${video}${audio ? ', mp4a.40.2' : ''}"`
+}
 
 const FRAME_INIT = 0x01
 const FRAME_FRAGMENT = 0x02
@@ -101,6 +113,7 @@ export function openMsePlayer(input: OpenMsePlayerInput): MsePlayerHandle {
   let closed = false
   const mediaSource = mediaSourceFactory()
   let sourceBuffer: SourceBufferLike | undefined
+  let mime: string | undefined
   // Fragments that arrive before the SourceBuffer exists / while it is updating queue here in order.
   const queue: Uint8Array[] = []
   let objectUrl: string | undefined
@@ -143,9 +156,13 @@ export function openMsePlayer(input: OpenMsePlayerInput): MsePlayerHandle {
   // We seek to buffered.start rather than the live edge: the pump/trim path already keeps only a ~2s tail
   // behind the playhead, so buffered.start IS near the live edge and starting there avoids a gap-induced stall.
   const seekIntoBuffer = (): void => {
-    if (sourceBuffer === undefined || sourceBuffer.buffered.length === 0) return
-    const start = sourceBuffer.buffered.start(0)
-    const end = sourceBuffer.buffered.end(0)
+    if (sourceBuffer === undefined) return
+    // The element exposes the playable intersection of video/audio tracks.
+    // A muxed SourceBuffer may also contain a leading range for just one track.
+    const buffered = input.video.buffered ?? sourceBuffer.buffered
+    if (buffered.length === 0) return
+    const start = buffered.start(0)
+    const end = buffered.end(0)
     const current = input.video.currentTime
     if (current >= start && current <= end) {
       // Playhead is inside the buffered range — nothing to do; do not fight the user's position.
@@ -184,9 +201,9 @@ export function openMsePlayer(input: OpenMsePlayerInput): MsePlayerHandle {
   }
 
   const onSourceOpen = (): void => {
-    if (closed || sourceBuffer !== undefined) return
+    if (closed || sourceBuffer !== undefined || mime === undefined || mediaSource.readyState !== 'open') return
     try {
-      sourceBuffer = mediaSource.addSourceBuffer(FMP4_MIME)
+      sourceBuffer = mediaSource.addSourceBuffer(mime)
       sourceBuffer.addEventListener('updateend', onUpdateEnd)
       pump()
     } catch (error) {
@@ -228,7 +245,9 @@ export function openMsePlayer(input: OpenMsePlayerInput): MsePlayerHandle {
     const tag = bytes[0]!
     const body = bytes.subarray(1)
     if (tag === FRAME_INIT || tag === FRAME_FRAGMENT) {
+      if (tag === FRAME_INIT) mime = fmp4MimeFromInit(body)
       queue.push(body.slice())
+      onSourceOpen()
       pump()
     }
   })

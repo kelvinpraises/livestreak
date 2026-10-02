@@ -105,7 +105,7 @@ describe("ObserveRuntime stopRun", () => {
     }
   });
 
-  it("interrupts blocked capture after timeout and returns interrupted result", async () => {
+  it("stops blocked capture cleanly with a stopped receipt and one finalization", async () => {
     const runId = "run_stop_blocked";
     const { options, counters } = createBlockedCaptureKernelOptions();
 
@@ -120,6 +120,8 @@ describe("ObserveRuntime stopRun", () => {
             () => runtime.readBoard(runId),
             () => counters.pullStarted > 0
           );
+          // G14-B07: zero finalization while the blocked pull is active.
+          expect(counters.finalized).toBe(false);
 
           const result = yield* runtime.stopRun(runId, {
             timeoutMs: 200,
@@ -133,16 +135,74 @@ describe("ObserveRuntime stopRun", () => {
 
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
-      expect(exit.value.result.outcome).toBe("interrupted");
-      expect(exit.value.result.snapshot).toBeUndefined();
-      expect(exit.value.result.board.cells["system:run"]?.status[0]).toBe("failed");
-      expect(String(exit.value.result.board.cells["system:run"]?.status[1])).toContain(
-        "interrupted"
-      );
+      // The control-aware pull wakes on stop: clean receipt, no forced interrupt.
+      expect(exit.value.result.outcome).toBe("stopped");
+      expect(exit.value.result.board.cells["system:run"]?.status[0]).toBe("stopped");
       expect(exit.value.result.board.cells["system:run"]?.settings?.stopRequested).toBe(true);
       expect(exit.value.counters.pullStarted).toBeGreaterThan(0);
       expect(exit.value.counters.finalizerCalls).toBe(1);
       expect(exit.value.counters.finalized).toBe(true);
+    }
+  });
+
+  it("still force-interrupts when a downstream delivery blocks after capture started", async () => {
+    // G14-B07: improving capture must not erase fallback coverage — a sink that never
+    // releases still trips the stop timeout and interrupts the run.
+    const runId = "run_stop_blocked_sink";
+    const { options: base } = createSyntheticKernelOptions(64);
+    const deliverStarted = { value: 0 };
+    const blockedSink: NonNullable<(typeof base)['sinkDriver']> = {
+      ...base.sinkDriver!,
+      attach: () =>
+        Effect.succeed({
+          id: "memory-sink",
+          deliver: () =>
+            Effect.sync(() => {
+              deliverStarted.value += 1;
+            }).pipe(Effect.zipRight(Effect.never)),
+          finalize: Effect.succeed({ deliveredItems: 0, output: { kind: "memory" } }),
+          health: Effect.succeed({
+            stage: "publish",
+            descriptorId: "memory",
+            status: "running",
+            updatedAtMs: Date.now(),
+            deliveredItems: 0
+          }),
+          detach: Effect.void
+        })
+    };
+
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* createObserveRuntime({
+            defaultKernelOptions: { ...base, sinkDriver: blockedSink }
+          });
+          yield* runtime.prepareRun(syntheticCaptureRunConfig(runId, `/tmp/${runId}.mp4`));
+          yield* runtime.startRun(runId);
+
+          const deadline = Date.now() + 10000;
+          for (;;) {
+            if (deliverStarted.value > 0) break;
+            if (Date.now() >= deadline) {
+              return yield* Effect.fail(new Error("downstream delivery never started"));
+            }
+            yield* Effect.sleep(50);
+          }
+
+          const result = yield* runtime.stopRun(runId, {
+            timeoutMs: 200,
+            reason: "blocked downstream stop"
+          });
+          return { result };
+        })
+      )
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.result.outcome).toBe("interrupted");
+      expect(deliverStarted.value).toBeGreaterThan(0);
     }
   });
 
@@ -400,7 +460,7 @@ describe("ObserveBridge stopRun", () => {
     }
   });
 
-  it("propagates interrupted result for blocked capture stop", async () => {
+  it("propagates stopped result for blocked capture stop", async () => {
     const runId = "run_bridge_stop_interrupted";
     const { options, counters } = createBlockedCaptureKernelOptions();
 
@@ -416,21 +476,24 @@ describe("ObserveBridge stopRun", () => {
             () => runtime.readBoard(runId),
             () => counters.pullStarted > 0
           );
+          expect(counters.finalized).toBe(false);
 
-          return yield* bridge.stopRun({
+          const stopped = yield* bridge.stopRun({
             caller: callerWithScopes("stopper-interrupted", [systemRunStopScope]),
             runId,
             timeoutMs: 200,
             reason: "bridge blocked stop"
           });
+          return { outcome: stopped.outcome, finalized: counters.finalized, finalizerCalls: counters.finalizerCalls };
         })
       )
     );
 
     expect(Exit.isSuccess(exit)).toBe(true);
     if (Exit.isSuccess(exit)) {
-      expect(exit.value.outcome).toBe("interrupted");
-      expect(exit.value.snapshot).toBeUndefined();
+      expect(exit.value.outcome).toBe("stopped");
+      expect(exit.value.finalized).toBe(true);
+      expect(exit.value.finalizerCalls).toBe(1);
     }
   });
 

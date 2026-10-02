@@ -1,0 +1,7 @@
+{
+  "name": "livestreak-rtmp-broadcaster-example",
+  "private": true,
+  "type": "module",
+  "scripts": {"broadcast": "node src/main.mjs"},
+  "dependencies": {"@livestreak/cli": "0.1.0", "ws": "^8.18.3"}
+}

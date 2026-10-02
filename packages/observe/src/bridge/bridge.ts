@@ -135,13 +135,30 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
   ): Effect.Effect<BridgeConsoleCallResult, LiveStreakError> =>
     Effect.gen(function* () {
       // Family routing: a descriptor id names its CELL (observe.obs.<id>.run.prepare →
-      // obs:<id>:run); the scope comes from that cell's live catalog binding. Unknown cells
-      // fail closed — a call can never fall through to another family.
+      // obs:<id>:run); the scope comes from that cell's live catalog binding. Unknown cells,
+      // malformed ids, and action/id disagreements fail closed — a call can never fall
+      // through to another family (or to the bare-action legacy fallback) on a typo.
       const parsed = consoleInput.id === undefined ? undefined : parseConsoleId(consoleInput.id);
+      if (consoleInput.id !== undefined && parsed === undefined) {
+        return yield* Effect.fail(
+          new LiveStreakConfigError({
+            message: `Malformed observe descriptor id "${consoleInput.id}" — supply a well-formed id or none`
+          })
+        );
+      }
       const liveBoard = yield* runtime.readBoard(consoleInput.runId);
       let cellId: string | undefined;
       let internalScope: string | undefined;
       if (parsed !== undefined) {
+        if (consoleInput.action !== parsed.fn) {
+          return yield* Effect.fail(
+            new LiveStreakConfigError({
+              message:
+                `Action "${consoleInput.action}" disagrees with descriptor id "${consoleInput.id}" ` +
+                `(expected "${parsed.fn}")`
+            })
+          );
+        }
         const cell = liveBoard.cells[parsed.cellId];
         if (cell === undefined) {
           return yield* Effect.fail(
@@ -150,8 +167,24 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
             })
           );
         }
+        // Live advertised-function validation: the board cell must list the function AND the
+        // catalog must advertise the scope — a stale client cannot invoke a renamed/removed fn.
+        if (Array.isArray(cell.functions) && !cell.functions.includes(parsed.fn)) {
+          return yield* Effect.fail(
+            new LiveStreakConfigError({
+              message: `Cell ${parsed.cellId} does not advertise function ${parsed.fn}`
+            })
+          );
+        }
         cellId = parsed.cellId;
         internalScope = `${cell.catalog ?? parsed.cellId}:${parsed.fn}`;
+        if (CONSOLE_SCOPES.byId.get(descriptorId(cell.catalog ?? parsed.cellId, parsed.fn)) === undefined) {
+          return yield* Effect.fail(
+            new LiveStreakConfigError({
+              message: `Unknown observe function "${consoleInput.id}"`
+            })
+          );
+        }
       } else {
         internalScope =
           consoleInput.action === "configure"
@@ -185,15 +218,13 @@ export const createObserveBridge = (input: CreateObserveBridgeInput): ObserveBri
         return { txId: `prepare-${consoleInput.runId}` };
       }
       if (internalScope === systemRunStartScope) {
-        // Prepared is a disposable derivation of the board (a pipeline config change demotes
-        // it) — start re-derives it instead of failing "must be prepared" at the operator.
+        // Authoritative lifecycle: the BOARD's canonical prepared flag decides — never the
+        // composite run.prepared, which can still read true after a demoting config change.
+        // A demoted board re-prepares first; the kernel start gate backstops direct callers.
         // Per-observation runs live at runId#obsId (the runtime's key scheme).
         const preparedKey =
           obsId === undefined ? consoleInput.runId : `${consoleInput.runId}#${obsId}`;
-        const run =
-          (yield* runtime.store.get(preparedKey)) ??
-          (yield* runtime.store.require(consoleInput.runId));
-        if (run.prepared !== true) {
+        if (readBoardRunPrepared(liveBoard, obsId) !== true) {
           if (input.hostBaseUrl === undefined) {
             return yield* Effect.fail(
               new LiveStreakConfigError({

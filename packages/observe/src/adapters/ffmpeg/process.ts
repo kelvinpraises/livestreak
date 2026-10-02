@@ -35,6 +35,7 @@ export interface NodeWritable {
 
 export interface NodeChildProcess {
   readonly stdin: NodeWritable;
+  readonly stdio?: readonly unknown[];
   readonly stdout: NodeReadable;
   readonly stderr: NodeReadable;
   readonly killed: boolean;
@@ -99,7 +100,7 @@ export const runChild = (
 export const spawnChild = (
   binary: string,
   commandArguments: readonly string[],
-  stdio: "pipe" | "ignore-stdout" = "pipe"
+  stdio: "pipe" | "ignore-stdout" | "pipe-audio" = "pipe"
 ): Effect.Effect<NodeChildProcess, LiveStreakError> =>
   Effect.flatMap(
     Effect.tryPromise({
@@ -111,7 +112,9 @@ export const spawnChild = (
         const child = spawn(
           binary,
           commandArguments,
-          stdio === "pipe"
+          stdio === "pipe-audio"
+            ? { stdio: ["pipe", "pipe", "pipe", "pipe"] }
+            : stdio === "pipe"
             ? { stdio: ["pipe", "pipe", "pipe"] }
             : { stdio: ["ignore", "pipe", "pipe"] }
         );
@@ -144,9 +147,6 @@ export const spawnChild = (
   );
 
 export const killProcess = (child: NodeChildProcess): void => {
-  if (child.killed) {
-    return;
-  }
   if (child.exitCode !== null) {
     return;
   }
@@ -156,9 +156,6 @@ export const killProcess = (child: NodeChildProcess): void => {
 
   child.kill("SIGTERM");
   const timer = setTimeout(() => {
-    if (child.killed) {
-      return;
-    }
     if (child.exitCode !== null) {
       return;
     }
@@ -278,7 +275,7 @@ interface NodeChildProcessModule {
   readonly spawn: (
     binary: string,
     commandArguments: readonly string[],
-    options: { readonly stdio: readonly ["pipe", "pipe", "pipe"] | readonly ["ignore", "pipe", "pipe"] }
+    options: { readonly stdio: readonly ["pipe", "pipe", "pipe"] | readonly ["pipe", "pipe", "pipe", "pipe"] | readonly ["ignore", "pipe", "pipe"] }
   ) => NodeChildProcess;
 }
 

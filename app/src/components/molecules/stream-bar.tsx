@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { WSFrame } from '#/utils/mock'
 import { ScoreUSD } from '#/components/atoms/score-usd'
+import { usePreferFixture } from '#/hooks/use-fixture-mode'
 
 interface Props {
   frame: WSFrame
@@ -10,6 +11,7 @@ interface Props {
 }
 
 export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerSec }: Props) {
+  const preferFixture = usePreferFixture()
   const [minute, setMinute] = useState(frame.min)
   useEffect(() => { setMinute(frame.min) }, [frame.min])
 
@@ -36,11 +38,11 @@ export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerS
       {/* Stream title + elapsed */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1 }}>
         <span className="display" style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em' }}>{streamTitle}</span>
-        <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.08)' }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {preferFixture && <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.08)' }} />}
+        {preferFixture && <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00ff87' }}>{minute}'</span>
           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>elapsed</span>
-        </div>
+        </div>}
       </div>
 
       {/* Pooled total */}

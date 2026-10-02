@@ -4,11 +4,12 @@ import type { FrameSource } from "#pipeline/capture/index.js";
 import { applyWorkerSnapshotToBoard } from "#run/control/board/index.js";
 import { projectWorkerControlView } from "#run/control/board/index.js";
 import type { ControlBus } from "#run/control/bus/index.js";
+import type { ExecutionLease } from "#run/control/bus/types.js";
 import { createCaptureStageState, createEmptyWorkerState, failWorker, type PublishManifest, type SinkStageState } from "./state.js";
 import { validateWorkerPrepare } from "./prepare.js";
 import { supervisorTurn } from "./supervisor.js";
 import { projectWorkerSnapshot, type WorkerSnapshot } from "./snapshot.js";
-import type { WorkerState } from "./state.js";
+import type { WorkerLifecycle, WorkerState } from "./state.js";
 import type { WorkerBoardWake } from "./wake.js";
 
 export type WorkerRunOutcome = "stopped" | "failed" | "max-turns-exceeded";
@@ -29,11 +30,15 @@ export interface RunWorkerUntilStoppedInput {
   readonly bus: ControlBus;
   readonly boardWake: WorkerBoardWake;
   readonly maxTurns?: number;
+  /** Execution lease captured at start; snapshot commits are generation-fenced with it. */
+  readonly execution?: ExecutionLease;
 }
 
 export interface RunScopedWorkerUntilStoppedInput {
   readonly runId: string;
   readonly obsId?: string;
+  /** Execution lease captured at start; snapshot commits are generation-fenced with it. */
+  readonly execution?: ExecutionLease;
   readonly manifest: PublishManifest;
   readonly sinks: Record<string, SinkStageState>;
   readonly bus: ControlBus;
@@ -65,12 +70,12 @@ export const runWorkerUntilStoppedWithBoard = (
       bus: input.bus,
       boardWake: input.boardWake,
       maxTurns: input.maxTurns,
-      afterTurn: true
+      afterTurn: true,
+      ...(input.execution === undefined ? {} : { execution: input.execution })
     });
 
-    const board = yield* input.bus.readBoard();
     const snapshot = projectWorkerSnapshot(loop.state);
-    yield* input.bus.commitBoard(applyWorkerSnapshotToBoard(board, snapshot, input.state.obsId));
+    yield* commitWorkerSnapshotBoard(input.bus, snapshot, input.state.obsId, input.execution);
 
     return loop.result;
   });
@@ -83,7 +88,21 @@ export const runScopedWorkerUntilStoppedWithBoard = (
     const source = yield* input.prepareCapture;
 
     if (source.control !== undefined) {
-      yield* input.bus.mountSurface(source.control);
+      if (input.obsId === undefined) {
+        yield* input.bus.mountSurface(source.control);
+      } else {
+        // Owned binding: a family never mints a global stage cell for its source control.
+        // Family functions are preserved; control-specific routing uses the validated
+        // canonical route, and result footprints are enforced at commit.
+        const ownerId = `obs:${input.obsId}:capture`;
+        const owner = (yield* input.bus.readBoard()).cells[ownerId];
+        if (owner !== undefined) {
+          yield* input.bus.mountStageCell({
+            id: ownerId,
+            cell: { ...source.control.cell.cell, functions: [...owner.functions] }
+          });
+        }
+      }
     }
 
     const capture = yield* createCaptureStageState(source);
@@ -99,12 +118,42 @@ export const runScopedWorkerUntilStoppedWithBoard = (
       state,
       bus: input.bus,
       boardWake: input.boardWake,
-      maxTurns: input.maxTurns
+      maxTurns: input.maxTurns,
+      ...(input.execution === undefined ? {} : { execution: input.execution })
     });
   });
 };
 
 // --- helpers ---
+
+/**
+ * Worker snapshot write: when the worker carries its start generation, the write is fenced —
+ * a stale generation (stopped/restarted/removed observation) is rejected instead of
+ * overwriting current board state. Workers without a lease keep the legacy unchecked write.
+ */
+const commitWorkerSnapshotBoard = (
+  bus: ControlBus,
+  snapshot: WorkerSnapshot,
+  obsId: string | undefined,
+  execution: ExecutionLease | undefined
+): Effect.Effect<void, LiveStreakError> => {
+  // The projection derives from the CURRENT board inside the guard: two sibling snapshots
+  // can never silently drop each other, and a retired generation's write is rejected.
+  // Workers without a lease keep the legacy direct commit.
+  if (execution === undefined) {
+    return bus
+      .readBoard()
+      .pipe(
+        Effect.flatMap((board) => bus.commitBoard(applyWorkerSnapshotToBoard(board, snapshot, obsId))),
+        Effect.asVoid
+      );
+  }
+  return bus
+    .commitGuardedUpdate({ kind: "owner", lease: execution }, { kind: "snapshot", ...(obsId === undefined ? {} : { obsId }) }, (current) =>
+      Effect.succeed(applyWorkerSnapshotToBoard(current, snapshot, obsId))
+    )
+    .pipe(Effect.asVoid);
+}
 
 // O1: the worker budget counts CONSECUTIVE no-progress ("idle") turns, NOT raw
 // frame turns. This makes the cap a measure of *liveness* (a stuck loop) rather
@@ -127,6 +176,7 @@ interface WorkerLoopInput {
   readonly boardWake: WorkerBoardWake;
   readonly maxTurns?: number;
   readonly afterTurn?: boolean;
+  readonly execution?: ExecutionLease;
 }
 
 interface WorkerLoopOutcome {
@@ -154,20 +204,31 @@ const runWorkerLoop = (
     while (true) {
       const board = yield* input.bus.readBoard();
       const view = projectWorkerControlView(board, input.state.obsId);
-      const turn = yield* supervisorTurn(state, view);
+      const prevLifecycle: WorkerLifecycle = state.lifecycle;
+      const turn = yield* supervisorTurn(state, view, input.boardWake);
       turns += 1;
 
-      // O1: only no-progress turns count against the budget; any work resets it.
+      // O1 (+ foundation wake rule): only no-progress turns count against the budget; any
+      // work resets it. A capture-control wake is a legitimate wait — neither media work nor
+      // spinning — so it neither increments the idle budget nor spends the 5ms wait below.
+      // A stable paused lifecycle is equally legitimate: the pump is suspended by design and
+      // only control transitions (which publish) can move it. Transients keep counting so a
+      // genuinely stuck pause/resume/stop still trips the budget.
       if (turn.didWork === true) {
         consecutiveIdleTurns = 0;
-      } else {
+      } else if (turn.wokeForControl !== true && state.lifecycle !== "paused") {
         consecutiveIdleTurns += 1;
       }
 
-      if (input.afterTurn === true) {
-        const latestBoard = yield* input.bus.readBoard();
+      // Publish snapshots on actual work, lifecycle transition, or terminal/error result only.
+      // Health-only snapshots from unchanged paused/no-progress turns used to bump the board
+      // revision (health timestamps), waking the worker against itself until the idle budget died.
+      if (
+        input.afterTurn === true &&
+        (turn.didWork || state.lifecycle !== prevLifecycle || turn.shouldContinue === false)
+      ) {
         const snapshot = projectWorkerSnapshot(state);
-        yield* input.bus.commitBoard(applyWorkerSnapshotToBoard(latestBoard, snapshot, input.state.obsId));
+        yield* commitWorkerSnapshotBoard(input.bus, snapshot, input.state.obsId, input.execution);
       }
 
       if (turn.shouldContinue === false) {
@@ -177,6 +238,12 @@ const runWorkerLoop = (
       if (consecutiveIdleTurns >= maxIdleTurns) {
         stalled = true;
         break;
+      }
+
+      // A control wake already means "reread the board now": continue immediately without
+      // spending another wait first.
+      if (turn.wokeForControl === true) {
+        continue;
       }
 
       if (shouldWaitForControl(state)) {

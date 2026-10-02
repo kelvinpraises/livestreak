@@ -3,13 +3,14 @@ import { useMemo } from 'react'
 import type { StreamMeta } from '#/types/demo'
 import { useOptionsContext } from '#/providers/options-provider'
 import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
+import { useHostStream } from '#/hooks/use-host-stream'
 
 /** Honest placeholder header for a live stream that isn't on the board (yet) — never the fixture (A). */
 function emptyStreamMeta(routeId: string): StreamMeta {
   return {
     id: routeId,
     title: routeId,
-    category: 'Sports',
+    category: 'Live',
     activeVaults: 0,
     totalPooled: 0,
     elapsed: '',
@@ -21,6 +22,7 @@ export function useStreamMeta(routeId: string): StreamMeta {
   const preferFixture = usePreferFixture()
   const parsed = useParsedFixture()
   const { board } = useOptionsContext()
+  const { stream: hostStream } = useHostStream(routeId)
 
   return useMemo(() => {
     if (!preferFixture) {
@@ -43,9 +45,19 @@ export function useStreamMeta(routeId: string): StreamMeta {
           isLive: market.stream?.status === 'live',
         }
       }
+      // Spectators can watch a registered broadcast before wallet/account loading succeeds.
+      if (hostStream) return {
+        id: hostStream.marketId ?? routeId,
+        title: hostStream.title,
+        category: hostStream.category ?? 'Live',
+        activeVaults: hostStream.activeVaults ?? 0,
+        totalPooled: hostStream.totalPooled ?? 0,
+        elapsed: '',
+        isLive: hostStream.isLive,
+      }
       return emptyStreamMeta(routeId)
     }
 
     return parsed.streams.find(s => s.id === routeId) ?? parsed.streams[0]!
-  }, [preferFixture, board, parsed, routeId])
+  }, [preferFixture, board, parsed, routeId, hostStream])
 }

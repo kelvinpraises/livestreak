@@ -5,6 +5,7 @@ import { defaultSyntheticCaptureConfig } from "#pipeline/capture/synthetic/drive
 import type { Board } from "./control/board/index.js";
 import type { ObserveRunConfig } from "./run.js";
 import { observationCellId, readObservationIndex } from "./control/system/config.js";
+import { observationCompleteness } from "./control/board/settings.js";
 
 // Read a board cell's settings/readonly maps with safe defaults — the only place that knows the board's
 // cell-id / field-path schema for deriving a run config.
@@ -58,18 +59,26 @@ export const runConfigFromBoard = (
       );
     }
 
-    const captureCell = cellRecord(board, observationCellId(obsId, "capture"));
-    // Authoritative capture gate (B4-R01): fresh mounts and post-switch cells carry
-    // configured:false, so derivation refuses stale input in both directions until the
-    // destination configure lands. This is the console path's choke point into prepare.
-    if (captureCell.readonly.configured !== true) {
+    // Authoritative per-family gates (B4-R01 + B-F02-02): fresh mounts and post-switch cells
+    // carry configured:false, so derivation refuses stale input in both directions until the
+    // destination configure lands. Sibling/global cells can never satisfy these checks.
+    // This is the console path's choke point into prepare.
+    const completeness = observationCompleteness(board, obsId);
+    if (!completeness.capture) {
       return yield* Effect.fail(
         new LiveStreakConfigError({
           message: "Configure capture before going live."
         })
       );
     }
-    const captureSettings = captureCell.settings;
+    if (!completeness.publish) {
+      return yield* Effect.fail(
+        new LiveStreakConfigError({
+          message: "Configure publish before going live."
+        })
+      );
+    }
+    const captureSettings = cellRecord(board, observationCellId(obsId, "capture")).settings;
     const syntheticSelected = captureSettings.source === "synthetic";
     const ingestSelected = captureSettings.source === "ingest";
 
@@ -83,8 +92,10 @@ export const runConfigFromBoard = (
       );
     }
 
+    // Market gate keeps its narrowing check (identical to completeness.market); capture/publish
+    // gate through the shared predicate above.
     const marketId = cellRecord(board, observationCellId(obsId, "market")).readonly.marketId;
-    if (typeof marketId !== "string" || marketId.trim().length === 0) {
+    if (typeof marketId !== "string" || marketId.trim().length === 0 || !completeness.market) {
       return yield* Effect.fail(
         new LiveStreakConfigError({ message: "Register a market before going live." })
       );
@@ -110,6 +121,17 @@ export const runConfigFromBoard = (
             typeof captureSettings.continuous === "boolean" ? captureSettings.continuous : true
         }
       };
+    } else if (captureSettings.source === "rtmp") {
+      capture = { driverId: "rtmp", config: {
+        port: captureSettings.port,
+        streamName: captureSettings.streamName,
+        width: captureSettings.width,
+        height: captureSettings.height,
+        fps: captureSettings.fps,
+        audio: captureSettings.audio,
+        startupTimeoutMs: captureSettings.startupTimeoutMs,
+        idleTimeoutMs: captureSettings.idleTimeoutMs
+      }};
     } else if (ingestSelected) {
       // Bot-pushed generated show: the producer bot renders arbitrary frames and POSTs them
       // to the driver's loopback endpoint (see capture/ingest/driver.ts for the contract).
@@ -151,7 +173,9 @@ export const runConfigFromBoard = (
         capture,
         sink: {
           driverId: "direct",
-          instanceId: "direct",
+          // Stable family sink instance key, shared with kernel records, worker view and
+          // snapshot projection. The public market/stream identity stays the registered id.
+          instanceId: `${obsId}:direct`,
           config: {
             streamId: marketId,
             hostBaseUrl,
@@ -170,7 +194,9 @@ export const runConfigFromBoard = (
       capture,
       sink: {
         driverId: "live",
-        instanceId: "live",
+        // Stable family sink instance key, shared with kernel records, worker view and
+        // snapshot projection. The public market/stream identity stays the registered id.
+        instanceId: `${obsId}:live`,
         // Encode-once fMP4 fan-out keyed to the registered market (the id the viewer consumes under, over
         // the host `/live/watch/:streamId` endpoint).
         config: {

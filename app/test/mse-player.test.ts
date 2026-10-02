@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import {
   openMsePlayer,
+  fmp4MimeFromInit,
   type MediaSourceLike,
   type PlayerSocket,
   type SourceBufferLike,
@@ -162,6 +163,9 @@ describe('MSE live player', () => {
       mediaSourceFactory: () => ms,
     })
     ms.fireSourceOpen()
+    socket.fire('message', { data: frame(FRAME_INIT, [9, 9]) })
+    sb.fireUpdateEnd()
+    sb.appended.length = 0
     sb.setBuffered(0, 12)
     sb.throwQuotaOnce()
     socket.fire('message', { data: frame(FRAME_FRAGMENT, [1]) })
@@ -273,4 +277,23 @@ describe('source-mode selection', () => {
     expect(ended.kind).toBe('vod')
     expect(ended.src).toContain('blob1')
   })
+})
+
+it('selects the actual AVC profile and AAC track advertised by the init segment', () => {
+  const init = new Uint8Array([0,0,0,12,0x61,0x76,0x63,0x43,1,0x64,0,0x1f,0,0,0,16,0x6d,0x70,0x34,0x61,0,0,0,0])
+  expect(fmp4MimeFromInit(init)).toBe('video/mp4; codecs="avc1.64001f, mp4a.40.2"')
+  expect(fmp4MimeFromInit(init.subarray(0,12))).toBe('video/mp4; codecs="avc1.64001f"')
+})
+
+it('seeks into the element’s playable audiovisual range instead of a leading partial-track range', () => {
+  const sb = makeSourceBuffer()
+  sb.setBuffered(0, 30)
+  const ms = makeMediaSource(sb)
+  const socket = makeSocket()
+  const video = {src:'',currentTime:0,play:()=>Promise.resolve(),buffered:{length:1,start:()=>20,end:()=>30}} as unknown as HTMLVideoElement
+  openMsePlayer({baseUrl:'http://h',streamId:'s',video,socketFactory:()=>socket,mediaSourceFactory:()=>ms})
+  ms.fireSourceOpen()
+  socket.fire('message',{data:frame(FRAME_INIT,[9,9])})
+  sb.fireUpdateEnd()
+  expect(video.currentTime).toBe(20)
 })

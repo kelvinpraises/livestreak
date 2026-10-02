@@ -115,3 +115,12 @@ describe("live ring buffer", () => {
     expect(ring.isLive("s")).toBe(false);
   });
 });
+
+it("never primes a restarted encoder with fragments from its previous init epoch", () => {
+  const ring=createLiveRingStore(smallConfig);
+  ring.setInit("s",bytes(1));ring.pushFragment("s",bytes(2));ring.end("s");
+  ring.setInit("s",bytes(3));ring.pushFragment("s",bytes(4));
+  const viewer=collect();ring.addViewer("s","new",viewer.sink);
+  expect(viewer.frames).toEqual([{kind:"init",data:bytes(3)},{kind:"fragment",data:bytes(4)}]);
+  expect(ring.isLive("s")).toBe(true);
+});

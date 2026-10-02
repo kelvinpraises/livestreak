@@ -70,3 +70,17 @@ describe("fMP4 encoder (real ffmpeg)", () => {
     }
   }, 30000);
 });
+
+it("muxes producer audio and video into the same init and fragments", async () => {
+  const chunks: Fmp4Chunk[] = [];
+  await Effect.runPromise(Effect.gen(function* () {
+    const encoder = yield* createFmp4Encoder({width:W,height:H,fps:FPS,audio:true,fragmentSeconds:0.5,onChunk:chunk=>chunks.push(chunk)});
+    const pcm = new Uint8Array(4800*4);
+    for(let i=0;i<30;i++) yield* Effect.all([encoder.writeFrame(grayI420()),encoder.writeAudio!(pcm)],{concurrency:2});
+    yield* encoder.finalize;
+  }).pipe(Effect.timeout("15 seconds")));
+  const init=chunks.find(chunk=>chunk.kind==="init")!;
+  expect(Buffer.from(init.data).includes(Buffer.from("mp4a"))).toBe(true);
+  expect(Buffer.from(init.data).includes(Buffer.from("avcC"))).toBe(true);
+  expect(chunks.filter(chunk=>chunk.kind==="fragment").length).toBeGreaterThan(1);
+}, 20000);

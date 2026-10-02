@@ -1,5 +1,5 @@
 import { Effect, Scope } from "effect";
-import type { LiveStreakError } from "@livestreak/core";
+import { LiveStreakConfigError, type LiveStreakError } from "@livestreak/core";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import type { ControlCallEnvelope, ControlCallResult, ControlArtifact } from "./control/bus/index.js";
 import type {
@@ -8,6 +8,7 @@ import type {
   ControlPanel
 } from "./control/bus/index.js";
 import type { Board } from "./control/board/index.js";
+import { setBoardRunPrepared } from "./control/board/index.js";
 import {
   prepareObserveRun,
   startObserveRunAsync,
@@ -64,7 +65,7 @@ export interface ObserveRuntime {
    */
   readonly prepareConfiguredRun: (
     runId: string,
-    options: { readonly hostBaseUrl: string; readonly obsId?: string }
+    options: { readonly hostBaseUrl?: string; readonly obsId?: string }
   ) => Effect.Effect<ObserveRun, LiveStreakError>;
 
   readonly startRun: (
@@ -124,6 +125,42 @@ const mergeKernelOptions = (
   overrides: RuntimeKernelOptions | undefined
 ): RuntimeKernelOptions => ({ ...defaults, ...overrides });
 
+// Driver precedence: an explicit per-start injection wins; an applicable explicit default
+// wins over the cached built-in; the cache is fallback only. Absent/undefined never erases
+// a valid default — the kernel fails loudly on descriptor-id mismatches instead.
+const selectDriver = <D>(
+  driverId: string,
+  injected: D | undefined,
+  configuredDefault: D | undefined,
+  cached: () => D | undefined
+): D | undefined => injected ?? configuredDefault ?? cached();
+
+// Host resolution: an explicit URL wins and is retained per key on success; otherwise
+// the retained context, otherwise the session default. Failed preparation never
+// poisons the retained context.
+const assertDeploymentHostUrl = (
+  url: string | undefined
+): Effect.Effect<string, LiveStreakError> => {
+  if (url === undefined || url.length === 0) {
+    return Effect.fail(
+      new LiveStreakConfigError({
+        message: "Prepare requires a host base URL (pass hostBaseUrl or session hostUrl)"
+      })
+    );
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("not http(s)");
+    }
+  } catch {
+    return Effect.fail(
+      new LiveStreakConfigError({ message: `Prepare host base URL is not a valid http(s) URL: ${url}` })
+    );
+  }
+  return Effect.succeed(url);
+};
+
 const buildObserveRuntime = (
   input: CreateObserveRuntimeInput,
   scope: Scope.Scope
@@ -131,6 +168,9 @@ const buildObserveRuntime = (
   const store = input.store ?? createRunStore();
   const defaultKernelOptions = input.defaultKernelOptions;
   const sessionInit = input.sessionInit;
+  // Retained deployment contexts per run key: an explicit host URL stays selected for
+  // later hook prepares; a failed preparation never poisons them; removeRun drops them.
+  const preparedHostContext = new Map<string, string>();
 
   // The encode-once streaming sink drivers — built once, reused for prepare + start. Their per-run state
   // (ingest transport / viewer server) rides on the run config or attach, so the drivers are stateless here.
@@ -148,29 +188,196 @@ const buildObserveRuntime = (
     return undefined;
   };
 
+  // Canonical family preparation shared by public prepareConfiguredRun and wired run hooks:
+  // resolve the observation, reclaim, claim preparing ownership, register if needed,
+  // rederive canonical inputs (never cached config), select drivers, prepare the kernel,
+  // publish to the store, release. Host context: explicit URL wins and is retained per key
+  // on success; otherwise the retained context, otherwise the session default.
+  const prepareFamilyCanonical = (
+    runId: string,
+    obsId: string | undefined,
+    explicitHostBaseUrl: string | undefined
+  ): Effect.Effect<ObserveRun, LiveStreakError> =>
+    Effect.gen(function* () {
+      const run = yield* store.require(runId);
+      const prepareBus = run.bus;
+      if (prepareBus === undefined) {
+        return yield* Effect.fail(
+          new LiveStreakConfigError({
+            message: `Prepare requires a mounted control bus for run ${runId}`
+          })
+        );
+      }
+      // Canonical inputs come from the LIVE bus board — never the store's board copy,
+      // which lags direct configure calls that bypass bridge sync. Deriving from a stale
+      // copy would store old config while certifying prepared=true (false certification).
+      const liveBoard = yield* prepareBus.readBoard();
+      const index = readObservationIndex(liveBoard);
+      const resolvedObsId =
+        obsId ?? (Object.keys(index).length === 1 ? Object.keys(index)[0] : undefined);
+      const key = runKey(runId, resolvedObsId);
+      yield* reclaimTerminalRunHandle(store, key);
+      // Admission read: a protected phase held by anyone (preparing/configuring/executing)
+      // refuses the prepare before claiming — the claim itself enforces this too, but the
+      // explicit read makes the refusal observable and auditable at the boundary.
+      const admission = yield* prepareBus.execution.readEntry(key);
+      if (admission.phase !== "inactive") {
+        return yield* Effect.fail(
+          new LiveStreakConfigError({
+            message: `Observation ${key} is already ${admission.phase} — prepare refused`
+          })
+        );
+      }
+      const hostBaseUrl = yield* assertDeploymentHostUrl(
+        explicitHostBaseUrl ?? preparedHostContext.get(key) ?? sessionInit?.hostUrl
+      );
+      // One acquire/use/release bracket: the claim and the cleanup installation share
+      // the outer mask atomically; restore applies only to the body once cleanup exists.
+      // On failure or interruption after the bus certified prepared, the certification
+      // rolls back (prepared=false) before release — a cancelled publication can never
+      // leave a stale prepared=true behind.
+      return yield* Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const prepareToken = yield* prepareBus.execution.claimPrepare(key);
+          const preparationLease = { obsKey: key, token: prepareToken };
+          return yield* restore(
+            Effect.gen(function* () {
+              const freshBoard = yield* prepareBus.readBoard();
+              const marketCell =
+                resolvedObsId === undefined
+                  ? undefined
+                  : freshBoard.cells[observationCellId(resolvedObsId, "market")];
+              if (
+                resolvedObsId !== undefined &&
+                marketCell !== undefined &&
+                marketCell.readonly?.registrationState === "none"
+              ) {
+                yield* prepareBus.dispatchCall(
+                  {
+                    callId: `prepare-register-${runId}-${resolvedObsId}`,
+                    runId,
+                    cellId: observationCellId(resolvedObsId, "market"),
+                    scope: "market:register",
+                    payload: {}
+                  },
+                  { kind: "owner", lease: preparationLease }
+                );
+              }
+              const config = yield* runConfigFromBoard({
+                runId,
+                board: yield* prepareBus.readBoard(),
+                hostBaseUrl,
+                ...(resolvedObsId === undefined ? {} : { obsId: resolvedObsId })
+              });
+              const sinkDriver =
+                selectDriver(
+                  config.sink.driverId,
+                  undefined,
+                  defaultKernelOptions?.sinkDriver,
+                  () => streamingSinkFor(config.sink.driverId)
+                );
+              const prepared = yield* prepareObserveRun(
+                { ...run, config, manifest: run.manifest, prepared: false },
+                mergeKernelOptions(defaultKernelOptions, {
+                  ...(sinkDriver === undefined ? {} : { sinkDriver }),
+                  preparationLease,
+                  sessionInit,
+                  runHooks
+                })
+              );
+              // Publication handoff: the store write and the bus prepared-commit must agree.
+              // If publication fails after the bus certified prepared, roll the bus flag back
+              // (fenced, still preparing) so a stale prepared=true can never satisfy a start.
+              // The rollback is best-effort; the original publication failure propagates.
+              const published = yield* Effect.exit(store.replace(prepared, key));
+              if (published._tag === "Failure") {
+                yield* prepareBus
+                  .commitGuardedUpdate(
+                    { kind: "owner", lease: preparationLease },
+                    {
+                      kind: "lifecycle",
+                      ...(resolvedObsId === undefined ? {} : { obsId: resolvedObsId })
+                    },
+                    (current) =>
+                      Effect.succeed(
+                        setBoardRunPrepared(current, false, undefined, resolvedObsId)
+                      )
+                  )
+                  .pipe(Effect.ignore);
+                preparedHostContext.delete(key);
+                return yield* Effect.failCause(published.cause);
+              }
+              preparedHostContext.set(key, hostBaseUrl);
+              return prepared;
+            })
+          ).pipe(
+            Effect.onExit((exit) =>
+              exit._tag === "Failure"
+                ? Effect.gen(function* () {
+                    yield* prepareBus
+                      .commitGuardedUpdate(
+                        { kind: "owner", lease: preparationLease },
+                        {
+                          kind: "lifecycle",
+                          ...(resolvedObsId === undefined ? {} : { obsId: resolvedObsId })
+                        },
+                        (current) =>
+                          Effect.succeed(
+                            setBoardRunPrepared(current, false, undefined, resolvedObsId)
+                          )
+                      )
+                      .pipe(Effect.ignore);
+                    yield* prepareBus.execution.release(key, prepareToken);
+                  })
+                : prepareBus.execution.release(key, prepareToken)
+            )
+          );
+        })
+      );
+    });
+
   const runHooks: import("./control/system/run.js").SystemRunHooks = {
-    prepare: (runId: string, obsId?: string) =>
+    // No cached-ready shortcut: a hook prepare always runs the canonical routine,
+    // which rederives from the live board. A cached composite can certify a run whose
+    // inputs changed after its read; the canonical routine truthfully refuses if owned
+    // and otherwise rederives, admits, registers and publishes.
+    prepare: (runId: string, obsId?: string) => prepareFamilyCanonical(runId, obsId, undefined),
+    // Wired hooks share the canonical admitted start path (same driver selection as
+    // public startRun): a live family started through hooks resolves its sink driver
+    // instead of failing unknown-driver.
+    start: (runId: string, obsId?: string) =>
       Effect.gen(function* () {
         const key = runKey(runId, obsId);
-        const existing = yield* store.get(key);
-        const run = existing ?? (yield* store.require(runId));
-        if (run.prepared === true && run.bus !== undefined) {
-          return run;
-        }
-        const prepared = yield* prepareObserveRun(
-          run,
-          mergeKernelOptions(defaultKernelOptions, { sessionInit, runHooks })
+        const run = yield* store.get(key).pipe(
+          Effect.flatMap((entry) =>
+            entry !== undefined ? Effect.succeed(entry) : store.require(runId)
+          )
         );
-        yield* store.replace(prepared, key);
-        return prepared;
+        const sinkDriver =
+          selectDriver(
+            run.config.sink.driverId,
+            undefined,
+            defaultKernelOptions?.sinkDriver,
+            () => streamingSinkFor(run.config.sink.driverId)
+          );
+        const captureDriver = selectDriver(
+          run.config.capture.driverId,
+          undefined,
+          defaultKernelOptions?.captureDriver,
+          () => undefined
+        );
+        return yield* startRunEffect(
+          store,
+          scope,
+          key,
+          mergeKernelOptions(defaultKernelOptions, {
+            ...(sinkDriver === undefined ? {} : { sinkDriver }),
+            ...(captureDriver === undefined ? {} : { captureDriver }),
+            sessionInit,
+            runHooks
+          })
+        );
       }),
-    start: (runId: string, obsId?: string) =>
-      startRunEffect(
-        store,
-        scope,
-        runKey(runId, obsId),
-        mergeKernelOptions(defaultKernelOptions, { sessionInit, runHooks })
-      ),
     await: (runId: string, obsId?: string) =>
       Effect.gen(function* () {
         const handle = yield* store.requireHandle(runKey(runId, obsId));
@@ -193,76 +400,30 @@ const buildObserveRuntime = (
       }),
 
     prepareConfiguredRun: (runId, options) =>
-      Effect.gen(function* () {
-        const run = yield* store.require(runId);
-        // Resolve WHICH observation this prepare drives: the caller's, or the session's only one.
-        const boardForObs = yield* readStoredRunBoard(store, runId);
-        const index = readObservationIndex(boardForObs);
-        const obsId =
-          options.obsId ?? (Object.keys(index).length === 1 ? Object.keys(index)[0] : undefined);
-        const key = runKey(runId, obsId);
-        // Re-preparing a finished run reclaims its terminal handle (so reads route to the fresh bus,
-        // not the dead run's); an ACTIVE run of THIS observation refuses re-prepare. Other
-        // observations' runs are untouched — that is the whole point of the key.
-        yield* reclaimTerminalRunHandle(store, key);
-        // Prepare composes registration: an unregistered family market registers here, with the
-        // title saved at birth. Idempotent by board state — a registered market is skipped.
-        {
-          const marketCell =
-            obsId === undefined ? undefined : boardForObs.cells[observationCellId(obsId, "market")];
-          if (
-            obsId !== undefined &&
-            marketCell !== undefined &&
-            marketCell.readonly?.registrationState === "none"
-          ) {
-            yield* callStoredRunFunction(store, {
-              callId: `prepare-register-${runId}-${obsId}`,
-              runId,
-              cellId: observationCellId(obsId, "market"),
-              scope: "market:register",
-              payload: {}
-            });
-          }
-        }
-        // Config derives from the BUS board (canonical) — the stored run's board copy can lag
-        // behind configure calls that haven't been synced back yet.
-        const config = yield* runConfigFromBoard({
-          runId,
-          board: yield* readStoredRunBoard(store, runId),
-          hostBaseUrl: options.hostBaseUrl,
-          ...(obsId === undefined ? {} : { obsId })
-        });
-        const sinkDriver = streamingSinkFor(config.sink.driverId);
-        const prepared = yield* prepareObserveRun(
-          { ...run, config, manifest: run.manifest, prepared: false },
-          mergeKernelOptions(defaultKernelOptions, {
-            ...(sinkDriver === undefined ? {} : { sinkDriver }),
-            sessionInit,
-            runHooks
-          })
-        );
-        yield* store.replace(prepared, key);
-        return prepared;
-      }),
+      prepareFamilyCanonical(runId, options.obsId, options.hostBaseUrl),
 
     startRun: (runId, options, obsId) =>
       Effect.gen(function* () {
-        // Re-supply the injected streaming sink for a board-configured run (the kernel re-resolves the
-        // driver at start). For every other sink, leave sinkDriver unset — writing an `undefined` key into
-        // the overrides would clobber defaultKernelOptions.sinkDriver, so the kernel fails to resolve the
-        // driver (e.g. the in-memory test sink) and the worker hangs.
+        // Driver precedence: explicit per-start injection wins; an applicable explicit default
+        // wins over the cached built-in; the cache is fallback only. Absent/undefined never
+        // erases a valid default — the kernel fails loudly on descriptor-id mismatches.
         const key = runKey(runId, obsId);
         const run = yield* store.get(key).pipe(
           Effect.flatMap((entry) => (entry !== undefined ? Effect.succeed(entry) : store.require(runId)))
         );
-        const streamingSink = streamingSinkFor(run.config.sink.driverId);
+        const sinkDriver = selectDriver(
+          run.config.sink.driverId,
+          options?.sinkDriver,
+          defaultKernelOptions?.sinkDriver,
+          () => streamingSinkFor(run.config.sink.driverId)
+        );
         return yield* startRunEffect(
           store,
           scope,
           key,
           mergeKernelOptions(defaultKernelOptions, {
             ...options,
-            ...(streamingSink === undefined ? {} : { sinkDriver: streamingSink }),
+            ...(sinkDriver === undefined ? {} : { sinkDriver: sinkDriver }),
             sessionInit,
             runHooks
           })
@@ -292,7 +453,17 @@ const buildObserveRuntime = (
 
     stopRun: (runId, options, obsId) => stopObserveRun(store, runId, options, obsId),
 
-    removeRun: (runId) => store.remove(runId),
+    removeRun: (runId) =>
+      Effect.gen(function* () {
+        yield* store.remove(runId);
+        // Drop retained deployment contexts for the run and all its families (bounded scan
+        // of the private map; never the store or board). A new session starts context-free.
+        for (const key of [...preparedHostContext.keys()]) {
+          if (key === runId || key.startsWith(`${runId}#`)) {
+            preparedHostContext.delete(key);
+          }
+        }
+      }),
     removeHandle: (runId) => store.removeHandle(runId)
   };
 };
@@ -310,7 +481,17 @@ const startRunEffect = (
       run,
       options
     }).pipe(Effect.provideService(Scope.Scope, scope));
-    yield* store.putHandle(handle, key);
+    // Publication failure or cancellation must not orphan a live child: interrupt and
+    // await its cleanup (the kernel scope finalizer retires the lease) before propagating.
+    // onExit (not catchAll) observes interruption as well as failure.
+    yield* Effect.onExit(store.putHandle(handle, key), (exit) =>
+      exit._tag === "Failure"
+        ? Effect.gen(function* () {
+            yield* handle.interrupt;
+            yield* Effect.exit(handle.awaitResult());
+          }).pipe(Effect.ignore)
+        : Effect.void
+    );
     return handle;
   });
 

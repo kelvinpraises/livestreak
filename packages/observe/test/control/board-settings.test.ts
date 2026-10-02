@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
 import { createBrowserBoardFixture, createFileBoardFixture } from "#test/helpers/board.js";
-import { validateBoardSettings } from "#run/control/board/index.js";
+import {
+  isObservationConfigured,
+  observationCompleteness,
+  validateBoardSettings
+} from "#run/control/board/index.js";
 import type { Board } from "#run/control/board/index.js";
 import { projectWorkerControlView } from "#run/control/board/index.js";
 
@@ -557,6 +561,95 @@ describe("validateBoardSettings", () => {
       expect(exit.cause.toString()).toContain(
         "capture:file.settings.maxPumpMs must be a finite number"
       );
+    }
+  });
+});
+
+describe("observationCompleteness", () => {
+  const familyBoard = (over?: {
+    captureConfigured?: boolean;
+    publishConfigured?: boolean;
+    marketId?: string;
+    siblingConfigured?: boolean;
+  }): Board =>
+    ({
+      revision: 1,
+      catalogVersion: "0.1.0",
+      cells: {
+        "obs:a:capture": { readonly: { configured: over?.captureConfigured ?? true } },
+        "obs:a:publish": {
+          readonly: { kind: "live", configured: over?.publishConfigured ?? true }
+        },
+        "obs:a:market": {
+          readonly: over?.marketId === undefined ? {} : { marketId: over.marketId }
+        },
+        // A fully configured sibling must never satisfy a's prerequisites.
+        "obs:b:capture": { readonly: { configured: over?.siblingConfigured ?? true } },
+        "obs:b:publish": {
+          readonly: { kind: "direct", configured: over?.siblingConfigured ?? true }
+        },
+        "obs:b:market": { readonly: { marketId: "market-sibling" } },
+        // Legacy global cells must never satisfy a family either.
+        "capture:file": { readonly: { configured: true } },
+        "sink:live": { readonly: { configured: true } }
+      }
+    }) as unknown as Board;
+
+  it("reports the selected observation complete when its own cells are configured", () => {
+    const completeness = observationCompleteness(
+      familyBoard({ marketId: "market-a" }),
+      "a"
+    );
+
+    expect(completeness).toEqual({ capture: true, publish: true, market: true });
+    expect(isObservationConfigured(familyBoard({ marketId: "market-a" }), "a")).toBe(true);
+  });
+
+  it("is not satisfied by a configured sibling or by global cells", () => {
+    // `a` has nothing of its own; only `b` and the globals are configured.
+    const board = familyBoard({
+      captureConfigured: false,
+      publishConfigured: false,
+      siblingConfigured: true
+    });
+
+    expect(observationCompleteness(board, "a")).toEqual({
+      capture: false,
+      publish: false,
+      market: false
+    });
+    expect(isObservationConfigured(board, "a")).toBe(false);
+    expect(isObservationConfigured(board, "b")).toBe(true);
+  });
+
+  it("reports partial writes honestly without gating them", () => {
+    const board = familyBoard({ publishConfigured: false, marketId: "market-a" });
+
+    expect(observationCompleteness(board, "a")).toEqual({
+      capture: true,
+      publish: false,
+      market: true
+    });
+    expect(isObservationConfigured(board, "a")).toBe(false);
+  });
+});
+
+describe("family shape validation", () => {
+  it("rejects an invalid second-family pause mode that the legacy check never sees", async () => {
+    const board = {
+      ...baseBoard,
+      cells: {
+        ...baseBoard.cells,
+        "obs:second:pause": {
+          ...baseBoard.cells["system:pause"],
+          settings: { requested: false, whilePaused: "not-a-mode" }
+        }
+      }
+    };
+    const exit = await Effect.runPromiseExit(validateBoardSettings(board));
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      expect(String(exit.cause)).toContain("obs:second:pause.settings.whilePaused");
     }
   });
 });

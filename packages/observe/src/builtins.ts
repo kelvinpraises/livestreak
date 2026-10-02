@@ -1,3 +1,4 @@
+import { createRtmpCaptureDriver, rtmpCaptureDescriptor, type RtmpCaptureConfig } from "./pipeline/capture/rtmp/driver.js";
 import { LiveStreakConfigError } from "@livestreak/core";
 import { createObserveRegistry } from "./pipeline/registry.js";
 import {
@@ -38,7 +39,7 @@ import {
 } from "./pipeline/publish/sinks/direct/driver.js";
 import type { SinkDriver } from "./pipeline/publish/types.js";
 
-export type BuiltInCaptureDriverId = "file" | "synthetic" | "ingest";
+export type BuiltInCaptureDriverId = "file" | "synthetic" | "ingest" | "rtmp";
 export type BuiltInSinkDriverId = "file" | "live" | "direct";
 
 export const builtInObserveRegistry = createObserveRegistry({
@@ -47,7 +48,8 @@ export const builtInObserveRegistry = createObserveRegistry({
       { descriptor: fileCaptureDescriptor },
       { descriptor: browserCaptureDescriptor },
       { descriptor: syntheticCaptureDescriptor },
-      { descriptor: ingestCaptureDescriptor }
+      { descriptor: ingestCaptureDescriptor },
+      { descriptor: rtmpCaptureDescriptor }
     ]
   },
   publish: {
@@ -62,7 +64,7 @@ export const builtInObserveRegistry = createObserveRegistry({
 export const getBuiltInCaptureDriver = (
   id: BuiltInCaptureDriverId,
   options: FileCaptureDriverOptions = {}
-): CaptureDriver<FileCaptureConfig> | CaptureDriver<SyntheticCaptureConfig> | CaptureDriver<IngestCaptureConfig> => {
+): CaptureDriver<FileCaptureConfig> | CaptureDriver<SyntheticCaptureConfig> | CaptureDriver<IngestCaptureConfig> | CaptureDriver<RtmpCaptureConfig> => {
   if (id === "file") {
     return createFileCaptureDriver(options);
   }
@@ -74,6 +76,8 @@ export const getBuiltInCaptureDriver = (
   if (id === "ingest") {
     return createIngestCaptureDriver();
   }
+
+  if (id === "rtmp") return createRtmpCaptureDriver();
 
   return missingCaptureDriver(id);
 };

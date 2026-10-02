@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Exit } from "effect";
+
+// Tight poll for actual sink delivery: prompt control response means a bare yield no longer
+// guarantees frames slipped through before a stop request lands, and a 512-frame run can
+// finish inside one sleep — so check every scheduler turn and stop at the first delivery.
+const waitForDelivered = (count: () => number, timeoutMs = 10000): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (count() > 0) return;
+      if (Date.now() >= deadline) {
+        return yield* Effect.fail(new Error("timed out waiting for delivered frames"));
+      }
+      yield* Effect.yieldNow();
+    }
+  });
 import { systemRunStopScope } from "#run/control/index.js";
 import { createObserveRuntime } from "#run/runtime.js";
 import { createRunStore } from "#run/store.js";
@@ -458,7 +473,8 @@ describe("ObserveRuntime", () => {
   });
 
   it("callFunction system:run:stop ends a live run cleanly", async () => {
-    const frameCount = 512;
+    // Large stream: stopping at first delivery provably cuts the run short.
+    const frameCount = 2048;
     const { options, delivered } = createYieldingSyntheticKernelOptions(frameCount);
 
     const exit = await Effect.runPromiseExit(
@@ -469,7 +485,9 @@ describe("ObserveRuntime", () => {
             makeSyntheticObserveRun("run_stop_live", "/tmp/run_stop_live.mp4").config
           );
           yield* runtime.startRun("run_stop_live");
-          yield* Effect.yieldNow();
+          // Wait for actual delivery before stopping: with prompt control response a bare
+          // yield no longer guarantees frames slipped through first.
+          yield* waitForDelivered(() => delivered.length);
           yield* runtime.callFunction({
             callId: "call_stop_live",
             runId: "run_stop_live",
@@ -496,8 +514,8 @@ describe("ObserveRuntime", () => {
   });
 
   it("system:run:stop isolates runs", async () => {
-    const { options: optionsA, delivered: deliveredA } = createYieldingSyntheticKernelOptions(512);
-    const { options: optionsB, delivered: deliveredB } = createYieldingSyntheticKernelOptions(512);
+    const { options: optionsA, delivered: deliveredA } = createYieldingSyntheticKernelOptions(2048);
+    const { options: optionsB, delivered: deliveredB } = createYieldingSyntheticKernelOptions(2048);
 
     const exit = await Effect.runPromiseExit(
       Effect.scoped(
@@ -519,7 +537,9 @@ describe("ObserveRuntime", () => {
 
           yield* runtime.startRun("run_stop_a", optionsA);
           yield* runtime.startRun("run_stop_b", optionsB);
-          yield* Effect.yieldNow();
+          // Wait for actual delivery on both runs before stopping (see above).
+          yield* waitForDelivered(() => deliveredA.length);
+          yield* waitForDelivered(() => deliveredB.length);
 
           yield* runtime.callFunction({
             callId: "call_stop_a",
@@ -548,9 +568,9 @@ describe("ObserveRuntime", () => {
       expect(exit.value.resultB.outcome).toBe("stopped");
       expect(exit.value.boardBDuring.cells["system:run"]?.settings?.stopRequested).not.toBe(true);
       expect(exit.value.deliveredA).toBeGreaterThan(0);
-      expect(exit.value.deliveredA).toBeLessThan(512);
+      expect(exit.value.deliveredA).toBeLessThan(2048);
       expect(exit.value.deliveredB).toBeGreaterThan(0);
-      expect(exit.value.deliveredB).toBeLessThan(512);
+      expect(exit.value.deliveredB).toBeLessThan(2048);
     }
   });
 });

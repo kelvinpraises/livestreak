@@ -107,3 +107,59 @@ describe("RunStore", () => {
     expect(result.changed).toBe(true);
   });
 });
+
+describe("RunStore execution-time reads and identity retirement", () => {
+  const handleFor = (runId: string) =>
+    ({
+      runId,
+      run: makeObserveRunSync(sampleRunConfig(runId)),
+      bus: undefined,
+      startedAtMs: 1,
+      awaitResult: () => Effect.fail(new Error("unused")),
+      interrupt: Effect.void,
+      isDone: Effect.succeed(true)
+    }) as unknown as import("#run/store.js").ObserveRunHandle;
+
+  it("two concurrent duplicate puts cannot both succeed", async () => {
+    const store = createRunStore();
+    const run = makeObserveRunSync(sampleRunConfig("run_store_race"));
+
+    const exits = await Effect.runPromise(
+      Effect.all([Effect.exit(store.put(run)), Effect.exit(store.put(run))], {
+        concurrency: 2
+      })
+    );
+
+    const failures = exits.filter((exit) => Exit.isFailure(exit));
+    expect(failures.length).toBe(1);
+  });
+
+  it("reads evaluate at execution, not construction", async () => {
+    const store = createRunStore();
+    const run = makeObserveRunSync(sampleRunConfig("run_store_deferred"));
+
+    // Construct the read BEFORE the write exists; it must still see the write at execution.
+    const deferred = store.require("run_store_deferred");
+    await Effect.runPromise(store.put(run));
+    const seen = await Effect.runPromise(deferred);
+
+    expect(seen).toEqual(run);
+  });
+
+  it("stale identity removal cannot retire a new handle", async () => {
+    const store = createRunStore();
+    const first = handleFor("run_store_idem");
+    const second = handleFor("run_store_idem");
+
+    await Effect.runPromise(store.putHandle(first));
+    await Effect.runPromise(store.removeHandle("run_store_idem"));
+    await Effect.runPromise(store.putHandle(second));
+
+    // A late removal naming the first generation must leave the second alone.
+    await Effect.runPromise(store.removeHandleIfCurrent(first, "run_store_idem"));
+    expect(await Effect.runPromise(store.getHandle("run_store_idem"))).toBe(second);
+
+    await Effect.runPromise(store.removeHandleIfCurrent(second, "run_store_idem"));
+    expect(await Effect.runPromise(store.getHandle("run_store_idem"))).toBe(undefined);
+  });
+});

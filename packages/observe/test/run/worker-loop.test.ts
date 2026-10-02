@@ -1,5 +1,5 @@
  
-import { Effect, Exit, Fiber, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import {
   createSyntheticCaptureDriver,
@@ -11,7 +11,51 @@ import { buildControlCatalog } from "#run/control/index.js";
 import type { ControlBus } from "#run/control/bus/index.js";
 import { createControlBus } from "#run/control/bus/index.js";
 import type { Board } from "#run/control/board/index.js";
-import { createSystemRunSurface, systemRunStopScope } from "#run/control/index.js";
+
+// Deadline poll for actual sink delivery (see runtime.test.ts): prompt control response
+// means stop-after-yield can land before the first pull completes.
+// Bounded-both-sides poll: waits until some but not all frames delivered (mid-flow).
+const waitForDeliveredRange = (
+  count: () => number,
+  low: number,
+  high: number,
+  timeoutMs = 10000
+): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const current = count();
+      if (current >= low && current < high) return;
+      if (Date.now() >= deadline) {
+        return yield* Effect.fail(
+          new Error(`timed out waiting for delivered count in [${low}, ${high}), got ${current}`)
+        );
+      }
+      yield* Effect.yieldNow();
+    }
+  });
+
+const waitForDeliveredCount = (
+  count: () => number,
+  timeoutMs = 10000
+): Effect.Effect<void, Error> =>
+  Effect.gen(function* () {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      if (count() > 0) return;
+      if (Date.now() >= deadline) {
+        return yield* Effect.fail(new Error("timed out waiting for delivered frames"));
+      }
+      yield* Effect.yieldNow();
+    }
+  });
+import {
+  createSystemPauseSurface,
+  createSystemRunSurface,
+  systemPausePauseScope,
+  systemPauseResumeScope,
+  systemRunStopScope
+} from "#run/control/index.js";
 import {
   defaultControlPause,
   defaultControlRun,
@@ -173,7 +217,8 @@ describe("worker loop", () => {
   });
 
   it("stops from Board stop request before natural eos", async () => {
-    const frameCount = 128;
+    // Large stream: stopping at first delivery provably cuts the run short.
+    const frameCount = 2048;
     const driver = createYieldingSyntheticCaptureDriver();
     const captureConfig = {
       ...defaultSyntheticCaptureConfig,
@@ -209,7 +254,9 @@ describe("worker loop", () => {
             })
           );
 
-          yield* Effect.yieldNow();
+          // Wait for actual delivery before stopping: prompt control response means a bare
+          // yield no longer guarantees frames slipped through first.
+          yield* waitForDeliveredCount(() => delivered.length);
 
           yield* bus.callFunction({
             callId: "call_stop_worker",
@@ -235,6 +282,160 @@ describe("worker loop", () => {
       expect(exit.value.deliveredCount).toBeGreaterThan(0);
       expect(exit.value.deliveredCount).toBeLessThan(frameCount);
       expect(exit.value.result.snapshot.sinks[sinkId]?.finalized).toBe(true);
+    }
+  });
+
+  // G19: pause and stop with queued backlog present. Frames flow, pause freezes delivery
+  // mid-stream (no loss, no duplication while parked), resume drains everything in order,
+  // stop lands cleanly.
+  it("pause freezes backlog delivery; resume drains all in order", async () => {
+    const frameCount = 2048;
+    const driver = createYieldingSyntheticCaptureDriver();
+    const validatedConfig = await Effect.runPromise(
+      driver.validate({ ...defaultSyntheticCaptureConfig, frameCount })
+    );
+    const delivered: number[] = [];
+    const sinkId = "memory-test";
+    const runId = "run_test_pause_backlog";
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const bus = yield* createControlBus({
+            runId,
+            board: createRunningBoard(runId, sinkId),
+            catalog: buildControlCatalog(),
+            surfaces: [createSystemRunSurface(), createSystemPauseSurface()]
+          });
+          const boardWake = yield* createWorkerBoardWake();
+          yield* bus.registerWakeWorker(() => boardWake.notify());
+          const fiber = yield* Effect.fork(
+            runScopedWorkerUntilStoppedWithBoard({
+              runId,
+              manifest: createPassthroughVideoManifest(),
+              sinks: createMemorySinkRecord(sinkId, delivered),
+              bus,
+              boardWake,
+              maxTurns: frameCount * 64,
+              prepareCapture: driver.create(validatedConfig)
+            })
+          );
+          // Catch the run mid-flow: some frames delivered, most still ahead.
+          yield* waitForDeliveredRange(() => delivered.length, 1, frameCount);
+          yield* bus.callFunction({
+            callId: "call_pause_backlog",
+            runId,
+            scope: systemPausePauseScope,
+            payload: { }
+          });
+          const frozenAt = delivered.length;
+          expect(frozenAt).toBeGreaterThan(0);
+          expect(frozenAt).toBeLessThan(frameCount);
+          // Parked: no further delivery across a quiet window.
+          yield* Effect.sleep(300);
+          expect(delivered.length).toBe(frozenAt);
+          yield* bus.callFunction({
+            callId: "call_resume_backlog",
+            runId,
+            scope: systemPauseResumeScope,
+            payload: { }
+          });
+          const result = yield* Fiber.join(fiber);
+          const finalBoard = yield* bus.readBoard();
+          return { result, finalBoard, delivered: [...delivered] };
+        })
+      )
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.result.outcome).toBe("stopped");
+      // Full count, strictly ordered, once-only (timeline markers consume track sequence
+      // slots, so video sequences have gaps but never repeat or reorder).
+      expect(exit.value.delivered).toHaveLength(frameCount);
+      expect(new Set(exit.value.delivered).size).toBe(frameCount);
+      expect([...exit.value.delivered].sort((a, z) => a - z)).toEqual(exit.value.delivered);
+    }
+  });
+
+  // G19/G20: genuinely lagging subscriptions via a gate-blocked sink. The fast sink takes the
+  // first frame while slow is parked at cursor 0 (distinct positions — sink deliveries are
+  // awaited serially, so fast does NOT finish everything first); opening the gate lets slow
+  // drain in order with matching finalized counts. A mere per-delivery delay does NOT prove
+  // cursor independence — both cursors would advance together.
+  it("lagging subscriptions hold distinct cursors through EOS", async () => {
+    const frameCount = 8;
+    const driver = createSyntheticCaptureDriver();
+    const validatedConfig = await Effect.runPromise(
+      driver.validate({ ...defaultSyntheticCaptureConfig, frameCount })
+    );
+    const fast: number[] = [];
+    const slow: number[] = [];
+    const runId = "run_test_lagging_sinks";
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const bus = yield* createControlBus({
+            runId,
+            board: createRunningBoard(runId, "sink-fast"),
+            catalog: buildControlCatalog()
+          });
+          yield* bus.applyBoardPatch({
+            cells: {
+              [`sink:sink-slow`]: {
+                create: {
+                  label: "Slow Sink",
+                  catalog: "sink:memory",
+                  status: ["idle", null, Date.now()],
+                  settings: { subscribe: ["publish.video.rendered"], required: true },
+                  readonly: {},
+                  functions: []
+                }
+              }
+            }
+          });
+          const slowRecord = createMemorySinkRecord("sink-slow", slow);
+          const slowAttachment = slowRecord["sink-slow"]!.attachment;
+          const gateOpen = yield* Deferred.make<void>();
+          const laggingAttachment = {
+            ...slowAttachment,
+            deliver: (item: Parameters<typeof slowAttachment.deliver>[0]) =>
+              Effect.zipRight(
+                Deferred.await(gateOpen),
+                slowAttachment.deliver(item)
+              )
+          };
+          const worker = yield* Effect.fork(
+            runWorkerInCaptureScope(driver, validatedConfig, {
+              runId,
+              manifest: createPassthroughVideoManifest(),
+              sinks: {
+                ...createMemorySinkRecord("sink-fast", fast),
+                ["sink-slow"]: { ...slowRecord["sink-slow"]!, attachment: laggingAttachment }
+              },
+              bus
+            })
+          );
+          // The turn blocks in the gated sink after fast takes frame 0: genuinely distinct
+          // cursor positions (fast 1, slow 0) — not a mere per-delivery delay.
+          yield* waitForDeliveredCount(() => fast.length);
+          expect(slow).toHaveLength(0);
+          // Open the gate: slow drains the retained backlog in order, then EOS finalizes both.
+          yield* Deferred.succeed(gateOpen, void 0);
+          const result = yield* Fiber.join(worker);
+          return { result, fast: [...fast], slow: [...slow] };
+        })
+      )
+    );
+
+    expect(Exit.isSuccess(exit)).toBe(true);
+    if (Exit.isSuccess(exit)) {
+      expect(exit.value.result.outcome).toBe("stopped");
+      expect(exit.value.fast).toHaveLength(frameCount);
+      expect(exit.value.slow).toHaveLength(frameCount);
+      expect(exit.value.slow).toEqual(exit.value.fast);
+      expect(exit.value.result.snapshot.sinks["sink-fast"]?.deliveredItems).toBe(frameCount);
+      expect(exit.value.result.snapshot.sinks["sink-slow"]?.deliveredItems).toBe(frameCount);
+      expect(exit.value.result.snapshot.sinks["sink-slow"]?.finalized).toBe(true);
     }
   });
 });

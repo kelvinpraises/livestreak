@@ -4,6 +4,8 @@ import { nowTimePoint } from "@livestreak/schema";
 import type {
   CaptureDriver,
   CaptureDriverDescriptor,
+  CaptureLiveControls,
+  CaptureLivePauseState,
   CaptureStageHealth,
   FrameSource,
   RawFrame
@@ -76,11 +78,13 @@ export const validateIngestCaptureConfig = (
   if (path.length === 0 || !path.startsWith("/")) {
     return Effect.fail(configError('Ingest capture path must start with "/"'));
   }
-  if (!Number.isInteger(config.width) || config.width < 1) {
-    return Effect.fail(configError("Ingest capture requires a positive width"));
+  // G14-B05: safe integers only — unsafe widths compute Infinity byte counts and defeat the
+  // HTTP body bound. No new product memory cap; just exact arithmetic.
+  if (!Number.isSafeInteger(config.width) || config.width < 1 || config.width % 2 !== 0) {
+    return Effect.fail(configError("Ingest capture requires a safe positive EVEN width (I420 chroma shares 2x2 blocks)"));
   }
-  if (!Number.isInteger(config.height) || config.height < 1) {
-    return Effect.fail(configError("Ingest capture requires a positive height"));
+  if (!Number.isSafeInteger(config.height) || config.height < 1 || config.height % 2 !== 0) {
+    return Effect.fail(configError("Ingest capture requires a safe positive EVEN height (I420 chroma shares 2x2 blocks)"));
   }
   if (!Number.isFinite(config.fps) || config.fps <= 0) {
     return Effect.fail(configError("Ingest capture requires a positive fps"));
@@ -90,16 +94,31 @@ export const validateIngestCaptureConfig = (
     return Effect.fail(configError('Ingest capture byteFormat must be "rgba" or "yuv420p"'));
   }
   const maxQueuedFrames = config.maxQueuedFrames ?? defaultConfig.maxQueuedFrames;
-  if (!Number.isInteger(maxQueuedFrames) || maxQueuedFrames < 1) {
-    return Effect.fail(configError("Ingest capture maxQueuedFrames must be a positive integer"));
+  if (!Number.isSafeInteger(maxQueuedFrames) || maxQueuedFrames < 1) {
+    return Effect.fail(configError("Ingest capture maxQueuedFrames must be a safe positive integer"));
+  }
+  // G18-B03: safe operands do not imply a safe product — validate the SELECTED format's
+  // byte count before acquisition/listening.
+  const byteCount =
+    byteFormat === "rgba"
+      ? config.width * config.height * 4
+      : (config.width * config.height * 3) / 2;
+  if (!Number.isSafeInteger(byteCount) || byteCount <= 0) {
+    return Effect.fail(
+      configError(
+        `Ingest capture frame byte count must be a safe positive integer, got ${byteCount} for ${config.width}x${config.height} ${byteFormat}`
+      )
+    );
   }
   return Effect.succeed({ port, path, width: config.width, height: config.height, fps: config.fps, byteFormat, maxQueuedFrames });
 };
 
+// The byte product itself was validated above (safe even dims alone do NOT imply it); both
+// products are exact here — no floor.
 const frameBytes = (config: ResolvedIngestCaptureConfig): number =>
   config.byteFormat === "rgba"
     ? config.width * config.height * 4
-    : Math.floor((config.width * config.height * 3) / 2);
+    : (config.width * config.height * 3) / 2;
 
 export const createIngestCaptureDriver = (): CaptureDriver<IngestCaptureConfig> => ({
   descriptor: ingestCaptureDescriptor,
@@ -113,7 +132,39 @@ export const createIngestCaptureDriver = (): CaptureDriver<IngestCaptureConfig> 
       const sourceId = "capture:ingest";
       const expected = frameBytes(resolved);
       let sequence = 0;
+      // ONE source-owned mutable state object (X4 ruling): read synchronously by the HTTP
+      // admission callback and updated through Effect.sync by pause/resume/snapshot. No Ref plus
+      // mirror — two truths invite divergence. Plain mutation is purity-safe (no Effect.run*).
+      const controlState = { paused: false, revision: 0 };
+      const readPauseState = (): CaptureLivePauseState => ({
+        paused: controlState.paused,
+        revision: controlState.revision
+      });
+      const live: CaptureLiveControls = {
+        // Idempotent with transition-only revision (Q4): repeated calls without a real
+        // transition neither bump revision nor disturb admission.
+        pause: () =>
+          Effect.sync(() => {
+            if (!controlState.paused) {
+              controlState.paused = true;
+              controlState.revision += 1;
+            }
+            return readPauseState();
+          }),
+        resume: () =>
+          Effect.sync(() => {
+            if (controlState.paused) {
+              controlState.paused = false;
+              controlState.revision += 1;
+            }
+            return readPauseState();
+          }),
+        snapshot: Effect.sync(readPauseState)
+      };
 
+      // M2-02: bound the source prefetch to queue capacity plus at most one pending result.
+      // fromQueue without maxChunkSize can hand a whole backlog in one pull, which
+      // capture-pull buffers outside the queue and lets it refill behind the bound.
       const queue = yield* Queue.bounded<RawFrame>(resolved.maxQueuedFrames);
       yield* Effect.addFinalizer(() => Queue.shutdown(queue));
 
@@ -152,6 +203,16 @@ export const createIngestCaptureDriver = (): CaptureDriver<IngestCaptureConfig> 
                     );
                     return;
                   }
+                  // Paused admission (Q4): recheck at body-complete time — a request begun before
+                  // pause must not slip through afterward. Refused frames advance neither sequence
+                  // nor accepted count, and count as drops like full-queue refusals. Listener stays open.
+                  if (controlState.paused) {
+                    stats.droppedFrames += 1;
+                    res.writeHead(429, { "content-type": "application/json" }).end(
+                      JSON.stringify({ error: "ingest paused", reason: "paused" })
+                    );
+                    return;
+                  }
                   const frame: RawFrame = {
                     id: `${sourceId}:${sequence}`,
                     sourceId,
@@ -171,7 +232,6 @@ export const createIngestCaptureDriver = (): CaptureDriver<IngestCaptureConfig> 
                       data: new Uint8Array(body)
                     }
                   };
-                  sequence += 1;
                   // Synchronous boundary: Queue.unsafeOffer never suspends, so a full queue
                   // answers 429 HERE instead of hanging the POST. (Queue.offer would block
                   // until a take frees space — that parked every POST under load.) This is also
@@ -179,8 +239,9 @@ export const createIngestCaptureDriver = (): CaptureDriver<IngestCaptureConfig> 
                   if (Queue.unsafeOffer(queue, frame)) {
                     stats.frameCount += 1;
                     res.writeHead(200, { "content-type": "application/json" }).end(
-                      JSON.stringify({ seq: sequence - 1 })
+                      JSON.stringify({ seq: sequence })
                     );
+                    sequence += 1;
                   } else {
                     stats.droppedFrames += 1;
                     res.writeHead(429, { "content-type": "application/json" }).end(
@@ -198,7 +259,20 @@ export const createIngestCaptureDriver = (): CaptureDriver<IngestCaptureConfig> 
           catch: (cause) =>
             configError(`Ingest capture could not listen on 127.0.0.1:${resolved.port} — ${String(cause)}`)
         }),
-        (srv) => Effect.promise(() => new Promise<void>((resolve) => srv.close(() => resolve())))
+        (srv) =>
+          // G18-B04: bounded release that never awaits producer cooperation. Stop listening
+          // FIRST (close), then destroy idle and in-flight sockets (closeAllConnections) so the
+          // close callback resolves promptly. NOTE on finalizer order: Effect acquireRelease
+          // releases LIFO, so this server release runs BEFORE the queue shutdown registered
+          // earlier — admission is stopped by the closing listener, not by an already-shut queue.
+          // No silent fallback: closeAllConnections exists on the supported Node runtime.
+          Effect.promise(
+            () =>
+              new Promise<void>((resolve) => {
+                srv.close(() => resolve());
+                srv.closeAllConnections();
+              })
+          )
       );
       server.unref?.();
 
@@ -220,8 +294,9 @@ export const createIngestCaptureDriver = (): CaptureDriver<IngestCaptureConfig> 
 
       const frameSource: FrameSource = {
         descriptor: ingestCaptureDescriptor,
-        frames: Stream.fromQueue(queue),
-        health
+        frames: Stream.fromQueue(queue, { maxChunkSize: 1 }),
+        health,
+        live
       };
       return frameSource;
     })

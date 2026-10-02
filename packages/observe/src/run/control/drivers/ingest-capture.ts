@@ -52,6 +52,7 @@ interface IngestConfigureArgs {
   readonly width: number;
   readonly height: number;
   readonly fps: number;
+  readonly byteFormat: "rgba" | "yuv420p";
   readonly port?: number;
   readonly path?: string;
 }
@@ -74,6 +75,9 @@ const configureCall = (
                 width: args.width,
                 height: args.height,
                 fps: args.fps,
+                // Written on EVERY configure (Q3): omission resets to rgba and can never
+                // retain an earlier YUV setting across reconfigures.
+                byteFormat: args.byteFormat,
                 ...(args.port === undefined ? {} : { port: args.port }),
                 ...(args.path === undefined ? {} : { path: args.path })
               }
@@ -119,14 +123,33 @@ const decodeConfigurePayload = (
     const width = record.width;
     const height = record.height;
     const fps = record.fps;
-    if (!Number.isInteger(width) || (width as number) < 1) {
-      return yield* fail("width must be a positive integer");
+    // G14-B05: safe integers only — width=2**1023 would otherwise compute an Infinity byte
+    // count and defeat the HTTP body bound. No new product memory cap; just exact arithmetic.
+    if (!Number.isSafeInteger(width) || (width as number) < 1 || (width as number) % 2 !== 0) {
+      return yield* fail("width must be a safe positive EVEN integer (I420 chroma shares 2x2 blocks)");
     }
-    if (!Number.isInteger(height) || (height as number) < 1) {
-      return yield* fail("height must be a positive integer");
+    if (!Number.isSafeInteger(height) || (height as number) < 1 || (height as number) % 2 !== 0) {
+      return yield* fail("height must be a safe positive EVEN integer (I420 chroma shares 2x2 blocks)");
     }
     if (typeof fps !== "number" || !Number.isFinite(fps) || fps <= 0) {
       return yield* fail("fps must be a positive number");
+    }
+    const byteFormat = record.byteFormat ?? "rgba";
+    if (byteFormat !== "rgba" && byteFormat !== "yuv420p") {
+      return yield* fail('byteFormat must be "rgba" or "yuv420p"');
+    }
+    // G18-B03: safe operands do not imply a safe product (2**52 x 2**52 is safe/even per
+    // side but 2**106 bytes for RGBA). Validate the SELECTED format's byte count before
+    // the board mutates. No arbitrary memory cap.
+    const byteCount =
+      byteFormat === "rgba"
+        ? (width as number) * (height as number) * 4
+        : ((width as number) * (height as number) * 3) / 2;
+    if (!Number.isSafeInteger(byteCount) || byteCount <= 0) {
+      return yield* fail(
+        "frame byte count for the selected format must be a safe positive integer, " +
+          `got ${byteCount} for ${width}x${height} ${byteFormat}`
+      );
     }
     const port = record.port;
     if (port !== undefined && (!Number.isInteger(port) || (port as number) < 1 || (port as number) > 65535)) {
@@ -140,6 +163,7 @@ const decodeConfigurePayload = (
       width: width as number,
       height: height as number,
       fps: fps as number,
+      byteFormat: byteFormat as "rgba" | "yuv420p",
       ...(port === undefined ? {} : { port: port as number }),
       ...(path === undefined ? {} : { path: path as string })
     };

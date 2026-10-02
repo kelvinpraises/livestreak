@@ -1,0 +1,13 @@
+{
+  "hostBaseUrl": "http://127.0.0.1:8787",
+  "chain": "eip155:31337",
+  "title": "RTMP audiovisual broadcast",
+  "port": 48785,
+  "broadcaster": { "sessionId": "REPLACE", "pairingPassword": "REPLACE" },
+  "bookmaker": { "sessionId": "REPLACE", "pairingPassword": "REPLACE" },
+  "viewer": { "sessionId": "REPLACE", "pairingPassword": "REPLACE" },
+  "exerciseControls": true,
+  "keepAliveMs": 30000,
+  "receiptFile": "receipt.json",
+  "mediaFile": "viewer.mp4"
+}

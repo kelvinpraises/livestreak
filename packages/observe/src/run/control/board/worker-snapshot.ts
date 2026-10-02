@@ -23,12 +23,17 @@ export const applyWorkerSnapshotToBoard = (
   let nextBoard = board;
   let changed = false;
 
-  if (nextStatus !== currentStatus) {
+  // Narrow projector rule: a terminal current status (stopped/failed) keeps its exact
+  // status tuple (state, reason, time) and final run receipt no matter what the snapshot
+  // says — facts still project below. Only the owning lifecycle decides terminal state.
+  const currentTerminal = isTerminalBoardRunStatus(currentStatus);
+  if (nextStatus !== currentStatus && !currentTerminal) {
     const nextReason = statusReasonFromWorkerSnapshot(
       snapshot,
       nextStatus,
       runCell.status[1],
-      board
+      board,
+      obsId
     );
     nextBoard = {
       ...nextBoard,
@@ -44,8 +49,8 @@ export const applyWorkerSnapshotToBoard = (
   }
 
   const changedReference = { value: changed };
-  nextBoard = projectCaptureReadonlyFacts(nextBoard, snapshot, changedReference);
-  nextBoard = projectSinkReadonlyFacts(nextBoard, snapshot, changedReference);
+  nextBoard = projectCaptureReadonlyFacts(nextBoard, snapshot, changedReference, obsId);
+  nextBoard = projectSinkReadonlyFacts(nextBoard, snapshot, changedReference, obsId);
   changed = changedReference.value;
 
   if (!changed) {
@@ -127,10 +132,11 @@ const statusReasonFromWorkerSnapshot = (
   snapshot: WorkerSnapshot,
   nextStatus: BoardRunStatus,
   currentReason: string | null,
-  board: Board
+  board: Board,
+  obsId?: string
 ): string | null => {
   if (nextStatus === "draining") {
-    const runSettings = board.cells[runCellIdOf(board) ?? "system:run"]?.settings;
+    const runSettings = board.cells[runCellIdOf(board, undefined, obsId) ?? "system:run"]?.settings;
     if (runSettings?.stopRequested === true) {
       if (typeof runSettings.stopReason === "string") {
         return runSettings.stopReason;
@@ -142,7 +148,7 @@ const statusReasonFromWorkerSnapshot = (
   }
 
   if (nextStatus === "stopping") {
-    const runSettings = board.cells[runCellIdOf(board) ?? "system:run"]?.settings;
+    const runSettings = board.cells[runCellIdOf(board, undefined, obsId) ?? "system:run"]?.settings;
     if (typeof runSettings?.stopReason === "string") {
       return runSettings.stopReason;
     }
@@ -182,14 +188,25 @@ const statusReasonFromWorkerSnapshot = (
 const projectCaptureReadonlyFacts = (
   board: Board,
   snapshot: WorkerSnapshot,
-  changed: { value: boolean }
+  changed: { value: boolean },
+  obsId?: string
 ): Board => {
   const capture = snapshot.capture;
   if (capture === undefined) {
     return board;
   }
 
-  const cellId = capture.sourceType === "browser" ? "capture:browser" : "capture:file";
+  // Owner routing: an observation run reports into its own capture cell so a sibling's
+  // (or a stale global stage's) facts are never overwritten. Legacy runs without an
+  // observation keep the historical global cells.
+  const legacyCellId = capture.sourceType === "browser" ? "capture:browser" : "capture:file";
+  let cellId = legacyCellId;
+  if (obsId !== undefined) {
+    const ownedCellId = `obs:${obsId}:capture`;
+    if (board.cells[ownedCellId] !== undefined) {
+      cellId = ownedCellId;
+    }
+  }
   const cell = board.cells[cellId];
   if (cell === undefined) {
     return board;
@@ -223,12 +240,23 @@ const projectCaptureReadonlyFacts = (
 const projectSinkReadonlyFacts = (
   board: Board,
   snapshot: WorkerSnapshot,
-  changed: { value: boolean }
+  changed: { value: boolean },
+  obsId?: string
 ): Board => {
   let nextBoard = board;
 
+  // Owned family readout: an observation run reports publish facts (counters, finalized,
+  // final output) into its own publish cell — never a shared global stage cell. One source
+  // serves one selected sink, so all sink facts land on the owner. Legacy runs without an
+  // observation keep the historical stage cells.
   for (const [sinkId, sinkSnapshot] of Object.entries(snapshot.sinks)) {
-    const cellId = `sink:${sinkId}`;
+    let cellId = `sink:${sinkId}`;
+    if (obsId !== undefined) {
+      const ownedPublishCellId = `obs:${obsId}:publish`;
+      if (nextBoard.cells[ownedPublishCellId] !== undefined) {
+        cellId = ownedPublishCellId;
+      }
+    }
     const cell = nextBoard.cells[cellId];
     if (cell === undefined) {
       continue;

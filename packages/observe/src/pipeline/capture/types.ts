@@ -74,7 +74,15 @@ export interface RawFrameCadence {
   readonly droppedFrames: number;
 }
 
+export interface CaptureAudioPayload {
+  readonly data: Uint8Array;
+  readonly sampleRate: number;
+  readonly channels: number;
+  readonly format: "s16le";
+}
+
 export interface CaptureVideoPayload {
+  readonly audio?: CaptureAudioPayload;
   readonly width: number;
   readonly height: number;
   readonly byteFormat: RawFrameByteFormat;

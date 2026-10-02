@@ -188,3 +188,95 @@ describe("applyBoardPatch prepared demotion", () => {
     expect(result.board.cells["system:run"]?.readonly?.prepared).toBe(false);
   });
 });
+
+describe("applyBoardPatch invalidation", () => {
+  const familyBoard = {
+    revision: 5,
+    catalogVersion: "0.1.0",
+    cells: {
+      "obs:a:capture": {
+        label: "Capture",
+        catalog: "capture:file",
+        status: ["configured", null, 1] as const,
+        settings: { path: "/tmp/a.mp4" },
+        readonly: { configured: true },
+        functions: ["configure", "close"]
+      },
+      "obs:a:run": {
+        label: "Run",
+        catalog: "system:run",
+        status: ["prepared", null, 1] as const,
+        readonly: { prepared: true },
+        functions: ["prepare", "start", "await", "stop"]
+      },
+      "obs:b:run": {
+        label: "Run",
+        catalog: "system:run",
+        status: ["prepared", null, 1] as const,
+        readonly: { prepared: true },
+        functions: ["prepare", "start", "await", "stop"]
+      }
+    }
+  };
+
+  it("demotes when a kind switch replaces the serving catalog", async () => {
+    const result = await Effect.runPromise(
+      applyBoardPatch(familyBoard, {
+        cells: {
+          "obs:a:capture": {
+            catalog: "capture:ingest",
+            settings: { set: { source: "ingest" } },
+            readonly: { set: { configured: false } }
+          }
+        }
+      })
+    );
+
+    expect(result.board.cells["obs:a:run"]?.readonly?.prepared).toBe(false);
+    // The sibling observation is untouched.
+    expect(result.board.cells["obs:b:run"]?.readonly?.prepared).toBe(true);
+  });
+
+  it("demotes when close unconfigures a pipeline cell", async () => {
+    const result = await Effect.runPromise(
+      applyBoardPatch(familyBoard, {
+        cells: {
+          "obs:a:capture": {
+            readonly: { set: { configured: false } },
+            status: ["idle", null, 2] as const
+          }
+        }
+      })
+    );
+
+    expect(result.board.cells["obs:a:run"]?.readonly?.prepared).toBe(false);
+    expect(result.board.cells["obs:b:run"]?.readonly?.prepared).toBe(true);
+  });
+
+  it("demotes the owning observation when a pipeline cell is removed", async () => {
+    const result = await Effect.runPromise(
+      applyBoardPatch(familyBoard, {
+        cells: { "obs:a:capture": { remove: true } }
+      })
+    );
+
+    expect(result.changed).toBe(true);
+    expect(result.board.cells["obs:a:capture"]).toBe(undefined);
+    expect(result.board.cells["obs:a:run"]?.readonly?.prepared).toBe(false);
+    expect(result.board.cells["obs:b:run"]?.readonly?.prepared).toBe(true);
+  });
+
+  it("leaves prepared intact for health-only readonly writes", async () => {
+    const result = await Effect.runPromise(
+      applyBoardPatch(familyBoard, {
+        cells: {
+          "obs:a:capture": {
+            readonly: { set: { health: { status: "running" }, exhausted: false } }
+          }
+        }
+      })
+    );
+
+    expect(result.board.cells["obs:a:run"]?.readonly?.prepared).toBe(true);
+  });
+});

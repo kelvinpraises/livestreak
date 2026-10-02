@@ -17,7 +17,8 @@ import { ingestCaptureConfigureScope } from "#pipeline/capture/ingest/commands.j
 import { createIngestCaptureDriver } from "#pipeline/capture/ingest/driver.js";
 import { runConfigFromBoard } from "#run/board-run-config.js";
 
-const PORT = 48721;
+// Own range: ingest-capture.test.ts binds 48719-48725 in parallel workers.
+const PORT = 48741;
 const W = 16;
 const H = 16;
 
@@ -58,7 +59,10 @@ describe("ingest capture — client configure to POST proof", () => {
         ...board.cells[observationCellId(obsId, "publish")]!,
         readonly: {
           ...board.cells[observationCellId(obsId, "publish")]?.readonly,
-          kind: "live"
+          kind: "live",
+          // Completed publish prerequisite (mirrors a configured sink; this proof owns
+          // only the capture path, so the sink configure step is overlaid, not performed).
+          configured: true
         }
       }
     }
@@ -140,6 +144,36 @@ describe("ingest capture — client configure to POST proof", () => {
             })
           );
           expect(bad._tag).toBe("Failure");
+          // G14-B05: unsafe dimensions never reach the board.
+          const unsafe = yield* Effect.exit(
+            bus.callFunction({
+              callId: "cap-unsafe",
+              runId,
+              scope: ingestCaptureConfigureScope,
+              cellId: observationCellId(obsId, "capture"),
+              payload: { width: 2 ** 1023, height: H, fps: 30 }
+            })
+          );
+          expect(unsafe._tag).toBe("Failure");
+          // G18-B03: safe even operands with an unsafe PRODUCT fail for both formats AND
+          // leave the board untouched (decode fails before any patch is built).
+          for (const byteFormat of ["rgba", "yuv420p"] as const) {
+            const product = yield* Effect.exit(
+              bus.callFunction({
+                callId: `cap-product-${byteFormat}`,
+                runId,
+                scope: ingestCaptureConfigureScope,
+                cellId: observationCellId(obsId, "capture"),
+                payload: { width: 2 ** 52, height: 2 ** 52, fps: 30, byteFormat }
+              })
+            );
+            expect(product._tag, byteFormat).toBe("Failure");
+          }
+          // Failed configures build no patch: only the kind switch's source stamp remains
+          // (maxPumpMs was already cleared by that switch); no width/height/fps leaked in.
+          expect(
+            (yield* bus.readBoard()).cells[observationCellId(obsId, "capture")]?.settings
+          ).toEqual({ source: "ingest" });
 
           yield* bus.callFunction({
             callId: "cap-1",
@@ -154,7 +188,33 @@ describe("ingest capture — client configure to POST proof", () => {
             width: W,
             height: H,
             fps: 30,
-            port: PORT
+            port: PORT,
+            // Omitted on configure: the decoder writes the default, never retains.
+            byteFormat: "rgba"
+          });
+
+          // Q3: an explicit YUV setting is written, then reset by a later omission.
+          yield* bus.callFunction({
+            callId: "cap-yuv",
+            runId,
+            scope: ingestCaptureConfigureScope,
+            cellId: observationCellId(obsId, "capture"),
+            payload: { width: W, height: H, fps: 30, port: PORT, byteFormat: "yuv420p" }
+          });
+          board = yield* bus.readBoard();
+          expect(board.cells[observationCellId(obsId, "capture")]?.settings).toMatchObject({
+            byteFormat: "yuv420p"
+          });
+          yield* bus.callFunction({
+            callId: "cap-reset",
+            runId,
+            scope: ingestCaptureConfigureScope,
+            cellId: observationCellId(obsId, "capture"),
+            payload: { width: W, height: H, fps: 30, port: PORT }
+          });
+          board = yield* bus.readBoard();
+          expect(board.cells[observationCellId(obsId, "capture")]?.settings).toMatchObject({
+            byteFormat: "rgba"
           });
 
           // The board derives the ingest driver.

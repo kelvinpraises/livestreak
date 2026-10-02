@@ -112,6 +112,9 @@ export const createLiveRingStore = (config: LiveRingConfig = defaultConfig): Liv
     setInit(streamId, data) {
       const s = stream(streamId);
       s.init = data;
+      // A new encoder epoch cannot reuse fragments from the previous init/timeline.
+      s.fragments = [];
+      s.bytes = 0;
       // A fresh init (reconnect) reopens the stream and re-primes existing viewers so MSE re-inits.
       s.ended = false;
       s.endReason = undefined;

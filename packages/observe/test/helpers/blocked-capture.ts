@@ -67,9 +67,11 @@ export const createBlockedCaptureDriver = (): {
           functions: []
         }
       }),
+    // G14-B07: no inner scope — the finalizer registers in the CALLER's execution scope, so
+    // it runs on actual stop/interrupt. The old inner Effect.scoped finalized before first pull,
+    // which could never prove stop cleanup.
     create: () =>
-      Effect.scoped(
-        Effect.gen(function* () {
+      Effect.gen(function* () {
           counters.createCalls += 1;
 
           yield* Effect.addFinalizer(() =>
@@ -112,7 +114,6 @@ export const createBlockedCaptureDriver = (): {
 
           return frameSource;
         })
-      )
   };
 
   return { driver, counters };

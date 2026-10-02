@@ -66,11 +66,48 @@ export const projectWorkerControlView = (board: Board, obsId?: string): WorkerCo
     },
      
     process: null,
-    sinks: projectSinkPolicies(board)
+    sinks: projectSinkPolicies(board, obsId)
   };
 };
 
-const projectSinkPolicies = (board: Board): readonly WorkerControlSinkPolicy[] => {
+/** Publish kind → the sink driver serving it (matches builtin sink descriptor ids). */
+const publishKindDriverId = (kind: unknown): string | undefined =>
+  kind === "live" ? "live" : kind === "direct" ? "direct" : kind === "file-export" ? "file" : undefined;
+
+const publishKindPolicyKind = (kind: unknown): string =>
+  kind === "live" ? "live" : kind === "direct" ? "direct" : kind === "file-export" ? "file" : "unknown";
+
+const projectSinkPolicies = (board: Board, obsId?: string): readonly WorkerControlSinkPolicy[] => {
+  // Owned family policy: the worker serves exactly its own publish cell's configured sink
+  // under the stable `<obsId>:<driverId>` instance key. No global/unrelated stage cell can
+  // join (same-kind siblings share nothing), and unconfigured families serve nothing.
+  // Legacy runs without an observation keep the global stage discovery below.
+  if (obsId !== undefined) {
+    const publish = board.cells[`obs:${obsId}:publish`];
+    // An unconfigured family serves nothing: kind alone (e.g. post-switch configured:false)
+    // is not a runnable policy.
+    if (publish?.readonly?.configured !== true) {
+      return [];
+    }
+    const driverId = publishKindDriverId(publish?.readonly?.kind);
+    if (driverId === undefined) {
+      return [];
+    }
+    const settings = publish?.settings ?? {};
+    const subscribe = settings.subscribe;
+    if (!Array.isArray(subscribe)) {
+      return [];
+    }
+    return [
+      {
+        sinkId: `${obsId}:${driverId}`,
+        kind: publishKindPolicyKind(publish?.readonly?.kind),
+        subscribe: subscribe.filter((entry): entry is string => typeof entry === "string"),
+        required: settings.required === true
+      }
+    ];
+  }
+
   const policies: WorkerControlSinkPolicy[] = [];
 
   for (const [cellId, cell] of Object.entries(board.cells)) {

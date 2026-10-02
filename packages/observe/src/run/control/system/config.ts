@@ -65,7 +65,7 @@ export const observationPublishKindPatch = (
 
 /** Capture kind → the capture catalog serving it. The cell id never changes on a kind switch. */
 export const captureKindCatalog = (kind: string): string =>
-  kind === "ingest" ? "capture:ingest" : "capture:file";
+  kind === "rtmp" ? "capture:rtmp" : kind === "ingest" ? "capture:ingest" : "capture:file";
 
 /** One patch flips a family's capture kind: same cell, new catalog, details reset. */
 export const observationCaptureKindPatch = (
@@ -92,7 +92,8 @@ export const observationCaptureKindPatch = (
           "port",
           "byteFormat",
           "frameCount",
-          "continuous"
+          "continuous",
+          "streamName", "audio", "startupTimeoutMs", "idleTimeoutMs"
         ]
       },
       readonly: { set: { kind, configured: false } },
@@ -204,10 +205,10 @@ const captureKindCall = (
         new LiveStreakConfigError({ message: `system:config:captureKind unknown observation ${obsId}` })
       );
     }
-    if (kind !== "file" && kind !== "ingest") {
+    if (kind !== "file" && kind !== "ingest" && kind !== "rtmp") {
       return yield* Effect.fail(
         new LiveStreakConfigError({
-          message: 'system:config:captureKind kind must be "file" or "ingest"'
+          message: 'system:config:captureKind kind must be "file", "ingest" or "rtmp"'
         })
       );
     }
@@ -533,7 +534,7 @@ export const systemConfigCatalogFunctions = (): Readonly<
           value: {
             type: "enum",
             description: "Capture kind.",
-            values: ["file", "ingest"],
+            values: ["file", "ingest", "rtmp"],
             required: true
           },
           help: "file = replay a media file; ingest = bot-posted rendered frames."

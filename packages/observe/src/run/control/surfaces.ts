@@ -1,3 +1,4 @@
+import { createRtmpCaptureControlSurface } from "./drivers/rtmp-capture.js";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import { createFileCaptureControlSurface } from "./drivers/file-capture.js";
 import { createIngestCaptureControlSurface } from "./drivers/ingest-capture.js";
@@ -28,6 +29,7 @@ export const createObserveControlSurfaces = (
   }),
   createFileCaptureControlSurface(),
   createIngestCaptureControlSurface(),
+  createRtmpCaptureControlSurface(),
   createFileSinkControlSurface("file-export"),
   createLiveSinkControlSurface(),
   createDirectSinkControlSurface()

@@ -38,15 +38,24 @@ export const applyBoardPatch = (
     let changed = false;
     let pipelineConfigChanged = false;
     const demoteObsIds = new Set<string>();
-    let demoteLegacy = false;
+    const demoteFlags = { legacy: false };
 
     for (const [cellId, cellPatch] of Object.entries(cellPatches)) {
       if (cellPatch.remove === true) {
         if (nextCells[cellId] !== undefined) {
-          const { [cellId]: _removed, ...rest } = nextCells;
-          nextCells = rest as Record<BoardCellId, BoardCell>;
+          const rest: Record<BoardCellId, BoardCell> = {};
+          for (const [id, cell] of Object.entries(nextCells)) {
+            if (id !== cellId) {
+              rest[id as BoardCellId] = cell;
+            }
+          }
+          nextCells = rest;
           changed = true;
-          if (isPipelineCell(cellId)) pipelineConfigChanged = true;
+          // Removal invalidates too — and names its demotion target like any other change.
+          if (isPipelineCell(cellId)) {
+            pipelineConfigChanged = true;
+            collectDemoteTarget(cellId, demoteObsIds, demoteFlags);
+          }
         }
         continue;
       }
@@ -73,14 +82,9 @@ export const applyBoardPatch = (
       if (patched.changed) {
         nextCells = { ...nextCells, [cellId]: patched.cell };
         changed = true;
-        if (patchTouchesPipelineConfig(cellId, cellPatch)) {
+        if (patchTouchesPipelineConfig(cellId, cellPatch, currentCell)) {
           pipelineConfigChanged = true;
-          const kind = familyKind(cellId);
-          if (kind !== undefined) {
-            demoteObsIds.add(cellId.split(":")[1] ?? "");
-          } else {
-            demoteLegacy = true;
-          }
+          collectDemoteTarget(cellId, demoteObsIds, demoteFlags);
         }
       }
     }
@@ -100,7 +104,7 @@ export const applyBoardPatch = (
     // change never demotes another family's run.
     if (pipelineConfigChanged) {
       const targets: (string | undefined)[] = [
-        ...(demoteLegacy ? [undefined] : []),
+        ...(demoteFlags.legacy ? [undefined] : []),
         ...demoteObsIds
       ];
       for (const obsId of targets) {
@@ -149,9 +153,44 @@ const isPipelineCell = (cellId: string): boolean => {
   return cellId.startsWith("capture:") || cellId.startsWith("sink:");
 };
 
-const patchTouchesPipelineConfig = (cellId: string, patch: BoardCellPatch): boolean => {
+const collectDemoteTarget = (
+  cellId: string,
+  demoteObsIds: Set<string>,
+  flags: { legacy: boolean }
+): void => {
+  const kind = familyKind(cellId);
+  if (kind !== undefined) {
+    demoteObsIds.add(cellId.split(":")[1] ?? "");
+  } else {
+    flags.legacy = true;
+  }
+};
+
+const patchTouchesPipelineConfig = (
+  cellId: string,
+  patch: BoardCellPatch,
+  currentCell?: BoardCell
+): boolean => {
   if (isPipelineCell(cellId)) {
-    return patch.settings !== undefined;
+    if (patch.settings !== undefined) {
+      return true;
+    }
+    // A kind switch replaces the serving catalog: the old derivation is stale even when the
+    // settings payload itself is unchanged.
+    if (
+      patch.catalog !== undefined &&
+      (currentCell === undefined || patch.catalog !== currentCell.catalog)
+    ) {
+      return true;
+    }
+    // Unconfiguring (close, kind-switch reset) invalidates; completing configuration does not.
+    // Health/counter readonly writes (updatedAtMs, deliveredItems, ...) never invalidate.
+    if (patch.readonly?.set !== undefined && Object.hasOwn(patch.readonly.set, "configured")) {
+      return (
+        patch.readonly.set as Record<string, unknown>
+      ).configured !== true;
+    }
+    return false;
   }
   if (cellId === "market" || familyKind(cellId) === "market") {
     return patch.readonly?.set !== undefined && Object.hasOwn(patch.readonly.set, "marketId");

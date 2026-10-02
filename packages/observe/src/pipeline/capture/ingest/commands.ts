@@ -16,7 +16,7 @@ export const ingestCaptureConfigureCommand = {
           description: "Frame width in pixels the bot sends.",
           required: true
         },
-        help: "Positive integer; must match the posted bytes."
+        help: "Positive EVEN integer (I420 packs one chroma sample per 2x2 block); must match the posted bytes."
       },
       {
         name: "height",
@@ -25,7 +25,7 @@ export const ingestCaptureConfigureCommand = {
           description: "Frame height in pixels the bot sends.",
           required: true
         },
-        help: "Positive integer; must match the posted bytes."
+        help: "Positive EVEN integer (I420 packs one chroma sample per 2x2 block); must match the posted bytes."
       },
       {
         name: "fps",
@@ -35,6 +35,16 @@ export const ingestCaptureConfigureCommand = {
           required: true
         },
         help: "Positive number."
+      },
+      {
+        name: "byteFormat",
+        value: {
+          type: "enum" as const,
+          description: "Pixel layout the bot sends.",
+          values: ["rgba", "yuv420p"],
+          default: "rgba"
+        },
+        help: "Defaults to rgba; both normalize to the encoder's I420."
       },
       {
         name: "port",

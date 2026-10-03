@@ -9,12 +9,12 @@ import type { OptionsReader } from "../chains/types.js";
 
 export const gatherUserVaultClaims = async (
   reader: OptionsReader,
-  user: UserAddress
+  user: UserAddress,
 ): Promise<readonly UserVaultClaimRow[]> => {
   const tokenIds = await readOrThrow(
     () => reader.listOwnerTokens(user),
     "owner tokens",
-    user
+    user,
   );
 
   const rows: UserVaultClaimRow[] = [];
@@ -23,13 +23,13 @@ export const gatherUserVaultClaims = async (
     const nft = await readOrThrow(
       () => reader.readNft(tokenId, user),
       "nft",
-      String(tokenId)
+      String(tokenId),
     );
 
     const vaultIds = await readOrThrow(
       () => reader.readAccountVaultIds(tokenId),
       "account vault ids",
-      String(tokenId)
+      String(tokenId),
     );
 
     const vaultIdSet = new Set(vaultIds);
@@ -38,34 +38,31 @@ export const gatherUserVaultClaims = async (
     }
 
     for (const vaultId of vaultIdSet) {
-      const lane = nft.lanes.find((entry) => entry.vaultId === vaultId);
-      if (lane === undefined) {
-        continue;
-      }
+      const lanes = nft.lanes.filter((entry) => entry.vaultId === vaultId);
+      if (lanes.length === 0) continue;
 
-      const vault = await readOrThrow(
-        () => reader.readVault(vaultId),
-        "vault",
-        vaultId
-      );
+      const vault = await readOrThrow(() => reader.readVault(vaultId), "vault", vaultId);
       const winningSide = await reader.readWinningSide(vaultId);
-      const claimable = lane.claimable ?? (await reader.readClaimable(tokenId, vaultId, lane.side));
-      const lossClaimable =
-        lane.lossClaimable ??
-        (await reader.readLossClaimable(tokenId, vaultId, lane.side));
-      const won = winningSide === undefined ? undefined : lane.side === winningSide;
+      for (const lane of lanes) {
+        const claimable =
+          lane.claimable ?? (await reader.readClaimable(tokenId, vaultId, lane.side));
+        const lossClaimable =
+          lane.lossClaimable ??
+          (await reader.readLossClaimable(tokenId, vaultId, lane.side));
+        const won = winningSide === undefined ? undefined : lane.side === winningSide;
 
-      rows.push({
-        tokenId,
-        vaultId,
-        marketId: vault.marketId,
-        status: vault.status,
-        side: lane.side,
-        ...(winningSide === undefined ? {} : { winningSide }),
-        claimable,
-        lossClaimable,
-        ...(won === undefined ? {} : { won })
-      });
+        rows.push({
+          tokenId,
+          vaultId,
+          marketId: vault.marketId,
+          status: vault.status,
+          side: lane.side,
+          ...(winningSide === undefined ? {} : { winningSide }),
+          claimable,
+          lossClaimable: lane.lossClaimed ? 0n : lossClaimable,
+          ...(won === undefined ? {} : { won }),
+        });
+      }
     }
   }
 
@@ -74,7 +71,7 @@ export const gatherUserVaultClaims = async (
 
 export const readClaimsView = async (
   reader: OptionsReader,
-  user: UserAddress
+  user: UserAddress,
 ): Promise<OptionsClaimsView> => {
   const rows = await gatherUserVaultClaims(reader, user);
   return projectClaimsView(user, rows);
@@ -85,7 +82,7 @@ export const readClaimsView = async (
 const readOrThrow = async <T>(
   read: () => Promise<T>,
   entity: string,
-  id: string
+  id: string,
 ): Promise<T> => {
   try {
     return await read();
@@ -98,8 +95,8 @@ const readOrThrow = async <T>(
       message: `Failed to read ${entity}`,
       metadata: {
         details: id,
-        cause: error
-      }
+        cause: error,
+      },
     });
   }
 };

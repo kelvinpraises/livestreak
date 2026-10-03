@@ -8,7 +8,7 @@ import type {
   CallActionEnvelope,
   CallResultFrame,
   RemoteCallOutcome,
-  HostCallFrame
+  HostCallFrame,
 } from "@livestreak/schema";
 import type { SessionRegistry } from "../session/registry.js";
 import { enrichRelayErrorMessage } from "../decode-revert.js";
@@ -18,7 +18,7 @@ import { enrichRelayErrorMessage } from "../decode-revert.js";
 export type DispatchFn = (
   caller: BridgeCaller,
   envelope: CallActionEnvelope,
-  target?: string
+  target?: string,
 ) => Promise<RemoteCallOutcome>;
 
 export interface RelayDeps {
@@ -40,10 +40,10 @@ const withTimeout = async <T>(promise: Promise<T>, ms: number): Promise<T> => {
       new Promise<never>((_, reject) => {
         timer = setTimeout(
           () => reject(new Error(`gateway dispatch timed out after ${ms}ms`)),
-          ms
+          ms,
         );
         (timer as { unref?: () => void }).unref?.();
-      })
+      }),
     ]);
   } finally {
     clearTimeout(timer);
@@ -58,7 +58,11 @@ export const createRelay = (deps: RelayDeps): Relay => {
   const now = deps.now ?? (() => Date.now());
 
   const handleCall = async (frame: HostCallFrame): Promise<CallResultFrame> => {
-    const base = { type: "call_result" as const, callId: frame.callId, sessionId: frame.sessionId };
+    const base = {
+      type: "call_result" as const,
+      callId: frame.callId,
+      sessionId: frame.sessionId,
+    };
 
     const decision = deps.registry.authorize(frame.sessionId, frame.envelope, now());
     if (!decision.ok) {
@@ -73,13 +77,19 @@ export const createRelay = (deps: RelayDeps): Relay => {
     try {
       const result = await withTimeout(
         deps.dispatch(deps.registry.callerFor(record), frame.envelope, frame.target),
-        deps.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS
+        deps.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS,
       );
       deps.registry.commitSpend(frame.sessionId, frame.envelope);
       const payload = {
+        ...(result.recordDigest === undefined ? {} : { recordDigest: result.recordDigest }),
+        ...(result.confirmationDigest === undefined
+          ? {}
+          : { confirmationDigest: result.confirmationDigest }),
+        ...(result.status === undefined ? {} : { status: result.status }),
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
         ...(result.commitment === undefined ? {} : { commitment: result.commitment }),
         ...(result.terms === undefined ? {} : { terms: result.terms }),
-        ...(result.mandate === undefined ? {} : { mandate: result.mandate })
+        ...(result.mandate === undefined ? {} : { mandate: result.mandate }),
       } as { -readonly [K in keyof RemoteCallOutcome]: RemoteCallOutcome[K] };
       if (result.txId !== undefined) {
         payload.txId = result.txId;
@@ -93,7 +103,7 @@ export const createRelay = (deps: RelayDeps): Relay => {
       return {
         ...base,
         ok: false,
-        error: { message: enrichRelayErrorMessage(raw) }
+        error: { message: enrichRelayErrorMessage(raw) },
       };
     }
   };

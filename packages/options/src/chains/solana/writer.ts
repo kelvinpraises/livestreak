@@ -117,6 +117,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
     const tx = buildLivestreakTransaction(instructions);
     let result: { hash: string };
     try {
+      config.onTransactionSubmitting?.();
       result = await account.sendTransaction(tx);
     } catch (error) {
       // Preflight logs live on the kit error's context, not its message — surface the program's

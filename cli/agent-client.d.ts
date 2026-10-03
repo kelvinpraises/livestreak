@@ -93,15 +93,29 @@ export interface VaultMandate {
   readonly yesMeaning: string;
   readonly noMeaning: string;
   readonly method: "deterministic" | "discretionary" | "mixed";
-  readonly evaluation: NumericEvaluation | { readonly kind: "rubric"; readonly rubric: string } |
-    { readonly kind: "mixed"; readonly rubric: string; readonly checks: readonly NumericEvaluation[] };
-  readonly evidence: readonly { readonly sourceId: string; readonly kind: "data" | "video" | "record" | "testimony"; readonly description: string }[];
+  readonly evaluation:
+    | NumericEvaluation
+    | { readonly kind: "rubric"; readonly rubric: string }
+    | {
+        readonly kind: "mixed";
+        readonly rubric: string;
+        readonly checks: readonly NumericEvaluation[];
+      };
+  readonly evidence: readonly {
+    readonly sourceId: string;
+    readonly kind: "data" | "video" | "record" | "testimony";
+    readonly description: string;
+  }[];
   readonly authority: "market-designated-steward";
   readonly authorityChanges: "registry-authority-may-change";
   readonly fundingClose: number;
   readonly decisionStart: number;
   readonly decisionEnd: number;
-  readonly missingEvidence: { readonly deadline: number; readonly treatment: "unresolved-escalate-no-guaranteed-refund"; readonly procedure: string };
+  readonly missingEvidence: {
+    readonly deadline: number;
+    readonly treatment: "unresolved-escalate-no-guaranteed-refund";
+    readonly procedure: string;
+  };
   readonly ambiguityProcedure: string;
 }
 export interface BoundVaultTerms {
@@ -119,7 +133,17 @@ export interface VerifiedVaultMandate {
 
 export interface RemoteCallOutcome {
   readonly ok: boolean;
-  readonly result?: { readonly txId?: string; readonly tokenId?: string; readonly commitment?: string; readonly terms?: BoundVaultTerms; readonly mandate?: VaultMandate };
+  readonly result?: {
+    readonly txId?: string;
+    readonly tokenId?: string;
+    readonly commitment?: string;
+    readonly terms?: BoundVaultTerms;
+    readonly mandate?: VaultMandate;
+    readonly recordDigest?: string;
+    readonly confirmationDigest?: string;
+    readonly status?: string;
+    readonly reason?: string;
+  };
   readonly error?: string;
 }
 
@@ -130,7 +154,7 @@ export interface RemoteUiClient {
     target: RemoteDriveTarget,
     action: string,
     args?: unknown,
-    id?: string
+    id?: string,
   ): Promise<RemoteCallOutcome>;
   boards(): Readonly<Record<string, unknown>>;
   /** Scope-filtered function catalog last pushed by Host (empty until `ready`). */
@@ -162,6 +186,8 @@ export interface RemoteDriveInput {
   readonly observeTitle?: string;
   readonly fundDeposit?: string;
   readonly resolveOutcome?: string;
+  readonly resolveReason?: string;
+  readonly resolveEvidenceJson?: string;
   readonly observeOnly?: boolean;
   /** File capture path for the direct-video lane (exclusive with `ingest`). */
   readonly directVideoPath?: string;
@@ -210,13 +236,15 @@ export declare const createAgentClient: (opts: RemoteUiClientOptions) => RemoteU
 
 export declare const classifyRemoteError: (message: string) => string;
 
-export declare const runRemoteDrive: (input: RemoteDriveInput) => Promise<RemoteDriveResult>;
+export declare const runRemoteDrive: (
+  input: RemoteDriveInput,
+) => Promise<RemoteDriveResult>;
 
 /** Proof-only changing frames (counter bytes, rgba-sized). */
 export declare function generateCounterFrames(
   width: number,
   height: number,
-  count: number
+  count: number,
 ): AsyncGenerator<Uint8Array>;
 
 /** Post-start drive failure that hands the still-posting pump to the caller. */

@@ -2,7 +2,11 @@ import { Effect } from "effect";
 import { canonicalMandateBytes } from "@livestreak/schema";
 import { assertWatchableProof } from "@livestreak/observe";
 import { defaultSettingsPath, ensureSettings } from "../../prefs/settings.js";
-import { createRemoteUiClient, type RemoteDriveTarget, type RemoteUiClient } from "./ui-client.js";
+import {
+  createRemoteUiClient,
+  type RemoteDriveTarget,
+  type RemoteUiClient,
+} from "./ui-client.js";
 
 export interface RemoteDriveInput {
   readonly sessionId: string;
@@ -17,6 +21,8 @@ export interface RemoteDriveInput {
   readonly observeTitle?: string;
   readonly fundDeposit?: string;
   readonly resolveOutcome?: string;
+  readonly resolveReason?: string;
+  readonly resolveEvidenceJson?: string;
   readonly observeOnly?: boolean;
   /** When set, drive the DIRECT video lane too: publish=direct + this capture file, go live in
    *  lan mode, then connect to the broadcaster's announced door and assert real bytes flow. */
@@ -33,7 +39,11 @@ export interface RemoteDriveInput {
   readonly mediaOnly?: boolean;
   /** Complete explicit judging terms for the newly registered market; never inferred from a title. */
   readonly mandate?: import("@livestreak/schema").VaultMandate;
-  readonly mandateForMarket?: (marketId: string) => import("@livestreak/schema").VaultMandate | Promise<import("@livestreak/schema").VaultMandate>;
+  readonly mandateForMarket?: (
+    marketId: string,
+  ) =>
+    | import("@livestreak/schema").VaultMandate
+    | Promise<import("@livestreak/schema").VaultMandate>;
   readonly operationId?: string;
   readonly log?: (line: string) => void;
 }
@@ -74,7 +84,10 @@ export const readObservationIdFromBoard = (board: unknown): string | undefined =
   return entries[entries.length - 1]?.[0];
 };
 
-export const readMarketIdFromBoard = (board: unknown, obsId?: string): string | undefined => {
+export const readMarketIdFromBoard = (
+  board: unknown,
+  obsId?: string,
+): string | undefined => {
   const cells = boardCells(board);
   const family = obsId ?? readObservationIdFromBoard(board);
   const market = family !== undefined ? cells[`obs:${family}:market`] : cells.market;
@@ -87,11 +100,16 @@ const runObserveLeg = async (
   chain: string,
   title: string,
   record: (step: RemoteDriveStep) => void,
-  publish?: "direct"
+  publish?: "direct",
 ): Promise<{ marketId: string; obsId: string | undefined }> => {
   // Add observation: title + chain only — the board saves them; kinds live on the family cells.
   const configureResult = await client.call("observe", "configure", { title, chain });
-  record({ target: "observe", action: "configure", ok: configureResult.ok, error: configureResult.error });
+  record({
+    target: "observe",
+    action: "configure",
+    ok: configureResult.ok,
+    error: configureResult.error,
+  });
   if (!configureResult.ok) {
     throw new Error(configureResult.error ?? "observe configure failed");
   }
@@ -102,8 +120,16 @@ const runObserveLeg = async (
   }
 
   if (publish === "direct") {
-    const kindResult = await client.call("observe", "publishKind", { obsId, kind: "direct" });
-    record({ target: "observe", action: "publishKind", ok: kindResult.ok, error: kindResult.error });
+    const kindResult = await client.call("observe", "publishKind", {
+      obsId,
+      kind: "direct",
+    });
+    record({
+      target: "observe",
+      action: "publishKind",
+      ok: kindResult.ok,
+      error: kindResult.error,
+    });
     if (!kindResult.ok) {
       throw new Error(kindResult.error ?? "observe publishKind failed");
     }
@@ -114,9 +140,14 @@ const runObserveLeg = async (
     "observe",
     "register",
     {},
-    `observe.obs.${obsId}.market.register`
+    `observe.obs.${obsId}.market.register`,
   );
-  record({ target: "observe", action: "register", ok: registerResult.ok, error: registerResult.error });
+  record({
+    target: "observe",
+    action: "register",
+    ok: registerResult.ok,
+    error: registerResult.error,
+  });
   if (!registerResult.ok) {
     throw new Error(registerResult.error ?? "observe register failed");
   }
@@ -136,7 +167,7 @@ const DIRECT_FRAME_FRAGMENT = 0x02;
 const pollDirectAnnounce = async (
   hostBaseUrl: string,
   streamId: string,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<string> => {
   const base = hostBaseUrl.replace(/\/+$/, "");
   const deadline = Date.now() + timeoutMs;
@@ -160,7 +191,7 @@ const pollDirectAnnounce = async (
 /** Connect to the broadcaster's door as a real viewer; resolve once init + 2 fragments arrive. */
 const consumeDirectFrames = async (
   watchUrl: string,
-  timeoutMs: number
+  timeoutMs: number,
 ): Promise<{ initBytes: number; fragments: number }> => {
   const { default: WebSocket } = await import("ws");
   return await new Promise((resolve, reject) => {
@@ -179,7 +210,9 @@ const consumeDirectFrames = async (
       reject(new Error(message));
     };
     const timer = setTimeout(() => {
-      fail(`direct watch got init=${initBytes}b fragments=${fragments} within ${timeoutMs}ms`);
+      fail(
+        `direct watch got init=${initBytes}b fragments=${fragments} within ${timeoutMs}ms`,
+      );
     }, timeoutMs);
     ws.on("close", () => {
       fail(`direct door closed with init=${initBytes}b fragments=${fragments}`);
@@ -204,7 +237,7 @@ const consumeDirectFrames = async (
     ws.on("error", (err) => {
       fail(
         `direct watch error: ${err instanceof Error ? err.message : String(err)} ` +
-          `(init=${initBytes}b fragments=${fragments})`
+          `(init=${initBytes}b fragments=${fragments})`,
       );
     });
   });
@@ -221,29 +254,39 @@ const summarizeSteps = (steps: readonly RemoteDriveStep[]): string =>
 // Shared direct-media verification: announce, then fresh viewer sockets judged by B's
 // guard against ONE total budget (announce time counts toward the proof).
 const verifyDirectMedia = async (
-  input: { readonly hostBaseUrl: string; readonly marketId: string; readonly timeoutMs: number },
-  log: (line: string) => void
+  input: {
+    readonly hostBaseUrl: string;
+    readonly marketId: string;
+    readonly timeoutMs: number;
+  },
+  log: (line: string) => void,
 ): Promise<{ readonly initBytes: number; readonly fragments: number }> => {
   const startedAt = Date.now();
-  const watchUrl = await pollDirectAnnounce(input.hostBaseUrl, input.marketId, input.timeoutMs);
+  const watchUrl = await pollDirectAnnounce(
+    input.hostBaseUrl,
+    input.marketId,
+    input.timeoutMs,
+  );
   log(`direct door: ${watchUrl}`);
   const remaining = input.timeoutMs - (Date.now() - startedAt);
   if (remaining < 1000) {
     throw new Error(
-      `watch budget exhausted after announce (${input.timeoutMs}ms total); increase directTimeoutMs and retry`
+      `watch budget exhausted after announce (${input.timeoutMs}ms total); increase directTimeoutMs and retry`,
     );
   }
   const dialTimeoutMs = Math.max(1000, Math.min(8000, Math.floor(remaining / 4)));
-  const singleDial = (): Effect.Effect<{ readonly initBytes: number; readonly fragments: number }> =>
+  const singleDial = (): Effect.Effect<{
+    readonly initBytes: number;
+    readonly fragments: number;
+  }> =>
     Effect.orElseSucceed(
       Effect.tryPromise(() => consumeDirectFrames(watchUrl, dialTimeoutMs)),
-      () => ({ initBytes: 0, fragments: 0 })
+      () => ({ initBytes: 0, fragments: 0 }),
     );
   return await Effect.runPromise(
-    assertWatchableProof({ probe: singleDial(), minFragments: 2, timeoutMs: remaining })
+    assertWatchableProof({ probe: singleDial(), minFragments: 2, timeoutMs: remaining }),
   );
 };
-
 
 const runDirectVideoLeg = async (
   client: RemoteUiClient,
@@ -256,7 +299,7 @@ const runDirectVideoLeg = async (
     timeoutMs: number;
   },
   record: (step: RemoteDriveStep) => void,
-  log: (line: string) => void
+  log: (line: string) => void,
 ): Promise<{
   readonly mediaRunning: true;
   readonly proof: { readonly initBytes: number; readonly fragments: number };
@@ -265,7 +308,7 @@ const runDirectVideoLeg = async (
     label: string,
     action: string,
     args: unknown,
-    id: string
+    id: string,
   ): Promise<void> => {
     const result = await client.call("observe", action, args, id);
     record({ target: "observe", action: label, ok: result.ok, error: result.error });
@@ -274,7 +317,8 @@ const runDirectVideoLeg = async (
     }
   };
 
-  const family = (cell: string, fn: string): string => `observe.obs.${input.obsId}.${cell}.${fn}`;
+  const family = (cell: string, fn: string): string =>
+    `observe.obs.${input.obsId}.${cell}.${fn}`;
   // Best-effort stop request: an `ok` reply means the gateway accepted the request,
   // never that the producer has terminated (only a terminal run observation proves that).
   const requestStop = async (): Promise<"accepted" | "unconfirmed"> => {
@@ -289,16 +333,21 @@ const runDirectVideoLeg = async (
 
   let startAttempted = false;
   try {
-    await step("captureConfigure", "configure", { path: input.videoPath }, family("capture", "configure"));
+    await step(
+      "captureConfigure",
+      "configure",
+      { path: input.videoPath },
+      family("capture", "configure"),
+    );
     await step(
       "directConfigure",
       "configure",
       {
         streamId: input.marketId,
         reachability: "lan",
-        ...(input.port === undefined ? {} : { port: input.port })
+        ...(input.port === undefined ? {} : { port: input.port }),
       },
-      family("publish", "configure")
+      family("publish", "configure"),
     );
     await step("prepare", "prepare", {}, family("run", "prepare"));
     startAttempted = true;
@@ -311,20 +360,24 @@ const runDirectVideoLeg = async (
         `direct setup failed for market ${input.marketId} after start was attempted (${detail}); ` +
           `producer state unknown — the start may have dispatched; ` +
           `requested cleanup stop (${stopNote}) while market remains registered (not live); ` +
-          "read back run state before retry"
+          "read back run state before retry",
       );
     }
     throw new Error(
       `direct setup failed for market ${input.marketId}: ${detail}; ` +
-        "market remains registered (not live); producer not started (start never attempted); fix and retry"
+        "market remains registered (not live); producer not started (start never attempted); fix and retry",
     );
   }
 
   let proof: { readonly initBytes: number; readonly fragments: number };
   try {
     proof = await verifyDirectMedia(
-      { hostBaseUrl: input.hostBaseUrl, marketId: input.marketId, timeoutMs: input.timeoutMs },
-      log
+      {
+        hostBaseUrl: input.hostBaseUrl,
+        marketId: input.marketId,
+        timeoutMs: input.timeoutMs,
+      },
+      log,
     );
     log(`direct watch: init=${proof.initBytes}b fragments=${proof.fragments}`);
     record({ target: "observe", action: "directWatch", ok: true });
@@ -334,7 +387,7 @@ const runDirectVideoLeg = async (
     const stopNote = await requestStop();
     throw new Error(
       `watch proof failed for market ${input.marketId}: ${detail}; ` +
-        `market remains registered (not live); stop request ${stopNote}; fix capture/publish and retry`
+        `market remains registered (not live); stop request ${stopNote}; fix capture/publish and retry`,
     );
   }
 
@@ -347,7 +400,7 @@ const runDirectVideoLeg = async (
       "observe",
       "goLive",
       {},
-      `observe.obs.${input.obsId}.market.goLive`
+      `observe.obs.${input.obsId}.market.goLive`,
     );
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
@@ -355,19 +408,26 @@ const runDirectVideoLeg = async (
     throw new Error(
       `market ${input.marketId} goLive uncertain (${detail}); chain phase unknown — ` +
         "the write may or may not have landed; media still running for readback; " +
-        "read back chain phase before retrying; no rollback claimed"
+        "read back chain phase before retrying; no rollback claimed",
     );
   }
-  record({ target: "observe", action: "goLive", ok: goLiveOutcome.ok, error: goLiveOutcome.error });
+  record({
+    target: "observe",
+    action: "goLive",
+    ok: goLiveOutcome.ok,
+    error: goLiveOutcome.error,
+  });
   if (!goLiveOutcome.ok) {
     const msg = goLiveOutcome.error ?? "observe goLive failed";
     throw new Error(
       `market ${input.marketId} goLive uncertain (${msg}); chain phase unknown — ` +
         "the write may or may not have landed; media still running for readback; " +
-        "read back chain phase before retrying; no rollback claimed"
+        "read back chain phase before retrying; no rollback claimed",
     );
   }
-  log(`live: market ${input.marketId} confirmed live; producer stays running (flow-06 owns the later stop)`);
+  log(
+    `live: market ${input.marketId} confirmed live; producer stays running (flow-06 owns the later stop)`,
+  );
   return { mediaRunning: true, proof };
 };
 
@@ -395,7 +455,7 @@ export interface IngestDriveInput {
 export async function* generateCounterFrames(
   width: number,
   height: number,
-  count: number
+  count: number,
 ): AsyncGenerator<Uint8Array> {
   const size = width * height * 4;
   for (let seq = 0; seq < count; seq += 1) {
@@ -440,7 +500,7 @@ const startIngestPump = (
     readonly expectedBytes: number;
     readonly frames: AsyncIterable<Uint8Array>;
   },
-  log: (line: string) => void
+  log: (line: string) => void,
 ): IngestPump => {
   let active = true;
   let posted = 0;
@@ -466,7 +526,7 @@ const startIngestPump = (
         const frame = next.value;
         if (frame.length !== input.expectedBytes) {
           throw new Error(
-            `ingest frame is ${frame.length}b, contract expects ${input.expectedBytes}b; fix the bot frame size`
+            `ingest frame is ${frame.length}b, contract expects ${input.expectedBytes}b; fix the bot frame size`,
           );
         }
         let res: Response;
@@ -474,7 +534,7 @@ const startIngestPump = (
           res = await fetch(url, {
             method: "POST",
             headers: { "content-type": "application/octet-stream" },
-            body: new Blob([Buffer.from(frame)])
+            body: new Blob([Buffer.from(frame)]),
           });
         } catch (cause) {
           if (posted === 0 && dropped === 0) {
@@ -490,7 +550,9 @@ const startIngestPump = (
           continue;
         }
         if (!res.ok) {
-          throw new Error(`ingest POST failed (${res.status}) after ${posted} frames accepted`);
+          throw new Error(
+            `ingest POST failed (${res.status}) after ${posted} frames accepted`,
+          );
         }
         posted += 1;
         if (posted === 1) {
@@ -502,7 +564,7 @@ const startIngestPump = (
         exhausted = true;
         log(
           `ingest: frame supply exhausted after ${posted} posted/${dropped} dropped — ` +
-            "continuity beyond buffered frames unproven"
+            "continuity beyond buffered frames unproven",
         );
       }
     } catch (cause) {
@@ -518,7 +580,7 @@ const startIngestPump = (
     posted: () => posted,
     dropped: () => dropped,
     failure: () => failure,
-    exhausted: () => exhausted
+    exhausted: () => exhausted,
   };
 };
 
@@ -532,14 +594,20 @@ const runIngestVideoLeg = async (
     timeoutMs: number;
   },
   record: (step: RemoteDriveStep) => void,
-  log: (line: string) => void
+  log: (line: string) => void,
 ): Promise<{
   readonly mediaRunning: true;
   readonly proof: { readonly initBytes: number; readonly fragments: number };
   readonly pump: IngestPump;
 }> => {
-  const family = (cell: string, fn: string): string => `observe.obs.${input.obsId}.${cell}.${fn}`;
-  const step = async (label: string, action: string, args: unknown, id: string): Promise<void> => {
+  const family = (cell: string, fn: string): string =>
+    `observe.obs.${input.obsId}.${cell}.${fn}`;
+  const step = async (
+    label: string,
+    action: string,
+    args: unknown,
+    id: string,
+  ): Promise<void> => {
     const result = await client.call("observe", action, args, id);
     record({ target: "observe", action: label, ok: result.ok, error: result.error });
     if (!result.ok) {
@@ -557,23 +625,39 @@ const runIngestVideoLeg = async (
   };
 
   // Kind switch first: same cell, new catalog (file details reset by the switch).
-  const kindResult = await client.call("observe", "captureKind", { obsId: input.obsId, kind: "ingest" });
-  record({ target: "observe", action: "captureKind", ok: kindResult.ok, error: kindResult.error });
+  const kindResult = await client.call("observe", "captureKind", {
+    obsId: input.obsId,
+    kind: "ingest",
+  });
+  record({
+    target: "observe",
+    action: "captureKind",
+    ok: kindResult.ok,
+    error: kindResult.error,
+  });
   if (!kindResult.ok) {
     throw new Error(
       `ingest captureKind failed for market ${input.marketId}: ${kindResult.error ?? "unknown"}; ` +
-        "market remains registered (not live); producer not started; fix scopes and retry"
+        "market remains registered (not live); producer not started; fix scopes and retry",
     );
   }
 
   // Publish kind switch: without this the direct configure below lands on the
   // mounted live surface (ignored) and no direct door is ever announced.
-  const pubKindResult = await client.call("observe", "publishKind", { obsId: input.obsId, kind: "direct" });
-  record({ target: "observe", action: "publishKind", ok: pubKindResult.ok, error: pubKindResult.error });
+  const pubKindResult = await client.call("observe", "publishKind", {
+    obsId: input.obsId,
+    kind: "direct",
+  });
+  record({
+    target: "observe",
+    action: "publishKind",
+    ok: pubKindResult.ok,
+    error: pubKindResult.error,
+  });
   if (!pubKindResult.ok) {
     throw new Error(
       `ingest publishKind failed for market ${input.marketId}: ${pubKindResult.error ?? "unknown"}; ` +
-        "market remains registered (not live); producer not started; fix scopes and retry"
+        "market remains registered (not live); producer not started; fix scopes and retry",
     );
   }
 
@@ -587,15 +671,15 @@ const runIngestVideoLeg = async (
         height: input.ingest.height,
         fps: input.ingest.fps,
         ...(input.ingest.port === undefined ? {} : { port: input.ingest.port }),
-        ...(input.ingest.path === undefined ? {} : { path: input.ingest.path })
+        ...(input.ingest.path === undefined ? {} : { path: input.ingest.path }),
       },
-      family("capture", "configure")
+      family("capture", "configure"),
     );
     await step(
       "directConfigure",
       "configure",
       { streamId: input.marketId, reachability: "lan" },
-      family("publish", "configure")
+      family("publish", "configure"),
     );
     await step("prepare", "prepare", {}, family("run", "prepare"));
     startAttempted = true;
@@ -608,12 +692,12 @@ const runIngestVideoLeg = async (
         `ingest setup failed for market ${input.marketId} after start was attempted (${detail}); ` +
           "producer state unknown — the start may have dispatched; " +
           `requested cleanup stop (${stopNote}) while market remains registered (not live); ` +
-          "read back run state before retry"
+          "read back run state before retry",
       );
     }
     throw new Error(
       `ingest setup failed for market ${input.marketId}: ${detail}; ` +
-        "market remains registered (not live); producer not started (start never attempted); fix and retry"
+        "market remains registered (not live); producer not started (start never attempted); fix and retry",
     );
   }
 
@@ -631,9 +715,9 @@ const runIngestVideoLeg = async (
       port: input.ingest.port ?? 48710,
       path: input.ingest.path ?? "/frames",
       expectedBytes,
-      frames: input.ingest.frames
+      frames: input.ingest.frames,
     },
-    log
+    log,
   );
   const stopPump = async (): Promise<void> => {
     pump.stop();
@@ -641,14 +725,22 @@ const runIngestVideoLeg = async (
   };
   const pumpDetail = (): string | undefined => {
     const failure = pump.failure();
-    return failure === undefined ? undefined : failure instanceof Error ? failure.message : String(failure);
+    return failure === undefined
+      ? undefined
+      : failure instanceof Error
+        ? failure.message
+        : String(failure);
   };
 
   let proof: { readonly initBytes: number; readonly fragments: number };
   try {
     proof = await verifyDirectMedia(
-      { hostBaseUrl: input.hostBaseUrl, marketId: input.marketId, timeoutMs: input.timeoutMs },
-      log
+      {
+        hostBaseUrl: input.hostBaseUrl,
+        marketId: input.marketId,
+        timeoutMs: input.timeoutMs,
+      },
+      log,
     );
     log(`direct watch: init=${proof.initBytes}b fragments=${proof.fragments}`);
     record({ target: "observe", action: "directWatch", ok: true });
@@ -661,7 +753,7 @@ const runIngestVideoLeg = async (
     throw new Error(
       `watch proof failed for market ${input.marketId}: ${detail}; ` +
         `market remains registered (not live); stop request ${stopNote};` +
-        `${pumpNote === undefined ? "" : ` pump also failed: ${pumpNote};`} fix capture/publish/frames and retry`
+        `${pumpNote === undefined ? "" : ` pump also failed: ${pumpNote};`} fix capture/publish/frames and retry`,
     );
   }
   // Frames must actually be flowing into the producer: require one accepted POST
@@ -683,7 +775,7 @@ const runIngestVideoLeg = async (
     throw new Error(
       `ingest pump failed for market ${input.marketId}: ${pumpFailure}; ` +
         `posted=${pump.posted()} dropped=${pump.dropped()}; ` +
-        `market remains registered (not live); stop request ${stopNote}; fix frame contract and retry`
+        `market remains registered (not live); stop request ${stopNote}; fix frame contract and retry`,
     );
   }
 
@@ -696,7 +788,7 @@ const runIngestVideoLeg = async (
       "observe",
       "goLive",
       {},
-      `observe.obs.${input.obsId}.market.goLive`
+      `observe.obs.${input.obsId}.market.goLive`,
     );
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
@@ -705,26 +797,35 @@ const runIngestVideoLeg = async (
       `market ${input.marketId} goLive uncertain (${detail}); chain phase unknown — ` +
         "the write may or may not have landed; pump still posting under your ownership; " +
         "stop it after truthful end; read back chain phase before retrying; no rollback claimed",
-      pump
+      pump,
     );
   }
-  record({ target: "observe", action: "goLive", ok: goLiveOutcome.ok, error: goLiveOutcome.error });
+  record({
+    target: "observe",
+    action: "goLive",
+    ok: goLiveOutcome.ok,
+    error: goLiveOutcome.error,
+  });
   if (!goLiveOutcome.ok) {
     const msg = goLiveOutcome.error ?? "observe goLive failed";
     throw new IngestPumpError(
       `market ${input.marketId} goLive uncertain (${msg}); chain phase unknown — ` +
         "the write may or may not have landed; pump still posting under your ownership; " +
         "stop it after truthful end; read back chain phase before retrying; no rollback claimed",
-      pump
+      pump,
     );
   }
-  log(`live: market ${input.marketId} confirmed live; producer stays running (flow-06 owns the later stop)`);
+  log(
+    `live: market ${input.marketId} confirmed live; producer stays running (flow-06 owns the later stop)`,
+  );
   return { mediaRunning: true, proof, pump };
 };
 
-
-export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDriveResult> => {
-  const log = input.log ?? ((line: string) => process.stderr.write(`[remote drive] ${line}\n`));
+export const runRemoteDrive = async (
+  input: RemoteDriveInput,
+): Promise<RemoteDriveResult> => {
+  const log =
+    input.log ?? ((line: string) => process.stderr.write(`[remote drive] ${line}\n`));
   if (input.directVideoPath !== undefined && input.ingest !== undefined) {
     throw new Error("choose one producer: directVideoPath (file) or ingest (bot-fed)");
   }
@@ -739,7 +840,7 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
     hostBaseUrl,
     sessionId: input.sessionId,
     pairingPassword: input.pairingPassword,
-    log
+    log,
   });
 
   const stewardClient =
@@ -749,7 +850,7 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
           hostBaseUrl,
           sessionId: input.stewardSessionId,
           pairingPassword: input.stewardPairingPassword ?? "",
-          log
+          log,
         });
 
   const steps: RemoteDriveStep[] = [];
@@ -776,7 +877,7 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
             settings.defaultChain,
             input.observeTitle ?? `remote-drive-${input.sessionId}`,
             record,
-            input.directVideoPath === undefined ? undefined : "direct"
+            input.directVideoPath === undefined ? undefined : "direct",
           );
     const marketId = observed.marketId;
     log(`marketId: ${marketId}`);
@@ -815,10 +916,10 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
           videoPath: input.directVideoPath,
           ...(input.directPort === undefined ? {} : { port: input.directPort }),
           hostBaseUrl,
-          timeoutMs: input.directTimeoutMs ?? 30_000
+          timeoutMs: input.directTimeoutMs ?? 30_000,
         },
         record,
-        log
+        log,
       );
       mediaRunning = leg.mediaRunning;
       lastVerifiedMedia = `init=${leg.proof.initBytes}b fragments=${leg.proof.fragments} (pre-goLive proof)`;
@@ -835,10 +936,10 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
           obsId: observed.obsId,
           ingest: input.ingest,
           hostBaseUrl,
-          timeoutMs: input.directTimeoutMs ?? 30_000
+          timeoutMs: input.directTimeoutMs ?? 30_000,
         },
         record,
-        log
+        log,
       );
       ingestPump = leg.pump;
       mediaRunning = leg.mediaRunning;
@@ -850,7 +951,7 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
       if (mediaRunning) {
         log(
           `drive is not stopping the producer for market ${marketId} (flow-06 end owns stop); ` +
-            mediaNote()
+            mediaNote(),
         );
       }
       return { marketId, steps, ...handPumpOver() };
@@ -859,151 +960,211 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
     // Post-live economy: never stop media here. Failures carry reconciling state
     // (steps are lost on throw) and never claim a rollback.
     try {
-
-    // Bookmaker: seed a vault on the fresh market; the result's tokenId IS the vaultId.
-    const mandate = input.mandate ?? await input.mandateForMarket?.(marketId);
-    if (!mandate || !input.operationId) {
-      throw new Error("Economy drive requires explicit mandate and operationId; use the public role client example or --observe-only for media");
-    }
-    canonicalMandateBytes(mandate);
-    if (mandate.marketId !== marketId) throw new Error("Explicit mandate does not belong to the driven market");
-    const bmConfigure = await client.call("bookmaker", "configure", { marketId });
-    record({ target: "bookmaker", action: "configure", ok: bmConfigure.ok, error: bmConfigure.error });
-    if (!bmConfigure.ok) {
-      throw new Error(bmConfigure.error ?? "bookmaker configure failed");
-    }
-
-    const createVault = await client.call("bookmaker", "createVault", {
-      marketId,
-      question: mandate.question,
-      mandate,
-      operationId: input.operationId,
-      creatorSide: "yes",
-      creatorStake: "5000000",
-      seedRate: "8333"
-    });
-    record({ target: "bookmaker", action: "createVault", ok: createVault.ok, error: createVault.error });
-    const vaultId = createVault.result?.tokenId;
-    if (!createVault.ok || vaultId === undefined) {
-      throw new Error(createVault.error ?? "createVault failed (no vaultId)");
-    }
-    log(`vaultId: ${vaultId}`);
-
-    const optionsConfigure = await client.call("options", "configure", { marketId });
-    record({
-      target: "options",
-      action: "configure",
-      ok: optionsConfigure.ok,
-      error: optionsConfigure.error
-    });
-    if (!optionsConfigure.ok) {
-      throw new Error(optionsConfigure.error ?? "options configure failed");
-    }
-
-    // Operator address off the live options board (the session wallet's account).
-    const board = client.boards().options as
-      | { snapshot?: { account?: string } }
-      | undefined;
-    const account = board?.snapshot?.account;
-    if (account === undefined) {
-      throw new Error("options board has no account after configure");
-    }
-
-    // operator omitted: the writer defaults it to the MarketDriver.
-    const approval = await client.call("options", "setApprovalForAll", { approved: true });
-    record({
-      target: "options",
-      action: "setApprovalForAll",
-      ok: approval.ok,
-      error: approval.error
-    });
-    if (!approval.ok) {
-      throw new Error(approval.error ?? "setApprovalForAll failed");
-    }
-
-    const mint = await client.call("options", "mint", { marketId, to: account });
-    record({ target: "options", action: "mint", ok: mint.ok, error: mint.error });
-    const tokenId = mint.result?.tokenId;
-    if (!mint.ok || tokenId === undefined) {
-      throw new Error(mint.error ?? "mint failed (no tokenId)");
-    }
-    log(`tokenId: ${tokenId}`);
-
-    const fund = await client.call("options", "fund", {
-      tokenId,
-      vaultId,
-      side: "yes",
-      rate: "1000",
-      deposit: input.fundDeposit ?? "1000000"
-    });
-    record({ target: "options", action: "fund", ok: fund.ok, error: fund.error });
-    if (!fund.ok) {
-      throw new Error(fund.error ?? "fund failed");
-    }
-
-    // Continuity: a fresh viewer must still see bytes after funding. Failure reports
-    // the last verified state; it never stops media or claims a rollback.
-    if (mediaRunning) {
-      try {
-        const re = await verifyDirectMedia(
-          { hostBaseUrl, marketId, timeoutMs: input.directTimeoutMs ?? 30_000 },
-          log
-        );
-        lastVerifiedMedia = `init=${re.initBytes}b fragments=${re.fragments} (post-fund re-probe)`;
-        record({ target: "options", action: "directWatchPostFund", ok: true });
-        log(`post-fund watch: ${lastVerifiedMedia}; observed delivering at re-probe`);
-      } catch (cause) {
-        const detail = cause instanceof Error ? cause.message : String(cause);
-        record({ target: "options", action: "directWatchPostFund", ok: false, error: detail });
+      // Bookmaker: seed a vault on the fresh market; the result's tokenId IS the vaultId.
+      const mandate = input.mandate ?? (await input.mandateForMarket?.(marketId));
+      if (!mandate || !input.operationId) {
         throw new Error(
-          `media re-probe failed after fund for market ${marketId}: ${detail}; ` +
-            `last verified media: ${lastVerifiedMedia}; current delivery unverified; chain phase=${chainPhase}; ` +
-            "fund already recorded — reconcile and end via flow-06; no rollback claimed"
+          "Economy drive requires explicit mandate and operationId; use the public role client example or --observe-only for media",
         );
       }
-    }
+      canonicalMandateBytes(mandate);
+      if (mandate.marketId !== marketId)
+        throw new Error("Explicit mandate does not belong to the driven market");
+      const bmConfigure = await client.call("bookmaker", "configure", { marketId });
+      record({
+        target: "bookmaker",
+        action: "configure",
+        ok: bmConfigure.ok,
+        error: bmConfigure.error,
+      });
+      if (!bmConfigure.ok) {
+        throw new Error(bmConfigure.error ?? "bookmaker configure failed");
+      }
 
-    // Media-only proof ends here: settlement legs are out of scope (generic mandate unresolved).
-    if (input.mediaOnly === true) {
+      const createVault = await client.call("bookmaker", "createVault", {
+        marketId,
+        question: mandate.question,
+        mandate,
+        operationId: input.operationId,
+        creatorSide: "yes",
+        creatorStake: "5000000",
+        seedRate: "8333",
+      });
+      record({
+        target: "bookmaker",
+        action: "createVault",
+        ok: createVault.ok,
+        error: createVault.error,
+      });
+      const vaultId = createVault.result?.tokenId;
+      if (!createVault.ok || vaultId === undefined) {
+        throw new Error(createVault.error ?? "createVault failed (no vaultId)");
+      }
+      log(`vaultId: ${vaultId}`);
+
+      const optionsConfigure = await client.call("options", "configure", { marketId });
+      record({
+        target: "options",
+        action: "configure",
+        ok: optionsConfigure.ok,
+        error: optionsConfigure.error,
+      });
+      if (!optionsConfigure.ok) {
+        throw new Error(optionsConfigure.error ?? "options configure failed");
+      }
+
+      // Operator address off the live options board (the session wallet's account).
+      const board = client.boards().options as
+        | { snapshot?: { account?: string } }
+        | undefined;
+      const account = board?.snapshot?.account;
+      if (account === undefined) {
+        throw new Error("options board has no account after configure");
+      }
+
+      // operator omitted: the writer defaults it to the MarketDriver.
+      const approval = await client.call("options", "setApprovalForAll", {
+        approved: true,
+      });
+      record({
+        target: "options",
+        action: "setApprovalForAll",
+        ok: approval.ok,
+        error: approval.error,
+      });
+      if (!approval.ok) {
+        throw new Error(approval.error ?? "setApprovalForAll failed");
+      }
+
+      const mint = await client.call("options", "mint", { marketId, to: account });
+      record({ target: "options", action: "mint", ok: mint.ok, error: mint.error });
+      const tokenId = mint.result?.tokenId;
+      if (!mint.ok || tokenId === undefined) {
+        throw new Error(mint.error ?? "mint failed (no tokenId)");
+      }
+      log(`tokenId: ${tokenId}`);
+
+      const fund = await client.call("options", "fund", {
+        tokenId,
+        vaultId,
+        side: "yes",
+        rate: "1000",
+        deposit: input.fundDeposit ?? "1000000",
+      });
+      record({ target: "options", action: "fund", ok: fund.ok, error: fund.error });
+      if (!fund.ok) {
+        throw new Error(fund.error ?? "fund failed");
+      }
+
+      // Continuity: a fresh viewer must still see bytes after funding. Failure reports
+      // the last verified state; it never stops media or claims a rollback.
+      if (mediaRunning) {
+        try {
+          const re = await verifyDirectMedia(
+            { hostBaseUrl, marketId, timeoutMs: input.directTimeoutMs ?? 30_000 },
+            log,
+          );
+          lastVerifiedMedia = `init=${re.initBytes}b fragments=${re.fragments} (post-fund re-probe)`;
+          record({ target: "options", action: "directWatchPostFund", ok: true });
+          log(`post-fund watch: ${lastVerifiedMedia}; observed delivering at re-probe`);
+        } catch (cause) {
+          const detail = cause instanceof Error ? cause.message : String(cause);
+          record({
+            target: "options",
+            action: "directWatchPostFund",
+            ok: false,
+            error: detail,
+          });
+          throw new Error(
+            `media re-probe failed after fund for market ${marketId}: ${detail}; ` +
+              `last verified media: ${lastVerifiedMedia}; current delivery unverified; chain phase=${chainPhase}; ` +
+              "fund already recorded — reconcile and end via flow-06; no rollback claimed",
+          );
+        }
+      }
+
+      // Media-only proof ends here: settlement legs are out of scope (generic mandate unresolved).
+      if (input.mediaOnly === true) {
+        if (mediaRunning) {
+          log(
+            `media-only drive complete for market ${marketId} (flow-06 end owns stop); ` +
+              mediaNote(),
+          );
+        }
+        return { marketId, steps, ...handPumpOver() };
+      }
+
+      if (
+        !input.resolveOutcome ||
+        !input.resolveReason?.trim() ||
+        !input.resolveEvidenceJson
+      ) {
+        throw new Error(
+          "Settlement drive requires explicit resolveOutcome, resolveReason and resolveEvidenceJson; no outcome is inferred",
+        );
+      }
+      // Steward: watch the vault, then resolve it (via the steward-role session when provided).
+      const stConfigure = await stewardLeg.call("steward", "configure", {
+        marketId,
+        vaultId,
+      });
+      record({
+        target: "steward",
+        action: "configure",
+        ok: stConfigure.ok,
+        error: stConfigure.error,
+      });
+      if (!stConfigure.ok) {
+        throw new Error(stConfigure.error ?? "steward configure failed");
+      }
+
+      const resolve = await stewardLeg.call("steward", "resolve", {
+        subjectId: vaultId,
+        subjectKind: "vault",
+        vaultId,
+        outcome: input.resolveOutcome,
+        reason: input.resolveReason,
+        evidenceJson: input.resolveEvidenceJson,
+      });
+      record({
+        target: "steward",
+        action: "resolve",
+        ok: resolve.ok,
+        error: resolve.error,
+      });
+      if (!resolve.ok) {
+        throw new Error(resolve.error ?? "steward resolve failed");
+      }
+      const decision = resolve.result as { status?: string; reason?: string } | undefined;
+      if (decision?.status !== "confirmed") {
+        throw new Error(
+          decision?.reason ??
+            "Resolution needs attention or confirmation; no withdrawal attempted",
+        );
+      }
+
+      const withdraw = await client.call("options", "withdraw", {
+        tokenId,
+        vaultId,
+        to: account,
+      });
+      record({
+        target: "options",
+        action: "withdraw",
+        ok: withdraw.ok,
+        error: withdraw.error,
+      });
+      if (!withdraw.ok) {
+        throw new Error(withdraw.error ?? "withdraw failed");
+      }
+
       if (mediaRunning) {
         log(
-          `media-only drive complete for market ${marketId} (flow-06 end owns stop); ` + mediaNote()
+          `drive is not stopping the producer for market ${marketId} (flow-06 end owns stop); ` +
+            mediaNote(),
         );
       }
       return { marketId, steps, ...handPumpOver() };
-    }
-
-    // Steward: watch the vault, then resolve it (via the steward-role session when provided).
-    const stConfigure = await stewardLeg.call("steward", "configure", { marketId, vaultId });
-    record({ target: "steward", action: "configure", ok: stConfigure.ok, error: stConfigure.error });
-    if (!stConfigure.ok) {
-      throw new Error(stConfigure.error ?? "steward configure failed");
-    }
-
-    const resolve = await stewardLeg.call("steward", "resolve", {
-      subjectId: vaultId,
-      subjectKind: "vault",
-      vaultId,
-      outcome: input.resolveOutcome ?? "yes"
-    });
-    record({ target: "steward", action: "resolve", ok: resolve.ok, error: resolve.error });
-    if (!resolve.ok) {
-      throw new Error(resolve.error ?? "steward resolve failed");
-    }
-
-    const withdraw = await client.call("options", "withdraw", { tokenId, vaultId, to: account });
-    record({ target: "options", action: "withdraw", ok: withdraw.ok, error: withdraw.error });
-    if (!withdraw.ok) {
-      throw new Error(withdraw.error ?? "withdraw failed");
-    }
-
-    if (mediaRunning) {
-      log(
-        `drive is not stopping the producer for market ${marketId} (flow-06 end owns stop); ` +
-          mediaNote()
-      );
-    }
-    return { marketId, steps, ...handPumpOver() };
     } catch (cause) {
       if (cause instanceof IngestPumpError) {
         pumpHandedOver = true;

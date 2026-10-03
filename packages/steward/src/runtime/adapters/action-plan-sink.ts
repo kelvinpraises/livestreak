@@ -2,7 +2,7 @@ import type { WalletChain } from "@livestreak/wallet";
 import type {
   StewardActionPlan,
   StewardContractCall,
-  StewardHostAction
+  StewardHostAction,
 } from "../../model/action-plan.js";
 import type { StewardActionPlanSink } from "../sink.js";
 
@@ -15,7 +15,10 @@ import type { StewardActionPlanSink } from "../sink.js";
 
 export interface StewardContractExecutor {
   readonly chain: WalletChain;
-  readonly executeContractCall: (call: StewardContractCall) => Promise<{ readonly txId: string }>;
+  readonly executeContractCall: (
+    call: StewardContractCall,
+    onSubmitted?: (txId: string) => Promise<void>,
+  ) => Promise<{ readonly txId: string }>;
 }
 
 export interface StewardHostActionExecutor {
@@ -35,7 +38,9 @@ export interface DispatchedPlanSummary {
   readonly hostActionKinds: readonly string[];
 }
 
-export const createActionPlanSink = (executor: StewardActionExecutor): StewardActionPlanSink => ({
+export const createActionPlanSink = (
+  executor: StewardActionExecutor,
+): StewardActionPlanSink => ({
   submit: async (plans: readonly StewardActionPlan[]): Promise<void> => {
     for (const plan of plans) {
       const txIds: string[] = [];
@@ -49,8 +54,8 @@ export const createActionPlanSink = (executor: StewardActionExecutor): StewardAc
       executor.onDispatched?.({
         action: plan.decision.action,
         txIds,
-        hostActionKinds: plan.hostActions.map((action) => action.kind)
+        hostActionKinds: plan.hostActions.map((action) => action.kind),
       });
     }
-  }
+  },
 });

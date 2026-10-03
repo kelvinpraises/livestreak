@@ -1,4 +1,8 @@
-import type { BridgeCaller, CallActionEnvelope, FunctionDescriptor } from "@livestreak/schema";
+import type {
+  BridgeCaller,
+  CallActionEnvelope,
+  FunctionDescriptor,
+} from "@livestreak/schema";
 
 /** One package bridge wired into the merged remote console gateway. */
 export type ConsolePackage = "options" | "bookmaker" | "observe" | "steward";
@@ -6,34 +10,47 @@ export type ConsolePackage = "options" | "bookmaker" | "observe" | "steward";
 export interface ConsoleEdge {
   readonly package: ConsolePackage;
   describeFunctions(): Promise<readonly FunctionDescriptor[]>;
-  dispatch(caller: BridgeCaller, envelope: CallActionEnvelope): Promise<{ readonly txId?: string; readonly tokenId?: string; readonly terms?: import("@livestreak/schema").BoundVaultTerms; readonly mandate?: import("@livestreak/schema").VaultMandate; readonly commitment?: string }>;
+  dispatch(
+    caller: BridgeCaller,
+    envelope: CallActionEnvelope,
+  ): Promise<{
+    readonly txId?: string;
+    readonly tokenId?: string;
+    readonly terms?: import("@livestreak/schema").BoundVaultTerms;
+    readonly mandate?: import("@livestreak/schema").VaultMandate;
+    readonly commitment?: string;
+    readonly confirmationDigest?: string;
+    readonly recordDigest?: string;
+    readonly status?: string;
+    readonly reason?: string;
+  }>;
   subscribeBoard?(listener: (board: unknown) => void): () => void;
   refresh?(): Promise<void>;
   readBoard?(): Promise<unknown>;
 }
 
 export const mergeConsoleDescriptors = (
-  edges: readonly ConsoleEdge[]
+  edges: readonly ConsoleEdge[],
 ): Promise<readonly FunctionDescriptor[]> =>
-  Promise.all(edges.map((edge) => edge.describeFunctions().catch(() => [] as FunctionDescriptor[]))).then(
-    (groups) => {
-      const seen = new Set<string>();
-      const merged: FunctionDescriptor[] = [];
-      for (const group of groups) {
-        for (const fn of group) {
-          if (seen.has(fn.id)) {
-            continue;
-          }
-          seen.add(fn.id);
-          merged.push(fn);
+  Promise.all(
+    edges.map((edge) => edge.describeFunctions().catch(() => [] as FunctionDescriptor[])),
+  ).then((groups) => {
+    const seen = new Set<string>();
+    const merged: FunctionDescriptor[] = [];
+    for (const group of groups) {
+      for (const fn of group) {
+        if (seen.has(fn.id)) {
+          continue;
         }
+        seen.add(fn.id);
+        merged.push(fn);
       }
-      return merged;
     }
-  );
+    return merged;
+  });
 
 export const buildConsoleRoutes = async (
-  edges: readonly ConsoleEdge[]
+  edges: readonly ConsoleEdge[],
 ): Promise<ReadonlyMap<string, ConsoleEdge>> => {
   const routes = new Map<string, ConsoleEdge>();
   for (const edge of edges) {
@@ -49,9 +66,28 @@ export const buildConsoleRoutes = async (
 export const createMergedDispatch = (
   routes: ReadonlyMap<string, ConsoleEdge>,
   edges: readonly ConsoleEdge[] = [],
-  getTargetPackage?: (frame: { readonly target?: string; readonly envelope: CallActionEnvelope }) => ConsolePackage | undefined
-): ((caller: BridgeCaller, envelope: CallActionEnvelope, target?: string) => Promise<{ readonly txId?: string; readonly tokenId?: string; readonly terms?: import("@livestreak/schema").BoundVaultTerms; readonly mandate?: import("@livestreak/schema").VaultMandate; readonly commitment?: string }>) => {
-  const byPackage = new Map<ConsolePackage, ConsoleEdge>(edges.map((edge) => [edge.package, edge]));
+  getTargetPackage?: (frame: {
+    readonly target?: string;
+    readonly envelope: CallActionEnvelope;
+  }) => ConsolePackage | undefined,
+): ((
+  caller: BridgeCaller,
+  envelope: CallActionEnvelope,
+  target?: string,
+) => Promise<{
+  readonly txId?: string;
+  readonly tokenId?: string;
+  readonly terms?: import("@livestreak/schema").BoundVaultTerms;
+  readonly mandate?: import("@livestreak/schema").VaultMandate;
+  readonly commitment?: string;
+  readonly confirmationDigest?: string;
+  readonly recordDigest?: string;
+  readonly status?: string;
+  readonly reason?: string;
+}>) => {
+  const byPackage = new Map<ConsolePackage, ConsoleEdge>(
+    edges.map((edge) => [edge.package, edge]),
+  );
   return async (caller, envelope, target) => {
     const pkg = target ?? getTargetPackage?.({ envelope, target });
     const key = pkg === undefined ? envelope.action : `${pkg}:${envelope.action}`;

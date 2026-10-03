@@ -8,7 +8,7 @@ export {
   ContentPersistence,
   ContentDescriptorAdvert,
   WalrusDescriptorAdvert,
-  pointerSchemeForNetwork
+  pointerSchemeForNetwork,
 } from "./walrus.js";
 export * from "./media/policy.js";
 export * from "./media/session.js";
@@ -21,3 +21,4 @@ export * from "./forum.js";
 export * from "./validation.js";
 
 export * from "./mandates.js";
+export * from "./resolutions.js";

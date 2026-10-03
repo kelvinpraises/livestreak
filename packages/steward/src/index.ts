@@ -4,13 +4,13 @@ export type {
   AppendMessagePayload,
   OpenThreadPayload,
   StewardContractCall,
-  StewardHostAction
+  StewardHostAction,
 } from "./model/action-plan.js";
 export type { StewardDecision, StewardDecisionAction } from "./model/decision.js";
 export type {
   StewardFinding,
   StewardFindingKind,
-  StewardFindingSeverity
+  StewardFindingSeverity,
 } from "./model/finding.js";
 export type { StewardPanelSummary, StewardPanelView } from "./model/panel.js";
 export type { StewardSubject, StewardSubjectKind } from "./model/subject.js";
@@ -18,12 +18,9 @@ export type { StewardSubject, StewardSubjectKind } from "./model/subject.js";
 export type {
   StewardFact,
   StewardFactSource,
-  TeeAttestationRef
+  TeeAttestationRef,
 } from "./workflow/facts/index.js";
-export {
-  isTeeAttestationRef,
-  STEWARD_FACT_SOURCES
-} from "./workflow/facts/index.js";
+export { isTeeAttestationRef, STEWARD_FACT_SOURCES } from "./workflow/facts/index.js";
 
 export {
   isStewardActionPlan,
@@ -46,13 +43,13 @@ export {
   validateStewardFact,
   validateStewardFinding,
   validateStewardSubject,
-  validateStewardSubjectKind
+  validateStewardSubjectKind,
 } from "./validate/index.js";
 
 export {
   evaluateStewardRules,
   chooseStewardDecisions,
-  planStewardActions
+  planStewardActions,
 } from "./workflow/index.js";
 export type {
   StewardRule,
@@ -60,7 +57,7 @@ export type {
   StewardRuleset,
   StewardDecisionMapping,
   StewardDecisionPolicy,
-  StewardActionContext
+  StewardActionContext,
 } from "./workflow/index.js";
 
 export {
@@ -81,7 +78,7 @@ export {
   createStewardRuntimeBootstrap,
   stewardRuntimeConfigFromPackageInit,
   stewardSubjectsFromPackageInit,
-  stewardChainConfigFromPackageInit
+  stewardChainConfigFromPackageInit,
 } from "./bridge/index.js";
 export type {
   BridgeCaller,
@@ -94,13 +91,13 @@ export type {
   StewardFunctionTarget,
   StewardFunctionView,
   StewardPanelInput,
-  StewardStateSnapshot
+  StewardStateSnapshot,
 } from "./bridge/index.js";
 
 export {
   createStewardRuntime,
   validateStewardRuntimeConfig,
-  assembleBoard
+  assembleBoard,
 } from "./runtime/index.js";
 export * from "./runtime/adapters/index.js";
 export type {
@@ -114,15 +111,17 @@ export type {
   StewardMemorySink,
   StewardRuntime,
   StewardRuntimeConfig,
-  StewardRuntimeInput
+  StewardRuntimeInput,
 } from "./runtime/index.js";
 
 export {
   createStewardContractExecutor,
-  validateStewardChainConfig
+  validateStewardChainConfig,
 } from "./chains/index.js";
 export type {
   StewardChainConfig,
   StewardEvmAddresses,
-  StewardSuiObjectIds
+  StewardSuiObjectIds,
 } from "./chains/index.js";
+export * from "./workflow/resolution/evaluate.js";
+export * from "./runtime/resolution/controller.js";

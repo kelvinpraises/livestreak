@@ -7,8 +7,7 @@
 //   2. Tree contract: one root group; every action's parentId points at an emitted node.
 //   3. No fieldless forms: the revealed resolve action exposes an inputSchema whose properties cover
 //      every field submitBridgeAction requires (subjectId + outcome).
-//   4. Happy path: configure(vaultId) reveals the vault subject's resolve → resolve dispatches an action
-//      plan into the injected fake sink (package seam), with only form-suppliable values.
+//   4. Resolution needs reason and evidence; the old raw plan sink cannot bypass the guard.
 import { describe, expect, it } from "vitest";
 import type { FunctionDescriptor } from "@livestreak/schema";
 import type { StewardActionPlan, StewardActionPlanSink } from "@livestreak/steward";
@@ -17,34 +16,47 @@ import { packageInit, trustedCaller } from "./helpers/operator-flow.js";
 
 const VAULT_ID = "vault-op-flow";
 
-const recordingSink = (): StewardActionPlanSink & { readonly plans: StewardActionPlan[] } => {
+const recordingSink = (): StewardActionPlanSink & {
+  readonly plans: StewardActionPlan[];
+} => {
   const plans: StewardActionPlan[] = [];
   return {
     plans,
     submit: (next: readonly StewardActionPlan[]) => {
       plans.push(...next);
-    }
+    },
   };
 };
 
 const makeEdge = (sink: StewardActionPlanSink) =>
   createStewardConsoleEdge({ packageInit: packageInit("steward"), actionPlanSink: sink });
 
-const byName = (descriptors: readonly FunctionDescriptor[], name: string): readonly FunctionDescriptor[] =>
+const byName = (
+  descriptors: readonly FunctionDescriptor[],
+  name: string,
+): readonly FunctionDescriptor[] =>
   descriptors.filter((descriptor) => descriptor.name === name);
 
 const fieldNames = (descriptor: FunctionDescriptor | undefined): readonly string[] =>
-  (descriptor?.inputSchema?.type === "object" ? descriptor.inputSchema.properties ?? [] : []).map(
-    (property) => property.name
-  );
+  (descriptor?.inputSchema?.type === "object"
+    ? (descriptor.inputSchema.properties ?? [])
+    : []
+  ).map((property) => property.name);
 
 describe("steward console edge — pristine operator flow", () => {
   it("pristine T0: Configure, Close and rule lookup are visible (no watched subject)", async () => {
     const edge = makeEdge(recordingSink());
     const descriptors = await edge.describeFunctions();
 
-    const visibleActions = descriptors.filter((d) => d.nodeKind === "action" && d.visible === true);
-    expect(visibleActions.map((d) => d.name).sort()).toEqual(["close", "configure", "readMandate"]);
+    const visibleActions = descriptors.filter(
+      (d) => d.nodeKind === "action" && d.visible === true,
+    );
+    expect(visibleActions.map((d) => d.name).sort()).toEqual([
+      "close",
+      "configure",
+      "readMandate",
+      "recoverResolution",
+    ]);
     expect(descriptors.some((d) => d.name === "resolve" && d.visible === true)).toBe(false);
   });
 
@@ -75,7 +87,7 @@ describe("steward console edge — pristine operator flow", () => {
     await edge.dispatch(trustedCaller(), {
       scope: "bridge:action",
       action: "configure",
-      args: { vaultId: VAULT_ID }
+      args: { vaultId: VAULT_ID },
     });
 
     const configured = await edge.describeFunctions();
@@ -87,29 +99,25 @@ describe("steward console edge — pristine operator flow", () => {
     const names = new Set(fieldNames(resolve));
     expect(names.has("subjectId")).toBe(true);
     expect(names.has("outcome")).toBe(true);
+    expect(names.has("reason")).toBe(true);
+    expect(names.has("evidenceJson")).toBe(true);
   });
 
-  it("happy path: configure(vaultId) → resolve submits an action plan to the sink with form values", async () => {
+  it("does not allow the legacy action-plan sink to bypass evidence-backed resolution", async () => {
     const sink = recordingSink();
     const edge = makeEdge(sink);
-
     await edge.dispatch(trustedCaller(), {
       scope: "bridge:action",
       action: "configure",
-      args: { vaultId: VAULT_ID }
+      args: { vaultId: VAULT_ID },
     });
-
-    await edge.dispatch(trustedCaller(), {
-      scope: "bridge:action",
-      action: "resolve",
-      args: { subjectId: VAULT_ID, subjectKind: "vault", outcome: "yes" }
-    });
-
-    expect(sink.plans).toHaveLength(1);
-    const plan = sink.plans[0]!;
-    expect(plan.decision.action).toBe("resolve");
-    expect(plan.decision.finding.subject.id).toBe(VAULT_ID);
-    // The vault subject carries a vaultId, so the plan emits a real resolve contract call.
-    expect(plan.contractCalls.some((call) => call.functionName === "resolve")).toBe(true);
+    await expect(
+      edge.dispatch(trustedCaller(), {
+        scope: "bridge:action",
+        action: "resolve",
+        args: { subjectId: VAULT_ID, subjectKind: "vault", outcome: "yes" },
+      }),
+    ).rejects.toThrow();
+    expect(sink.plans).toHaveLength(0);
   });
 });

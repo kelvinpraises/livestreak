@@ -27,6 +27,10 @@ export interface RemoteCallError {
   readonly message: string;
 }
 export interface RemoteCallOutcome {
+  readonly recordDigest?: string;
+  readonly confirmationDigest?: string;
+  readonly status?: string;
+  readonly reason?: string;
   readonly txId?: string;
   readonly tokenId?: string;
   readonly commitment?: string;
@@ -164,10 +168,16 @@ export type UiServerFrame =
 // Type guards (cheap `type` discriminators; full validation stays at each boundary) ----------------
 const typeOf = (value: unknown): string | undefined =>
   value !== null && typeof value === "object"
-    ? (value as { type?: unknown }).type as string | undefined
+    ? ((value as { type?: unknown }).type as string | undefined)
     : undefined;
 
-const GATEWAY_TYPES = new Set(["register", "revoke", "call_result", "board_patch", "functions"]);
+const GATEWAY_TYPES = new Set([
+  "register",
+  "revoke",
+  "call_result",
+  "board_patch",
+  "functions",
+]);
 const HOST_TYPES = new Set(["ack", "call", "session_closed"]);
 const UI_CLIENT_TYPES = new Set(["ui.hello", "call"]);
 const UI_SERVER_TYPES = new Set([
@@ -176,7 +186,7 @@ const UI_SERVER_TYPES = new Set([
   "call_result",
   "board_patch",
   "revoked",
-  "error"
+  "error",
 ]);
 
 export const isGatewayFrame = (value: unknown): value is GatewayFrame =>

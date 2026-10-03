@@ -25,7 +25,7 @@
     "clean": "rm -rf dist",
     "build": "tsc -p tsconfig.json && node scripts/bundle.mjs",
     "prepack": "npm run build",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.public.json",
     "lint": "eslint src test",
     "test": "vitest run",
     "dev": "NODE_OPTIONS=--conditions=livestreak-dev tsx src/main.ts"

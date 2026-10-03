@@ -7,7 +7,7 @@ import {
   createWalletManager,
   isPaymasterSideFailure,
   pollUntilUserOperationIncluded,
-  type EvmErc4337WalletConfig
+  type EvmErc4337WalletConfig,
 } from "@livestreak/wallet";
 import {
   createPublicClient,
@@ -17,7 +17,7 @@ import {
   maxUint256,
   zeroAddress,
   type Abi,
-  type Log
+  type Log,
 } from "viem";
 
 import { asTokenId, type TokenId } from "../../model/ids.js";
@@ -42,27 +42,36 @@ import {
   type TxId,
   type UnstakeLvstInput,
   type WithdrawInput,
-  type WithdrawManyInput
+  type WithdrawManyInput,
 } from "../types.js";
 import { DEFAULT_ABIS } from "./abis.js";
-import { validateOptionsContractAddresses, type OptionsContractAddresses } from "./addresses.js";
+import {
+  validateOptionsContractAddresses,
+  type OptionsContractAddresses,
+} from "./addresses.js";
 import {
   sideToSolidityValue,
   validateMarketIdForContracts,
   validateTokenIdForContracts,
   validateUint64Salt,
   validateUserAddress,
-  validateVaultIdForContracts
+  validateVaultIdForContracts,
 } from "./encode.js";
 
 type ResolvedAccount = {
   // The signer account (Safe) and its read-only twin used to poll receipts.
   readonly account: {
     getAddress(): Promise<string>;
-    sendTransaction(tx: { to: `0x${string}`; data: `0x${string}`; value: bigint }): Promise<{
+    sendTransaction(tx: {
+      to: `0x${string}`;
+      data: `0x${string}`;
+      value: bigint;
+    }): Promise<{
       hash: string;
     }>;
-    toReadOnlyAccount(): Promise<{ getUserOperationReceipt(hash: string): Promise<unknown> }>;
+    toReadOnlyAccount(): Promise<{
+      getUserOperationReceipt(hash: string): Promise<unknown>;
+    }>;
   };
   readonly readOnly: { getUserOperationReceipt(hash: string): Promise<unknown> };
 };
@@ -70,16 +79,20 @@ type ResolvedAccount = {
 export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWriter => {
   if (config.walletInit.chain !== "evm") {
     throw new LiveStreakConfigError({
-      message: "EVM options writer requires walletInit.chain === evm"
+      message: "EVM options writer requires walletInit.chain === evm",
     });
   }
 
   const evmConfig = config.walletInit.config as EvmErc4337WalletConfig;
-  const addresses = validateOptionsContractAddresses(config.addresses as OptionsContractAddresses);
+  const addresses = validateOptionsContractAddresses(
+    config.addresses as OptionsContractAddresses,
+  );
   const abis = DEFAULT_ABIS;
   const mandateReader = createEvmOptionsReader(config);
   const requireMandate = async (vaultId: string) => {
-    const verified = await mandateReader.readVaultMandate!(vaultId as import("../../model/ids.js").VaultId);
+    const verified = await mandateReader.readVaultMandate!(
+      vaultId as import("../../model/ids.js").VaultId,
+    );
     requireOpenMandate(verified, Number((await getPublicClient().getBlock()).timestamp));
   };
 
@@ -99,7 +112,8 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
 
   // Read-only public client for allowance / USDC-address lookups (G4). Lazily constructed.
   const rpcUrl =
-    config.readRpcUrl ?? String((config.walletInit.config as { provider?: string }).provider ?? "");
+    config.readRpcUrl ??
+    String((config.walletInit.config as { provider?: string }).provider ?? "");
   let publicClient: ReturnType<typeof createPublicClient> | undefined;
   const getPublicClient = () => {
     if (publicClient === undefined) {
@@ -112,13 +126,13 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     address: `0x${string}`,
     abi: readonly unknown[],
     functionName: string,
-    args: readonly unknown[] = []
+    args: readonly unknown[] = [],
   ): Promise<T> =>
     getPublicClient().readContract({
       address,
       abi: abi as Abi,
       functionName,
-      args: args as readonly unknown[] | undefined
+      args: args as readonly unknown[] | undefined,
     }) as Promise<T>;
 
   let usdcAddress: `0x${string}` | undefined;
@@ -128,7 +142,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         addresses.marketDriver,
         abis.MarketDriver,
         "USDC",
-        []
+        [],
       );
     }
     return usdcAddress;
@@ -145,7 +159,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     const usdc = await getUsdcAddress();
     const allowance = await readContract<bigint>(usdc, abis.LvstToken, "allowance", [
       owner,
-      addresses.marketDriver
+      addresses.marketDriver,
     ]);
     if (allowance >= required) {
       return;
@@ -157,17 +171,18 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     address: `0x${string}`,
     abi: readonly unknown[],
     functionName: string,
-    args: readonly unknown[] = []
+    args: readonly unknown[] = [],
   ): Promise<{ txId: TxId; receipt: unknown }> => {
     const { account, readOnly } = await getAccount();
     const data = encodeFunctionData({
       abi: abi as Abi,
       functionName,
-      args: args as readonly unknown[] | undefined
+      args: args as readonly unknown[] | undefined,
     });
 
     let sendResult: { hash: string };
     try {
+      config.onTransactionSubmitting?.(functionName);
       sendResult = await account.sendTransaction({ to: address, data, value: 0n });
     } catch (error) {
       throw classifySendFailure(error);
@@ -184,7 +199,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     address: `0x${string}`,
     abi: readonly unknown[],
     functionName: string,
-    args: readonly unknown[] = []
+    args: readonly unknown[] = [],
   ): Promise<TxId> => {
     const { txId } = await sendForReceipt(address, abi, functionName, args);
     return txId;
@@ -196,7 +211,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         const decoded = decodeEventLog({
           abi: abis.MarketDriver as Abi,
           data: log.data,
-          topics: log.topics
+          topics: log.topics,
         });
         if (decoded.eventName === "MarketNftMinted") {
           const tokenId = (decoded.args as { tokenId?: bigint }).tokenId;
@@ -210,7 +225,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     }
 
     throw new LiveStreakRuntimeError({
-      message: "Mint receipt did not contain a decodable MarketNftMinted event"
+      message: "Mint receipt did not contain a decodable MarketNftMinted event",
     });
   };
 
@@ -223,7 +238,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         addresses.marketDriver,
         abis.MarketDriver,
         "mint",
-        [marketBytes, to as `0x${string}`]
+        [marketBytes, to as `0x${string}`],
       );
       return { txId, tokenId: decodeMintedTokenId(receipt) };
     },
@@ -237,7 +252,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         addresses.marketDriver,
         abis.MarketDriver,
         "mintWithSalt",
-        [marketBytes, salt, to as `0x${string}`]
+        [marketBytes, salt, to as `0x${string}`],
       );
       return { txId, tokenId: decodeMintedTokenId(receipt) };
     },
@@ -257,7 +272,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         vaultBytes,
         side,
         rate,
-        deposit
+        deposit,
       ]);
     },
 
@@ -268,7 +283,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       return send(addresses.vault, abis.Vault, "advance", [
         vaultBytes,
         side,
-        input.maxSteps ?? 0n
+        input.maxSteps ?? 0n,
       ]);
     },
 
@@ -278,19 +293,47 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       const lanes = input.lanes.map((lane) => ({
         vaultId: validateVaultIdForContracts(lane.vaultId),
         side: sideToSolidityValue(validateOptionsVaultSide(lane.side)),
-        rate: requirePositiveBigInt(lane.rate, "rate")
+        rate: requirePositiveBigInt(lane.rate, "rate"),
       }));
 
       // A pure removal must remain usable without Host metadata; retained exact live/closed
       // lanes do not add or extend funding. Re-opening a depleted lane is still a funding write.
-      const count = Number(await readContract<bigint>(addresses.marketDriver, abis.MarketDriver, "laneCount", [tokenId]));
+      const count = Number(
+        await readContract<bigint>(addresses.marketDriver, abis.MarketDriver, "laneCount", [
+          tokenId,
+        ]),
+      );
       if (count > 16) throw new Error("Unexpected lane count");
-      const current = await Promise.all(Array.from({length:count}, (_, i) => readContract<readonly [string, number, bigint]>(addresses.marketDriver, abis.MarketDriver, "laneAt", [tokenId, BigInt(i)])));
+      const current = await Promise.all(
+        Array.from({ length: count }, (_, i) =>
+          readContract<readonly [string, number, bigint]>(
+            addresses.marketDriver,
+            abis.MarketDriver,
+            "laneAt",
+            [tokenId, BigInt(i)],
+          ),
+        ),
+      );
       for (const lane of input.lanes) {
-        const held = current.find(v => v[0] === lane.vaultId && Number(v[1]) === sideToSolidityValue(lane.side) && v[2] === lane.rate);
+        const held = current.find(
+          (v) =>
+            v[0] === lane.vaultId &&
+            Number(v[1]) === sideToSolidityValue(lane.side) &&
+            v[2] === lane.rate,
+        );
         if (held && addDeposit === 0n) {
-          const position = await readContract<readonly [bigint,bigint,bigint,number,boolean]>(addresses.vault, abis.Vault, "getPosition", [lane.vaultId, sideToSolidityValue(lane.side), tokenId]);
-          const closes = Number(await readContract<number>(addresses.vault, abis.Vault, "fundingClose", [lane.vaultId]));
+          const position = await readContract<
+            readonly [bigint, bigint, bigint, number, boolean]
+          >(addresses.vault, abis.Vault, "getPosition", [
+            lane.vaultId,
+            sideToSolidityValue(lane.side),
+            tokenId,
+          ]);
+          const closes = Number(
+            await readContract<number>(addresses.vault, abis.Vault, "fundingClose", [
+              lane.vaultId,
+            ]),
+          );
           const now = Number((await getPublicClient().getBlock()).timestamp);
           if (closes <= now || (!position[4] && Number(position[3]) > now)) continue;
         }
@@ -301,7 +344,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       return send(addresses.marketDriver, abis.MarketDriver, "setLanes", [
         tokenId,
         lanes,
-        addDeposit
+        addDeposit,
       ]);
     },
 
@@ -313,7 +356,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       return send(addresses.marketDriver, abis.MarketDriver, "stop", [
         tokenId,
         vaultBytes,
-        side
+        side,
       ]);
     },
 
@@ -337,19 +380,21 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       return send(addresses.marketDriver, abis.MarketDriver, "withdraw", [
         tokenId,
         vaultBytes,
-        to as `0x${string}`
+        to as `0x${string}`,
       ]);
     },
 
     withdrawMany: async (input: WithdrawManyInput) => {
       const tokenId = validateTokenIdForContracts(input.tokenId);
       const to = validateUserAddress(input.to, "to");
-      const vaultIds = input.vaultIds.map((vaultId) => validateVaultIdForContracts(vaultId));
+      const vaultIds = input.vaultIds.map((vaultId) =>
+        validateVaultIdForContracts(vaultId),
+      );
 
       return send(addresses.marketDriver, abis.MarketDriver, "withdraw", [
         tokenId,
         vaultIds,
-        to as `0x${string}`
+        to as `0x${string}`,
       ]);
     },
 
@@ -363,7 +408,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         tokenId,
         vaultBytes,
         side,
-        to as `0x${string}`
+        to as `0x${string}`,
       ]);
     },
 
@@ -377,7 +422,8 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       return send(addresses.treasury, abis.Treasury, "unstakeLvst", [amount]);
     },
 
-    claimDividends: async () => send(addresses.treasury, abis.Treasury, "claimDividends", []),
+    claimDividends: async () =>
+      send(addresses.treasury, abis.Treasury, "claimDividends", []),
 
     transferNft: async (input: TransferNftInput) => {
       const from = validateUserAddress(input.from, "from");
@@ -387,7 +433,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       return send(addresses.marketDriver, abis.MarketDriver, "transferFrom", [
         from as `0x${string}`,
         to as `0x${string}`,
-        tokenId
+        tokenId,
       ]);
     },
 
@@ -397,18 +443,21 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
 
       return send(addresses.marketDriver, abis.MarketDriver, "approve", [
         operator as `0x${string}`,
-        tokenId
+        tokenId,
       ]);
     },
 
     setApprovalForAll: async (input: SetApprovalForAllInput) => {
-      const operator = validateUserAddress(input.operator ?? addresses.marketDriver, "operator");
+      const operator = validateUserAddress(
+        input.operator ?? addresses.marketDriver,
+        "operator",
+      );
 
       return send(addresses.marketDriver, abis.MarketDriver, "setApprovalForAll", [
         operator as `0x${string}`,
-        input.approved
+        input.approved,
       ]);
-    }
+    },
   };
 };
 
@@ -432,7 +481,7 @@ const requirePositiveBigInt = (value: bigint, field: string): bigint => {
   if (typeof value !== "bigint" || value <= 0n) {
     throw new LiveStreakConfigError({
       message: `Options write requires ${field} to be a bigint > 0`,
-      metadata: { details: String(value) }
+      metadata: { details: String(value) },
     });
   }
 
@@ -443,7 +492,7 @@ const requireNonNegativeBigInt = (value: bigint, field: string): bigint => {
   if (typeof value !== "bigint" || value < 0n) {
     throw new LiveStreakConfigError({
       message: `Options write requires ${field} to be a bigint >= 0`,
-      metadata: { details: String(value) }
+      metadata: { details: String(value) },
     });
   }
 
@@ -455,12 +504,12 @@ const classifySendFailure = (error: unknown): LiveStreakRuntimeError => {
 
   if (isPaymasterSideFailure(error)) {
     return new LiveStreakRuntimeError({
-      message: `Paymaster-side write failure: ${message}`
+      message: `Paymaster-side write failure: ${message}`,
     });
   }
 
   return new LiveStreakRuntimeError({
-    message: `UserOperation send failed: ${message}`
+    message: `UserOperation send failed: ${message}`,
   });
 };
 

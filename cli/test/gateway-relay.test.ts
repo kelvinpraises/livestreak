@@ -1,13 +1,21 @@
 import { bridgeActionScope, type HostCallFrame } from "@livestreak/schema";
 import { describe, expect, it, vi } from "vitest";
-import { assertNoSeedInFrame, createRelay, type DispatchFn } from "../src/gateway/remote/relay.js";
+import {
+  assertNoSeedInFrame,
+  createRelay,
+  type DispatchFn,
+} from "../src/gateway/remote/relay.js";
 import { SessionRegistry } from "../src/gateway/session/registry.js";
 
-const callFrame = (sessionId: string, action: string, args: unknown = {}): HostCallFrame => ({
+const callFrame = (
+  sessionId: string,
+  action: string,
+  args: unknown = {},
+): HostCallFrame => ({
   type: "call",
   callId: `call-${action}`,
   sessionId,
-  envelope: { scope: bridgeActionScope, action, args }
+  envelope: { scope: bridgeActionScope, action, args },
 });
 
 describe("gateway/relay", () => {
@@ -28,13 +36,46 @@ describe("gateway/relay", () => {
   it("preserves verified rule replies without exposing extra dispatch fields", async () => {
     const reg = new SessionRegistry();
     const rec = reg.mint({ scopes: ["bridge:action:readMandate"], ttlMs: 60_000 });
-    const { fixtureMandate } = await import("../../packages/schema/test/helpers/mandate.js");
+    const { fixtureMandate } =
+      await import("../../packages/schema/test/helpers/mandate.js");
     const mandate = fixtureMandate();
-    const terms = { chainId: mandate.chainId, marketId: mandate.marketId, vaultId: "42", question: mandate.question, commitment: `0x${"ab".repeat(32)}`, fundingClose: mandate.fundingClose };
-    const relay = createRelay({ registry: reg, dispatch: async () => ({ terms, mandate, secret: "must stay private" }) });
+    const terms = {
+      chainId: mandate.chainId,
+      marketId: mandate.marketId,
+      vaultId: "42",
+      question: mandate.question,
+      commitment: `0x${"ab".repeat(32)}`,
+      fundingClose: mandate.fundingClose,
+    };
+    const relay = createRelay({
+      registry: reg,
+      dispatch: async () => ({ terms, mandate, secret: "must stay private" }),
+    });
     const result = await relay.handleCall(callFrame(rec.sessionId, "readMandate"));
     expect(result.result).toEqual({ terms, mandate });
     expect(JSON.stringify(result)).not.toContain("must stay private");
+  });
+
+  it("preserves resolution attention and confirmation references while stripping internal state", async () => {
+    const reg = new SessionRegistry();
+    const rec = reg.mint({ scopes: ["bridge:action:resolve"], ttlMs: 60_000 });
+    const resultFields = {
+      txId: "actual",
+      status: "confirmed" as const,
+      recordDigest: `0x${"ab".repeat(32)}`,
+      confirmationDigest: `0x${"cd".repeat(32)}`,
+      reason: "Declared rule passed",
+    };
+    const relay = createRelay({
+      registry: reg,
+      dispatch: async () => ({ ...resultFields, record: { privateInternal: true } }),
+    });
+    expect((await relay.handleCall(callFrame(rec.sessionId, "resolve"))).result).toEqual(
+      resultFields,
+    );
+    expect(
+      JSON.stringify(await relay.handleCall(callFrame(rec.sessionId, "resolve"))),
+    ).not.toContain("privateInternal");
   });
 
   it("denies an out-of-scope call WITHOUT dispatching (seed never touched)", async () => {
@@ -51,11 +92,17 @@ describe("gateway/relay", () => {
 
   it("denies and does not dispatch when the spend cap would be exceeded", async () => {
     const reg = new SessionRegistry();
-    const rec = reg.mint({ scopes: ["bridge:action:fund"], ttlMs: 60_000, spendCapUSDC: 100n });
+    const rec = reg.mint({
+      scopes: ["bridge:action:fund"],
+      ttlMs: 60_000,
+      spendCapUSDC: 100n,
+    });
     const dispatch = vi.fn<DispatchFn>(async () => ({ txId: "0x" }));
     const relay = createRelay({ registry: reg, dispatch });
 
-    const result = await relay.handleCall(callFrame(rec.sessionId, "fund", { deposit: "500" }));
+    const result = await relay.handleCall(
+      callFrame(rec.sessionId, "fund", { deposit: "500" }),
+    );
     expect(result.ok).toBe(false);
     expect(result.error?.message).toMatch(/spend cap exceeded/);
     expect(dispatch).not.toHaveBeenCalled();
@@ -63,7 +110,11 @@ describe("gateway/relay", () => {
 
   it("commits the spend only after a successful dispatch", async () => {
     const reg = new SessionRegistry();
-    const rec = reg.mint({ scopes: ["bridge:action:fund"], ttlMs: 60_000, spendCapUSDC: 1_000n });
+    const rec = reg.mint({
+      scopes: ["bridge:action:fund"],
+      ttlMs: 60_000,
+      spendCapUSDC: 1_000n,
+    });
     const relay = createRelay({ registry: reg, dispatch: async () => ({ txId: "0x1" }) });
 
     await relay.handleCall(callFrame(rec.sessionId, "fund", { deposit: "400" }));
@@ -77,7 +128,7 @@ describe("gateway/relay", () => {
       registry: reg,
       dispatch: async () => {
         throw new Error("ERC20: transfer amount exceeds balance");
-      }
+      },
     });
     const result = await relay.handleCall(callFrame(rec.sessionId, "fund"));
     expect(result.ok).toBe(false);

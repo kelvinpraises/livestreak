@@ -11,7 +11,7 @@ import {
   generateCounterFrames,
   IngestPumpError,
   readMarketIdFromBoard,
-  runRemoteDrive
+  runRemoteDrive,
 } from "../src/gateway/remote/driver.js";
 import { runRemoteDrive as runRemoteDriveCommand } from "../src/commands/remote.js";
 import type { RemoteUiClient } from "../src/gateway/remote/ui-client.js";
@@ -24,12 +24,12 @@ const { mockClient } = vi.hoisted(() => ({
     connect: vi.fn(async () => {}),
     call: vi.fn(async () => ({ ok: true })),
     boards: vi.fn(() => ({ observe: observeBoardWithMarket("0xmarketdeadbeef") })),
-    close: vi.fn()
-  }
+    close: vi.fn(),
+  },
 }));
 
 vi.mock("../src/gateway/remote/ui-client.js", () => ({
-  createRemoteUiClient: () => mockClient as unknown as RemoteUiClient
+  createRemoteUiClient: () => mockClient as unknown as RemoteUiClient,
 }));
 
 // Family board: the session index names the observation; its market cell carries the id.
@@ -37,13 +37,15 @@ const observeBoardWithMarket = (marketId: string) => ({
   cells: {
     "system:config": {
       readonly: {
-        observations: { "obs-drive": { title: "t", chain: "eip155:31337", createdAtMs: 1 } }
-      }
+        observations: {
+          "obs-drive": { title: "t", chain: "eip155:31337", createdAtMs: 1 },
+        },
+      },
     },
     "obs:obs-drive:market": {
-      readonly: { marketId }
-    }
-  }
+      readonly: { marketId },
+    },
+  },
 });
 
 const openDoors: Array<() => Promise<void>> = [];
@@ -58,15 +60,12 @@ const startDoor = async (script: (ws: WebSocket) => void): Promise<string> => {
 };
 
 const stubAnnounce = (watchUrl: string): void => {
-  vi.stubGlobal(
-    "fetch",
-    async (url: unknown) => {
-      if (typeof url === "string" && url.includes("/live/direct/")) {
-        return { ok: true, json: async () => ({ watchUrl }) } as unknown as Response;
-      }
-      throw new Error(`unexpected fetch ${String(url)}`);
+  vi.stubGlobal("fetch", async (url: unknown) => {
+    if (typeof url === "string" && url.includes("/live/direct/")) {
+      return { ok: true, json: async () => ({ watchUrl }) } as unknown as Response;
     }
-  );
+    throw new Error(`unexpected fetch ${String(url)}`);
+  });
 };
 
 const fullProof = (ws: WebSocket): void => {
@@ -86,11 +85,12 @@ describe("remote drive", () => {
     mockClient.call.mockImplementation(async (_target: string, action: string) => ({
       ok: true,
       ...(action === "createVault" ? { result: { tokenId: "0xvault01" } } : {}),
-      ...(action === "mint" ? { result: { tokenId: "7" } } : {})
+      ...(action === "mint" ? { result: { tokenId: "7" } } : {}),
+      ...(action === "resolve" ? { result: { status: "confirmed" } } : {}),
     }));
     mockClient.boards.mockReturnValue({
       observe: observeBoardWithMarket("0xmarketdeadbeef"),
-      options: { snapshot: { account: "0xoperator" } }
+      options: { snapshot: { account: "0xoperator" } },
     });
 
     const dir = await mkdtemp(join(tmpdir(), "livestreak-drive-test-"));
@@ -100,12 +100,13 @@ describe("remote drive", () => {
 
   it("observe-only calls configure then register and skips options/steward", async () => {
     const result = await runRemoteDrive({
-      mandate: fixtureMandate("0xmarketdeadbeef"), operationId: `0x${"aa".repeat(32)}`,
+      mandate: fixtureMandate("0xmarketdeadbeef"),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_observe",
       pairingPassword: "pw",
       settingsPath,
       observeOnly: true,
-      log: () => {}
+      log: () => {},
     });
 
     expect(result.marketId).toBe("0xmarketdeadbeef");
@@ -121,24 +122,50 @@ describe("remote drive", () => {
 
   it("binds caller-authored terms to the newly discovered market without inventing rules", async () => {
     const mandateForMarket = vi.fn((marketId: string) => fixtureMandate(marketId));
-    await runRemoteDrive({ sessionId: "explicit-terms", pairingPassword: "pw", settingsPath, mandateForMarket, operationId: `0x${"aa".repeat(32)}`, log: () => {} });
+    await runRemoteDrive({
+      resolveOutcome: "yes",
+      resolveReason: "explicit fixture judgement",
+      resolveEvidenceJson: "[]",
+      sessionId: "explicit-terms",
+      pairingPassword: "pw",
+      settingsPath,
+      mandateForMarket,
+      operationId: `0x${"aa".repeat(32)}`,
+      log: () => {},
+    });
     expect(mandateForMarket).toHaveBeenCalledWith("0xmarketdeadbeef");
-    const args = mockClient.call.mock.calls.find(c => c[1] === "createVault")?.[2];
-    expect(args).toMatchObject({ mandate: fixtureMandate("0xmarketdeadbeef"), operationId: `0x${"aa".repeat(32)}` });
+    const args = mockClient.call.mock.calls.find((c) => c[1] === "createVault")?.[2];
+    expect(args).toMatchObject({
+      mandate: fixtureMandate("0xmarketdeadbeef"),
+      operationId: `0x${"aa".repeat(32)}`,
+    });
   });
 
   it("rejects explicit terms for a different market before Bookmaker creation", async () => {
-    await expect(runRemoteDrive({ sessionId: "wrong-terms", pairingPassword: "pw", settingsPath, mandate: fixtureMandate("other-market"), operationId: `0x${"aa".repeat(32)}`, log: () => {} })).rejects.toThrow("does not belong");
-    expect(mockClient.call.mock.calls.some(c => c[1] === "createVault")).toBe(false);
+    await expect(
+      runRemoteDrive({
+        sessionId: "wrong-terms",
+        pairingPassword: "pw",
+        settingsPath,
+        mandate: fixtureMandate("other-market"),
+        operationId: `0x${"aa".repeat(32)}`,
+        log: () => {},
+      }),
+    ).rejects.toThrow("does not belong");
+    expect(mockClient.call.mock.calls.some((c) => c[1] === "createVault")).toBe(false);
   });
 
   it("full path runs configure through withdraw", async () => {
     const result = await runRemoteDrive({
-      mandate: fixtureMandate("0xmarketdeadbeef"), operationId: `0x${"aa".repeat(32)}`,
+      mandate: fixtureMandate("0xmarketdeadbeef"),
+      operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "explicit fixture judgement",
+      resolveEvidenceJson: "[]",
       sessionId: "sess_full",
       pairingPassword: "pw",
       settingsPath,
-      log: () => {}
+      log: () => {},
     });
 
     expect(result.marketId).toBe("0xmarketdeadbeef");
@@ -154,13 +181,59 @@ describe("remote drive", () => {
       "options:fund",
       "steward:configure",
       "steward:resolve",
-      "options:withdraw"
+      "options:withdraw",
     ]);
     // Threaded ids reach the dependent steps.
-    const fundArgs = mockClient.call.mock.calls.find((c) => c[1] === "fund")?.[2] as Record<string, unknown>;
+    const fundArgs = mockClient.call.mock.calls.find((c) => c[1] === "fund")?.[2] as Record<
+      string,
+      unknown
+    >;
     expect(fundArgs).toMatchObject({ tokenId: "7", vaultId: "0xvault01", side: "yes" });
-    const resolveArgs = mockClient.call.mock.calls.find((c) => c[1] === "resolve")?.[2] as Record<string, unknown>;
-    expect(resolveArgs).toMatchObject({ subjectId: "0xvault01", subjectKind: "vault" });
+    const resolveArgs = mockClient.call.mock.calls.find(
+      (c) => c[1] === "resolve",
+    )?.[2] as Record<string, unknown>;
+    expect(resolveArgs).toMatchObject({
+      subjectId: "0xvault01",
+      subjectKind: "vault",
+      outcome: "yes",
+      reason: "explicit fixture judgement",
+      evidenceJson: "[]",
+    });
+  });
+
+  it("never invents an outcome or withdraws while resolution needs attention", async () => {
+    const base = {
+      sessionId: "guard",
+      pairingPassword: "pw",
+      settingsPath,
+      mandate: fixtureMandate("0xmarketdeadbeef"),
+      operationId: `0x${"aa".repeat(32)}`,
+      log: () => {},
+    };
+    await expect(runRemoteDrive(base)).rejects.toThrow("explicit resolveOutcome");
+    expect(
+      mockClient.call.mock.calls.some((c) => c[1] === "resolve" || c[1] === "withdraw"),
+    ).toBe(false);
+    mockClient.call.mockImplementation(async (_target: string, action: string) => ({
+      ok: true,
+      result:
+        action === "resolve"
+          ? { status: "attention", reason: "Missing evidence" }
+          : action === "createVault"
+            ? { tokenId: "0xvault01" }
+            : action === "mint"
+              ? { tokenId: "7" }
+              : {},
+    }));
+    await expect(
+      runRemoteDrive({
+        ...base,
+        resolveOutcome: "yes",
+        resolveReason: "judgement",
+        resolveEvidenceJson: "[]",
+      }),
+    ).rejects.toThrow("Missing evidence");
+    expect(mockClient.call.mock.calls.some((c) => c[1] === "withdraw")).toBe(false);
   });
 
   it("readMarketIdFromBoard reads market cell readonly", () => {
@@ -170,11 +243,12 @@ describe("remote drive", () => {
 
   it("runRemoteDrive command wrapper prints step summary", async () => {
     const output = await runRemoteDriveCommand({
-      mandate: fixtureMandate("0xmarketdeadbeef"), operationId: `0x${"aa".repeat(32)}`,
+      mandate: fixtureMandate("0xmarketdeadbeef"),
+      operationId: `0x${"aa".repeat(32)}`,
       session: "sess_cmd",
       pairPassword: "pw",
       settingsPath,
-      observeOnly: true
+      observeOnly: true,
     });
     expect(output).toMatch(/remote drive complete/);
     expect(output).toMatch(/marketId=0xmarketdeadbeef/);
@@ -197,11 +271,12 @@ describe("remote drive watchability gate", () => {
     mockClient.call.mockImplementation(async (_target: string, action: string) => ({
       ok: true,
       ...(action === "createVault" ? { result: { tokenId: "0xvault01" } } : {}),
-      ...(action === "mint" ? { result: { tokenId: "7" } } : {})
+      ...(action === "mint" ? { result: { tokenId: "7" } } : {}),
+      ...(action === "resolve" ? { result: { status: "confirmed" } } : {}),
     }));
     mockClient.boards.mockReturnValue({
       observe: observeBoardWithMarket(LIVE_MARKET),
-      options: { snapshot: { account: "0xoperator" } }
+      options: { snapshot: { account: "0xoperator" } },
     });
     const dir = await mkdtemp(join(tmpdir(), "livestreak-drive-gate-test-"));
     settingsPath = join(dir, "settings.json");
@@ -225,7 +300,11 @@ describe("remote drive watchability gate", () => {
     stubAnnounce(await startDoor(fullProof));
     const lines: string[] = [];
     const result = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_gate_ok",
       pairingPassword: "pw",
       settingsPath,
@@ -259,19 +338,23 @@ describe("remote drive watchability gate", () => {
         await startDoor((ws) => {
           ws.send(Buffer.from([0x01, 1, 2, 3, 4]));
           ws.close();
-        })
+        }),
       );
       const err = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+        resolveOutcome: "yes",
+        resolveReason: "Explicit local test judgement",
+        resolveEvidenceJson: "[]",
+        mandate: fixtureMandate(LIVE_MARKET),
+        operationId: `0x${"aa".repeat(32)}`,
         sessionId: "sess_gate_nobytes",
         pairingPassword: "pw",
         settingsPath,
         directVideoPath: "vid.mp4",
         directTimeoutMs: 2500,
-        log: () => {}
+        log: () => {},
       }).then(
         () => new Error("unexpected success"),
-        (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+        (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
       );
       expect(err.message).toMatch(/remains registered \(not live\)/);
       expect(err.message).toMatch(/stop request (accepted|unconfirmed)/);
@@ -280,7 +363,7 @@ describe("remote drive watchability gate", () => {
       expect(calls("goLive")).toHaveLength(0);
       expect(calls("stop")).toHaveLength(1);
       expect(calls("createVault")).toHaveLength(0);
-    }
+    },
   );
 
   it("post-live fund failure keeps media running and carries reconciling state", async () => {
@@ -292,25 +375,30 @@ describe("remote drive watchability gate", () => {
       return {
         ok: true,
         ...(action === "createVault" ? { result: { tokenId: "0xvault01" } } : {}),
-        ...(action === "mint" ? { result: { tokenId: "7" } } : {})
+        ...(action === "mint" ? { result: { tokenId: "7" } } : {}),
+        ...(action === "resolve" ? { result: { status: "confirmed" } } : {}),
       };
     });
     const err = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_gate_fundfail",
       pairingPassword: "pw",
       settingsPath,
       directVideoPath: "vid.mp4",
       directTimeoutMs: 4000,
-      log: () => {}
+      log: () => {},
     }).then(
       () => new Error("unexpected success"),
-      (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
     expect(err.message).toContain(LIVE_MARKET);
     expect(err.message).toMatch(/phase=live;/);
     expect(err.message).toMatch(
-      /last verified init=4b fragments=2 \(pre-goLive proof\); current delivery unverified/
+      /last verified init=4b fragments=2 \(pre-goLive proof\); current delivery unverified/,
     );
     expect(err.message).toMatch(/no stop was sent \(flow-06 owns stop\)/);
     expect(err.message).not.toMatch(/mediaRunning=/);
@@ -331,16 +419,20 @@ describe("remote drive watchability gate", () => {
       return { ok: true };
     });
     const err = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_gate_startfail",
       pairingPassword: "pw",
       settingsPath,
       directVideoPath: "vid.mp4",
       directTimeoutMs: 4000,
-      log: () => {}
+      log: () => {},
     }).then(
       () => new Error("unexpected success"),
-      (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
     expect(err.message).toMatch(/after start was attempted/);
     expect(err.message).toMatch(/producer state unknown/);
@@ -360,16 +452,20 @@ describe("remote drive watchability gate", () => {
       return { ok: true };
     });
     const err = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_gate_ambiguous",
       pairingPassword: "pw",
       settingsPath,
       directVideoPath: "vid.mp4",
       directTimeoutMs: 4000,
-      log: () => {}
+      log: () => {},
     }).then(
       () => new Error("unexpected success"),
-      (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
     expect(err.message).toMatch(/goLive uncertain/);
     expect(err.message).toMatch(/chain phase unknown/);
@@ -391,25 +487,29 @@ describe("remote drive watchability gate", () => {
           ws.send(Buffer.from([0x02, 6]));
           ws.send(Buffer.from([0x01, 1, 2, 3, 4]));
           ws.close();
-        })
+        }),
       );
       const err = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+        resolveOutcome: "yes",
+        resolveReason: "Explicit local test judgement",
+        resolveEvidenceJson: "[]",
+        mandate: fixtureMandate(LIVE_MARKET),
+        operationId: `0x${"aa".repeat(32)}`,
         sessionId: "sess_gate_outoforder",
         pairingPassword: "pw",
         settingsPath,
         directVideoPath: "vid.mp4",
         directTimeoutMs: 2500,
-        log: () => {}
+        log: () => {},
       }).then(
         () => new Error("unexpected success"),
-        (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+        (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
       );
       expect(err.message).toMatch(/watch proof failed/);
       expect(err.message).toMatch(/remains registered \(not live\)/);
       expect(calls("goLive")).toHaveLength(0);
       expect(calls("stop")).toHaveLength(1);
-    }
+    },
   );
 
   it(
@@ -425,22 +525,28 @@ describe("remote drive watchability gate", () => {
             return;
           }
           fullProof(ws);
-        })
+        }),
       );
       const err = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+        resolveOutcome: "yes",
+        resolveReason: "Explicit local test judgement",
+        resolveEvidenceJson: "[]",
+        mandate: fixtureMandate(LIVE_MARKET),
+        operationId: `0x${"aa".repeat(32)}`,
         sessionId: "sess_gate_midfund",
         pairingPassword: "pw",
         settingsPath,
         directVideoPath: "vid.mp4",
         directTimeoutMs: 4000,
-        log: () => {}
+        log: () => {},
       }).then(
         () => new Error("unexpected success"),
-        (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+        (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
       );
       expect(err.message).toMatch(/media re-probe failed after fund/);
-      expect(err.message).toMatch(/last verified media: init=4b fragments=2 \(pre-goLive proof\)/);
+      expect(err.message).toMatch(
+        /last verified media: init=4b fragments=2 \(pre-goLive proof\)/,
+      );
       expect(err.message).toMatch(/chain phase=live/);
       expect(err.message).toMatch(/no rollback claimed/);
       expect(err.message).toMatch(/current delivery unverified/);
@@ -449,7 +555,7 @@ describe("remote drive watchability gate", () => {
       expect(calls("goLive")).toHaveLength(1);
       expect(calls("fund")).toHaveLength(1);
       expect(calls("stop")).toHaveLength(0);
-    }
+    },
   );
 });
 
@@ -470,11 +576,12 @@ describe("remote drive ingest leg", () => {
     mockClient.call.mockImplementation(async (_target: string, action: string) => ({
       ok: true,
       ...(action === "createVault" ? { result: { tokenId: "0xvault01" } } : {}),
-      ...(action === "mint" ? { result: { tokenId: "7" } } : {})
+      ...(action === "mint" ? { result: { tokenId: "7" } } : {}),
+      ...(action === "resolve" ? { result: { status: "confirmed" } } : {}),
     }));
     mockClient.boards.mockReturnValue({
       observe: observeBoardWithMarket(LIVE_MARKET),
-      options: { snapshot: { account: "0xoperator" } }
+      options: { snapshot: { account: "0xoperator" } },
     });
     httpServers = [];
     const dir = await mkdtemp(join(tmpdir(), "livestreak-drive-ingest-test-"));
@@ -497,7 +604,7 @@ describe("remote drive ingest leg", () => {
 
   // Local stand-in for the gateway loopback endpoint: records POST bodies.
   const startIngestStub = async (
-    statusFor: (hits: number) => number
+    statusFor: (hits: number) => number,
   ): Promise<{ port: number; bodies: Buffer[] }> => {
     const bodies: Buffer[] = [];
     let hits = 0;
@@ -537,19 +644,23 @@ describe("remote drive ingest leg", () => {
     fps: 30,
     port,
     path: "/frames",
-    frames: generateCounterFrames(FRAME_W, FRAME_H, 400)
+    frames: generateCounterFrames(FRAME_W, FRAME_H, 400),
   });
 
   const driveIngest = (session: string, port: number) =>
     runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: session,
       pairingPassword: "pw",
       settingsPath,
       ingest: ingestArgs(port),
       mediaOnly: true,
       directTimeoutMs: 5000,
-      log: () => {}
+      log: () => {},
     });
 
   it("bot-fed drive proves bytes, funds, and returns media-only with no steward", async () => {
@@ -562,19 +673,28 @@ describe("remote drive ingest leg", () => {
     expect(kinds).toHaveLength(1);
     expect(kinds[0]?.[2]).toEqual({ obsId: "obs-drive", kind: "ingest" });
     const capCfg = mockClient.call.mock.calls.find(
-      (c) => c[1] === "configure" && typeof c[2] === "object" && (c[2] as Record<string, unknown>).width === FRAME_W
+      (c) =>
+        c[1] === "configure" &&
+        typeof c[2] === "object" &&
+        (c[2] as Record<string, unknown>).width === FRAME_W,
     );
-    expect(capCfg?.[2]).toMatchObject({ width: FRAME_W, height: FRAME_H, fps: 30, port: stub.port, path: "/frames" });
+    expect(capCfg?.[2]).toMatchObject({
+      width: FRAME_W,
+      height: FRAME_H,
+      fps: 30,
+      port: stub.port,
+      path: "/frames",
+    });
     expect(capCfg?.[3]).toBe("observe.obs.obs-drive.capture.configure");
-    expect(mockClient.call.mock.calls.findIndex((c) => c[1] === "captureKind")).toBeLessThan(
-      mockClient.call.mock.calls.findIndex((c) => c === capCfg)
-    );
+    expect(
+      mockClient.call.mock.calls.findIndex((c) => c[1] === "captureKind"),
+    ).toBeLessThan(mockClient.call.mock.calls.findIndex((c) => c === capCfg));
     const pubKinds = calls("publishKind");
     expect(pubKinds).toHaveLength(1);
     expect(pubKinds[0]?.[2]).toEqual({ obsId: "obs-drive", kind: "direct" });
-    expect(mockClient.call.mock.calls.findIndex((c) => c[1] === "publishKind")).toBeLessThan(
-      mockClient.call.mock.calls.findIndex((c) => c === capCfg)
-    );
+    expect(
+      mockClient.call.mock.calls.findIndex((c) => c[1] === "publishKind"),
+    ).toBeLessThan(mockClient.call.mock.calls.findIndex((c) => c === capCfg));
     const actions = mockClient.call.mock.calls.map((c) => `${c[0]}:${c[1]}`);
     expect(actions).toContain("observe:goLive");
     expect(actions).toContain("options:fund");
@@ -600,11 +720,11 @@ describe("remote drive ingest leg", () => {
     const stub = await startIngestStub(() => 200);
     stubAnnounceForwarding(await startDoor(fullProof));
     mockClient.call.mockImplementation(async (_target: string, action: string) =>
-      action === "captureKind" ? { ok: false, error: "denied" } : { ok: true }
+      action === "captureKind" ? { ok: false, error: "denied" } : { ok: true },
     );
     const err = await driveIngest("sess_ingest_kindfail", stub.port).then(
       () => new Error("unexpected success"),
-      (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
     expect(err.message).toMatch(/captureKind failed/);
     expect(err.message).toMatch(/remains registered \(not live\)/);
@@ -618,11 +738,11 @@ describe("remote drive ingest leg", () => {
     const stub = await startIngestStub(() => 200);
     stubAnnounceForwarding(await startDoor(fullProof));
     mockClient.call.mockImplementation(async (_target: string, action: string) =>
-      action === "publishKind" ? { ok: false, error: "denied" } : { ok: true }
+      action === "publishKind" ? { ok: false, error: "denied" } : { ok: true },
     );
     const err = await driveIngest("sess_ingest_pubkindfail", stub.port).then(
       () => new Error("unexpected success"),
-      (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
     expect(err.message).toMatch(/publishKind failed/);
     expect(err.message).toMatch(/remains registered \(not live\)/);
@@ -641,11 +761,11 @@ describe("remote drive ingest leg", () => {
         await startDoor((ws) => {
           ws.send(Buffer.from([0x01, 1, 2, 3, 4]));
           ws.close();
-        })
+        }),
       );
       const err = await driveIngest("sess_ingest_nobytes", stub.port).then(
         () => new Error("unexpected success"),
-        (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+        (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
       );
       expect(err.message).toMatch(/watch proof failed/);
       expect(err.message).toMatch(/remains registered \(not live\)/);
@@ -653,7 +773,7 @@ describe("remote drive ingest leg", () => {
       expect(calls("goLive")).toHaveLength(0);
       expect(calls("stop")).toHaveLength(1);
       expect(stub.bodies.length).toBeGreaterThan(0);
-    }
+    },
   );
 
   it("rejected frame POSTs fail pre-live with posted counts", async () => {
@@ -661,7 +781,7 @@ describe("remote drive ingest leg", () => {
     stubAnnounceForwarding(await startDoor(fullProof));
     const err = await driveIngest("sess_ingest_400", stub.port).then(
       () => new Error("unexpected success"),
-      (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
     expect(err.message).toMatch(/ingest POST failed \(400\)/);
     expect(err.message).toMatch(/remains registered \(not live\)/);
@@ -682,15 +802,19 @@ describe("remote drive ingest leg", () => {
 
   it("mediaOnly without ingest is rejected before any client call", async () => {
     const err = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_mediaonly_bare",
       pairingPassword: "pw",
       settingsPath,
       mediaOnly: true,
-      log: () => {}
+      log: () => {},
     }).then(
       () => new Error("unexpected success"),
-      (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
     expect(err.message).toMatch(/mediaOnly requires the ingest block/);
     expect(mockClient.connect).not.toHaveBeenCalled();
@@ -699,65 +823,87 @@ describe("remote drive ingest leg", () => {
   it("file and ingest producers cannot be combined", async () => {
     const stub = await startIngestStub(() => 200);
     const err = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_both_producers",
       pairingPassword: "pw",
       settingsPath,
       directVideoPath: "vid.mp4",
       ingest: ingestArgs(stub.port),
-      log: () => {}
+      log: () => {},
     }).then(
       () => new Error("unexpected success"),
-      (e: unknown) => (e instanceof Error ? e : new Error(String(e)))
+      (e: unknown) => (e instanceof Error ? e : new Error(String(e))),
     );
     expect(err.message).toMatch(/choose one producer/);
     expect(mockClient.connect).not.toHaveBeenCalled();
   });
 
-  it("frames keep flowing after media-only return until the caller stops the pump", { timeout: 20000 }, async () => {
-    const stub = await startIngestStub(() => 200);
-    stubAnnounceForwarding(await startDoor(fullProof));
-    const result = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
-      sessionId: "sess_ingest_handover",
-      pairingPassword: "pw",
-      settingsPath,
-      ingest: { ...ingestArgs(stub.port), frames: generateCounterFrames(FRAME_W, FRAME_H, 100000) },
-      mediaOnly: true,
-      directTimeoutMs: 5000,
-      log: () => {}
-    });
-    expect(result.marketId).toBe(LIVE_MARKET);
-    const pump = result.pump;
-    expect(pump).toBeDefined();
-    if (pump === undefined) {
-      throw new Error("media-only result must carry the pump");
-    }
-    const atReturn = stub.bodies.length;
-    expect(atReturn).toBeGreaterThan(0);
-    await new Promise((r) => setTimeout(r, 400));
-    expect(stub.bodies.length).toBeGreaterThan(atReturn);
-    expect(pump.exhausted()).toBe(false);
-    expect(calls("stop")).toHaveLength(0);
-    pump.stop();
-    await pump.done;
-  });
+  it(
+    "frames keep flowing after media-only return until the caller stops the pump",
+    { timeout: 20000 },
+    async () => {
+      const stub = await startIngestStub(() => 200);
+      stubAnnounceForwarding(await startDoor(fullProof));
+      const result = await runRemoteDrive({
+        resolveOutcome: "yes",
+        resolveReason: "Explicit local test judgement",
+        resolveEvidenceJson: "[]",
+        mandate: fixtureMandate(LIVE_MARKET),
+        operationId: `0x${"aa".repeat(32)}`,
+        sessionId: "sess_ingest_handover",
+        pairingPassword: "pw",
+        settingsPath,
+        ingest: {
+          ...ingestArgs(stub.port),
+          frames: generateCounterFrames(FRAME_W, FRAME_H, 100000),
+        },
+        mediaOnly: true,
+        directTimeoutMs: 5000,
+        log: () => {},
+      });
+      expect(result.marketId).toBe(LIVE_MARKET);
+      const pump = result.pump;
+      expect(pump).toBeDefined();
+      if (pump === undefined) {
+        throw new Error("media-only result must carry the pump");
+      }
+      const atReturn = stub.bodies.length;
+      expect(atReturn).toBeGreaterThan(0);
+      await new Promise((r) => setTimeout(r, 400));
+      expect(stub.bodies.length).toBeGreaterThan(atReturn);
+      expect(pump.exhausted()).toBe(false);
+      expect(calls("stop")).toHaveLength(0);
+      pump.stop();
+      await pump.done;
+    },
+  );
 
   it("an exhausted frame supply is reported but still passes on viewer bytes", async () => {
     const stub = await startIngestStub(() => 200);
     stubAnnounceForwarding(await startDoor(fullProof));
     const lines: string[] = [];
     const result = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_ingest_exhausted",
       pairingPassword: "pw",
       settingsPath,
-      ingest: { ...ingestArgs(stub.port), frames: generateCounterFrames(FRAME_W, FRAME_H, 3) },
+      ingest: {
+        ...ingestArgs(stub.port),
+        frames: generateCounterFrames(FRAME_W, FRAME_H, 3),
+      },
       mediaOnly: true,
       directTimeoutMs: 5000,
       log: (line: string) => {
         lines.push(line);
-      }
+      },
     });
     expect(result.marketId).toBe(LIVE_MARKET);
     const pumpExhausted = result.pump;
@@ -771,59 +917,75 @@ describe("remote drive ingest leg", () => {
     await result.pump?.done;
   });
 
-  it("a blocked frame iterable cannot stall drive teardown", { timeout: 20000 }, async () => {
-    const stub = await startIngestStub(() => 200);
-    stubAnnounceForwarding(await startDoor(fullProof));
-    async function* hangingFrames(): AsyncGenerator<Uint8Array> {
-      yield* generateCounterFrames(FRAME_W, FRAME_H, 2);
-      await new Promise(() => {});
-    }
-    const result = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
-      sessionId: "sess_ingest_blocked",
-      pairingPassword: "pw",
-      settingsPath,
-      ingest: { ...ingestArgs(stub.port), frames: hangingFrames() },
-      mediaOnly: true,
-      directTimeoutMs: 5000,
-      log: () => {}
-    });
-    expect(result.marketId).toBe(LIVE_MARKET);
-    const pump = result.pump;
-    expect(pump).toBeDefined();
-    if (pump === undefined) {
-      throw new Error("media-only result must carry the pump");
-    }
-    const postedDeadline = Date.now() + 5000;
-    while (pump.posted() < 2 && Date.now() < postedDeadline) {
-      await new Promise((r) => setTimeout(r, 50));
-    }
-    expect(pump.posted()).toBe(2);
-    pump.stop();
-    await Promise.race([
-      pump.done,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("pump teardown hung")), 3000))
-    ]);
-  });
+  it(
+    "a blocked frame iterable cannot stall drive teardown",
+    { timeout: 20000 },
+    async () => {
+      const stub = await startIngestStub(() => 200);
+      stubAnnounceForwarding(await startDoor(fullProof));
+      async function* hangingFrames(): AsyncGenerator<Uint8Array> {
+        yield* generateCounterFrames(FRAME_W, FRAME_H, 2);
+        await new Promise(() => {});
+      }
+      const result = await runRemoteDrive({
+        resolveOutcome: "yes",
+        resolveReason: "Explicit local test judgement",
+        resolveEvidenceJson: "[]",
+        mandate: fixtureMandate(LIVE_MARKET),
+        operationId: `0x${"aa".repeat(32)}`,
+        sessionId: "sess_ingest_blocked",
+        pairingPassword: "pw",
+        settingsPath,
+        ingest: { ...ingestArgs(stub.port), frames: hangingFrames() },
+        mediaOnly: true,
+        directTimeoutMs: 5000,
+        log: () => {},
+      });
+      expect(result.marketId).toBe(LIVE_MARKET);
+      const pump = result.pump;
+      expect(pump).toBeDefined();
+      if (pump === undefined) {
+        throw new Error("media-only result must carry the pump");
+      }
+      const postedDeadline = Date.now() + 5000;
+      while (pump.posted() < 2 && Date.now() < postedDeadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(pump.posted()).toBe(2);
+      pump.stop();
+      await Promise.race([
+        pump.done,
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("pump teardown hung")), 3000),
+        ),
+      ]);
+    },
+  );
 
   it("uncertain ingest goLive hands a live pump to the caller and sends no stop", async () => {
     const stub = await startIngestStub(() => 200);
     stubAnnounceForwarding(await startDoor(fullProof));
     mockClient.call.mockImplementation(async (_target: string, action: string) =>
-      action === "goLive" ? { ok: false, error: "denied: ambiguous relay write" } : { ok: true }
+      action === "goLive"
+        ? { ok: false, error: "denied: ambiguous relay write" }
+        : { ok: true },
     );
     const err: unknown = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_ingest_uncertain",
       pairingPassword: "pw",
       settingsPath,
       ingest: ingestArgs(stub.port),
       mediaOnly: true,
       directTimeoutMs: 5000,
-      log: () => {}
+      log: () => {},
     }).then(
       () => new Error("unexpected success"),
-      (e: unknown) => e
+      (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(IngestPumpError);
     expect((err as Error).message).toMatch(/goLive uncertain/);
@@ -847,17 +1009,21 @@ describe("remote drive ingest leg", () => {
       return { ok: true };
     });
     const err: unknown = await runRemoteDrive({
-      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
+      resolveOutcome: "yes",
+      resolveReason: "Explicit local test judgement",
+      resolveEvidenceJson: "[]",
+      mandate: fixtureMandate(LIVE_MARKET),
+      operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_ingest_fundfail",
       pairingPassword: "pw",
       settingsPath,
       ingest: ingestArgs(stub.port),
       mediaOnly: true,
       directTimeoutMs: 5000,
-      log: () => {}
+      log: () => {},
     }).then(
       () => new Error("unexpected success"),
-      (e: unknown) => e
+      (e: unknown) => e,
     );
     expect(err).toBeInstanceOf(IngestPumpError);
     expect((err as Error).message).toMatch(/drive failed/);
@@ -887,8 +1053,8 @@ describe("ingest board derivation (real Observe derivation)", () => {
           ...base.cells["system:config"],
           readonly: {
             ...(base.cells["system:config"]?.readonly ?? {}),
-            observations: { [OBS]: { title: "t", chain: "eip155:31337", createdAtMs: 1 } }
-          }
+            observations: { [OBS]: { title: "t", chain: "eip155:31337", createdAtMs: 1 } },
+          },
         },
         [`obs:${OBS}:market`]: {
           label: "Market",
@@ -896,15 +1062,15 @@ describe("ingest board derivation (real Observe derivation)", () => {
           status: ["registered", null, 1],
           settings: {},
           readonly: { marketId: MARKET, registrationState: "registered" },
-          functions: []
+          functions: [],
         },
         [`obs:${OBS}:publish`]: {
           label: "Publish",
           catalog: "publish",
           status: ["configured", null, 1],
           settings: { streamId: MARKET, reachability: "lan" },
-          readonly: { kind: publishKind },
-          functions: []
+          readonly: { kind: publishKind, configured: true },
+          functions: [],
         },
         [`obs:${OBS}:capture`]: {
           label: "Capture",
@@ -912,9 +1078,9 @@ describe("ingest board derivation (real Observe derivation)", () => {
           status: ["configured", null, 1],
           settings: { source: "ingest", width: 16, height: 16, fps: 30 },
           readonly: { configured: true, sourceType: "stream", sourceMode: "live" },
-          functions: []
-        }
-      }
+          functions: [],
+        },
+      },
     };
   };
 
@@ -923,8 +1089,8 @@ describe("ingest board derivation (real Observe derivation)", () => {
       runConfigFromBoard({
         runId: "run_derivation",
         board: derivationBoard("direct"),
-        hostBaseUrl: "http://127.0.0.1:9"
-      })
+        hostBaseUrl: "http://127.0.0.1:9",
+      }),
     );
     expect(derived.capture.driverId).toBe("ingest");
     expect(derived.sink.driverId).toBe("direct");
@@ -935,10 +1101,34 @@ describe("ingest board derivation (real Observe derivation)", () => {
       runConfigFromBoard({
         runId: "run_derivation",
         board: derivationBoard("live"),
-        hostBaseUrl: "http://127.0.0.1:9"
-      })
+        hostBaseUrl: "http://127.0.0.1:9",
+      }),
     );
     expect(derived.capture.driverId).toBe("ingest");
     expect(derived.sink.driverId).toBe("live");
+  });
+
+  it("a selected publish kind without completed configuration cannot go live", async () => {
+    const board = derivationBoard("live");
+    const publish = board.cells[`obs:${OBS}:publish`]!;
+    const unconfigured = {
+      ...board,
+      cells: {
+        ...board.cells,
+        [`obs:${OBS}:publish`]: {
+          ...publish,
+          readonly: { ...publish.readonly, configured: false },
+        },
+      },
+    };
+    await expect(
+      Effect.runPromise(
+        runConfigFromBoard({
+          runId: "run_derivation",
+          board: unconfigured,
+          hostBaseUrl: "http://127.0.0.1:9",
+        }),
+      ),
+    ).rejects.toThrow("Configure publish before going live");
   });
 });

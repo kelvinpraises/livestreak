@@ -7,16 +7,12 @@ import { projectStewardControls } from "./panel/project.js";
 import type { StewardControlsView } from "./panel/types.js";
 import { stewardWatchSubjects } from "../model/subject.js";
 import { authorizeBridgeCaller, hasAnyScope } from "./scope.js";
-import type {
-  CapabilityScope,
-  CreateStewardBridgeInput,
-  StewardBridge
-} from "./types.js";
+import type { CapabilityScope, CreateStewardBridgeInput, StewardBridge } from "./types.js";
 import {
   bridgeActionScope,
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
-  bridgeControlsReadScope
+  bridgeControlsReadScope,
 } from "./types.js";
 
 export type {
@@ -25,14 +21,14 @@ export type {
   CapabilityGrant,
   CapabilityScope,
   CreateStewardBridgeInput,
-  StewardBridge
+  StewardBridge,
 } from "./types.js";
 
 export {
   bridgeActionScope,
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
-  bridgeControlsReadScope
+  bridgeControlsReadScope,
 } from "./types.js";
 
 export { authorizeBridgeCaller, requireAnyScope } from "./scope.js";
@@ -61,14 +57,15 @@ export const createStewardBridge = (input: CreateStewardBridgeInput): StewardBri
       if (envelope.scope !== bridgeActionScope) {
         throw new LiveStreakConfigError({
           message: "Steward bridge callAction requires bridge:action scope",
-          metadata: { details: envelope.scope }
+          metadata: { details: envelope.scope },
         });
       }
 
       if (envelope.action === "readMandate") {
         authorizeBridgeCaller(caller, "bridge:action:readMandate");
         const args = envelope.args as { vaultId?: unknown } | undefined;
-        if (typeof args?.vaultId !== "string" || !input.readMandate) throw new Error("Verified mandate read unsupported");
+        if (typeof args?.vaultId !== "string" || !input.readMandate)
+          throw new Error("Verified mandate read unsupported");
         return input.readMandate(args.vaultId);
       }
       // Configure/close are runtime lens verbs: swap the watched subjects, refresh best-effort
@@ -78,7 +75,7 @@ export const createStewardBridge = (input: CreateStewardBridgeInput): StewardBri
         const subjects = stewardWatchSubjects({
           stewardId: stewardSelfId(runtime),
           ...(args.marketId === undefined ? {} : { marketId: args.marketId }),
-          ...(args.vaultId === undefined ? {} : { vaultId: args.vaultId })
+          ...(args.vaultId === undefined ? {} : { vaultId: args.vaultId }),
         });
         try {
           await runtime.configure(subjects);
@@ -110,26 +107,41 @@ export const createStewardBridge = (input: CreateStewardBridgeInput): StewardBri
           if (!authorized) {
             throw new LiveStreakCapabilityError({
               message: `No capability grant authorizes ${granular} or ${consoleScope}`,
-              requiredScope: granular
+              requiredScope: granular,
             });
           }
         }
       }
 
+      if (envelope.action === "resolve") {
+        if (!input.resolve)
+          throw new Error(
+            "Mandate/evidence resolution plumbing is unavailable; no result submitted",
+          );
+        return input.resolve(envelope.args);
+      }
+      if (envelope.action === "recoverResolution") {
+        authorizeBridgeCaller(caller, "bridge:action:recoverResolution");
+        const args = envelope.args as { vaultId?: unknown } | undefined;
+        if (!input.recoverResolution || typeof args?.vaultId !== "string")
+          throw new Error("Resolution recovery requires vaultId");
+        return input.recoverResolution(args.vaultId);
+      }
       return runtime.submitBridgeAction(envelope.action, envelope.args);
     },
 
     subscribeBoard: (caller, listener) => {
       authorizeBridgeCaller(caller, bridgeBoardSubscribeScope);
       return runtime.subscribeBoard(listener);
-    }
+    },
   };
 };
 
 // --- helpers ---
 
 const stewardSelfId = (runtime: CreateStewardBridgeInput["runtime"]): string =>
-  runtime.config.watchedSubjects.find((subject) => subject.kind === "steward")?.id ?? "steward";
+  runtime.config.watchedSubjects.find((subject) => subject.kind === "steward")?.id ??
+  "steward";
 
 const readConfigureArgs = (args: unknown): { marketId?: string; vaultId?: string } => {
   if (typeof args !== "object" || args === null || Array.isArray(args)) {
@@ -142,7 +154,7 @@ const readConfigureArgs = (args: unknown): { marketId?: string; vaultId?: string
       : {}),
     ...(typeof record.vaultId === "string" && record.vaultId.trim().length > 0
       ? { vaultId: record.vaultId.trim() }
-      : {})
+      : {}),
   };
 };
 

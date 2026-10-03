@@ -92,8 +92,11 @@ export const createSuiOptionsReader = (
   const reader = buildReader(ctx);
   reader.readChainTime = async () => {
     const clock = await client.getObject({ id: "0x6", options: { showContent: true } });
-    if (clock.data?.content?.dataType !== "moveObject") throw new Error("Sui clock unavailable");
-    return Math.floor(Number((clock.data.content.fields as { timestamp_ms: string }).timestamp_ms) / 1000);
+    if (clock.data?.content?.dataType !== "moveObject")
+      throw new Error("Sui clock unavailable");
+    return Math.floor(
+      Number((clock.data.content.fields as { timestamp_ms: string }).timestamp_ms) / 1000,
+    );
   };
   reader.readVaultMandate = async (vaultId) => {
     if (!options?.hostUrl) throw new Error("Durable mandate Host unavailable");
@@ -822,6 +825,28 @@ const readLossClaimable = async (
   }
 };
 
+const readLossClaimed = async (
+  ctx: ReaderContext,
+  tokenId: TokenId,
+  vaultId: VaultId,
+  side: OptionsVaultSide,
+): Promise<boolean> => {
+  const tx = new Transaction();
+  tx.moveCall({
+    target: target(ctx.packageId, MODULES.treasury, "is_loss_claimed"),
+    typeArguments: [ctx.coinType],
+    arguments: [
+      tx.object(ctx.ids.treasuryRegistry),
+      tx.pure.u256(tokenId),
+      tx.pure(bcs.vector(bcs.u8()).serialize(hexIdBytes(vaultId)).toBytes()),
+      tx.pure.u8(sideToSuiValue(side)),
+    ],
+  });
+  const value = (await inspect(ctx, tx))[0]?.[0];
+  if (!value) throw new Error("Sui loss claim state unavailable");
+  return readBool(value);
+};
+
 const readPot = async (ctx: ReaderContext, vaultId: VaultId): Promise<bigint> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
@@ -848,14 +873,20 @@ const readPot = async (ctx: ReaderContext, vaultId: VaultId): Promise<bigint> =>
 };
 
 const readCollected = async (ctx: ReaderContext, vaultId: VaultId): Promise<boolean> => {
-  // No direct collected() accessor — derive from vault data.
-  // Vault is "collected" when outcome != pending and pot has been settled.
-  // The claimable fn checks `collected` table internally; we approximate as outcome resolved.
   try {
-    const vault = await readVault(ctx, vaultId);
-    return vault.status === "resolved";
+    const tx = new Transaction();
+    tx.moveCall({
+      target: target(ctx.packageId, MODULES.vault, "is_collected"),
+      typeArguments: [ctx.coinType],
+      arguments: [
+        tx.object(ctx.ids.vaultRegistry),
+        tx.pure(bcs.vector(bcs.u8()).serialize(hexIdBytes(vaultId)).toBytes()),
+      ],
+    });
+    const value = (await inspect(ctx, tx))[0]?.[0];
+    if (!value) throw new Error("Sui collected state unavailable");
+    return readBool(value);
   } catch (error) {
-    if (error instanceof LiveStreakConfigError) throw error;
     throw suiReadFailed("collected", error);
   }
 };
@@ -933,6 +964,23 @@ const readNft = async (
 ): Promise<OptionsNft> => {
   try {
     const laneCount = await readLaneCount(ctx, tokenId);
+    const activeVaults = new Set<string>();
+    for (let index = 0; index < laneCount; index += 1) {
+      const tx = new Transaction();
+      tx.moveCall({
+        target: target(ctx.packageId, MODULES.marketDriver, "lane_vault_at"),
+        arguments: [
+          tx.object(ctx.ids.marketDriverRegistry),
+          tx.pure.u256(tokenId),
+          tx.pure.u64(index),
+        ],
+      });
+      const value = (await inspect(ctx, tx))[0]?.[0];
+      if (!value) throw new Error("Active Sui lane identity unavailable");
+      activeVaults.add(
+        bytesVecToHex(bcs.vector(bcs.u8()).parse(Uint8Array.from(value[0]))),
+      );
+    }
     const clock = await ctx.client.getObject({
       id: SUI_CLOCK_OBJECT_ID,
       options: { showContent: true },
@@ -957,7 +1005,11 @@ const readNft = async (
           laneTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
         ],
       });
-      const laneVals = (await inspect(ctx, laneTx))[0] ?? [];
+      // Position history survives stopFunding, while the driver's lane is removed.
+      // Never borrow a removed dynamic field merely because its position is still claimable.
+      const laneVals = activeVaults.has(vaultId)
+        ? ((await inspect(ctx, laneTx))[0] ?? [])
+        : [];
       const activeSide =
         laneVals[0] !== undefined ? sideFromSuiValue(readU8(laneVals[0])) : "yes";
       const activeRate = laneVals[1] !== undefined ? readU256(laneVals[1]) : 0n;
@@ -1028,7 +1080,19 @@ const readNft = async (
           resolvedAtSec,
           nowSec,
         );
-        lanes.push(enrichSuiLane(lane, claimable, lossClaimable, winningSide, overstream));
+        const lossClaimed =
+          winningSide !== undefined && side !== winningSide
+            ? await readLossClaimed(ctx, tokenId, vaultId, side)
+            : false;
+        const collectPending =
+          winningSide !== undefined && side === winningSide && lane.sharesAccrued > 0n
+            ? !(await readCollected(ctx, vaultId))
+            : false;
+        lanes.push({
+          ...enrichSuiLane(lane, claimable, lossClaimable, winningSide, overstream),
+          lossClaimed,
+          collectPending,
+        });
       }
     }
 

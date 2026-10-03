@@ -4,7 +4,7 @@ import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core"
 import {
   createWalletManager,
   pollUntilUserOperationIncluded,
-  type EvmErc4337WalletConfig
+  type EvmErc4337WalletConfig,
 } from "@livestreak/wallet";
 import { encodeFunctionData, keccak256, stringToHex, type Abi } from "viem";
 import { stewardRegistryAbi } from "@livestreak/contracts/evm/abis";
@@ -14,12 +14,16 @@ import type { StewardContractExecutor } from "../runtime/adapters/action-plan-si
 import {
   severityToContractValue,
   validateStewardEvmAddresses,
-  type StewardChainConfig
+  type StewardChainConfig,
 } from "./types.js";
 
-export const createEvmStewardExecutor = (config: StewardChainConfig): StewardContractExecutor => {
+export const createEvmStewardExecutor = (
+  config: StewardChainConfig,
+): StewardContractExecutor => {
   if (config.walletInit.chain !== "evm") {
-    throw new LiveStreakConfigError({ message: "EVM steward executor requires walletInit.chain === evm" });
+    throw new LiveStreakConfigError({
+      message: "EVM steward executor requires walletInit.chain === evm",
+    });
   }
   const evmConfig = config.walletInit.config as EvmErc4337WalletConfig;
   const addresses = validateStewardEvmAddresses(config.addresses);
@@ -36,7 +40,10 @@ export const createEvmStewardExecutor = (config: StewardChainConfig): StewardCon
 
   return {
     chain: "evm",
-    executeContractCall: async (call: StewardContractCall): Promise<{ readonly txId: string }> => {
+    executeContractCall: async (
+      call: StewardContractCall,
+      onSubmitted?: (txId: string) => Promise<void>,
+    ): Promise<{ readonly txId: string }> => {
       // resolve + triggerHot have on-chain StewardRegistry targets. The remaining kinds
       // (proposePenalty, veto, challenge…) have no settled on-chain target yet — surface
       // them clearly rather than silently no-op.
@@ -49,20 +56,23 @@ export const createEvmStewardExecutor = (config: StewardChainConfig): StewardCon
         sendResult = await account.sendTransaction({
           to: addresses.stewardRegistry as `0x${string}`,
           data,
-          value: 0n
+          value: 0n,
         });
       } catch (error) {
         throw new LiveStreakRuntimeError({
-          message: `Steward ${call.functionName} send failed: ${error instanceof Error ? error.message : String(error)}`
+          message: `Steward ${call.functionName} send failed: ${error instanceof Error ? error.message : String(error)}`,
         });
       }
 
       // The shared poller returns the included receipt and THROWS on revert/missing-success, so a
       // post-poll re-fetch would be dead code (the false branch is unreachable; a missing receipt
       // passed silently). Trust the poller.
-      await pollUntilUserOperationIncluded(readOnly, sendResult.hash, { timeoutMs: 60_000 });
+      await onSubmitted?.(sendResult.hash);
+      await pollUntilUserOperationIncluded(readOnly, sendResult.hash, {
+        timeoutMs: 60_000,
+      });
       return { txId: sendResult.hash };
-    }
+    },
   };
 };
 
@@ -74,7 +84,7 @@ const encodeStewardCall = (call: StewardContractCall): `0x${string}` => {
     return encodeFunctionData({
       abi: stewardRegistryAbi as Abi,
       functionName: "resolveVault",
-      args: [vaultId as `0x${string}`, outcome]
+      args: [vaultId as `0x${string}`, outcome],
     });
   }
 
@@ -84,11 +94,16 @@ const encodeStewardCall = (call: StewardContractCall): `0x${string}` => {
     return encodeFunctionData({
       abi: stewardRegistryAbi as Abi,
       functionName: "triggerHot",
-      args: [vaultId as `0x${string}`, severityToContractValue(severity), 0n, keccak256(stringToHex(reason))]
+      args: [
+        vaultId as `0x${string}`,
+        severityToContractValue(severity),
+        0n,
+        keccak256(stringToHex(reason)),
+      ],
     });
   }
 
   throw new LiveStreakConfigError({
-    message: `Steward EVM executor does not support ${call.contract}.${call.functionName} yet`
+    message: `Steward EVM executor does not support ${call.contract}.${call.functionName} yet`,
   });
 };

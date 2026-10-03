@@ -203,3 +203,17 @@ Viewer and Steward sessions independently call `readMandate` with `{ vaultId }`.
 The drive API accepts explicit `mandate` or `mandateForMarket(marketId)` plus `operationId`; it does not infer judgement from the stream title. The CLI drive accepts `--mandate-file` and `--operation-id` for explicit terms bound to the intended market. For the demonstrated four-role live-media path use [the RTMP integration example](../../examples/rtmp-broadcaster/README.md). Its Viewer/Steward credentials are test orchestration, not production bot permissions.
 
 Support is local EVM with the Flow03 contract/ABI version. Contract/ABI source commits remain held by the user; this SDK packet alone is not a deployable feature release. Legacy EVM and unsupported Solana/Sui bound writes never fall back to question-only vaults. Resolution, payout and public Solana remain later flows.
+
+## Evidence-backed resolution (Flow 05)
+
+The public Steward `resolve` action is guarded; a bare YES/NO no longer resolves a vault. Configure/watch the vault, independently `readMandate`, then call `resolve` with `{ vaultId, outcome: "yes" | "no", reason, evidenceJson }`. `evidenceJson` is an array of `ResolutionEvidence`: `sourceId`, declared `kind`, Unix-second `observedAt` and `retrievedAt`, durable origin `reference`, original UTF-8 `payload`, its `0x` SHA-256 `digest`, and explicit `complete`. No URL is automatically fetched. Numeric payloads contain exactly `{ field, units, value }` with canonical integer-string value, matching the committed evaluation. Tie handling comes from the mandate. Discretionary/mixed rules require a deliberate judgement and cited reason. Evidence provenance is supplied by the Steward; alpha does not cryptographically attest source truth or off-chain authorship.
+
+The gateway verifies committed terms, chain time and actual dispute/outcome, independently evaluates the evidence, publishes a content-addressed durable record and reads it back before signing. Missing, contradictory, disputed or outside-window evidence returns `{ status: "attention", recordDigest, reason }` without a chain write. A successful response contains `{ status: "confirmed", recordDigest, txId }`, after actual outcome readback. Receipts are independently readable through `/content/resolutions/:digest`; discovery requires `chainId` and `vaultId`. Content addressing checks immutable bytes, not signer authenticity; the chain authenticates the resolution credential separately.
+
+A durable gateway journal scoped by deployment, signer and vault records the attempt before signing and the submitted hash before receipt waiting. `recoverResolution` with `{ vaultId }` reads the chain; it never blindly submits again. Lost sends without a trustworthy hash remain unknown until located. A confirmed attempt cannot be replaced with a contradictory outcome. Direct autonomous action-plan execution of `resolve` is blocked by the CLI composition: automation must use the same evidence-backed action. The existing manual monetary authority remains the designated Steward. There is no new void/refund promise or automatic resolution when the video ends.
+
+The legacy full `remote drive` no longer invents YES. Its settlement leg requires
+`--resolve-outcome`, `--resolve-reason`, and `--resolve-evidence-json`; it stops
+before withdrawal unless guarded resolution reports `confirmed`. For evidence
+that becomes available later, use separate public role calls at the declared
+window. Media-only and observe-only drives retain their media scope.

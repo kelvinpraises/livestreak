@@ -3,12 +3,7 @@
 import type { WalletInit } from "@livestreak/schema";
 
 import type { LvstAccount } from "../model/lvst.js";
-import type {
-  MarketId,
-  TokenId,
-  UserAddress,
-  VaultId
-} from "../model/ids.js";
+import type { MarketId, TokenId, UserAddress, VaultId } from "../model/ids.js";
 import type { OptionsBoardState } from "../model/math/accrual.js";
 import type { FunderBoundary } from "../model/math/live-pool.js";
 import type { OptionsMarket } from "../model/market.js";
@@ -18,7 +13,7 @@ import type { OptionsStreamState } from "../model/stream.js";
 import type {
   OptionsVault,
   OptionsVaultShareTotals,
-  OptionsVaultSide
+  OptionsVaultSide,
 } from "../model/vault.js";
 import type { OptionsContractAddresses } from "./evm/addresses.js";
 import type { OptionsSuiObjectIds } from "./sui/addresses.js";
@@ -138,7 +133,12 @@ export type AdvanceInput = {
 
 export interface OptionsReader {
   readChainTime?(): Promise<number>;
-  readVaultMandate?(vaultId: VaultId): Promise<{ readonly terms: import("@livestreak/schema").BoundVaultTerms; readonly mandate: import("@livestreak/schema").VaultMandate }>;
+  readVaultMandate?(
+    vaultId: VaultId,
+  ): Promise<{
+    readonly terms: import("@livestreak/schema").BoundVaultTerms;
+    readonly mandate: import("@livestreak/schema").VaultMandate;
+  }>;
   readMarket(marketId: MarketId): Promise<OptionsMarket>;
   readStreamState(marketId: MarketId): Promise<OptionsStreamState>;
   // Enumerate every registered market off the on-chain registry. The host indexer uses this
@@ -152,8 +152,16 @@ export interface OptionsReader {
   listOwnerTokens(owner: UserAddress): Promise<readonly TokenId[]>;
   readNft(tokenId: TokenId, owner: UserAddress): Promise<OptionsNft>;
   readLvstAccount(user: UserAddress): Promise<LvstAccount>;
-  readClaimable(tokenId: TokenId, vaultId: VaultId, side: OptionsVaultSide): Promise<bigint>;
-  readLossClaimable(tokenId: TokenId, vaultId: VaultId, side: OptionsVaultSide): Promise<bigint>;
+  readClaimable(
+    tokenId: TokenId,
+    vaultId: VaultId,
+    side: OptionsVaultSide,
+  ): Promise<bigint>;
+  readLossClaimable(
+    tokenId: TokenId,
+    vaultId: VaultId,
+    side: OptionsVaultSide,
+  ): Promise<bigint>;
   readPot(vaultId: VaultId): Promise<bigint>;
   readCollected(vaultId: VaultId): Promise<boolean>;
   readAccountVaultIds(tokenId: TokenId): Promise<readonly VaultId[]>;
@@ -164,7 +172,7 @@ export interface OptionsReader {
   readPendingShares(
     vaultId: VaultId,
     side: OptionsVaultSide,
-    tokenId: TokenId
+    tokenId: TokenId,
   ): Promise<bigint>;
   readUsdcAddress(): Promise<`0x${string}`>;
   readUsdcBalance(owner: UserAddress): Promise<bigint>;
@@ -176,7 +184,10 @@ export interface OptionsReader {
   // (Vault.getBoundaries). Each entry's rate is still summed into board.sideRate, so the live-pool
   // projection caps exactly at what was funded — for every funder (seed + all NFTs), not just the
   // connected user's reconstructed lanes.
-  readBoundaries(vaultId: VaultId, side: OptionsVaultSide): Promise<readonly FunderBoundary[]>;
+  readBoundaries(
+    vaultId: VaultId,
+    side: OptionsVaultSide,
+  ): Promise<readonly FunderBoundary[]>;
   readProtocolSummary?(): Promise<OptionsProtocolSummary>;
 }
 
@@ -212,9 +223,13 @@ export type ContractChain = "evm" | "sui" | "solana";
 export type OptionsChainConfig = {
   readonly walletInit: WalletInit;
   readonly seed: string | Uint8Array;
-  readonly addresses: OptionsContractAddresses | OptionsSuiObjectIds | OptionsSolanaAddresses;
+  readonly addresses:
+    | OptionsContractAddresses
+    | OptionsSuiObjectIds
+    | OptionsSolanaAddresses;
   readonly hostUrl?: string;
   /** Persist the submission identity before receipt polling; callers can recover after reload. */
+  readonly onTransactionSubmitting?: (action?: string) => void;
   readonly onTransactionSubmitted?: (txId: string, action?: string) => void;
   readonly readRpcUrl?: string;
   readonly includeProtocolSummary?: boolean;

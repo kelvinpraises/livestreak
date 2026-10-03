@@ -8,13 +8,13 @@ export type {
   BridgeCaller,
   CallActionEnvelope,
   CapabilityGrant,
-  CapabilityScope
+  CapabilityScope,
 } from "@livestreak/schema";
 export {
   bridgeActionScope,
   bridgeBoardReadScope,
   bridgeBoardSubscribeScope,
-  bridgeControlsReadScope
+  bridgeControlsReadScope,
 } from "@livestreak/schema";
 
 /** Configurator scope — operator supplies watched subjects before the action tree becomes visible. */
@@ -22,7 +22,18 @@ export const stewardConfigScope = "steward:config" as const;
 export const stewardConfigCloseScope = "steward:config:close" as const;
 
 export interface CreateStewardBridgeInput {
-  readonly readMandate?: (vaultId: string) => Promise<import("@livestreak/schema").VerifiedVaultMandate>;
+  readonly readMandate?: (
+    vaultId: string,
+  ) => Promise<import("@livestreak/schema").VerifiedVaultMandate>;
+  readonly resolve?: (
+    args: unknown,
+  ) => Promise<
+    | import("../runtime/resolution/controller.js").ResolutionAttempt
+    | { status: "attention"; recordDigest: string; reason: string }
+  >;
+  readonly recoverResolution?: (
+    vaultId: string,
+  ) => Promise<import("../runtime/resolution/controller.js").ResolutionAttempt>;
   readonly runtime: import("../runtime/runtime.js").StewardRuntime;
 }
 
@@ -32,22 +43,26 @@ export interface StewardActionAck {
 }
 
 export type StewardActionResult =
+  | import("../runtime/resolution/controller.js").ResolutionAttempt
+  | { status: "attention"; recordDigest: string; reason: string }
   | import("../model/action-plan.js").StewardActionPlan
   | StewardActionAck
   | import("@livestreak/schema").VerifiedVaultMandate;
 
 export interface StewardBridge {
   readonly runtime: import("../runtime/runtime.js").StewardRuntime;
-  readonly readBoard: (caller: BridgeCaller) => Promise<import("../runtime/board.js").StewardBoard>;
+  readonly readBoard: (
+    caller: BridgeCaller,
+  ) => Promise<import("../runtime/board.js").StewardBoard>;
   readonly readControls: (
-    caller: BridgeCaller
+    caller: BridgeCaller,
   ) => Promise<import("./panel/types.js").StewardControlsView>;
   readonly callAction: (
     caller: BridgeCaller,
-    envelope: CallActionEnvelope
+    envelope: CallActionEnvelope,
   ) => Promise<StewardActionResult>;
   readonly subscribeBoard: (
     caller: BridgeCaller,
-    listener: (board: import("../runtime/board.js").StewardBoard) => void
+    listener: (board: import("../runtime/board.js").StewardBoard) => void,
   ) => () => void;
 }

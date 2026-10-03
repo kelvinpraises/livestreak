@@ -11,6 +11,7 @@ const ports = vi.hoisted(() => ({
   send: vi.fn(),
   object: vi.fn(),
   owned: vi.fn(),
+  receipt: vi.fn(),
 }));
 vi.mock("@livestreak/wallet", async (original) => ({
   ...(await original<typeof import("@livestreak/wallet")>()),
@@ -19,6 +20,7 @@ vi.mock("@livestreak/wallet", async (original) => ({
     getObject: ports.object,
     getOwnedObjects: ports.owned,
     getChainIdentifier: async () => "testchain",
+    waitForTransaction: ports.receipt,
   }),
   createWalletManager: () => ({
     getAccount: async () => ({
@@ -62,6 +64,9 @@ let commitment = "";
 let closed = false;
 let zeroLanes = false;
 let abort = false;
+let resolved = false;
+let paid = false;
+let collected = false;
 const Vault = bcs.struct("VaultData", {
   id: bcs.vector(bcs.u8()),
   market_id: bcs.vector(bcs.u8()),
@@ -74,9 +79,15 @@ const Vault = bcs.struct("VaultData", {
 });
 beforeEach(async () => {
   vi.clearAllMocks();
+  ports.receipt
+    .mockReset()
+    .mockResolvedValue({ effects: { status: { status: "success" } } });
   closed = false;
   zeroLanes = false;
   abort = false;
+  resolved = false;
+  paid = false;
+  collected = false;
   mandate = { ...fixtureMandate(), chainId: "sui:testchain" };
   commitment = await mandateCommitment(canonicalMandateBytes(mandate));
   ports.object.mockResolvedValue({
@@ -98,8 +109,8 @@ beforeEach(async () => {
             market_id: bytes(mandate.marketId),
             question: Array.from(new TextEncoder().encode(mandate.question)),
             creator: bytes(id("7")),
-            status: 0,
-            outcome: 0,
+            status: resolved ? 3 : 0,
+            outcome: resolved ? 1 : 0,
             resolved_at: 0,
             exists: true,
           }),
@@ -123,7 +134,11 @@ beforeEach(async () => {
       case "get_account_vault_ids":
         values = [ret(bcs.vector(bcs.vector(bcs.u8())), [bytes(id("6"))])];
         break;
+      case "lane_vault_at":
+        values = [vec(bytes(id("6")))];
+        break;
       case "lane_at":
+        if (zeroLanes) throw new Error("Removed lane must not be borrowed");
         values = [ret(bcs.u8(), 0), u256(zeroLanes ? 0n : 10n)];
         break;
       case "get_position":
@@ -141,6 +156,14 @@ beforeEach(async () => {
         values = [u256(6n * WAD)];
         break;
       case "claimable":
+        values = [u256(0n)];
+        break;
+      case "is_collected":
+        values = [ret(bcs.bool(), collected)];
+        break;
+      case "is_loss_claimed":
+        values = [ret(bcs.bool(), paid)];
+        break;
       case "loss_claimable":
         values = [u256(0n)];
         break;
@@ -234,6 +257,19 @@ describe("Sui mandate and retained positions", () => {
     expect(nft.marketId).toBe(mandate.marketId);
     expect(nft.balance).toBe(1000n);
   });
+  it("winner collection and paid loss are read from real contract flags", async () => {
+    resolved = true;
+    zeroLanes = true;
+    const reader = createSuiOptionsReader(ids, "http://rpc.invalid");
+    const before = await reader.readNft(asTokenId(1n), asUserAddress(id("7")));
+    expect(before.lanes.find((l) => l.side === "yes")?.collectPending).toBe(true);
+    expect(before.lanes.find((l) => l.side === "no")?.lossClaimed).toBe(false);
+    collected = true;
+    paid = true;
+    const after = await reader.readNft(asTokenId(1n), asUserAddress(id("7")));
+    expect(after.lanes.find((l) => l.side === "yes")?.collectPending).toBe(false);
+    expect(after.lanes.find((l) => l.side === "no")?.lossClaimed).toBe(true);
+  });
   it("active NFT balance drains from the stored update instead of showing a hardcoded zero", async () => {
     const nft = await createSuiOptionsReader(ids, "http://rpc.invalid").readNft(
       asTokenId(1n),
@@ -271,6 +307,36 @@ describe("Sui mandate and retained positions", () => {
     ).resolves.toBe("cleanup");
     expect(fetcher).not.toHaveBeenCalled();
     expect(ports.send).toHaveBeenCalledTimes(1);
+  });
+  it("saves the submitted hash before confirmation and rejects failed execution effects", async () => {
+    const events: string[] = [];
+    ports.owned.mockResolvedValue({
+      data: [
+        {
+          data: {
+            objectId: id("8"),
+            content: { dataType: "moveObject", fields: { token_id: "1" } },
+          },
+        },
+      ],
+    });
+    ports.send.mockResolvedValue({ hash: "actual-hash" });
+    ports.receipt.mockImplementation(async () => {
+      events.push("receipt");
+      return { effects: { status: { status: "failure", error: "MoveAbort" } } };
+    });
+    const writer = createSuiOptionsWriter({
+      ...config,
+      onTransactionSubmitted: (hash) => events.push(hash),
+    });
+    await expect(
+      writer.setLanes({ tokenId: asTokenId(1n), lanes: [], addDeposit: 0n }),
+    ).rejects.toThrow("MoveAbort");
+    expect(events).toEqual(["actual-hash", "receipt"]);
+    expect(ports.receipt).toHaveBeenCalledWith({
+      digest: "actual-hash",
+      options: { showEffects: true },
+    });
   });
   it("Move read aborts propagate instead of silently hiding a position", async () => {
     abort = true;

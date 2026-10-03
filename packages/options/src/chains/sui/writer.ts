@@ -122,10 +122,11 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
   };
 
   const send = async (tx: Transaction): Promise<string> => {
-    const { account } = await getSui();
+    const { account, client } = await getSui();
     tx.setGasBudgetIfNotSet(100_000_000);
     let result: { hash: string };
     try {
+      config.onTransactionSubmitting?.();
       result = await account.sendTransaction(tx);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -134,6 +135,14 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       });
     }
     config.onTransactionSubmitted?.(result.hash);
+    const receipt = await client.waitForTransaction({
+      digest: result.hash,
+      options: { showEffects: true },
+    });
+    if (receipt.effects?.status.status !== "success")
+      throw new LiveStreakRuntimeError({
+        message: `Sui confirmation failed: ${receipt.effects?.status.error ?? "no successful receipt"}`,
+      });
     return result.hash;
   };
 

@@ -1,4 +1,11 @@
-import { createOptionsChain, optionsChainConfigFromPackageInit, asVaultId } from "@livestreak/options";
+import { createResolutionClient } from "@livestreak/host";
+import { createResolutionController } from "@livestreak/steward";
+import { createStewardResolutionStore } from "./steward-resolution-store.js";
+import {
+  createOptionsChain,
+  optionsChainConfigFromPackageInit,
+  asVaultId,
+} from "@livestreak/options";
 import {
   bridgeActionScope,
   createActionPlanSink,
@@ -18,7 +25,7 @@ import {
   type ObserveBoardReader,
   type StewardActionPlanSink,
   type StewardHostActionExecutor,
-  type StewardMemoryClient
+  type StewardMemoryClient,
 } from "@livestreak/steward";
 import type { FunctionDescriptor, PackageRuntimeInit } from "@livestreak/schema";
 import type { ConsoleEdge } from "../gateway/console/edge.js";
@@ -34,7 +41,7 @@ const dropHostAction = (kind: string): void => {
   if (warnedHostKinds.has(kind)) return;
   warnedHostKinds.add(kind);
   console.error(
-    `[gateway] steward host action "${kind}" dropped — forum client unwired in the CLI edge`
+    `[gateway] steward host action "${kind}" dropped — forum client unwired in the CLI edge`,
   );
 };
 
@@ -53,22 +60,38 @@ export interface CreateStewardConsoleEdgeInput {
   readonly hostActionExecutor?: StewardHostActionExecutor;
 }
 
-export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): ConsoleEdge => {
+export const createStewardConsoleEdge = (
+  input: CreateStewardConsoleEdgeInput,
+): ConsoleEdge => {
   const stewardId = input.packageInit.wallet.operatorAddress ?? "remote-console";
   const caller = localOperatorCaller();
 
+  const contractExecutor = input.actionPlanSink
+    ? undefined
+    : createStewardContractExecutor(stewardChainConfigFromPackageInit(input.packageInit));
   const actionPlanSink: StewardActionPlanSink =
     input.actionPlanSink ??
     createActionPlanSink({
-      contract: createStewardContractExecutor(stewardChainConfigFromPackageInit(input.packageInit)),
-      host: input.hostActionExecutor ?? { runHostAction: (action) => dropHostAction(action.kind) }
+      contract: {
+        ...contractExecutor!,
+        executeContractCall: async (call) => {
+          if (call.functionName === "resolve")
+            throw new Error(
+              "Resolution requires mandate, evidence and durable receipt; use guarded resolve action",
+            );
+          return contractExecutor!.executeContractCall(call);
+        },
+      },
+      host: input.hostActionExecutor ?? {
+        runHostAction: (action) => dropHostAction(action.kind),
+      },
     });
 
   const runtime = createStewardRuntime({
     config: createStewardRuntimeBootstrap(input.packageInit, {
       runtimeId: "cli-steward-remote",
       stewardId,
-      watchedSubjects: [{ kind: "steward", id: stewardId }]
+      watchedSubjects: [{ kind: "steward", id: stewardId }],
     }).runtimeConfig,
     contractFactSource:
       input.contractVaultReader === undefined
@@ -84,15 +107,93 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
         ? { readFacts: noopFacts }
         : createMemoryFactSource(input.memoryClient),
     memorySink:
-      input.memoryClient === undefined ? noopMemorySink : createMemorySink(input.memoryClient),
-    actionPlanSink
+      input.memoryClient === undefined
+        ? noopMemorySink
+        : createMemorySink(input.memoryClient),
+    actionPlanSink,
   });
   const readMandate = async (vaultId: string) => {
-    const reader = createOptionsChain(optionsChainConfigFromPackageInit(input.packageInit)).reader;
-    if (!reader.readVaultMandate) throw new Error("Verified mandate read unsupported on this chain");
+    const reader = createOptionsChain(
+      optionsChainConfigFromPackageInit(input.packageInit),
+    ).reader;
+    if (!reader.readVaultMandate)
+      throw new Error("Verified mandate read unsupported on this chain");
     return reader.readVaultMandate(asVaultId(vaultId));
   };
-  const bridge = createStewardBridge({ runtime, readMandate });
+  let reader: ReturnType<typeof createOptionsChain>["reader"] | undefined;
+  const getReader = () =>
+    (reader ??= createOptionsChain(
+      optionsChainConfigFromPackageInit(input.packageInit),
+    ).reader);
+  let controller: ReturnType<typeof createResolutionController> | undefined;
+  const getController = async () => {
+    if (controller) return controller;
+    if (!contractExecutor) throw new Error("Live resolution executor unavailable");
+    const r = getReader();
+    if (!r.readChainTime) throw new Error("Chain clock unavailable for resolution");
+    const client = createResolutionClient(input.packageInit.hostUrl);
+    // Full chain identity comes from the chain-bound mandate on first submission, not its family.
+    const state = createStewardResolutionStore(
+      JSON.stringify(input.packageInit.contracts),
+      stewardId,
+    );
+    controller = createResolutionController({
+      stewardId,
+      readMandate,
+      load: state.load,
+      save: state.save,
+      publish: client.publish,
+      readState: async (vaultId) => {
+        const [vault, chainTime] = await Promise.all([
+          r.readVault(asVaultId(vaultId)),
+          r.readChainTime!(),
+        ]);
+        return { outcome: vault.outcome, disputed: vault.status === "disputed", chainTime };
+      },
+      execute: async (vaultId, outcome, submitted) =>
+        (
+          await contractExecutor.executeContractCall(
+            {
+              contract: "vault",
+              functionName: "resolve",
+              args: [vaultId, outcome === "yes" ? 1 : 2],
+            },
+            submitted,
+          )
+        ).txId,
+    });
+    return controller;
+  };
+  const bridge = createStewardBridge({
+    runtime,
+    readMandate,
+    resolve: async (args) => {
+      if (!args || typeof args !== "object")
+        throw new Error("Resolution arguments required");
+      const a = args as {
+        vaultId?: unknown;
+        subjectId?: unknown;
+        outcome?: unknown;
+        reason?: unknown;
+        evidenceJson?: unknown;
+      };
+      const vaultId =
+        typeof a.vaultId === "string"
+          ? a.vaultId
+          : typeof a.subjectId === "string"
+            ? a.subjectId
+            : undefined;
+      if (!vaultId || typeof a.evidenceJson !== "string" || a.evidenceJson.length > 65536)
+        throw new Error("Resolution requires vaultId and bounded evidenceJson");
+      return (await getController()).submit({
+        vaultId,
+        outcome: a.outcome,
+        reason: a.reason,
+        evidence: JSON.parse(a.evidenceJson),
+      });
+    },
+    recoverResolution: async (vaultId) => (await getController()).recover(vaultId),
+  });
 
   return {
     package: "steward",
@@ -104,15 +205,18 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
       const result = await bridge.callAction(remoteCaller, {
         scope: bridgeActionScope,
         action: envelope.action,
-        args: envelope.args
+        args: envelope.args,
       });
-      if (envelope.action === "readMandate") return result as import("@livestreak/schema").VerifiedVaultMandate;
+      if (envelope.action === "readMandate")
+        return result as import("@livestreak/schema").VerifiedVaultMandate;
+      if ("recordDigest" in result)
+        return { ...result, txId: "txId" in result ? result.txId : undefined };
       return { txId: pickTxId(result) };
     },
 
     subscribeBoard: (listener) => bridge.subscribeBoard(caller, listener),
 
-    readBoard: async () => bridge.readBoard(caller)
+    readBoard: async () => bridge.readBoard(caller),
   };
 };
 

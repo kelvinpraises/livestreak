@@ -530,3 +530,79 @@ body {
     min-height: 0;
   }
 }
+
+/* Viewer funding: calm, readable controls inside the existing dark broadcast surface. */
+.funding-composer { display: grid; gap: 12px; padding-block: 2px 14px; font-family: var(--font-sans); font-size: 13px; color: var(--color-text); }
+.funding-composer button, .funding-composer input { font: inherit; }
+.funding-composer button { cursor: pointer; transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, opacity 150ms ease-out, transform 150ms ease-out; }
+.funding-composer button:disabled { cursor: default; opacity: .45; }
+.funding-composer :is(button, input, summary, a):focus-visible { outline: 2px solid var(--color-blue); outline-offset: 3px; }
+.funding-composer button:not(:disabled):active { transform: scale(.96); }
+.funding-rules { border: 1px solid var(--color-border-mid); border-radius: 10px; background: rgba(0,200,255,.035); }
+.funding-rules summary { min-height: 44px; display: flex; align-items: center; gap: 8px; padding: 10px 12px; color: var(--color-blue); cursor: pointer; font-size: 12px; line-height: 1.45; }
+.funding-rules summary::after { content: '+'; margin-left: auto; font-size: 16px; }
+.funding-rules[open] summary::after { content: '−'; }
+.funding-rules-body { padding: 0 12px 6px; color: rgba(255,255,255,.7); line-height: 1.65; overflow-wrap: anywhere; }
+.funding-rules-body p { margin: 6px 0; text-wrap: pretty; }
+.funding-rules-body b { color: var(--color-text); }
+.funding-digest { margin: 0; padding: 0 12px 12px; font-size: 9px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.funding-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.funding-side { display: grid; gap: 5px; align-content: start; min-height: 64px; padding: 12px; text-align: left; border: 1px solid var(--color-border-mid); border-radius: 10px; background: rgba(255,255,255,.025); }
+.funding-side span:first-child { font-family: var(--font-mono); font-size: 13px; font-weight: 700; letter-spacing: .05em; }
+.funding-side span:last-child { font-size: 12px; color: rgba(255,255,255,.55); line-height: 1.4; text-wrap: pretty; }
+.funding-side-yes { color: var(--color-green); }
+.funding-side-no { color: var(--color-pink); }
+.funding-side-yes[aria-pressed=true] { border-color: rgba(0,255,135,.65); background: rgba(0,255,135,.1); }
+.funding-side-no[aria-pressed=true] { border-color: rgba(255,45,120,.65); background: rgba(255,45,120,.1); }
+.funding-side[aria-pressed=true] span:last-child { color: rgba(255,255,255,.8); }
+.funding-rate-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.funding-rate-row label { display: grid; gap: 2px; font-weight: 500; }
+.funding-rate-row label span { color: var(--color-text-muted); font-size: 10px; }
+.funding-rate-row input { width: 100px; min-height: 44px; border: 1px solid var(--color-border-bright); border-radius: 8px; background: rgba(255,255,255,.04); color: var(--color-text); padding: 9px 12px; text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.funding-presets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.funding-presets button { min-height: 44px; padding: 6px 3px; border: 1px solid var(--color-border-mid); border-radius: 7px; background: transparent; color: rgba(255,255,255,.55); font-size: 10px; font-variant-numeric: tabular-nums; }
+.funding-presets button[aria-pressed=true] { border-color: var(--color-border-bright); background: rgba(255,255,255,.07); color: var(--color-text); }
+.funding-quote { padding: 12px; border: 1px solid var(--color-border); border-radius: 10px; background: rgba(255,255,255,.02); }
+.funding-quote > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.funding-quote strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.funding-quote p { color: var(--color-text-muted); font-size: 11px; line-height: 1.55; margin: 5px 0 0; text-wrap: pretty; }
+.funding-wallet-balance { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--color-border); font-size: 10px; color: var(--color-text-muted); }
+.funding-notice { padding: 10px 12px; border-radius: 8px; background: rgba(255,122,0,.07); color: #ffb574; font-size: 11px; line-height: 1.6; }
+.funding-notice small { display: block; color: var(--color-text-muted); margin-top: 3px; }
+.funding-text-button { min-height: 40px; padding: 4px 0; border: 0; background: none; color: var(--color-blue); text-decoration: underline; text-underline-offset: 3px; }
+.funding-submit { min-height: 46px; display: flex; justify-content: center; align-items: center; gap: 9px; padding: 12px; border: 1px solid rgba(0,255,135,.3); border-radius: 10px; background: var(--color-green); color: #07070f; font-weight: 600 !important; box-shadow: 0 2px 8px rgba(0,0,0,.16); }
+.funding-submit[data-side=no] { background: var(--color-pink); border-color: rgba(255,45,120,.35); }
+.funding-progress { display: flex; align-items: flex-start; gap: 9px; min-height: 62px; padding: 11px 12px; border: 1px solid var(--color-border-mid); border-radius: 10px; color: var(--color-blue); }
+.funding-progress > svg { flex-shrink: 0; margin-top: 1px; }
+.funding-progress strong { font-size: 12px; font-weight: 500; }
+.funding-progress p { font-size: 11px; line-height: 1.5; margin: 3px 0 0; color: rgba(255,255,255,.6); }
+.funding-progress-confirmed { color: var(--color-green); border-color: rgba(0,255,135,.18); background: rgba(0,255,135,.03); }
+.funding-progress-unknown { color: #ffb574; }
+.funding-progress-failed, .funding-error { color: #ff8caa; }
+.funding-tx { display: block; font-size: 9px; color: var(--color-text-muted); margin-top: 5px; }
+.funding-position { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--color-border-mid); font-size: 11px; }
+.funding-position strong { color: var(--color-green); font-size: 11px; font-variant-numeric: tabular-nums; }
+.funding-caption { margin: 0; color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
+.funding-error { font-size: 11px; line-height: 1.55; margin: 0; overflow-wrap: anywhere; }
+.funding-spinner { animation: funding-spin .8s linear infinite; }
+@keyframes funding-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .funding-composer button { transition: none; } .funding-composer button:not(:disabled):active { transform: none; } .funding-spinner { animation: none; } }
+
+@media (max-width: 600px) {
+  .stream-nav { padding-inline: 12px !important; }
+  .stream-nav > div:first-child > :not(a) { display: none !important; }
+  .stream-nav > div:last-child { gap: 6px !important; }
+  .stream-summary { gap: 10px !important; padding-inline: 12px !important; }
+  .stream-summary > div:last-child > span { display: none; }
+  .stream-video-pane { height: 30vh; min-height: 180px; }
+  .funding-side { padding: 10px; }
+}
+@media (max-width: 600px) {
+  .stream-nav [data-testid="wallet-menu"] { padding-inline: 8px !important; gap: 5px !important; }
+  .stream-nav [data-testid="wallet-menu"] > span { font-size: 11px !important; }
+}
+@media (max-width: 370px) {
+  .stream-nav [data-testid="wallet-menu"] > .mono { display: none; }
+}
+
+[data-testid^="open-question-"]:focus-visible { outline: 2px solid var(--color-blue); outline-offset: 3px; }

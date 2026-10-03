@@ -55,7 +55,6 @@ export function NikoNikoCard({ vault, onClickCard }: Props) {
     setEnterDelay(Math.random() * 0.4)                  // random fade-in stagger
     setReady(true)
     // Mount-once by design (must NOT re-init on count changes). Stable per vaultId key.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Drift loop — depends only on `ready`, so a changing vault count never tears it down. Original motion:
@@ -98,6 +97,13 @@ export function NikoNikoCard({ vault, onClickCard }: Props) {
       animate={{ opacity: ready ? 1 : 0, filter: ready ? 'blur(0px)' : 'blur(4px)' }}
       exit={{ opacity: 0, filter: 'blur(4px)' }}
       transition={{ duration: 0.25, delay: enterDelay }}
+      role={onClickCard ? 'button' : undefined}
+      tabIndex={onClickCard ? 0 : undefined}
+      aria-label={`Open question: ${vault.question}`}
+      data-testid={`open-question-${vault.vaultId}`}
+      onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClickCard?.(vault.vaultId) } }}
+      onFocus={() => { hoveredRef.current = true; setHovered(true) }}
+      onBlur={() => { hoveredRef.current = false; setHovered(false) }}
       onClick={() => onClickCard?.(vault.vaultId)}
       onMouseEnter={() => { hoveredRef.current = true; setHovered(true); if (textRef.current) setIsTruncated(textRef.current.scrollWidth > textRef.current.clientWidth) }}
       onMouseLeave={() => { hoveredRef.current = false; setHovered(false) }}

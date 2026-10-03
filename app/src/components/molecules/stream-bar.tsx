@@ -16,7 +16,7 @@ export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerS
   useEffect(() => { setMinute(frame.min) }, [frame.min])
 
   return (
-    <header className="scan-line" style={{
+    <header className="scan-line stream-summary" style={{
       background: 'linear-gradient(90deg, rgba(0,255,135,0.04) 0%, rgba(13,13,28,0.98) 20%, rgba(13,13,28,0.98) 80%, rgba(0,200,255,0.04) 100%)',
       borderBottom: '1px solid rgba(255,255,255,0.07)',
       padding: '0 20px',
@@ -36,8 +36,8 @@ export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerS
       <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.08)' }} />
 
       {/* Stream title + elapsed */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1 }}>
-        <span className="display" style={{ fontSize: 15, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em' }}>{streamTitle}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
+        <span className="display" style={{ fontSize: 15, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em' }}>{streamTitle}</span>
         {preferFixture && <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.08)' }} />}
         {preferFixture && <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00ff87' }}>{minute}'</span>

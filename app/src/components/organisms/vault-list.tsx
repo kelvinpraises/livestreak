@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { usePreferFixture } from '#/hooks/use-fixture-mode'
 import { useStreamTab } from '#/hooks/use-board-ui-state'
 import { FocusedVault } from '#/components/organisms/focused-vault'
 import { VaultCard } from '#/components/molecules/vault-card'
@@ -19,15 +20,17 @@ interface Props {
   selectedVaultId: string | null
   streamId: string
   onDismissVault: () => void
-  onStream?: (vaultId: string, side: 'yes' | 'no', rate: number, durationMinutes?: number) => void
+  onStream?: (vaultId: string, side: 'yes' | 'no', rate: number, durationMinutes?: number) => void | Promise<unknown>
 }
 
 export function VaultList({ vaults, events, positions, selectedVaultId, streamId, onDismissVault, onStream }: Props) {
   // A1/S5: tab persists across the board's periodic refresh (was local useState → reset to STREAMS).
-  const [tab, setTab] = useStreamTab(streamId, 'mine')
+  const [tab, setTab] = useStreamTab(streamId, 'vaults')
   const selectedVault = selectedVaultId ? vaults.find(v => v.vaultId === selectedVaultId) : null
 
   const options = useOptionsContext()
+  const fixture = usePreferFixture()
+  const loading = !fixture && options.enabled && (!options.board || options.isLoading)
   const mintFn = (isOptionsModeEnabled() && options.isConnected)
     ? options.findFunction('mint', fn => fn.target?.kind === 'market')
     : undefined
@@ -40,11 +43,11 @@ export function VaultList({ vaults, events, positions, selectedVaultId, streamId
   const activeVaults = vaults.filter(v => v.status !== 'resolved')
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden' }}>
       {/* Focused vault from NikoNiko click */}
       <AnimatePresence>
         {selectedVault && (
-          <FocusedVault key="focused-vault" vault={selectedVault} onDismiss={onDismissVault} onStream={onStream} onGoToMint={() => setTab('mine')} />
+          <FocusedVault key={selectedVault.vaultId} vault={selectedVault} onDismiss={onDismissVault} onStream={onStream} onGoToMint={() => setTab('mine')} />
         )}
       </AnimatePresence>
 
@@ -58,7 +61,7 @@ export function VaultList({ vaults, events, positions, selectedVaultId, streamId
       {/* Tab content — S6: every panel stays MOUNTED and is toggled by visibility. Switching tabs is
           instant (no unmount/remount), so the VAULTS panel never flashes a ~1.5s blank while its cards
           re-mount and replay their entry animations. */}
-      <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
         <TabPanel active={tab === 'mine'}>
           {mintFn && !mintFn.disabled && mintFn.target?.marketId && (
             <div style={{ padding: '14px 10px' }}>
@@ -80,12 +83,12 @@ export function VaultList({ vaults, events, positions, selectedVaultId, streamId
           {activeVaults.length > 0 ? (
             <div style={{ padding: '14px 10px 4px' }}>
               {activeVaults.map((v, i) => (
-                <VaultCard key={v.vaultId} vault={v} index={i} onStream={onStream} onGoToMint={() => setTab('mine')} />
+                <VaultCard key={v.vaultId} vault={v} fundingFocused={selectedVaultId === v.vaultId} index={i} onStream={onStream} onGoToMint={() => setTab('mine')} />
               ))}
             </div>
           ) : (
             <div style={{ padding: '40px 20px', textAlign: 'center', color: 'rgba(255,255,255,0.3)', fontSize: 12 }}>
-              No active vaults in this market yet.
+              {loading ? 'Loading market questions…' : 'No active vaults in this market yet.'}
             </div>
           )}
         </TabPanel>

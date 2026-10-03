@@ -125,3 +125,28 @@ describe("evm positional-array tuple decode", () => {
     expect(snapshot.vaults[0]?.pools.yes).toBe(5_000_000n);
   });
 });
+
+it('shows a funded lane as stopped at accepted chain time even when the laptop clock is behind', async () => {
+  const owner = `0x${'a'.repeat(40)}` as never
+  const call: EvmContractCall = async (address, abi, fn, args) => {
+    switch (fn) {
+      case 'marketIdOf': return MARKET
+      case 'laneCount': return 1n
+      case 'laneAt': return [VAULT_OK, 0, 16_667n]
+      case 'getAccountVaultIds': return [VAULT_OK]
+      case 'getPosition': return args?.[1] === 0 ? [16_667n, 0n, 0n, 2_000_000_000, false] : [0n, 0n, 0n, 0, false]
+      case 'claimable': case 'lossClaimable': return 0n
+      case 'mintRate': return 1n
+      case 'ownerOf': return owner
+      case 'getApproved': return `0x${'0'.repeat(40)}`
+      case 'USDC': case 'DRIPS': return `0x${'8'.repeat(40)}`
+      case 'streamsState': return [B32(0), B32(0), 1_900_000_000, 10_000_000n, 2_000_000_000]
+      default: return makeCall([VAULT_OK])(address, abi, fn, args)
+    }
+  }
+  const reader = createEvmOptionsReaderFromCall(ADDRESSES, call, {readChainTime: async () => 2_100_000_000})
+  const nft = await reader.readNft(1n as never, owner)
+  expect(nft.lanes[0]?.rate).toBe(0n)
+  expect(nft.lanes[0]?.committedRate).toBe(16_667n)
+  expect(nft.lanes[0]?.depleted).toBe(true)
+})

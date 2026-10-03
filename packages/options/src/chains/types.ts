@@ -137,6 +137,7 @@ export type AdvanceInput = {
 };
 
 export interface OptionsReader {
+  readChainTime?(): Promise<number>;
   readVaultMandate?(vaultId: VaultId): Promise<{ readonly terms: import("@livestreak/schema").BoundVaultTerms; readonly mandate: import("@livestreak/schema").VaultMandate }>;
   readMarket(marketId: MarketId): Promise<OptionsMarket>;
   readStreamState(marketId: MarketId): Promise<OptionsStreamState>;
@@ -213,6 +214,8 @@ export type OptionsChainConfig = {
   readonly seed: string | Uint8Array;
   readonly addresses: OptionsContractAddresses | OptionsSuiObjectIds | OptionsSolanaAddresses;
   readonly hostUrl?: string;
+  /** Persist the submission identity before receipt polling; callers can recover after reload. */
+  readonly onTransactionSubmitted?: (txId: string, action?: string) => void;
   readonly readRpcUrl?: string;
   readonly includeProtocolSummary?: boolean;
   readonly transferOperator?: UserAddress;

@@ -1,31 +1,28 @@
-import { useState, useEffect, useMemo, type CSSProperties } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import { Fire, CheckCircle, XCircle, CaretDown, TrendUp, Users, ArrowRight } from '@phosphor-icons/react'
-import { StreamSlider } from '#/components/molecules/stream-slider'
-import { AccrualPreview, mapAccrualPreview } from '#/components/molecules/accrual-preview'
-import { streamMode, streamLabel } from '#/utils/stream-action'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
+import { Fire, CheckCircle, XCircle, CaretDown, TrendUp, Users } from '@phosphor-icons/react'
 import { formatUSDC, formatRate, formatCountdown, formatMultiplier, formatMinute, formatShares, calcPoolPct } from '#/utils/format'
 import type { VaultView } from '#/types/demo'
 import type { OptionsVault, OptionsFunctionView } from '@livestreak/options'
 import { isOptionsModeEnabled } from '#/utils/env'
 import { useOptionsContext } from '#/providers/options-provider'
 import { OptionsActionButton } from '#/components/atoms/options-action-button'
-import { useVaultFundingControls } from '#/hooks/use-vault-funding-controls'
 import { useVaultView } from '#/hooks/use-vault-views'
-import { useAccrualPreview } from '#/hooks/use-accrual-preview'
 import { useVaultCardUi } from '#/hooks/use-board-ui-state'
+import { FundingComposer } from '#/components/molecules/funding-composer'
 import { useStreamDraft } from '#/hooks/use-stream-draft'
 
-export function VaultCard({ vault, index = 0, onStream, onGoToMint }: {
+export function VaultCard({ vault, onStream, fundingFocused = false }: {
   vault: OptionsVault
   index?: number
-  /** Funding commit (live: fund an EXISTING position NFT; demo: mock notification). The single flow no
-   *  longer mints inline — a user without a position is routed to the Streams tab via onGoToMint. */
-  onStream?: (vaultId: string, side: 'yes' | 'no', rate: number, durationMinutes?: number) => void
+  fundingFocused?: boolean
+  /** Funding creates the viewer position if needed and confirms its on-chain lane. */
+  onStream?: (vaultId: string, side: 'yes' | 'no', rate: number, durationMinutes?: number) => void | Promise<unknown>
   /** Jump to the Streams tab to mint a position NFT (shown when the user has none for this market). */
   onGoToMint?: () => void
 }) {
   const view = useVaultView(vault.vaultId)
+  const reducedMotion = useReducedMotion()
   const hotUntil = vault.steward.hotUntilMs ?? null
   // Full-precision USDC pools from the board (A1); fall back to the rounded mock pools in mock mode.
   const yesTotal = view.poolYes ?? Number(vault.pools.yes)
@@ -33,32 +30,11 @@ export function VaultCard({ vault, index = 0, onStream, onGoToMint }: {
   const optionsEnabled = isOptionsModeEnabled()
   const options = useOptionsContext()
   const useOptions = optionsEnabled && options.isConnected
-  const funding = useVaultFundingControls(vault.vaultId)
   const side = view.userPosition?.side
   // A1/S5: expanded + selected side + amount persist across the board's periodic refresh so a
   // mid-fund user is never collapsed back to step 0.
   const { expanded, setExpanded } = useVaultCardUi(vault.vaultId)
   const draft = useStreamDraft(vault.vaultId)
-  const streamSide = draft.side
-  const streamRate = draft.rate
-  const [fundBusy, setFundBusy] = useState(false)
-  const [fundError, setFundError] = useState<string | null>(null)
-  const needsMint = useOptions && !funding.hasNft
-  const streamable = vault.status === 'open' || vault.status === 'hot'
-  const actionInput = { needsMint, side: streamSide, rate: streamRate, activeFundedSide: funding.activeFundedSide }
-  const mode = streamMode(actionInput)
-  const canStream = streamRate >= 0.01 && !fundBusy && (!useOptions || (funding.hasNft && streamable))
-  const stopReady = funding.stopFn !== undefined && !funding.stopFn.disabled && !fundBusy
-  const canAct = mode === 'stop' ? stopReady : (mode === 'stream' || mode === 'switch') && canStream
-  const sharePrice = useOptions
-    ? (streamSide === 'yes' ? view.sharePriceYes : streamSide === 'no' ? view.sharePriceNo : undefined)
-    : undefined
-  const { preview, loading: previewLoading } = useAccrualPreview(
-    vault.vaultId,
-    expanded ? streamSide : null,
-    expanded ? streamRate : 0,
-  )
-  const accrualPreview = useMemo(() => mapAccrualPreview(preview), [preview])
   const [hotMs, setHotMs] = useState(hotUntil ? Math.max(0, hotUntil - Date.now()) : 0)
 
   // Only the HOT window has a real on-chain deadline (steward hotUntil); tick it down while hot. There is
@@ -93,11 +69,11 @@ export function VaultCard({ vault, index = 0, onStream, onGoToMint }: {
     <motion.div
       id={`vault-${vault.vaultId}`}
       data-testid={`vault-card-${vault.vaultId}`}
-      layout
-      initial={{ opacity: 0, transform: 'translateY(8px)', filter: 'blur(4px)' }}
+      layout={!reducedMotion}
+      initial={false}
       animate={{ opacity: 1, transform: 'translateY(0px)', filter: 'blur(0px)' }}
       exit={{ opacity: 0, transform: 'translateY(-6px)', filter: 'blur(4px)' }}
-      transition={{ type: 'spring', stiffness: 320, damping: 30, delay: index * 0.04 }}
+      transition={{ duration: reducedMotion ? 0 : 0.18 }}
       className={`glass-card ${isHot ? 'card-hot' : ''} ${isWin ? 'card-win' : ''}`}
       style={{ marginBottom: 6, overflow: 'visible', ...cardStyle }}
     >
@@ -141,30 +117,26 @@ export function VaultCard({ vault, index = 0, onStream, onGoToMint }: {
             <button
               data-testid={`fund-yes-${vault.vaultId}`}
               className="vault-bet-btn vault-bet-yes"
-              onClick={() => setExpanded(true)}
-              disabled={funding.useOptions && funding.fundYes?.disabled && !funding.activeFundedSide}
-              title={funding.fundYes?.disabledReason}
+              onClick={() => { draft.setSide('yes'); if (draft.rate < 0.01) draft.setRate(1); setExpanded(true) }}
               style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               padding: '7px 0', borderRadius: 7, border: '1px solid rgba(0,255,135,0.25)',
               background: hasPos && view.userPosition?.side === 'yes' ? 'rgba(0,255,135,0.15)' : 'rgba(0,255,135,0.06)',
-              cursor: funding.useOptions && funding.fundYes?.disabled && !funding.activeFundedSide ? 'not-allowed' : 'pointer',
-              opacity: funding.useOptions && funding.fundYes?.disabled && !funding.activeFundedSide ? 0.45 : 1,
+              cursor: 'pointer',
+              opacity: 1,
               transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
             }}>
               <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', color: '#00ff87' }}>YES</span>
               <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'rgba(0,255,135,0.6)' }}>+{formatMultiplier(yesMultiplier)}</span>
             </button>
-            <button data-testid={`fund-no-${vault.vaultId}`} className="vault-bet-no" onClick={() => setExpanded(true)} style={{
+            <button data-testid={`fund-no-${vault.vaultId}`} className="vault-bet-no" onClick={() => { draft.setSide('no'); if (draft.rate < 0.01) draft.setRate(1); setExpanded(true) }} style={{
               flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               padding: '7px 0', borderRadius: 7, border: '1px solid rgba(255,45,120,0.25)',
               background: hasPos && view.userPosition?.side === 'no' ? 'rgba(255,45,120,0.15)' : 'rgba(255,45,120,0.06)',
-              cursor: funding.useOptions && funding.fundNo?.disabled && !funding.activeFundedSide ? 'not-allowed' : 'pointer',
-              opacity: funding.useOptions && funding.fundNo?.disabled && !funding.activeFundedSide ? 0.45 : 1,
+              cursor: 'pointer',
+              opacity: 1,
               transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
             }}
-              disabled={funding.useOptions && funding.fundNo?.disabled && !funding.activeFundedSide}
-              title={funding.fundNo?.disabledReason}
             >
               <span style={{ fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '0.06em', color: '#ff2d78' }}>NO</span>
               <span style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'rgba(255,45,120,0.6)' }}>+{formatMultiplier(noMultiplier)}</span>
@@ -222,121 +194,12 @@ export function VaultCard({ vault, index = 0, onStream, onGoToMint }: {
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0, transition: { type: 'spring', stiffness: 400, damping: 35, opacity: { duration: 0.1 } } }}
-            transition={{ type: 'spring', stiffness: 350, damping: 32 }}
+            exit={{ height: 0, opacity: 0, transition: { duration: reducedMotion ? 0 : 0.18 } }}
+            transition={{ duration: reducedMotion ? 0 : 0.18 }}
             style={{ overflow: 'hidden' }}
           >
             <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '12px 14px' }}>
-              {canBet && (
-                <div data-testid={`fund-amount-${vault.vaultId}`} style={{ marginBottom: 14 }}>
-                  <StreamSlider
-                    side={streamSide}
-                    rate={streamRate}
-                    onChange={draft.change}
-                    disabled={!streamable}
-                    pausable={!!funding.activeFundedSide}
-                    compact
-                  />
-                  <div role="group" aria-label="Choose side and stream rate" style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10 }}>
-                    <button
-                      type="button"
-                      data-testid={`fund-side-no-${vault.vaultId}`}
-                      aria-pressed={streamSide === 'no'}
-                      onClick={() => draft.setSide('no')}
-                      style={sideToggleStyle(streamSide === 'no', '#ff2d78')}
-                    >
-                      NO
-                    </button>
-                    <button
-                      type="button"
-                      data-testid={`fund-side-yes-${vault.vaultId}`}
-                      aria-pressed={streamSide === 'yes'}
-                      onClick={() => draft.setSide('yes')}
-                      style={sideToggleStyle(streamSide === 'yes', '#00ff87')}
-                    >
-                      YES
-                    </button>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      max={10}
-                      step={0.1}
-                      data-testid={`fund-amount-input-${vault.vaultId}`}
-                      aria-label="Stream rate in USDC per minute"
-                      value={streamRate > 0 ? Number(streamRate.toFixed(2)) : ''}
-                      placeholder="0.00"
-                      onChange={e => {
-                        const parsed = parseFloat(e.target.value)
-                        draft.setRate(Number.isFinite(parsed) ? Math.max(0, Math.min(parsed, 10)) : 0)
-                      }}
-                      style={{
-                        width: 84, padding: '7px 8px', borderRadius: 7,
-                        border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)',
-                        color: 'rgba(255,255,255,0.85)', fontSize: 12, fontFamily: 'var(--font-mono)',
-                        textAlign: 'right',
-                      }}
-                    />
-                    <span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)' }}>/min</span>
-                  </div>
-                  {useOptions && (
-                    <AccrualPreview side={streamSide} rate={streamRate} sharePrice={sharePrice} preview={accrualPreview} loading={previewLoading} />
-                  )}
-                  {!needsMint && streamSide && streamRate > 0.01 && (
-                    <div style={{ margin: '8px 0 0' }}>
-                      <span className="mono" style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)' }}>
-                        Draws from your shared balance — top up in Positions
-                      </span>
-                    </div>
-                  )}
-                  {mode === 'mint' ? (
-                    <button
-                      data-testid={`fund-mint-cta-${vault.vaultId}`}
-                      onClick={onGoToMint}
-                      style={mintCtaStyle}
-                    >
-                      {streamLabel(mode, actionInput)}
-                      <ArrowRight size={12} weight="bold" />
-                    </button>
-                  ) : (
-                    <button
-                      data-testid={`fund-submit-${vault.vaultId}`}
-                      disabled={!canAct}
-                      onClick={async () => {
-                        setFundError(null)
-                        setFundBusy(true)
-                        try {
-                          if (mode === 'stop' && funding.activeFundedSide) {
-                            await funding.stopFunding(vault.vaultId, funding.activeFundedSide)
-                          } else if (streamSide && onStream) {
-                            await onStream(vault.vaultId, streamSide, streamRate)
-                          }
-                          draft.clear()
-                        } catch (err) {
-                          setFundError(err instanceof Error ? err.message : mode === 'stop' ? 'Stop failed' : 'Fund failed')
-                        } finally {
-                          setFundBusy(false)
-                        }
-                      }}
-                      style={{
-                        width: '100%', marginTop: 10, padding: '9px 0',
-                        fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-display)',
-                        letterSpacing: '0.04em', borderRadius: 7, border: 'none',
-                        cursor: canAct ? 'pointer' : 'default',
-                        background: mode === 'stop' ? '#ff7a00' : streamSide === 'yes' ? '#00ff87' : streamSide === 'no' ? '#ff2d78' : 'rgba(255,255,255,0.06)',
-                        color: mode === 'stop' || streamSide ? '#000' : 'rgba(255,255,255,0.25)',
-                        opacity: canAct ? 1 : 0.45,
-                        transition: 'background 0.2s, color 0.2s, opacity 0.2s',
-                      }}
-                    >
-                      {fundBusy ? '...' : streamLabel(mode, actionInput)}
-                    </button>
-                  )}
-                  {fundError && (
-                    <p style={{ fontSize: 9, color: '#ff7a00', margin: '6px 0 0' }}>{fundError}</p>
-                  )}
-                </div>
-              )}
+              {canBet && !fundingFocused && <FundingComposer vault={vault} draft={draft} onStream={onStream} />}
               <ExpandedDetails vault={vault} poolPct={poolPct} view={view} />
             </div>
           </motion.div>
@@ -498,27 +361,9 @@ function ExpandedDetails({ vault, poolPct, view }: { vault: OptionsVault; poolPc
 
 // "Tush" redirect CTA shown when the user has no position NFT: an inviting outlined gradient that points
 // to the Streams tab to mint, distinct from the solid fund button so it doesn't read as "commit now".
-const mintCtaStyle: CSSProperties = {
-  width: '100%', marginTop: 10, padding: '9px 0',
-  fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-display)', letterSpacing: '0.03em',
-  borderRadius: 7, cursor: 'pointer',
-  border: '1px solid rgba(0,200,255,0.35)',
-  background: 'linear-gradient(135deg, rgba(0,200,255,0.14), rgba(0,255,135,0.08))',
-  color: '#00c8ff',
-  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
-  transition: 'background 0.2s, border-color 0.2s',
-}
 
-function sideToggleStyle(active: boolean, accent: string): CSSProperties {
-  return {
-    padding: '7px 12px', borderRadius: 7, cursor: 'pointer',
-    border: `1px solid ${active ? accent : 'rgba(255,255,255,0.12)'}`,
-    background: active ? `${accent}22` : 'rgba(255,255,255,0.04)',
-    color: active ? accent : 'rgba(255,255,255,0.5)',
-    fontSize: 11, fontWeight: 700, fontFamily: 'var(--font-mono)', letterSpacing: '0.06em',
-    transition: 'background 0.15s, border-color 0.15s, color 0.15s',
-  }
-}
+
+
 
 function severityLabel(severity?: number): string {
   if (severity === 0) return 'WARM'

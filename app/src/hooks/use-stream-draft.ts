@@ -1,7 +1,14 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import { useVaultView } from '#/hooks/use-vault-views'
 
 type Side = 'yes' | 'no'
+type Draft = { side: Side | null; rate: number }
+const drafts = new Map<string, Draft>()
+const listeners = new Map<string, Set<() => void>>()
+function writeDraft(vaultId: string, next: Draft | null) {
+  if (next) drafts.set(vaultId, next); else drafts.delete(vaultId)
+  listeners.get(vaultId)?.forEach(notify => notify())
+}
 
 export interface StreamDraft {
   side: Side | null
@@ -24,19 +31,25 @@ export function useStreamDraft(vaultId: string): StreamDraft {
   const globalSide = userPosition?.side ?? null
   const globalRate = userPosition?.rate ?? 0
 
-  const [draft, setDraft] = useState<{ side: Side | null; rate: number } | null>(null)
+  const subscribe = useCallback((notify: () => void) => {
+    const subscribers = listeners.get(vaultId) ?? new Set<() => void>()
+    listeners.set(vaultId, subscribers); subscribers.add(notify)
+    return () => { subscribers.delete(notify); if (!subscribers.size) listeners.delete(vaultId) }
+  }, [vaultId])
+  const snapshot = useCallback(() => drafts.get(vaultId) ?? null, [vaultId])
+  const draft = useSyncExternalStore(subscribe, snapshot, () => null)
 
   // Dead-centre (null side) from a pausable slider = PAUSE: overlay rate 0 on the committed side so the
   // card's action resolves to `stop` (≡ pause). With no committed stream it's just a cancel (clear). A
   // real side+rate overlays as the live edit.
   const change = useCallback(
     (side: Side | null, rate: number) =>
-      setDraft(side === null ? (globalSide ? { side: globalSide, rate: 0 } : null) : { side, rate }),
-    [globalSide]
+      writeDraft(vaultId, side === null ? (globalSide ? { side: globalSide, rate: 0 } : null) : { side, rate }),
+    [globalSide, vaultId]
   )
-  const setSide = useCallback((side: Side) => setDraft(d => ({ side, rate: d?.rate ?? globalRate })), [globalRate])
-  const setRate = useCallback((rate: number) => setDraft(d => ({ side: d?.side ?? globalSide, rate })), [globalSide])
-  const clear = useCallback(() => setDraft(null), [])
+  const setSide = useCallback((side: Side) => writeDraft(vaultId, { side, rate: drafts.get(vaultId)?.rate ?? globalRate }), [globalRate, vaultId])
+  const setRate = useCallback((rate: number) => writeDraft(vaultId, { side: drafts.get(vaultId)?.side ?? globalSide, rate }), [globalSide, vaultId])
+  const clear = useCallback(() => writeDraft(vaultId, null), [vaultId])
 
   return {
     side: draft?.side ?? globalSide,

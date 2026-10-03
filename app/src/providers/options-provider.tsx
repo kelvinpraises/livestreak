@@ -10,10 +10,14 @@ import {
 } from 'react'
 import { sha256, toBytes, hexToBytes, bytesToHex, parseUnits, isAddress, type Address } from 'viem'
 import { Schema } from 'effect'
+import { createWalletManager, createSuiReadClient, readUserOperationSuccess, type WalletConfigByChain } from '@livestreak/wallet'
+import type { VerifiedVaultMandate } from '@livestreak/schema'
+import { FundingSession, loadFunding, type FundingOperation, type FundingIntent, type FundingPorts } from '#/utils/funding-session'
 import { EvmWalletInitConfig, solanaWalletInitFromDescriptor, type WalletInit } from '@livestreak/schema'
 import { localnetDeployment } from '@livestreak/contracts/sui'
 import { localnetDeployment as solanaLocalnetDeployment } from '@livestreak/contracts/solana/deployments/localnet'
 import {
+  asTxId,
   asTokenId,
   asVaultId,
   asMarketId,
@@ -119,6 +123,9 @@ interface OptionsContextValue {
   /** S12/A8: human-readable progress while the wallet derives (e.g. "Deriving your Safe address…").
    *  null when idle. Surfaced by the connect UI so the ~1-min first derive doesn't look like a hang. */
   derivationStep: string | null
+  fundingOperation: FundingOperation | null
+  readFundingRules: (vaultId: string) => Promise<{ verified: VerifiedVaultMandate; chainNow: number }>
+  recoverFunding: () => Promise<void>
   claiming: boolean
   error: string | null
   address: Address | null
@@ -278,10 +285,7 @@ function buildChainConfig(
   walletInit: WalletInit | null,
 ): OptionsChainConfig {
   if (chain === 'sui') {
-    return createOptionsSuiConfig({
-      deployment: localnetDeployment,
-      seed: secret,
-    })
+    return { ...createOptionsSuiConfig({ deployment: localnetDeployment, seed: secret }), hostUrl: HOST_BASE_URL }
   }
 
   if (chain === 'solana') {
@@ -297,6 +301,7 @@ function buildChainConfig(
       },
       readRpcUrl: solanaLocalnetDeployment.rpc,
       includeProtocolSummary: true,
+      hostUrl: HOST_BASE_URL,
     }
   }
 
@@ -308,6 +313,7 @@ function buildChainConfig(
     addresses: buildOptionsContractAddresses(),
     readRpcUrl: LOCALHOST_RPC_URL,
     includeProtocolSummary: true,
+    hostUrl: HOST_BASE_URL,
   }
 }
 
@@ -326,6 +332,10 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   const [board, setBoard] = useState<OptionsBoard | null>(null)
   const [controls, setControls] = useState<readonly OptionsFunctionView[]>([])
   const [usdcBalance, setUsdcBalance] = useState(0)
+
+  const [fundingOperation, setFundingOperation] = useState<FundingOperation | null>(null)
+  const fundingSessionRef = useRef<FundingSession | null>(null)
+  const writeBusyRef = useRef(false)
 
   const walletInitRef = useRef<WalletInit | null>(null)
   const runtimeRef = useRef<OptionsRuntime | null>(null)
@@ -358,9 +368,11 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const syncFromBridge = useCallback(async (bridge: OptionsBridge) => {
-    applyBoard(await bridge.readBoard(APP_CALLER))
+    const nextBoard = await bridge.readBoard(APP_CALLER)
+    if (bridgeRef.current !== bridge) return
+    applyBoard(nextBoard)
     const nextControls = await bridge.readControls(APP_CALLER)
-    setControls(nextControls.functions)
+    if (bridgeRef.current === bridge) setControls(nextControls.functions)
   }, [applyBoard])
 
   const refreshConnected = useCallback(async (user: UserAddress, marketId?: string) => {
@@ -381,7 +393,8 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     if (!isChainDeployed(selectedChain)) {
       throw new Error(`${chainLabel(selectedChain)} isn't deployed in this environment — pick a deployed chain.`)
     }
-    const chainConfig = buildChainConfig(selectedChain, secret, walletInitRef.current)
+    const chainConfig = { ...buildChainConfig(selectedChain, secret, walletInitRef.current),
+      onTransactionSubmitted: (txId: string, action?: string) => fundingSessionRef.current?.submitted(txId, action) }
     const marketId = activeMarketIdRef.current
 
     const runtime = createOptionsRuntime({
@@ -403,11 +416,12 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     bridgeRef.current = bridge
 
     boardUnsubRef.current = bridge.subscribeBoard(APP_CALLER, (nextBoard) => {
+      if (bridgeRef.current !== bridge) return
       applyBoard(nextBoard)
       // A: never swallow live-data errors — the e2e reads console, and the UI must surface a
       // "live data unavailable" state instead of silently masquerading fixture data as live.
       void bridge.readControls(APP_CALLER)
-        .then(next => setControls(next.functions))
+        .then(next => { if (bridgeRef.current === bridge) setControls(next.functions) })
         .catch(err => {
           console.error('[options] readControls failed', err)
           setError(err instanceof Error ? err.message : String(err))
@@ -465,9 +479,10 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`${HOST_BASE_URL}/aa/descriptor`)
       if (!res.ok) throw new Error(`AA descriptor HTTP ${res.status}`)
       const descriptor = (await res.json()) as AaCapabilityDescriptor
+      if (cancelled()) return
       walletInitRef.current =
         chainKind === 'solana' ? buildSolanaWalletInit(descriptor) : buildWalletInit(descriptor)
-      if (!cancelled()) setReady(true)
+      setReady(true)
     } catch (err) {
       if (!cancelled()) {
         setError(err instanceof Error ? err.message : String(err))
@@ -509,30 +524,37 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       return () => teardownRuntime()
     }
 
+    let cancelled = false
     setIsLoading(true)
     void (async () => {
       try {
         const secret = hexToBytes(cached as `0x${string}`)
         const chainConfig = buildChainConfig(chainRef.current, secret, walletInitRef.current)
         const user = await deriveUserAddress(secret, chainRef.current, chainConfig)
+        if (cancelled) return
         setAddress(user as Address)
         setIsConnected(true)
         setDerivationStep('Loading market board…')
         await bootRuntime(secret, user)
       } catch (err) {
-        sessionStorage.removeItem(SESSION_SECRET_KEY)
+        if (cancelled) return
+        setIsConnected(false)
+        setAddress(null)
         console.error('[options] session reconnect failed', err)
         setError(err instanceof Error ? err.message : String(err))
       } finally {
+        if (!cancelled) {
         setIsLoading(false)
         setDerivationStep(null)
+        }
       }
     })()
 
-    return () => teardownRuntime()
+    return () => { cancelled = true; teardownRuntime() }
   }, [enabled, ready, chain, bootRuntime, teardownRuntime, deriveUserAddress, bootAnonymous])
 
   const disconnect = useCallback(() => {
+    if (writeBusyRef.current) return
     sessionStorage.removeItem(SESSION_SECRET_KEY)
     teardownRuntime()
     setAddress(null)
@@ -543,7 +565,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   }, [teardownRuntime, bootAnonymous])
 
   const setChain = useCallback((next: OptionsChainKind) => {
-    if (next === chainRef.current) return
+    if (writeBusyRef.current || isLoading || next === chainRef.current) return
     sessionStorage.setItem(SESSION_CHAIN_KEY, next)
     // B: switching chains KEEPS the derived secret and re-derives the new chain's address from the
     // SAME seed (EVM Safe ⇄ Sui address) with no re-login. We tear down the active chain's runtime
@@ -562,7 +584,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       setIsConnected(false)
     }
     setChainState(next)
-  }, [teardownRuntime])
+  }, [isLoading, teardownRuntime])
 
   const connect = useCallback(async (password: string) => {
     if (!enabled) return
@@ -573,13 +595,13 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     const effectiveSeed = testOptionsSeed() ?? password
     if (!effectiveSeed.trim()) {
       setError('Password required')
-      return
+      throw new Error('Password required')
     }
     // EVM (Safe/4337) and Solana (Kora/self-pay) both need a loaded walletInit before we can derive
     // or write; Sui signs natively with no descriptor, so it is exempt.
     if (chainRef.current !== 'sui' && !walletInitRef.current) {
       setError('Options config not ready — is host running?')
-      return
+      throw new Error('Wallet configuration is unavailable. Check that Host is running.')
     }
 
     setIsLoading(true)
@@ -601,6 +623,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       setIsConnected(false)
       setAddress(null)
       teardownRuntime()
+      throw err
     } finally {
       setIsLoading(false)
       setDerivationStep(null)
@@ -614,10 +637,11 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   const setActiveMarketId = useCallback((marketId: string | undefined) => {
     if (marketId === activeMarketIdRef.current) return
     activeMarketIdRef.current = marketId
+    if (!marketId) { teardownRuntime(); return }
     const user = address as UserAddress | null
     const cached = typeof window !== 'undefined' ? sessionStorage.getItem(SESSION_SECRET_KEY) : null
     if (isConnected && user && cached) {
-      void bootRuntime(hexToBytes(cached as `0x${string}`), user)
+      void bootRuntime(hexToBytes(cached as `0x${string}`), user).catch(err => setError(err instanceof Error ? err.message : String(err)))
     } else if (marketId) {
       void bootAnonymous()
     } else {
@@ -661,22 +685,25 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   }, [address, refreshConnected])
 
   const callBridgeAction = useCallback(async (action: string, args: unknown): Promise<TxId> => {
+    if (writeBusyRef.current) throw new Error('Wait for the current wallet action to finish.')
+    writeBusyRef.current = true
     setClaiming(true)
-    try {
-      const result = await requireBridge().callAction(APP_CALLER, {
-        scope: bridgeActionScope,
-        action,
-        args,
-      })
-      if (typeof result !== 'string' && !('txId' in result)) {
-        throw new Error('Options write returned a read result')
-      }
+    const execute = async (): Promise<TxId> => {
+      const pending = address ? loadFunding(localStorage, chainRef.current, address) : null
+      if (pending && !['confirmed', 'failed'].includes(pending.status)) throw new Error('Check your pending funding transaction before changing this wallet’s positions.')
+      const result = await requireBridge().callAction(APP_CALLER, { scope: bridgeActionScope, action, args })
+      if (typeof result !== 'string' && !('txId' in result)) throw new Error('Options write returned a read result')
       await afterWrite()
       return typeof result === 'string' ? result : result.txId
-    } finally {
-      setClaiming(false)
     }
-  }, [requireBridge, afterWrite])
+    try {
+      if (!navigator.locks) throw new Error('This browser does not support safe wallet actions across tabs.')
+      return await navigator.locks.request(`livestreak.fund:${chainRef.current}:${address}`, { ifAvailable: true }, lock => {
+        if (!lock) throw new Error('A wallet action is running in another tab. Wait for it to finish.')
+        return execute()
+      })
+    } finally { writeBusyRef.current = false; setClaiming(false) }
+  }, [address, requireBridge, afterWrite])
 
   const findFunction = useCallback((
     name: string,
@@ -729,15 +756,135 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   // preserves every other lane, applies the balance-first starter deposit, and owns the paused registry.
   // The app just names the gesture and forwards the high-level args — no lane reconstruction here.
 
-  // Open / switch / re-rate a vault's stream (balance-first). One operation behind both the vault-card
-  // "stream" gesture and the active-card "adjust rate" — the runtime decides deposit vs. pure re-rate.
-  const streamLane = useCallback((
-    vaultId: string,
-    side: 'yes' | 'no',
-    rateUsdPerMin: number,
-  ): Promise<TxId> =>
-    callBridgeAction('streamLane', { vaultId: asVaultId(vaultId), side, ratePerMin: rateUsdPerMin }),
-  [callBridgeAction])
+  useEffect(() => {
+    fundingSessionRef.current = null
+    setFundingOperation(null)
+    if (!address || !isConnected) return
+    try {
+      const session = new FundingSession(localStorage, chain, address, setFundingOperation)
+      fundingSessionRef.current = session
+      setFundingOperation(session.operation)
+      const sync = () => {
+        try {
+          const next = new FundingSession(localStorage, chain, address, setFundingOperation)
+          if (!writeBusyRef.current) { fundingSessionRef.current = next; setFundingOperation(next.operation) }
+        } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
+      }
+      window.addEventListener('storage', sync)
+      return () => window.removeEventListener('storage', sync)
+    } catch (err) { setError(err instanceof Error ? err.message : String(err)) }
+  }, [address, chain, isConnected])
+
+  const readFundingRules = useCallback(async (vaultId: string) => {
+    const runtime = runtimeRef.current
+    if (!runtime?.chain.reader.readVaultMandate || !runtime.chain.reader.readChainTime) {
+      throw new Error('Waiting for verified market rules.')
+    }
+    const [verified, chainNow] = await Promise.all([
+      runtime.chain.reader.readVaultMandate(asVaultId(vaultId)), runtime.chain.reader.readChainTime(),
+    ])
+    if (runtimeRef.current !== runtime) throw new Error('Network changed. Reload the market rules.')
+    if (!Number.isSafeInteger(chainNow)) throw new Error('Chain time is unavailable.')
+    return { verified, chainNow }
+  }, [])
+
+  const fundingPorts = useCallback((intent: FundingIntent): FundingPorts => {
+    const runtime = runtimeRef.current
+    const user = requireUser()
+    const selected = chainRef.current
+    if (!runtime || !isConnected) throw new Error('Connect your wallet to fund this question.')
+    const assertSession = () => {
+      if (runtimeRef.current !== runtime || chainRef.current !== selected) throw new Error('Network or market changed during funding.')
+    }
+    const position = async () => {
+      assertSession()
+      await refreshConnected(user, intent.marketId)
+      return runtime.readPanel().nfts.find(n => n.marketId === intent.marketId && (selected === 'evm' ? n.owner.toLowerCase() === user.toLowerCase() : n.owner === user))
+    }
+    return {
+      preflight: async () => {
+        assertSession()
+        if (!Number.isFinite(intent.rate) || intent.rate < 0.01 || intent.rate > 10) throw new Error('Choose a rate between 0.01 and 10 USDC per minute.')
+        const { verified, chainNow } = await readFundingRules(intent.vaultId)
+        if (verified.terms.marketId !== intent.marketId) throw new Error('This question belongs to a different market.')
+        if (chainNow >= verified.mandate.fundingClose) throw new Error('Funding has closed for this question.')
+        const nft = await position()
+        const budget = nft?.account.balanceRaw ? BigInt(nft.account.balanceRaw) : 0n
+        const needed = budget > 0n ? 0n : perMinUSDCToRate(intent.rate) * 600n
+        if (await runtime.chain.reader.readUsdcBalance(user) < needed) throw new Error(`Insufficient USDC. You need ${(Number(needed) / 1_000_000).toFixed(2)} USDC for the initial stream budget.`)
+      },
+      hasPosition: async () => !!await position(),
+      mint: async () => {
+        assertSession()
+        await requireBridge().callAction(APP_CALLER, { scope: bridgeActionScope, action: 'mint', args: { marketId: asMarketId(intent.marketId), to: user } })
+        await refreshConnected(user, intent.marketId)
+      },
+      fund: async () => {
+        assertSession()
+        const result = await requireBridge().callAction(APP_CALLER, { scope: bridgeActionScope, action: 'streamLane',
+          args: { vaultId: asVaultId(intent.vaultId), side: intent.side, ratePerMin: intent.rate, starterMinutes: 10 } })
+        if (typeof result !== 'string') throw new Error('Funding returned an unexpected result.')
+        return result
+      },
+      verify: async () => {
+        const nft = await position()
+        if (!nft) return false
+        const actual = await runtime.chain.reader.readNft(asTokenId(BigInt(nft.tokenId)), user)
+        return (selected === 'evm' ? actual.owner.toLowerCase() === user.toLowerCase() : actual.owner === user) && actual.lanes.some(l => l.vaultId === intent.vaultId && l.side === intent.side && l.committedRate === perMinUSDCToRate(intent.rate))
+      },
+      receipt: async txId => {
+        assertSession()
+        const cached = sessionStorage.getItem(SESSION_SECRET_KEY)
+        if (!cached) throw new Error('Reconnect the same wallet to check this transaction.')
+        const cfg = buildChainConfig(selected, hexToBytes(cached as `0x${string}`), walletInitRef.current)
+        if (selected === 'sui') {
+          const suiConfig = cfg.walletInit.config as WalletConfigByChain['sui']
+          const rpc = Array.isArray(suiConfig.rpcUrl) ? suiConfig.rpcUrl[0] : suiConfig.rpcUrl
+          const result = await createSuiReadClient(rpc as string, suiConfig.network).getTransactionBlock({ digest: txId, options: { showEffects: true } })
+          return result.effects ? result.effects.status.status === 'success' : undefined
+        }
+        const manager = createWalletManager(selected, cfg.seed, cfg.walletInit.config as WalletConfigByChain[typeof selected])
+        const account = await manager.getAccount()
+        const readOnly = await account.toReadOnlyAccount()
+        return readUserOperationSuccess(await readOnly.getUserOperationReceipt(txId))
+      },
+    }
+  }, [isConnected, requireUser, refreshConnected, readFundingRules, requireBridge])
+
+  const streamLane = useCallback(async (vaultId: string, side: 'yes' | 'no', rateUsdPerMin: number): Promise<TxId> => {
+    if (writeBusyRef.current) throw new Error('This wallet already has an action in progress.')
+    const session = fundingSessionRef.current
+    const runtime = runtimeRef.current
+    if (!session || !runtime) throw new Error('Wallet recovery storage is unavailable. Reconnect before funding.')
+    const vault = runtime.readPanel().markets.flatMap(m => m.vaults).find(v => v.vaultId === vaultId)
+    if (!vault) throw new Error('This question is not on the selected network. Switch to its network before funding.')
+    const intent: FundingIntent = { vaultId, marketId: vault.marketId, side, rate: rateUsdPerMin }
+    writeBusyRef.current = true; setClaiming(true)
+    try {
+      const run = () => session.run(intent, fundingPorts(intent))
+      if (navigator.locks) {
+        return asTxId(await navigator.locks.request(`livestreak.fund:${chainRef.current}:${address}`, { ifAvailable: true }, lock => {
+          if (!lock) throw new Error('Funding is already open in another tab. Wait for it to finish.')
+          return run()
+        }))
+      }
+      throw new Error('This browser does not support safe funding across tabs. Use a current browser.')
+    } finally { writeBusyRef.current = false; setClaiming(false) }
+  }, [address, fundingPorts])
+
+  const recoverFunding = useCallback(async () => {
+    const session = fundingSessionRef.current
+    if (!session?.operation || writeBusyRef.current) return
+    writeBusyRef.current = true; setClaiming(true)
+    try {
+      if (!navigator.locks) throw new Error('This browser does not support safe recovery across tabs.')
+      await navigator.locks.request(`livestreak.fund:${chainRef.current}:${address}`, { ifAvailable: true }, lock => {
+        if (!lock) throw new Error('Funding is still running in another tab. Wait for it to finish.')
+        return session.recover(fundingPorts(session.operation!))
+      })
+    }
+    finally { writeBusyRef.current = false; setClaiming(false) }
+  }, [address, fundingPorts])
 
   const pauseLane = useCallback((vaultId: string, side: 'yes' | 'no'): Promise<TxId> =>
     callBridgeAction('pauseLane', { vaultId: asVaultId(vaultId), side }), [callBridgeAction])
@@ -874,6 +1021,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     isLoading,
     derivationStep,
     claiming,
+    fundingOperation, readFundingRules, recoverFunding,
     error,
     address,
     usdcBalance,
@@ -908,7 +1056,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     approveNft,
     setApprovalForAll,
   }), [
-    enabled, ready, chain, setChain, isConnected, isLoading, derivationStep, claiming, error, address, usdcBalance, board, controls,
+    enabled, ready, chain, setChain, isConnected, isLoading, derivationStep, claiming, fundingOperation, readFundingRules, recoverFunding, error, address, usdcBalance, board, controls,
     connect, disconnect, afterWrite, setActiveMarketId, findFunction, findFundFunctionForVault,
     findStopFundingFunctionForVault, streamLane, pauseLane, resumeLane,
     addFundsNft, sweepNft, withdrawAllNft, previewAccrual, claimWin, hasNftForVault, mint, claimLoss, settleVault,

@@ -73,6 +73,7 @@ import {
 
 type ReaderContext = {
   readonly contractCall: EvmContractCall;
+  readonly readChainTime?: () => Promise<number>;
   readonly addresses: OptionsContractAddresses;
   readonly abis: OptionsContractAbis;
   readonly transferOperator?: UserAddress;
@@ -93,10 +94,12 @@ export const createEvmOptionsReaderFromCall = (
   options: {
     readonly transferOperator?: UserAddress;
     readonly includeProtocolSummary?: boolean;
+    readonly readChainTime?: () => Promise<number>;
   } = {}
 ): OptionsReader => {
   const ctx: ReaderContext = {
     contractCall,
+    readChainTime: options.readChainTime,
     addresses: validateOptionsContractAddresses(addresses),
     abis: DEFAULT_ABIS,
     ...(options.transferOperator === undefined
@@ -139,12 +142,14 @@ export const createEvmOptionsReader = (config: OptionsChainConfig): OptionsReade
         args: args as readonly unknown[] | undefined
       }) as Promise<T>,
     {
+      readChainTime: async () => Number((await publicClient.getBlock()).timestamp),
       ...(config.transferOperator === undefined
         ? {}
         : { transferOperator: config.transferOperator }),
       ...(config.includeProtocolSummary === true ? { includeProtocolSummary: true } : {})
     }
   );
+  reader.readChainTime = async () => Number((await publicClient.getBlock()).timestamp);
   reader.readVaultMandate = async (vaultId) => {
     if (!config.hostUrl) throw new Error("Durable mandate Host unavailable");
     const address = validateOptionsContractAddresses(config.addresses as OptionsContractAddresses).vault;
@@ -689,9 +694,8 @@ const readNft = async (
     );
 
     const count = Number(laneCount);
-    // Wall clock for the effective-depletion check: a lane reads depleted the moment its runway elapses
-    // in real time, matching the UI countdown (chain block.timestamp freezes between txs on a dev chain).
-    const nowSec = Math.floor(Date.now() / 1000);
+    // Actual RPC readers use accepted chain time; the injected call-only test port may supply a clock.
+    const nowSec = ctx.readChainTime ? await ctx.readChainTime() : Math.floor(Date.now() / 1000);
 
     // Active lanes (in _laneKeys): (vaultId:side) → on-chain bookkeeping rate. This IS the committedRate
     // setLanes re-asserts; a side with no entry here has no active stream (paused/depleted by balance).

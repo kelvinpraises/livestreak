@@ -59,7 +59,12 @@ import {
   sideToSolana,
 } from "./decode.js";
 
-const nowSec = (): number => Math.floor(Date.now() / 1000);
+const readChainTime = async (ctx: SolanaOptionsContext): Promise<number> => {
+  const slot = await ctx.rpc.getSlot({ commitment: "confirmed" }).send();
+  const time = await ctx.rpc.getBlockTime(slot).send();
+  if (time === null || !Number.isSafeInteger(Number(time))) throw new Error("Solana chain time unavailable");
+  return Number(time);
+};
 const ZERO_ID = `0x${"0".repeat(64)}`;
 
 const utf8 = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
@@ -122,6 +127,7 @@ export const createSolanaOptionsReader = (
   };
 
   const reader: OptionsReader = {
+    readChainTime: () => readChainTime(ctx),
     readVaultMandate: async (vaultId) => {
       if (!options?.hostUrl) throw new Error("Durable mandate Host unavailable");
       const data = await withVaultView(vaultId, (view, id) => view.vault(id));
@@ -183,10 +189,12 @@ export const createSolanaOptionsReader = (
             (b) => ({ maxEndMs: b.maxEnd * 1000, rate: b.rate }) satisfies FunderBoundary,
           ),
       ),
-    readPendingShares: (vaultId, side, tokenId) =>
-      withVaultView(vaultId, (view, target) =>
-        view.pendingShares(target, sideToSolana(side), tokenIdToHex32(tokenId), nowSec()),
-      ),
+    readPendingShares: async (vaultId, side, tokenId) => {
+      const now = await readChainTime(ctx);
+      return withVaultView(vaultId, (view, target) =>
+        view.pendingShares(target, sideToSolana(side), tokenIdToHex32(tokenId), now),
+      );
+    },
     readClaimable: (tokenId, vaultId, side) =>
       withVaultView(vaultId, (view, target) =>
         view.claimable(tokenIdToHex32(tokenId), target, sideToSolana(side)),
@@ -364,7 +372,7 @@ const readNft = async (
   tokenId: TokenId,
   owner: UserAddress,
 ): Promise<OptionsNft> => {
-  const now = nowSec();
+  const now = await readChainTime(ctx);
   const nft = await withTokenView(tokenId, (view, tokenHex, marketId) => {
     const laneCount = view.laneCount(tokenHex);
     const balance = view.nftBalance(tokenHex);

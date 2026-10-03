@@ -9,6 +9,7 @@ import { NikoNikoCard } from '#/components/molecules/niko-niko-card.tsx'
 import { VaultList } from '#/components/organisms/vault-list.tsx'
 import { WalletControls } from '#/components/molecules/wallet-controls.tsx'
 import { DemoEdgeToggle } from '#/components/molecules/demo-edge-toggle'
+import { usePreferFixture } from '#/hooks/use-fixture-mode'
 import { useVaults } from '#/hooks/use-vaults.ts'
 import { usePositions } from '#/hooks/use-positions.ts'
 import { useWebSocket } from '#/hooks/use-websocket.ts'
@@ -40,15 +41,10 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
   const { frame, events } = useWebSocket()
   const { legacyWallet } = useWalletContext()
   const { flow, stake, unstake, claimDividends, claiming } = useFlow()
-  const { board, fundStream, isConnected: optionsConnected, setActiveMarketId } = useOptionsContext()
+  const { board, fundStream, isConnected: optionsConnected, setActiveMarketId, chain, setChain, claiming: walletBusy } = useOptionsContext()
   const optionsEnabled = isOptionsModeEnabled()
 
-  // The route param IS the marketId — point the options runtime at THIS stream's market so its vaults
-  // (board) load + poll live. Without this the runtime has no market and every stream shows no vaults.
-  useEffect(() => {
-    if (!optionsEnabled) return
-    setActiveMarketId(streamId)
-  }, [optionsEnabled, streamId, setActiveMarketId])
+  const fixture = usePreferFixture()
   const { notifications, push, dismiss } = useWinNotifications()
   const [selectedVaultId, setSelectedVaultId] = useState<string | null>(null)
 
@@ -60,6 +56,10 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
     ? panelToStream(board.panel, streamId)
     : undefined
   const hostDetail = hostStream.stream
+  const wrongChain = !fixture && !!hostDetail?.chain && hostDetail.chain !== chain
+  useEffect(() => {
+    if (optionsEnabled) setActiveMarketId(wrongChain ? undefined : hostDetail?.marketId ?? streamId)
+  }, [optionsEnabled, streamId, hostDetail?.marketId, wrongChain, setActiveMarketId])
 
   // Recomputed every ~3s board poll, so it FLICKERS — between polls the board can momentarily drop
   // this market or report a non-'live' status, flipping eligibility false→true.
@@ -99,25 +99,16 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
   ) => {
     const vault = vaults.find(v => v.vaultId === vaultId)
 
-    if (optionsEnabled && optionsConnected) {
-      try {
-        const txId = await fundStream(vaultId, side, rate)
-        push({ type: 'stream', rate, side, option: vault?.question ?? vaultId, txId })
-      } catch (err) {
-        push({
-          type: 'stream',
-          rate,
-          side,
-          option: 'Stream failed',
-          subtitle: err instanceof Error ? err.message : 'Fund failed',
-        })
-      }
+    if (optionsEnabled && !fixture) {
+      if (wrongChain) throw new Error('Switch to the market’s network before funding.')
+      if (!optionsConnected) throw new Error('Connect your wallet before funding.')
+      const txId = await fundStream(vaultId, side, rate)
+      push({ type: 'stream', rate, side, option: vault?.question ?? vaultId, txId })
     } else {
       push({ type: 'stream', rate, side, option: vault?.question ?? vaultId, mock: true })
     }
-
-    setSelectedVaultId(null)
-  }, [vaults, push, optionsEnabled, optionsConnected, fundStream])
+    // Keep the question and player mounted so confirmation stays beside the stream.
+  }, [vaults, push, optionsEnabled, optionsConnected, fundStream, fixture, wrongChain])
 
   // S3/A2 — a thin, programmatic commit seam so accessibility tooling and headless E2E can fund a
   // vault WITHOUT synthesizing a sub-pixel OS mouse drag on the slider. Takes a total USDC amount
@@ -170,7 +161,7 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
       <div className="grid-bg" />
 
       {/* Nav */}
-      <div style={{
+      <div className="stream-nav" style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 20px', height: 48,
         borderBottom: '1px solid rgba(255,255,255,0.055)',
@@ -225,7 +216,10 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
 
         {/* RIGHT — Predictions (40%) */}
         <div className="stream-predictions-pane" style={{ flex: '2 1 40%', minWidth: 0, display: 'flex', flexDirection: 'column', background: 'rgba(7,7,15,0.98)', overflow: 'hidden' }}>
-          <VaultList vaults={vaults} events={events} positions={positions} selectedVaultId={selectedVaultId} streamId={streamId} onDismissVault={() => setSelectedVaultId(null)} onStream={handleStream} />
+          {wrongChain && <div className="funding-notice" role="status">This market is on {hostDetail!.chain}. Your wallet is on {chain}.
+            <button className="funding-text-button" disabled={walletBusy} onClick={() => setChain(hostDetail!.chain!)}>Switch to {hostDetail!.chain}</button>
+          </div>}
+          {!wrongChain && <VaultList vaults={vaults} events={events} positions={positions} selectedVaultId={selectedVaultId} streamId={streamId} onDismissVault={() => setSelectedVaultId(null)} onStream={handleStream} />}
         </div>
       </div>
 

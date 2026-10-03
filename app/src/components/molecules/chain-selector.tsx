@@ -12,7 +12,7 @@ import { isChainDeployed } from '#/utils/deployments'
 // the cva classes through tailwind-merge + inline-style precedence.
 export function ChainSelector() {
   const optionsEnabled = isOptionsModeEnabled()
-  const { chain, setChain, isLoading } = useOptionsContext()
+  const { chain, setChain, isLoading, claiming } = useOptionsContext()
 
   if (!optionsEnabled) return null
 
@@ -29,7 +29,7 @@ export function ChainSelector() {
             variant="ghost"
             data-testid={`chain-select-${item.id}`}
             type="button"
-            disabled={isLoading || active || pending}
+            disabled={isLoading || claiming || active || pending}
             title={
               pending
                 ? `${item.label} isn’t deployed in this environment (${item.network})`

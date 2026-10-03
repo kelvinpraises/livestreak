@@ -90,6 +90,11 @@ export const createSuiOptionsReader = (
   };
 
   const reader = buildReader(ctx);
+  reader.readChainTime = async () => {
+    const clock = await client.getObject({ id: "0x6", options: { showContent: true } });
+    if (clock.data?.content?.dataType !== "moveObject") throw new Error("Sui clock unavailable");
+    return Math.floor(Number((clock.data.content.fields as { timestamp_ms: string }).timestamp_ms) / 1000);
+  };
   reader.readVaultMandate = async (vaultId) => {
     if (!options?.hostUrl) throw new Error("Durable mandate Host unavailable");
     const vault = await readVault(ctx, vaultId);

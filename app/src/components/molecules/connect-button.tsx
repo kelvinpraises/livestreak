@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Wallet, CaretDown, SignOut, Copy, Check, X, SpinnerGap, Warning } from '@phosphor-icons/react'
 import {
@@ -47,6 +47,11 @@ export function ConnectButton() {
   // typing. Empty string in normal builds → unchanged manual-password flow.
   const [password, setPassword] = useState(testOptionsSeed() ?? '')
   const [copied, setCopied] = useState(false)
+  useEffect(() => {
+    const open = () => setModalOpen(true)
+    window.addEventListener('livestreak:connect-wallet', open)
+    return () => window.removeEventListener('livestreak:connect-wallet', open)
+  }, [])
 
   function copyAddress() {
     if (address) {
@@ -275,7 +280,7 @@ export function ConnectButton() {
           </span>
           <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.1)' }} />
           <span className="mono" style={{ fontSize: 12, color: '#00c8ff' }}>
-            {formatUSDCFull(legacyWallet.usdcBalance)}
+            {isLoading ? 'Loading…' : formatUSDCFull(legacyWallet.usdcBalance)}
           </span>
           <CaretDown size={12} color="rgba(255,255,255,0.35)" />
         </button>
@@ -305,7 +310,7 @@ export function ConnectButton() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 10px' }}>
           <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)' }}>Balance</span>
           <span className="mono" style={{ fontSize: 12, color: '#00c8ff', fontWeight: 600 }}>
-            {formatUSDCFull(legacyWallet.usdcBalance)}
+            {isLoading ? 'Loading…' : formatUSDCFull(legacyWallet.usdcBalance)}
           </span>
         </div>
         {/* Switchable post-connect: re-derives this chain's wallet from the same seed (no re-login). */}

@@ -132,6 +132,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         message: `Solana transaction failed: ${detail}${settlement === undefined ? "" : ` (${settlement})`}${capacity === undefined ? "" : ` (${capacity})`}`,
       });
     }
+    config.onTransactionSubmitted?.(result.hash);
     const readOnly = await account.toReadOnlyAccount();
     await pollUntilUserOperationIncluded(readOnly, result.hash);
     return result.hash;

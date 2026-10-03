@@ -133,6 +133,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         message: `Sui transaction failed: ${message}`,
       });
     }
+    config.onTransactionSubmitted?.(result.hash);
     return result.hash;
   };
 

@@ -173,6 +173,8 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       throw classifySendFailure(error);
     }
 
+    config.onTransactionSubmitted?.(sendResult.hash, functionName);
+
     // Shared, canonical poller (≥60s + backoff, success accepts boolean|hex|number); returns the receipt.
     const receipt = await pollUntilUserOperationIncluded(readOnly, sendResult.hash);
     return { txId: asTxId(sendResult.hash), receipt };

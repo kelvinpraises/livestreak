@@ -1,3 +1,9 @@
+import { createMandateClient } from "@livestreak/host";
+import {
+  canonicalMandateBytes,
+  mandateCommitment,
+  verifyMandate,
+} from "@livestreak/schema";
 // --- exports ---
 
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
@@ -8,7 +14,7 @@ import {
   bcs,
   createSuiReadClient,
   createWalletManager,
-  type SuiWalletConfig
+  type SuiWalletConfig,
 } from "@livestreak/wallet";
 import { MODULES, target } from "@livestreak/contracts/sui";
 
@@ -18,7 +24,7 @@ import type {
   CreateVaultInput,
   CreateVaultResult,
   TxId,
-  VaultId
+  VaultId,
 } from "../types.js";
 import { asTxId, asVaultId } from "../types.js";
 import type { BookmakerSuiObjectIds } from "../addresses.js";
@@ -33,30 +39,33 @@ const bytes32ByteArray = (id: string, field = "marketId"): number[] => {
   if (!SUI_BYTES32_RE.test(id)) {
     throw new LiveStreakConfigError({
       message: `Bookmaker Sui write requires a bytes32 ${field}`,
-      metadata: { details: id }
+      metadata: { details: id },
     });
   }
   const hex = id.startsWith("0x") ? id.slice(2) : id;
   return Array.from({ length: 32 }, (_, i) => parseInt(hex.slice(i * 2, i * 2 + 2), 16));
 };
 
-const vecU8Arg = (bytes: number[]): Uint8Array => bcs.vector(bcs.u8()).serialize(bytes).toBytes();
+const vecU8Arg = (bytes: number[]): Uint8Array =>
+  bcs.vector(bcs.u8()).serialize(bytes).toBytes();
 
 const vaultIdFromBytes = (bytes: readonly number[]): VaultId =>
   asVaultId(`0x${bytes.map((b) => b.toString(16).padStart(2, "0")).join("")}`);
 
 const parseVaultCreated = (
-  events: ReadonlyArray<{ type: string; parsedJson?: unknown }> | null | undefined
+  events: ReadonlyArray<{ type: string; parsedJson?: unknown }> | null | undefined,
 ): VaultId | undefined => {
   const event = events?.find((e) => e.type.endsWith("::vault_driver::VaultCreated"));
   const parsed = event?.parsedJson as { vault_id?: number[] } | undefined;
   return parsed?.vault_id === undefined ? undefined : vaultIdFromBytes(parsed.vault_id);
 };
 
-export const createSuiBookmakerWriter = (config: BookmakerChainConfig): BookmakerChainWriter => {
+export const createSuiBookmakerWriter = (
+  config: BookmakerChainConfig,
+): BookmakerChainWriter => {
   if (config.walletInit.chain !== "sui") {
     throw new LiveStreakConfigError({
-      message: "Sui bookmaker writer requires walletInit.chain === sui"
+      message: "Sui bookmaker writer requires walletInit.chain === sui",
     });
   }
 
@@ -67,7 +76,10 @@ export const createSuiBookmakerWriter = (config: BookmakerChainConfig): Bookmake
 
   // Derive the account/owner/client ONCE per writer and reuse across send + coin discovery.
   type SuiContext = {
-    account: { sendTransaction(tx: Transaction): Promise<{ hash: string }>; getAddress(): Promise<string> };
+    account: {
+      sendTransaction(tx: Transaction): Promise<{ hash: string }>;
+      getAddress(): Promise<string>;
+    };
     owner: string;
     client: SuiJsonRpcClient;
   };
@@ -78,7 +90,9 @@ export const createSuiBookmakerWriter = (config: BookmakerChainConfig): Bookmake
         const manager = createWalletManager("sui", config.seed, suiConfig);
         const account = (await manager.getAccount()) as SuiContext["account"];
         const owner = await account.getAddress();
-        const rpcUrl = Array.isArray(suiConfig.rpcUrl) ? suiConfig.rpcUrl[0] : (suiConfig.rpcUrl ?? "");
+        const rpcUrl = Array.isArray(suiConfig.rpcUrl)
+          ? suiConfig.rpcUrl[0]
+          : (suiConfig.rpcUrl ?? "");
         const client = createSuiReadClient(rpcUrl as string, suiConfig.network);
         return { account, owner, client };
       })();
@@ -99,14 +113,109 @@ export const createSuiBookmakerWriter = (config: BookmakerChainConfig): Bookmake
     if (total < amount) {
       throw new LiveStreakConfigError({
         message: `Sui: insufficient ${coinType} balance for createVault`,
-        metadata: { details: `need ${amount}, have ${total}` }
+        metadata: { details: `need ${amount}, have ${total}` },
       });
     }
     return objectIds;
   };
 
+  const readCreation = async (
+    input: CreateVaultInput,
+    commitment: string,
+  ): Promise<CreateVaultResult | undefined> => {
+    if (!input.mandate || !input.operationId)
+      throw new Error("Complete creation input required");
+    const { client, owner } = await getSui();
+    const tx = new Transaction();
+    tx.moveCall({
+      target: target(packageId, MODULES.vaultDriver, "creation"),
+      arguments: [
+        tx.object(ids.vaultDriverRegistry),
+        tx.pure.address(owner),
+        tx.pure(vecU8Arg(bytes32ByteArray(input.operationId, "operationId"))),
+      ],
+    });
+    const inspected = await client.devInspectTransactionBlock({
+      sender: owner,
+      transactionBlock: tx,
+    });
+    if (inspected.error)
+      throw new Error(`Sui bound creation lookup failed: ${inspected.error}`);
+    const values = inspected.results?.[0]?.returnValues;
+    if (!values || values.length !== 8)
+      throw new Error("Sui deployment does not support rule-bound creation");
+    const vec = (i: number) => bcs.vector(bcs.u8()).parse(Uint8Array.from(values[i]![0]));
+    const id = vec(0);
+    if (!id.length) return undefined;
+    if (
+      vaultIdFromBytes(vec(1)) !== input.marketId ||
+      new TextDecoder().decode(Uint8Array.from(vec(2))) !== input.question ||
+      bcs.u8().parse(Uint8Array.from(values[3]![0])) !== sideToSui(input.creatorSide) ||
+      BigInt(bcs.u256().parse(Uint8Array.from(values[4]![0]))) !== input.seedRate ||
+      BigInt(bcs.u128().parse(Uint8Array.from(values[5]![0]))) !== input.creatorStake ||
+      vaultIdFromBytes(vec(6)) !== commitment ||
+      Number(bcs.u64().parse(Uint8Array.from(values[7]![0]))) !== input.mandate.fundingClose
+    )
+      throw new Error("Creation operation conflict");
+    return {
+      txId: asTxId(`reconciled:${input.operationId}`),
+      vaultId: vaultIdFromBytes(id),
+      commitment,
+    };
+  };
+
+  const readCommitment = async (vaultId: string): Promise<string> => {
+    const { client, owner } = await getSui();
+    const tx = new Transaction();
+    tx.moveCall({
+      target: target(packageId, MODULES.vault, "bound_terms"),
+      typeArguments: [coinType],
+      arguments: [
+        tx.object(ids.vaultRegistry),
+        tx.pure(vecU8Arg(bytes32ByteArray(vaultId, "vaultId"))),
+      ],
+    });
+    const result = await client.devInspectTransactionBlock({
+      sender: owner,
+      transactionBlock: tx,
+    });
+    if (result.error || !result.results?.[0]?.returnValues?.[0])
+      throw new Error("Sui created vault mandate readback failed");
+    return vaultIdFromBytes(
+      bcs.vector(bcs.u8()).parse(Uint8Array.from(result.results[0].returnValues[0][0])),
+    );
+  };
+
   return {
     createVault: async (input: CreateVaultInput): Promise<CreateVaultResult> => {
+      if (!input.mandate || !input.operationId || !config.hostUrl)
+        throw new Error("Complete mandate, operation identity and durable Host required");
+      if (!/^0x(?!0{64}$)[0-9a-f]{64}$/.test(input.operationId))
+        throw new Error("Invalid creation operation identity");
+      const commitment = await mandateCommitment(canonicalMandateBytes(input.mandate));
+      const { client } = await getSui();
+      await verifyMandate(input.mandate, {
+        chainId: `sui:${await client.getChainIdentifier()}`,
+        marketId: input.marketId,
+        question: input.question,
+        vaultId: "pending",
+        commitment,
+        fundingClose: input.mandate.fundingClose,
+      });
+      const previous = await readCreation(input, commitment);
+      if (previous) return previous;
+      const clock = await client.getObject({
+        id: SUI_CLOCK_OBJECT_ID,
+        options: { showContent: true },
+      });
+      if (clock.data?.content?.dataType !== "moveObject")
+        throw new Error("Sui chain time unavailable");
+      const now = Math.floor(
+        Number((clock.data.content.fields as { timestamp_ms: string }).timestamp_ms) / 1000,
+      );
+      if (!Number.isSafeInteger(now) || now >= input.mandate.fundingClose)
+        throw new Error("Vault funding window already closed");
+      await createMandateClient(config.hostUrl).publish(input.mandate);
       const marketBytes = bytes32ByteArray(input.marketId, "marketId");
       const questionBytes = Array.from(new TextEncoder().encode(input.question));
       const side = sideToSui(input.creatorSide);
@@ -122,12 +231,12 @@ export const createSuiBookmakerWriter = (config: BookmakerChainConfig): Bookmake
       if (usdcCoins.length > 1) {
         tx.mergeCoins(
           primaryCoin,
-          usdcCoins.slice(1).map((id) => tx.object(id))
+          usdcCoins.slice(1).map((id) => tx.object(id)),
         );
       }
-      const [payment] = tx.splitCoins(primaryCoin, [tx.pure.u128(deposit)]);
+      const [payment] = tx.splitCoins(primaryCoin, [tx.pure.u64(deposit)]);
       tx.moveCall({
-        target: target(packageId, MODULES.vaultDriver, "create_vault"),
+        target: target(packageId, MODULES.vaultDriver, "create_bound_vault"),
         typeArguments: [coinType],
         arguments: [
           tx.object(ids.vaultDriverRegistry),
@@ -141,32 +250,38 @@ export const createSuiBookmakerWriter = (config: BookmakerChainConfig): Bookmake
           tx.pure.u256(rate),
           tx.pure.u128(deposit),
           payment!,
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.pure(vecU8Arg(bytes32ByteArray(commitment, "commitment"))),
+          tx.pure.u64(input.mandate.fundingClose),
+          tx.pure(vecU8Arg(bytes32ByteArray(input.operationId, "operationId"))),
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
 
-      const { account, client } = await getSui();
+      const { account } = await getSui();
       tx.setGasBudgetIfNotSet(100_000_000);
       let result: { hash: string };
       try {
         result = await account.sendTransaction(tx);
       } catch (error) {
         throw new LiveStreakRuntimeError({
-          message: `Sui createVault failed: ${error instanceof Error ? error.message : String(error)}`
+          message: `Sui createVault failed: ${error instanceof Error ? error.message : String(error)}`,
         });
       }
 
       const block = await client.waitForTransaction({
         digest: result.hash,
-        options: { showEvents: true }
+        options: { showEvents: true },
       });
-      const vaultId = parseVaultCreated(block.events);
+      const vaultId =
+        parseVaultCreated(block.events) ?? (await readCreation(input, commitment))?.vaultId;
       if (vaultId === undefined) {
         throw new LiveStreakRuntimeError({
-          message: "Sui createVault did not emit a decodable VaultCreated event"
+          message: "Sui createVault did not emit a decodable VaultCreated event",
         });
       }
-      return { txId: asTxId(result.hash), vaultId };
+      if ((await readCommitment(vaultId)) !== commitment)
+        throw new Error("Created vault commitment readback mismatch");
+      return { txId: asTxId(result.hash), vaultId, commitment };
     },
 
     // Sui transactions are synchronous (no pending-userOp recovery like EVM). Best-effort re-fetch the
@@ -174,23 +289,32 @@ export const createSuiBookmakerWriter = (config: BookmakerChainConfig): Bookmake
     confirmCreateVault: async (digest: TxId): Promise<CreateVaultResult | undefined> => {
       const { client } = await getSui();
       try {
-        const block = await client.waitForTransaction({ digest, options: { showEvents: true } });
+        const block = await client.waitForTransaction({
+          digest,
+          options: { showEvents: true },
+        });
         const vaultId = parseVaultCreated(block.events);
-        return vaultId === undefined ? undefined : { txId: digest, vaultId };
+        return vaultId === undefined
+          ? undefined
+          : { txId: digest, vaultId, commitment: await readCommitment(vaultId) };
       } catch {
         return undefined;
       }
-    }
+    },
   };
 };
 
 // --- helpers ---
 
 const requirePositiveBigInt = (value: bigint, field: string): bigint => {
-  if (typeof value !== "bigint" || value <= 0n) {
+  if (
+    typeof value !== "bigint" ||
+    value <= 0n ||
+    (field != "seedRate" && value > 18446744073709551615n)
+  ) {
     throw new LiveStreakConfigError({
       message: `Sui createVault requires ${field} to be a bigint > 0`,
-      metadata: { details: String(value) }
+      metadata: { details: String(value) },
     });
   }
   return value;

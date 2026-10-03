@@ -24,6 +24,11 @@ export const projectOptionsDescriptors = (panel: OptionsPanel): readonly Functio
 
   pushRoot(descriptors);
   pushConfigurator(descriptors);
+  descriptors.push(withDescriptorIdentity({
+    id: "options.action.readMandate", parentId: ROOT_ID, name: "readMandate", label: "Read verified mandate",
+    scope: "bridge:action:readMandate" as CapabilityScope, nodeKind: "action", visible: true, disabled: false,
+    inputSchema: { type: "object", properties: [{name:"vaultId",help:"Vault ID",value:{type:"string",required:true,description:"Vault whose chain-bound terms are verified"}}] }
+  }, {package:PACKAGE,idPrefix:"action"}));
 
   // Board-first: hide every action (even always-enabled globals like setApprovalForAll) until a market
   // is configured, so the pane shows only Configure + Close until you configure.

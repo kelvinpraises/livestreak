@@ -1,5 +1,7 @@
 // --- exports ---
 
+import { requireOpenMandate } from "../../flows/rule.js";
+import { createEvmOptionsReader } from "./reader.js";
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
 import {
   createWalletManager,
@@ -75,6 +77,11 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
   const evmConfig = config.walletInit.config as EvmErc4337WalletConfig;
   const addresses = validateOptionsContractAddresses(config.addresses as OptionsContractAddresses);
   const abis = DEFAULT_ABIS;
+  const mandateReader = createEvmOptionsReader(config);
+  const requireMandate = async (vaultId: string) => {
+    const verified = await mandateReader.readVaultMandate!(vaultId as import("../../model/ids.js").VaultId);
+    requireOpenMandate(verified, Number((await getPublicClient().getBlock()).timestamp));
+  };
 
   // OPT.rederive: derive the wallet account ONCE per writer (deterministic Safe), reuse across writes.
   let accountPromise: Promise<ResolvedAccount> | undefined;
@@ -240,6 +247,7 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       const rate = requirePositiveBigInt(input.rate, "rate");
       const deposit = requirePositiveBigInt(input.deposit, "deposit");
 
+      await requireMandate(input.vaultId);
       await ensureUsdcApproval(deposit);
 
       return send(addresses.marketDriver, abis.MarketDriver, "fund", [
@@ -271,6 +279,21 @@ export const createEvmOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         rate: requirePositiveBigInt(lane.rate, "rate")
       }));
 
+      // A pure removal must remain usable without Host metadata; retained exact live/closed
+      // lanes do not add or extend funding. Re-opening a depleted lane is still a funding write.
+      const count = Number(await readContract<bigint>(addresses.marketDriver, abis.MarketDriver, "laneCount", [tokenId]));
+      if (count > 16) throw new Error("Unexpected lane count");
+      const current = await Promise.all(Array.from({length:count}, (_, i) => readContract<readonly [string, number, bigint]>(addresses.marketDriver, abis.MarketDriver, "laneAt", [tokenId, BigInt(i)])));
+      for (const lane of input.lanes) {
+        const held = current.find(v => v[0] === lane.vaultId && Number(v[1]) === sideToSolidityValue(lane.side) && v[2] === lane.rate);
+        if (held && addDeposit === 0n) {
+          const position = await readContract<readonly [bigint,bigint,bigint,number,boolean]>(addresses.vault, abis.Vault, "getPosition", [lane.vaultId, sideToSolidityValue(lane.side), tokenId]);
+          const closes = Number(await readContract<number>(addresses.vault, abis.Vault, "fundingClose", [lane.vaultId]));
+          const now = Number((await getPublicClient().getBlock()).timestamp);
+          if (closes <= now || (!position[4] && Number(position[3]) > now)) continue;
+        }
+        await requireMandate(lane.vaultId);
+      }
       await ensureUsdcApproval(addDeposit);
 
       return send(addresses.marketDriver, abis.MarketDriver, "setLanes", [

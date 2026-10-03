@@ -42,7 +42,7 @@ const requireAdvancing = async (label) => {
   receipt.media[label] = { before, after: receipt.media.fragments };
 };
 try {
-  for (const role of ["broadcaster", "bookmaker", "viewer"]) {
+  for (const role of ["broadcaster", "bookmaker", "viewer", "steward"]) {
     clients[role] = createAgentClient({ hostBaseUrl: config.hostBaseUrl, ...config[role] });
     await clients[role].connect();
   }
@@ -154,17 +154,37 @@ try {
   if (config.preEconomyDelayMs) await sleep(config.preEconomyDelayMs);
   const beforeVault = receipt.media.fragments;
   await call("bookmaker", "bookmaker", "configure", { marketId });
-  const vault = await call("bookmaker", "bookmaker", "createVault", {
-    marketId,
-    question: "Will this live audiovisual broadcast continue?",
-    creatorSide: "yes",
-    creatorStake: "5000000",
-    seedRate: "8333",
-  });
+  const question = "Will the eligible video show two distinct moving frames during the decision window?";
+  const closes = Math.floor(Date.now()/1000) + (config.fundingWindowSec ?? 120);
+  const mandate = {
+    version: "livestreak-mandate/1", chainId: config.chain ?? "eip155:31337", marketId, question,
+    yesMeaning: "Two distinct video frames show visible movement in the declared window",
+    noMeaning: "Eligible complete video shows fewer than two moving frames in the declared window",
+    method: "discretionary", evaluation: {kind:"rubric",rubric:"Compare eligible decoded frames from this exact market during the decision window. Explain movement and ambiguity; missing footage is unresolved, never an automatic NO."},
+    evidence: [{sourceId:`market-video:${marketId}`,kind:"video",description:"This market's timestamped decoded video, with origin and window eligibility recorded"}],
+    authority:"market-designated-steward", authorityChanges:"registry-authority-may-change",
+    fundingClose:closes,decisionStart:closes,decisionEnd:closes+300,
+    missingEvidence:{deadline:closes+600,treatment:"unresolved-escalate-no-guaranteed-refund",procedure:"At the deadline record unavailable/ambiguous evidence, alert the designated Steward and remain unresolved; this alpha has no guaranteed refund transition"},
+    ambiguityProcedure:"Record conflicting observations and explain them; escalate at the missing-evidence deadline without manufacturing an answer"
+  };
+  const operationId = `0x${Array.from(crypto.getRandomValues(new Uint8Array(32)), b=>b.toString(16).padStart(2,"0")).join("")}`;
+  const creationArgs = { marketId, question, creatorSide:"yes", creatorStake:"5000000", seedRate:"8333", mandate, operationId };
+  const vault = await call("bookmaker", "bookmaker", "createVault", creationArgs);
   receipt.vaultId = vault?.tokenId;
   if (!receipt.vaultId) throw new Error("Missing vault receipt");
   receipt.media.duringVault = receipt.media.fragments - beforeVault;
   await requireAdvancing("afterVault");
+  receipt.commitment = vault.commitment;
+  receipt.creationOperationId = operationId;
+  const retried = await call("bookmaker", "bookmaker", "createVault", creationArgs);
+  if (retried?.tokenId !== receipt.vaultId) throw new Error("Creation replay produced a different vault");
+  receipt.creationReplay = "same-vault";
+  const viewerRule = await call("viewer", "options", "readMandate", {vaultId:receipt.vaultId});
+  const stewardRule = await call("steward", "steward", "readMandate", {vaultId:receipt.vaultId});
+  if (viewerRule?.terms?.commitment !== receipt.commitment || stewardRule?.terms?.commitment !== receipt.commitment || JSON.stringify(viewerRule.mandate) !== JSON.stringify(stewardRule.mandate)) throw new Error("Independent mandate verification mismatch");
+  receipt.independentRules = "viewer-and-steward-verified";
+  receipt.fundingClose = closes;
+
   await call("viewer", "options", "configure", { marketId });
   await waitFor(() => clients.viewer.boards().options?.snapshot?.account, "viewer account");
   receipt.viewerAccount = clients.viewer.boards().options.snapshot.account;
@@ -194,7 +214,7 @@ try {
     await call("broadcaster", "observe", "resume", {}, family("pause", "resume"));
     await requireAdvancing("afterResume");
   }
-  receipt.status = "media-and-separate-role-funding-passed";
+  receipt.status = "bound-vault-and-independent-rules-passed";
   console.log(JSON.stringify(receipt, null, 2));
   if (config.keepAliveMs) await sleep(config.keepAliveMs);
 } catch (error) {

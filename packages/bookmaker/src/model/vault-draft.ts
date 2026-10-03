@@ -6,6 +6,8 @@ export interface VaultResolutionWindow {
 }
 
 export interface VaultDraft {
+  readonly mandate?: import("@livestreak/schema").VaultMandate;
+  readonly operationId?: string;
   readonly marketId: string;
   readonly question: string;
   readonly outcomeKind: "binary";

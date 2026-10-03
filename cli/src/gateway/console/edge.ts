@@ -6,7 +6,7 @@ export type ConsolePackage = "options" | "bookmaker" | "observe" | "steward";
 export interface ConsoleEdge {
   readonly package: ConsolePackage;
   describeFunctions(): Promise<readonly FunctionDescriptor[]>;
-  dispatch(caller: BridgeCaller, envelope: CallActionEnvelope): Promise<{ readonly txId?: string; readonly tokenId?: string }>;
+  dispatch(caller: BridgeCaller, envelope: CallActionEnvelope): Promise<{ readonly txId?: string; readonly tokenId?: string; readonly terms?: import("@livestreak/schema").BoundVaultTerms; readonly mandate?: import("@livestreak/schema").VaultMandate; readonly commitment?: string }>;
   subscribeBoard?(listener: (board: unknown) => void): () => void;
   refresh?(): Promise<void>;
   readBoard?(): Promise<unknown>;
@@ -50,7 +50,7 @@ export const createMergedDispatch = (
   routes: ReadonlyMap<string, ConsoleEdge>,
   edges: readonly ConsoleEdge[] = [],
   getTargetPackage?: (frame: { readonly target?: string; readonly envelope: CallActionEnvelope }) => ConsolePackage | undefined
-): ((caller: BridgeCaller, envelope: CallActionEnvelope, target?: string) => Promise<{ readonly txId?: string; readonly tokenId?: string }>) => {
+): ((caller: BridgeCaller, envelope: CallActionEnvelope, target?: string) => Promise<{ readonly txId?: string; readonly tokenId?: string; readonly terms?: import("@livestreak/schema").BoundVaultTerms; readonly mandate?: import("@livestreak/schema").VaultMandate; readonly commitment?: string }>) => {
   const byPackage = new Map<ConsolePackage, ConsoleEdge>(edges.map((edge) => [edge.package, edge]));
   return async (caller, envelope, target) => {
     const pkg = target ?? getTargetPackage?.({ envelope, target });

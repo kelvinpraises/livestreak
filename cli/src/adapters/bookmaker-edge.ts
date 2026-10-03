@@ -58,6 +58,7 @@ export const createBookmakerEdge = (input: CreateBookmakerEdgeInput): ConsoleEdg
       });
       return {
         txId: String(result.txId),
+        ...(result.commitment === undefined ? {} : { commitment: result.commitment }),
         ...(result.vaultId === undefined ? {} : { tokenId: String(result.vaultId) })
       };
     },

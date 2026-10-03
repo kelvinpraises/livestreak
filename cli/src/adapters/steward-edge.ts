@@ -1,3 +1,4 @@
+import { createOptionsChain, optionsChainConfigFromPackageInit, asVaultId } from "@livestreak/options";
 import {
   bridgeActionScope,
   createActionPlanSink,
@@ -86,7 +87,12 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
       input.memoryClient === undefined ? noopMemorySink : createMemorySink(input.memoryClient),
     actionPlanSink
   });
-  const bridge = createStewardBridge({ runtime });
+  const readMandate = async (vaultId: string) => {
+    const reader = createOptionsChain(optionsChainConfigFromPackageInit(input.packageInit)).reader;
+    if (!reader.readVaultMandate) throw new Error("Verified mandate read unsupported on this chain");
+    return reader.readVaultMandate(asVaultId(vaultId));
+  };
+  const bridge = createStewardBridge({ runtime, readMandate });
 
   return {
     package: "steward",
@@ -100,6 +106,7 @@ export const createStewardConsoleEdge = (input: CreateStewardConsoleEdgeInput): 
         action: envelope.action,
         args: envelope.args
       });
+      if (envelope.action === "readMandate") return result as import("@livestreak/schema").VerifiedVaultMandate;
       return { txId: pickTxId(result) };
     },
 

@@ -61,6 +61,9 @@ fund scopes:
 ```ts
 await runRemoteDrive({
   sessionId, pairingPassword, hostUrl,
+  // Supply your complete judging terms; only bind the freshly registered market ID here.
+  mandateForMarket: (marketId) => ({ ...authoredMandate, marketId }),
+  operationId: creationOperationId, // nonzero 0x + 64 hex; reuse for recovery
   ingest: {
     width: 640, height: 360, fps: 30,
     port: 48710, path: "/frames", // server defaults; the bot chose them
@@ -86,7 +89,7 @@ await runRemoteDrive({
   `pump.exhausted()` reports a naturally ended supply; a hung iterable cannot
   stall teardown.
 - Proof frames for A's own verification come from `generateCounterFrames`
-  (labeled proof-only); C's stock bot supplies show frames over the same input.
+  (labeled proof-only); an external show bot supplies frames over the same input.
 - Failure rules match the file lane: pre-live asks for a stop and reports
   registered-not-live; uncertain `goLive` keeps media for readback; post-live
   failures carry `lastVerifiedMedia` and never claim a rollback; flow-06 owns stop.
@@ -190,3 +193,13 @@ constant consumed solely by undispatched lanes (a live bundler would be needed
 to derive it). This file alone does not complete Flow 01.
 
 Resume/reconnect semantics are flow 08 and explicitly out of scope here.
+
+## Rule-bound creation and independent reads (Flow 03)
+
+Creation requires the complete generic `livestreak-mandate/1` document and a nonzero bytes32 operation ID. The Bookmaker form accepts mandate JSON text; programmatic `createVault` accepts an object or JSON text. Terms are published before creation, and the EVM vault stores their immutable SHA-256 commitment and funding close. The operation ID belongs to the creator: repeat identical inputs for recovery; changed inputs reject.
+
+Viewer and Steward sessions independently call `readMandate` with `{ vaultId }`. Successful replies contain `{ terms, mandate }`, verified against chain metadata. Creation replies contain `{ txId, tokenId, commitment }`, where `tokenId` is the vault ID. These fields survive the Host/gateway wire and the self-contained public declarations. Fund/lane/top-up writes refuse unavailable or mismatched terms and use chain time for cutoff checks; safe stops remain available without rule storage.
+
+The drive API accepts explicit `mandate` or `mandateForMarket(marketId)` plus `operationId`; it does not infer judgement from the stream title. The CLI drive accepts `--mandate-file` and `--operation-id` for explicit terms bound to the intended market. For the demonstrated four-role live-media path use [the RTMP integration example](../../examples/rtmp-broadcaster/README.md). Its Viewer/Steward credentials are test orchestration, not production bot permissions.
+
+Support is local EVM with the Flow03 contract/ABI version. Contract/ABI source commits remain held by the user; this SDK packet alone is not a deployable feature release. Legacy EVM and unsupported Solana/Sui bound writes never fall back to question-only vaults. Resolution, payout and public Solana remain later flows.

@@ -133,6 +133,8 @@ const CONFIGURE_INPUT_SCHEMA: JsonSchema = obj([
 ]);
 
 const CREATE_VAULT_INPUT_SCHEMA: JsonSchema = obj([
+  { name: "mandate", help: "Complete immutable judging terms", value: { type: "string", required: true, description: "Complete livestreak-mandate/1 judging terms as JSON" } },
+  { name: "operationId", help: "Creation operation identity", value: str("Nonzero bytes32 creation identity; reuse exactly for recovery") },
   {
     name: "marketId",
     value: str("Market the vault belongs to."),
@@ -167,23 +169,5 @@ const CREATE_VAULT_INPUT_SCHEMA: JsonSchema = obj([
       description: "Initial stream rate. Base-unit integer as a decimal string."
     },
     help: "USDC base units/sec seed rate."
-  },
-  {
-    name: "resolutionSource",
-    value: {
-      type: "string",
-      required,
-      description: 'How the vault resolves (e.g. "manual").',
-      default: "manual"
-    },
-    help: "Resolution source — defaults to manual."
-  },
-  {
-    name: "resolutionWindowExpiresAtMs",
-    value: {
-      type: "integer",
-      description: "Resolution deadline (epoch ms). Leave blank to default to 24h from now."
-    },
-    help: "Optional — the gateway defaults this to now + 24h when blank."
   }
 ]);

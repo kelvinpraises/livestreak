@@ -3,7 +3,12 @@
 import { LiveStreakConfigError } from "@livestreak/core";
 import type { SuiNetwork } from "@livestreak/wallet";
 
-import type { OptionsChain, OptionsChainConfig, OptionsReader, OptionsWriter } from "../types.js";
+import type {
+  OptionsChain,
+  OptionsChainConfig,
+  OptionsReader,
+  OptionsWriter,
+} from "../types.js";
 import type { OptionsSuiObjectIds } from "./addresses.js";
 import { createSuiOptionsReader } from "./reader.js";
 import { createSuiOptionsWriter } from "./writer.js";
@@ -12,17 +17,20 @@ export const createSuiOptionsChain = (config?: OptionsChainConfig): OptionsChain
   if (config === undefined) {
     return {
       reader: createNotImplementedReader(),
-      writer: createNotImplementedWriter()
+      writer: createNotImplementedWriter(),
     };
   }
 
   if (config.walletInit.chain !== "sui") {
     throw new LiveStreakConfigError({
-      message: "Sui options chain requires walletInit.chain === sui"
+      message: "Sui options chain requires walletInit.chain === sui",
     });
   }
 
-  const suiConfig = config.walletInit.config as { rpcUrl?: string | string[]; network?: SuiNetwork };
+  const suiConfig = config.walletInit.config as {
+    rpcUrl?: string | string[];
+    network?: SuiNetwork;
+  };
   const rpcUrl =
     config.readRpcUrl ??
     (Array.isArray(suiConfig.rpcUrl) ? suiConfig.rpcUrl[0] : suiConfig.rpcUrl) ??
@@ -32,19 +40,22 @@ export const createSuiOptionsChain = (config?: OptionsChainConfig): OptionsChain
 
   return {
     reader: createSuiOptionsReader(ids, rpcUrl, suiConfig.network, {
-      includeProtocolSummary: config.includeProtocolSummary
+      includeProtocolSummary: config.includeProtocolSummary,
+      hostUrl: config.hostUrl,
     }),
-    writer: createSuiOptionsWriter(config)
+    writer: createSuiOptionsWriter(config),
   };
 };
 
 // --- helpers ---
 
-const notImplemented = (operation: string): (() => Promise<never>) => async () => {
-  throw new LiveStreakConfigError({
-    message: `Sui options chain: ${operation} is not implemented`
-  });
-};
+const notImplemented =
+  (operation: string): (() => Promise<never>) =>
+  async () => {
+    throw new LiveStreakConfigError({
+      message: `Sui options chain: ${operation} is not implemented`,
+    });
+  };
 
 const createNotImplementedReader = (): OptionsReader => ({
   readMarket: notImplemented("readMarket"),
@@ -71,7 +82,7 @@ const createNotImplementedReader = (): OptionsReader => ({
   readNftBalance: notImplemented("readNftBalance"),
   readOwnerOf: notImplemented("readOwnerOf"),
   readApproved: notImplemented("readApproved"),
-  readIsApprovedForAll: notImplemented("readIsApprovedForAll")
+  readIsApprovedForAll: notImplemented("readIsApprovedForAll"),
 });
 
 const createNotImplementedWriter = (): OptionsWriter => ({
@@ -90,5 +101,5 @@ const createNotImplementedWriter = (): OptionsWriter => ({
   claimDividends: notImplemented("claimDividends"),
   transferNft: notImplemented("transferNft"),
   approveNft: notImplemented("approveNft"),
-  setApprovalForAll: notImplemented("setApprovalForAll")
+  setApprovalForAll: notImplemented("setApprovalForAll"),
 });

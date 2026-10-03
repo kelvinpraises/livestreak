@@ -6,10 +6,8 @@ import { actionScopeFor } from "./action-scope.js";
 import { projectStewardControls } from "./panel/project.js";
 import type { StewardControlsView } from "./panel/types.js";
 import { stewardWatchSubjects } from "../model/subject.js";
-import { authorizeBridgeCaller, hasAnyScope, requireAnyScope } from "./scope.js";
+import { authorizeBridgeCaller, hasAnyScope } from "./scope.js";
 import type {
-  BridgeCaller,
-  CallActionEnvelope,
   CapabilityScope,
   CreateStewardBridgeInput,
   StewardBridge
@@ -20,7 +18,6 @@ import {
   bridgeBoardSubscribeScope,
   bridgeControlsReadScope
 } from "./types.js";
-import type { StewardBoard } from "../runtime/board.js";
 
 export type {
   BridgeCaller,
@@ -68,6 +65,12 @@ export const createStewardBridge = (input: CreateStewardBridgeInput): StewardBri
         });
       }
 
+      if (envelope.action === "readMandate") {
+        authorizeBridgeCaller(caller, "bridge:action:readMandate");
+        const args = envelope.args as { vaultId?: unknown } | undefined;
+        if (typeof args?.vaultId !== "string" || !input.readMandate) throw new Error("Verified mandate read unsupported");
+        return input.readMandate(args.vaultId);
+      }
       // Configure/close are runtime lens verbs: swap the watched subjects, refresh best-effort
       // (fact-source failures land on the board as lastError, not on the caller).
       if (envelope.action === "configure") {

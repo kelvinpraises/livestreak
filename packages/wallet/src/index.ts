@@ -84,7 +84,7 @@ export {
   getTransactionEncoder,
   getBase64EncodedWireTransaction,
 } from '@solana/transactions'
-export { getBase58Decoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs'
+export { getBase58Encoder, getBase58Decoder, getBase64Decoder, getBase64Encoder } from '@solana/codecs'
 export { getCompiledTransactionMessageDecoder } from '@solana/transaction-messages'
 export { createKeyPairSignerFromPrivateKeyBytes } from '@solana/signers'
 export { KoraClient } from '@solana/kora'

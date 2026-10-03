@@ -86,6 +86,7 @@ class BookmakerRuntimeFacade implements BookmakerRuntime {
       input.chain ??
       createBookmakerChain(
         validateBookmakerChainConfig({
+          hostUrl: this.config.hostUrl,
           walletInit: this.config.walletInit,
           seed: this.config.seed,
           addresses: this.config.addresses,

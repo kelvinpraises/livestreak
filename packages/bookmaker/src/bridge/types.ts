@@ -29,6 +29,7 @@ export interface CreateVaultActionResult {
 
 /** Any bridge action result — configure/close acks carry no vaultId. */
 export interface BookmakerActionResult {
+  readonly commitment?: string;
   readonly txId: import("../chains/types.js").TxId;
   readonly vaultId?: import("../chains/types.js").VaultId;
 }

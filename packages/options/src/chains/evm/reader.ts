@@ -1,5 +1,7 @@
 // --- exports ---
 
+import { createMandateClient } from "@livestreak/host";
+import type { BoundVaultTerms } from "@livestreak/schema";
 import { LiveStreakConfigError } from "@livestreak/core";
 import { createPublicClient, http, type Abi } from "viem";
 
@@ -122,7 +124,7 @@ export const createEvmOptionsReader = (config: OptionsChainConfig): OptionsReade
   const rpcUrl = config.readRpcUrl ?? String(evmConfig.provider);
   const publicClient = createPublicClient({ transport: http(rpcUrl) });
 
-  return createEvmOptionsReaderFromCall(
+  const reader = createEvmOptionsReaderFromCall(
     config.addresses as OptionsContractAddresses,
     async <T,>(
       address: `0x${string}`,
@@ -143,6 +145,21 @@ export const createEvmOptionsReader = (config: OptionsChainConfig): OptionsReade
       ...(config.includeProtocolSummary === true ? { includeProtocolSummary: true } : {})
     }
   );
+  reader.readVaultMandate = async (vaultId) => {
+    if (!config.hostUrl) throw new Error("Durable mandate Host unavailable");
+    const address = validateOptionsContractAddresses(config.addresses as OptionsContractAddresses).vault;
+    const args = [validateVaultIdForContracts(vaultId)];
+    const [vault, commitment, close, chainId] = await Promise.all([
+      publicClient.readContract({address,abi:DEFAULT_ABIS.Vault as Abi,functionName:"getVault",args}),
+      publicClient.readContract({address,abi:DEFAULT_ABIS.Vault as Abi,functionName:"mandateCommitment",args}),
+      publicClient.readContract({address,abi:DEFAULT_ABIS.Vault as Abi,functionName:"fundingClose",args}),
+      publicClient.getChainId()
+    ]);
+    const data = vault as { marketId: string; question: string };
+    const terms: BoundVaultTerms = { vaultId, marketId:data.marketId, question:data.question, commitment:String(commitment), fundingClose:Number(close), chainId:`eip155:${chainId}` };
+    return { terms, mandate: await createMandateClient(config.hostUrl).readVerified(terms) };
+  };
+  return reader;
 };
 
 const buildReader = (ctx: ReaderContext): OptionsReader => ({

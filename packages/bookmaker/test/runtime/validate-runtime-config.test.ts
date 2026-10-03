@@ -29,6 +29,12 @@ const chainFields = {
 } as const;
 
 describe("validateBookmakerRuntimeConfig", () => {
+  it("preserves the durable mandate Host through runtime validation", () => {
+    const result = validateBookmakerRuntimeConfig({ ...validConfig, hostUrl: "http://127.0.0.1:8787" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.hostUrl).toBe("http://127.0.0.1:8787");
+  });
+
   const validConfig = {
     runtimeId: "bookmaker-1",
     marketContext: marketContext(),

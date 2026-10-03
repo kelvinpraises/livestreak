@@ -18,6 +18,8 @@ describe("bookmaker bridge createVault wiring", () => {
   const nowMs = 10_000;
   const draft = vaultDraft({ marketId: FAKE_MARKET_ID });
   const createArgs = {
+    mandate: draft.mandate,
+    operationId: draft.operationId,
     marketId: draft.marketId,
     question: draft.question,
     creatorSide: draft.creatorSide,
@@ -178,7 +180,9 @@ describe("bookmaker bridge capability expiry", () => {
         scope: bridgeActionScope,
         action: "createVault",
         args: {
-          marketId: draft.marketId,
+          mandate: draft.mandate,
+    operationId: draft.operationId,
+    marketId: draft.marketId,
           question: draft.question,
           creatorSide: draft.creatorSide,
           creatorStake: draft.creatorStake,

@@ -40,13 +40,12 @@ export const validateOptionsChainConfig = (input: unknown): OptionsChainConfig =
   }
 
   const chain = (walletInit as { chain?: string }).chain;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const addresses =
     chain === "sui"
-      ? validateOptionsSuiObjectIds(input.addresses as any)
+      ? validateOptionsSuiObjectIds(input.addresses as unknown as import("./sui/addresses.js").OptionsSuiObjectIds)
       : chain === "solana"
-        ? validateOptionsSolanaAddresses(input.addresses as any)
-        : validateOptionsContractAddresses(input.addresses as any);
+        ? validateOptionsSolanaAddresses(input.addresses as unknown as import("./solana/addresses.js").OptionsSolanaAddresses)
+        : validateOptionsContractAddresses(input.addresses as unknown as import("./evm/addresses.js").OptionsContractAddresses);
 
   const readRpcUrl =
     input.readRpcUrl === undefined
@@ -59,6 +58,7 @@ export const validateOptionsChainConfig = (input: unknown): OptionsChainConfig =
       : asUserAddress(requireNonEmptyString(input.transferOperator, "transferOperator"));
 
   return {
+    ...(typeof input.hostUrl === "string" ? { hostUrl: input.hostUrl } : {}),
     walletInit: walletInit as OptionsChainConfig["walletInit"],
     seed,
     addresses,

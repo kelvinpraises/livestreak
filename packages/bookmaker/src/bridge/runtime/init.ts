@@ -89,6 +89,7 @@ export const bookmakerChainConfigFromPackageInit = (
   init: PackageRuntimeInit,
   options?: { readonly readRpcUrl?: string }
 ): BookmakerChainConfig => ({
+  hostUrl: init.hostUrl,
   walletInit: init.wallet.walletInit,
   seed: init.wallet.seed,
   addresses: bookmakerAddressesFromInit(init),
@@ -145,7 +146,8 @@ export const bookmakerRuntimeConfigFromPackageInit = (
     policy: options?.policy ?? defaultRemotePolicy(),
     fundingToken: bookmakerFundingTokenFromInit(init),
     ...(similarityClient === undefined ? {} : { similarityClient }),
-    walletInit: init.wallet.walletInit,
+    hostUrl: init.hostUrl,
+  walletInit: init.wallet.walletInit,
     seed: init.wallet.seed,
     addresses: bookmakerAddressesFromInit(init),
     ...(options?.readRpcUrl === undefined ? {} : { readRpcUrl: options.readRpcUrl })

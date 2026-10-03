@@ -1,3 +1,4 @@
+import { fixtureMandate } from "../../packages/schema/test/helpers/mandate.js";
 // Pristine-board OPERATOR FLOW for the bookmaker console edge — the post-purge regression guard.
 //
 // Drives the REAL cli edge (cli/src/adapters/bookmaker-edge.ts): the same describeFunctions/dispatch
@@ -53,14 +54,16 @@ const fieldNames = (descriptor: FunctionDescriptor | undefined): readonly string
     (property) => property.name
   );
 
-// The fields the createVault dispatch validator requires (validateCreateVaultIntent). The edge defaults
-// resolutionSource/resolutionWindowExpiresAtMs, but a form must still be able to supply the core draft.
+// The fields the createVault dispatch validator requires (validateCreateVaultIntent):
+// complete mandate and operation identity must be supplied explicitly by the form.
 const CREATE_VAULT_REQUIRED_FIELDS = [
   "marketId",
   "question",
   "creatorSide",
   "creatorStake",
-  "seedRate"
+  "seedRate",
+  "mandate",
+  "operationId"
 ] as const;
 
 describe("bookmaker console edge — pristine operator flow", () => {
@@ -138,7 +141,7 @@ describe("bookmaker console edge — pristine operator flow", () => {
       args: { marketId: FAKE_MARKET_ID }
     });
 
-    // Only values a rendered form could supply (all strings; resolution fields defaulted by the edge).
+    // Only values a rendered form could supply, including explicit JSON judging terms.
     const result = await edge.dispatch(trustedCaller(), {
       scope: "bridge:action",
       action: "createVault",
@@ -147,11 +150,14 @@ describe("bookmaker console edge — pristine operator flow", () => {
         question: "Does the operator flow hold?",
         creatorSide: "yes",
         creatorStake: "1000000",
-        seedRate: "1000"
+        seedRate: "1000",
+        mandate: JSON.stringify(fixtureMandate(FAKE_MARKET_ID, "Does the operator flow hold?")),
+        operationId: `0x${"ab".repeat(32)}`
       }
     });
 
     expect(chain.created).toHaveLength(1);
+    expect(chain.created[0]).toMatchObject({ mandate: fixtureMandate(FAKE_MARKET_ID, "Does the operator flow hold?"), operationId: `0x${"ab".repeat(32)}` });
     expect(result.txId).toBe(`0x${"aa".repeat(32)}`);
     expect(result.tokenId).toBe(FAKE_VAULT_ID);
   });

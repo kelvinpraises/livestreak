@@ -100,6 +100,7 @@ export const validateBookmakerRuntimeConfig = (
   }
 
   return validationSuccess({
+    ...(typeof value.hostUrl === "string" && value.hostUrl.trim() ? { hostUrl: value.hostUrl.trim() } : {}),
     runtimeId,
     marketContext: marketContext.value,
     watchSource: watchSource.value,

@@ -57,6 +57,7 @@ export const createOptionsConsoleEdge = (input: CreateOptionsConsoleEdgeInput): 
         action: envelope.action,
         args: envelope.args
       });
+      if (envelope.action === "readMandate") return result as import("@livestreak/schema").VerifiedVaultMandate;
       if (typeof result === "object" && result !== null) {
         const r = result as { txId?: unknown; tokenId?: unknown };
         return {

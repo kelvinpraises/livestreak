@@ -37,7 +37,6 @@ export {
 
 export { authorizeBridgeCaller, requireAnyScope } from "./scope.js";
 
-const DAY_MS = 86_400_000;
 
 export const createBookmakerBridge = (input: CreateBookmakerBridgeInput): BookmakerBridge => {
   const { runtime, now } = input;
@@ -123,7 +122,7 @@ const dispatchWriterAction = async (
 
   const intent = parseCreateVaultIntentFromArgs(args as Record<string, unknown>, nowMs);
   const result = await runtime.createVaultOnce(intent, nowMs);
-  return { txId: result.result.txId, vaultId: result.result.vaultId };
+  return { txId: result.result.txId, vaultId: result.result.vaultId, commitment: result.result.commitment };
 };
 
 const readConfigureMarketId = (args: unknown): string => {
@@ -154,23 +153,16 @@ const parseCreateVaultIntentFromArgs = (args: Record<string, unknown>, nowMs: nu
   const creatorStake = coerceBigIntArg(args.creatorStake);
   const seedRate = coerceBigIntArg(args.seedRate);
 
-  // Console auto-form defaults: blank resolution source → "manual"; blank/invalid window → +24h.
-  const source =
-    typeof args.resolutionSource === "string" && args.resolutionSource.trim().length > 0
-      ? args.resolutionSource.trim()
-      : "manual";
-  const rawWindow = args.resolutionWindowExpiresAtMs;
-  const windowNumber =
-    typeof rawWindow === "number"
-      ? rawWindow
-      : typeof rawWindow === "string" && rawWindow.trim().length > 0
-        ? Number(rawWindow)
-        : Number.NaN;
-  const expiresAt = Number.isFinite(windowNumber) && windowNumber > 0 ? windowNumber : nowMs + DAY_MS;
+  if (!args.mandate || !args.operationId) throw new LiveStreakConfigError({ message: "Complete mandate and operationId required" });
+  const mandate = (typeof args.mandate === "string" ? JSON.parse(args.mandate) : args.mandate) as import("@livestreak/schema").VaultMandate;
+  const source = mandate.authority;
+  const expiresAt = mandate.decisionEnd * 1000;
 
   const validated = validateCreateVaultIntent(
     {
       action: "createVault",
+      mandate,
+      operationId: args.operationId,
       marketId: args.marketId,
       question: args.question,
       creatorSide: args.creatorSide,

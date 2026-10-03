@@ -14,7 +14,7 @@ export { resolveSolanaAccountAddress } from "./account.js";
 export const createSolanaOptionsChain = (config: OptionsChainConfig): OptionsChain => {
   if (config.walletInit.chain !== "solana") {
     throw new LiveStreakConfigError({
-      message: "Solana options chain requires walletInit.chain === solana"
+      message: "Solana options chain requires walletInit.chain === solana",
     });
   }
 
@@ -22,8 +22,9 @@ export const createSolanaOptionsChain = (config: OptionsChainConfig): OptionsCha
 
   return {
     reader: createSolanaOptionsReader(ctx, {
-      includeProtocolSummary: config.includeProtocolSummary
+      includeProtocolSummary: config.includeProtocolSummary,
+      hostUrl: config.hostUrl,
     }),
-    writer: createSolanaOptionsWriter(config)
+    writer: createSolanaOptionsWriter(config),
   };
 };

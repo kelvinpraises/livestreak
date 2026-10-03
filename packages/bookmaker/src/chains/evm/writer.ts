@@ -9,7 +9,10 @@ import {
   UserOperationPollTimeoutError,
   type EvmErc4337WalletConfig
 } from "@livestreak/wallet";
-import { encodeFunctionData, type Abi } from "viem";
+import { createMandateClient } from "@livestreak/host";
+import { canonicalMandateBytes, mandateCommitment, verifyMandate } from "@livestreak/schema";
+import { vaultAbi } from "@livestreak/contracts/evm/abis";
+import { createPublicClient, http, zeroHash, encodeFunctionData, type Abi } from "viem";
 
 import { receiptTimeoutError } from "./create-vault-recovery.js";
 import type {
@@ -40,6 +43,7 @@ export const createEvmBookmakerWriter = (config: BookmakerChainConfig): Bookmake
   const evmConfig = config.walletInit.config as EvmErc4337WalletConfig;
   const addresses = validateBookmakerContractAddresses(config.addresses);
   const abis = DEFAULT_ABIS;
+  const publicClient = createPublicClient({ transport: http(config.readRpcUrl ?? String(evmConfig.provider)) });
 
   // OPT.rederive: derive the wallet account ONCE per writer (deterministic Safe), reuse across writes.
   let accountPromise: Promise<{ account: WritableAccount; readOnly: ReadOnlyAccount }> | undefined;
@@ -57,6 +61,12 @@ export const createEvmBookmakerWriter = (config: BookmakerChainConfig): Bookmake
 
   return {
     createVault: async (input: CreateVaultInput) => {
+      if (!input.mandate || !input.operationId || !config.hostUrl) throw new LiveStreakConfigError({ message: "Complete mandate, operation identity and durable Host required" });
+      const bytes = canonicalMandateBytes(input.mandate);
+      const commitment = await mandateCommitment(bytes);
+      if (!/^0x[0-9a-f]{64}$/.test(input.operationId) || input.operationId === zeroHash) throw new Error("Invalid creation operation identity");
+      const chainId = `eip155:${await publicClient.getChainId()}`;
+      await verifyMandate(input.mandate, { chainId, marketId: input.marketId, question: input.question, vaultId: "pending", commitment, fundingClose: input.mandate.fundingClose });
       const marketIdBytes = validateMarketIdForContracts(input.marketId);
       const side = sideToSolidityValue(input.creatorSide);
       const rate = validateSeedRate(input.seedRate);
@@ -64,12 +74,31 @@ export const createEvmBookmakerWriter = (config: BookmakerChainConfig): Bookmake
 
       const { account, readOnly } = await getAccount();
 
+      const creator = await readOnly.getAddress();
+      let previous: readonly [string, string];
+      try {
+        previous = await publicClient.readContract({ address: addresses.vaultDriver, abi: abis.VaultDriver as Abi, functionName: "creations", args: [creator, input.operationId] }) as readonly [string, string];
+      } catch {
+        throw new LiveStreakConfigError({ message: "EVM deployment cannot verify rule-bound creation; an available RPC and updated VaultDriver are required" });
+      }
+      if (previous[0] !== zeroHash) {
+        const terms = await publicClient.readContract({ address: addresses.vault, abi: vaultAbi as Abi, functionName: "getVault", args: [previous[0]] }) as { marketId: string; question: string; creator: string };
+        const storedCommitment = await publicClient.readContract({ address: addresses.vault, abi: vaultAbi as Abi, functionName: "mandateCommitment", args: [previous[0]] });
+        // The contract verifies the complete seed/input digest on a replay; verify it without sending.
+        const { keccak256, encodeAbiParameters, parseAbiParameters } = await import("viem");
+        const digest = keccak256(encodeAbiParameters(parseAbiParameters("bytes32, string, uint8, uint256, uint256, bytes32, uint32"), [marketIdBytes, input.question, side, rate, deposit, commitment, input.mandate.fundingClose]));
+        if (previous[1] !== digest || storedCommitment !== commitment || terms.marketId !== marketIdBytes || terms.question !== input.question || terms.creator.toLowerCase() !== creator.toLowerCase()) throw new Error("Creation operation conflict");
+        return { txId: asTxId(`reconciled:${input.operationId}`), vaultId: previous[0] as CreateVaultResult["vaultId"], commitment };
+      }
+      const block = await publicClient.getBlock();
+      if (block.timestamp >= BigInt(input.mandate.fundingClose)) throw new Error("Vault funding window already closed");
+      await createMandateClient(config.hostUrl).publish(input.mandate);
       await ensureUsdcAllowance(readOnly, account, addresses.usdc, addresses.vaultDriver, deposit);
 
       const data = encodeFunctionData({
         abi: abis.VaultDriver as Abi,
-        functionName: "createVault",
-        args: [marketIdBytes, input.question, side, rate, deposit]
+        functionName: "createBoundVault",
+        args: [marketIdBytes, input.question, side, rate, deposit, commitment, input.mandate.fundingClose, input.operationId]
       });
 
       let sendResult: { hash: string };
@@ -92,12 +121,18 @@ export const createEvmBookmakerWriter = (config: BookmakerChainConfig): Bookmake
         throw receiptFailure(`Transaction receipt missing for ${sendResult.hash}`);
       }
 
-      return resolved;
+      const storedCommitment = await publicClient.readContract({ address: addresses.vault, abi: vaultAbi as Abi, functionName: "mandateCommitment", args: [resolved.vaultId] });
+      if (storedCommitment !== commitment) throw new Error("Created vault commitment readback mismatch");
+      return { ...resolved, commitment };
     },
 
     confirmCreateVault: async (userOpHash: TxId) => {
       const { readOnly } = await getAccount();
-      return resolveCreateVaultFromUserOp(readOnly, userOpHash);
+      const result = await resolveCreateVaultFromUserOp(readOnly, userOpHash);
+      if (!result) return result;
+      const commitment = await publicClient.readContract({ address: addresses.vault, abi: vaultAbi as Abi, functionName: "mandateCommitment", args: [result.vaultId] }) as string;
+      if (!/^0x(?!0{64}$)[0-9a-f]{64}$/i.test(commitment)) throw new Error("Recovered vault has no mandate commitment");
+      return { ...result, commitment };
     }
   };
 };

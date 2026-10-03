@@ -1,3 +1,4 @@
+import type { VaultMandate } from "@livestreak/schema";
 // --- exports ---
 
 import type { WalletInit } from "@livestreak/schema";
@@ -17,6 +18,8 @@ export type VaultId = string & { readonly __brand: "VaultId" };
 export const asVaultId = (value: string): VaultId => value as VaultId;
 
 export type CreateVaultInput = {
+  readonly mandate?: VaultMandate;
+  readonly operationId?: string;
   readonly marketId: string;
   readonly question: string;
   readonly creatorSide: "yes" | "no";
@@ -27,6 +30,7 @@ export type CreateVaultInput = {
 export type CreateVaultResult = {
   readonly txId: TxId;
   readonly vaultId: VaultId;
+  readonly commitment?: string;
 };
 
 export interface BookmakerChainReader {
@@ -47,5 +51,6 @@ export interface BookmakerChainConfig {
   readonly walletInit: WalletInit;
   readonly seed: string | Uint8Array;
   readonly addresses: BookmakerContractAddresses | BookmakerSuiObjectIds | BookmakerSolanaAddresses;
+  readonly hostUrl?: string;
   readonly readRpcUrl?: string;
 }

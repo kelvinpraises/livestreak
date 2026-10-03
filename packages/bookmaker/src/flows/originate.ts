@@ -23,6 +23,8 @@ export type GuardedCreateVault = (
 ) => Promise<CreateVaultOnceResult>;
 
 export interface OriginateVaultInput {
+  readonly mandate?: import("@livestreak/schema").VaultMandate;
+  readonly operationId?: string;
   readonly evaluation: BookmakerDetectionEvaluation;
   readonly marketContext: BookmakerMarketContext;
   readonly fundingToken: string;
@@ -73,11 +75,15 @@ export const originateVault = async (input: OriginateVaultInput): Promise<Origin
   }
 
   const detection = input.evaluation.detection;
-  const draft = buildVaultDraft(detection, input.marketContext, {
+  const detectedDraft = buildVaultDraft(detection, input.marketContext, {
     fundingToken: input.fundingToken,
     nowMs: input.nowMs
   });
 
+  const draft: VaultDraft = input.mandate === undefined ? detectedDraft : {
+    ...detectedDraft, mandate: input.mandate, operationId: input.operationId,
+    resolutionWindow: { expiresAtMs: input.mandate.decisionEnd * 1000 }
+  };
   const similarity = await findSimilar(draft, input.similarityClient);
   const decision = chooseVaultAction(draft, similarity, {
     ...input.policy,

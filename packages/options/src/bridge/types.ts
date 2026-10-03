@@ -44,7 +44,7 @@ export interface OptionsBridge {
     caller: BridgeCaller,
     envelope: CallActionEnvelope
   ) => Promise<
-    import("../chains/types.js").TxId | import("../chains/types.js").MintResult
+    import("../chains/types.js").TxId | import("../chains/types.js").MintResult | import("@livestreak/schema").VerifiedVaultMandate
   >;
   readonly subscribeBoard: (
     caller: BridgeCaller,

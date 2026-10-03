@@ -89,6 +89,7 @@ const built = {
     buildSetDefaultStewardIx({ programId: PROGRAM_ID, authority: USER, steward: STEWARD }),
   create_vault_seeded: () =>
     buildCreateVaultSeededIx({
+      commitment: ID_A, fundingClose: 4294967294n, operationId: ID_B,
       programId: PROGRAM_ID,
       marketId: ID_A,
       user: USER,
@@ -160,6 +161,37 @@ const built = {
 }
 
 describe('livestreak instruction builders', () => {
+  it("bound creation encodes the immutable terms in IDL order", async () => {
+    const ix = await built.create_vault_seeded();
+    assert.deepEqual(
+      idlByName.create_vault_seeded.args.map((a) => a.name),
+      [
+        "question",
+        "seed_side",
+        "rate",
+        "deposit",
+        "commitment",
+        "funding_close",
+        "operation_id",
+      ],
+    );
+    const question = new TextEncoder().encode("goal scored?");
+    const length = new Uint8Array(4);
+    new DataView(length.buffer).setUint32(0, question.length, true);
+    const expected = new Uint8Array([
+      ...idlByName.create_vault_seeded.discriminator,
+      ...length,
+      ...question,
+      1,
+      ...u64le.encode(5_000_000n),
+      ...u64le.encode(500_000_000n),
+      ...new Uint8Array(32).fill(0x11),
+      ...u64le.encode(4294967294n),
+      ...new Uint8Array(32).fill(0x22),
+    ]);
+    assert.deepEqual(ix.data, expected);
+  });
+
   it('initialize data == deploy encoding (disc + steward pubkey + lvst mint pubkey)', async () => {
     const ix = await built.initialize()
     const disc = Uint8Array.from([175, 175, 109, 31, 13, 152, 155, 237])

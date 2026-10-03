@@ -668,6 +668,9 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
         action,
         args,
       })
+      if (typeof result !== 'string' && !('txId' in result)) {
+        throw new Error('Options write returned a read result')
+      }
       await afterWrite()
       return typeof result === 'string' ? result : result.txId
     } finally {

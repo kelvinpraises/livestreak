@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { canonicalMandateBytes } from "@livestreak/schema";
 import { assertWatchableProof } from "@livestreak/observe";
 import { defaultSettingsPath, ensureSettings } from "../../prefs/settings.js";
 import { createRemoteUiClient, type RemoteDriveTarget, type RemoteUiClient } from "./ui-client.js";
@@ -30,6 +31,10 @@ export interface RemoteDriveInput {
   /** Media-only proof: vault + fund + re-probe, then return without steward legs.
    *  Requires `ingest`; generic settlement is not ready. */
   readonly mediaOnly?: boolean;
+  /** Complete explicit judging terms for the newly registered market; never inferred from a title. */
+  readonly mandate?: import("@livestreak/schema").VaultMandate;
+  readonly mandateForMarket?: (marketId: string) => import("@livestreak/schema").VaultMandate | Promise<import("@livestreak/schema").VaultMandate>;
+  readonly operationId?: string;
   readonly log?: (line: string) => void;
 }
 
@@ -856,6 +861,12 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
     try {
 
     // Bookmaker: seed a vault on the fresh market; the result's tokenId IS the vaultId.
+    const mandate = input.mandate ?? await input.mandateForMarket?.(marketId);
+    if (!mandate || !input.operationId) {
+      throw new Error("Economy drive requires explicit mandate and operationId; use the public role client example or --observe-only for media");
+    }
+    canonicalMandateBytes(mandate);
+    if (mandate.marketId !== marketId) throw new Error("Explicit mandate does not belong to the driven market");
     const bmConfigure = await client.call("bookmaker", "configure", { marketId });
     record({ target: "bookmaker", action: "configure", ok: bmConfigure.ok, error: bmConfigure.error });
     if (!bmConfigure.ok) {
@@ -864,7 +875,9 @@ export const runRemoteDrive = async (input: RemoteDriveInput): Promise<RemoteDri
 
     const createVault = await client.call("bookmaker", "createVault", {
       marketId,
-      question: `Will ${input.observeTitle ?? "the stream"} deliver?`,
+      question: mandate.question,
+      mandate,
+      operationId: input.operationId,
       creatorSide: "yes",
       creatorStake: "5000000",
       seedRate: "8333"

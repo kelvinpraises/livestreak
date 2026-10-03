@@ -108,6 +108,8 @@ describe("runtime createVaultOnce discovery-index registration", () => {
         scope: bridgeActionScope,
         action: "createVault",
         args: {
+          mandate: intent.mandate,
+          operationId: intent.operationId,
           marketId: intent.marketId,
           question: intent.question,
           creatorSide: intent.creatorSide,

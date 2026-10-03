@@ -26,6 +26,11 @@ export const projectStewardDescriptors = (
 
   pushRoot(descriptors);
   pushConfigurator(descriptors);
+  descriptors.push(withDescriptorIdentity({
+    id: "steward.action.readMandate", parentId: ROOT_ID, name: "readMandate", label: "Read verified mandate",
+    scope: "bridge:action:readMandate" as CapabilityScope, nodeKind: "action", visible: true, disabled: false,
+    inputSchema: { type: "object", properties: [{name:"vaultId",help:"Vault ID",value:{type:"string",required:true,description:"Vault whose chain-bound terms are verified"}}] }
+  }, {package:PACKAGE,idPrefix:"action"}));
   pushSubjectGroups(descriptors, snapshot);
   for (const view of views) {
     descriptors.push(toActionDescriptor(view));

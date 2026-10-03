@@ -58,6 +58,10 @@ export const startAlto = async (chainName: string, config: AltoConfig): Promise<
       "--safe-mode",
       "false",
       "--no-profit-bundling",
+      // Stream edits settle time-dependent Drips state between simulation and inclusion.
+      // Alto v0.7 defaults to an exact estimate; leave headroom for the next boundary.
+      "--v7-call-gas-limit-multiplier",
+      "150",
       "--log-level",
       "info"
     ],

@@ -1,3 +1,4 @@
+import { fixtureMandate } from "../../../schema/test/helpers/mandate.js";
 import type {
   BookmakerMarketContext,
   BookmakerWatchSource,
@@ -40,7 +41,8 @@ export const detection = (overrides: Partial<Detection> = {}): Detection => ({
   ...overrides
 });
 
-export const vaultDraft = (overrides: Partial<VaultDraft> = {}): VaultDraft => ({
+export const vaultDraft = (overrides: Partial<VaultDraft> = {}): VaultDraft => {
+ const draft: VaultDraft = {
   marketId: "market-1",
   question: "Will Team A score in the next 10 minutes?",
   outcomeKind: "binary",
@@ -56,7 +58,10 @@ export const vaultDraft = (overrides: Partial<VaultDraft> = {}): VaultDraft => (
   creatorStake: 5_000_000n,
   seedRate: 8_333n,
   ...overrides
-});
+ };
+ const end=Math.floor(draft.resolutionWindow.expiresAtMs/1000);
+ return { ...draft, mandate: overrides.mandate ?? {...fixtureMandate(draft.marketId,draft.question), fundingClose:end-300, decisionStart:end-300, decisionEnd:end, missingEvidence:{deadline:end+100,treatment:"unresolved-escalate-no-guaranteed-refund",procedure:"Fixture escalation only; no refund promise"}}, operationId: overrides.operationId ?? `0x${"41".repeat(32)}` };
+};
 
 export const similarityResult = (
   overrides: Partial<SimilarityResult> = {}

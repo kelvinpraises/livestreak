@@ -22,6 +22,7 @@ export interface BookmakerRuntimeConfig {
   readonly walletInit: WalletInit;
   readonly seed: string | Uint8Array;
   readonly addresses: BookmakerContractAddresses | BookmakerSuiObjectIds | BookmakerSolanaAddresses;
+  readonly hostUrl?: string;
   readonly readRpcUrl?: string;
   readonly chainId?: number;
 }

@@ -85,10 +85,11 @@ export const createOptionsBridge = (input: CreateOptionsBridgeInput): OptionsBri
         });
       }
 
+      if (envelope.action === "readMandate") authorizeBridgeCaller(caller, "bridge:action:readMandate");
       const result = await dispatchWriterAction(runtime, envelope.action, envelope.args);
 
       // Reflect a chain write on the board immediately (configure/close publish themselves).
-      if (envelope.action !== "configure" && envelope.action !== "close") {
+      if (envelope.action !== "configure" && envelope.action !== "close" && envelope.action !== "readMandate") {
         const active = runtime.activeMarketId();
         if (active !== undefined && runtime.config.user !== undefined) {
           try {
@@ -120,8 +121,13 @@ const dispatchWriterAction = async (
   runtime: CreateOptionsBridgeInput["runtime"],
   action: string,
   rawArgs: unknown
-): Promise<TxId | MintResult> => {
+): Promise<TxId | MintResult | import("@livestreak/schema").VerifiedVaultMandate> => {
   const writer = runtime.chain.writer;
+  if (action === "readMandate") {
+    const args = readArgs<{ vaultId: string }>(rawArgs);
+    if (typeof args.vaultId !== "string" || !runtime.chain.reader.readVaultMandate) throw new Error("Verified mandate read unsupported");
+    return runtime.chain.reader.readVaultMandate(args.vaultId as import("../model/ids.js").VaultId);
+  }
 
   // Configure/close are runtime lens verbs, not chain writes.
   if (action === "configure") {

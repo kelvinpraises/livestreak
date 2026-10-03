@@ -21,6 +21,7 @@ export type IdempotencySnapshotEntry = {
 export type IdempotencyPersistedState = {
   readonly settled: Readonly<Record<string, CreateVaultResult>>;
   readonly pending: Readonly<Record<string, TxId>>;
+  readonly prepared?: Readonly<Record<string, string>>;
 };
 
 /** Optional persistence port (mirrors options' PausedLanesPort): `initial` rehydrates settled +
@@ -28,10 +29,12 @@ export type IdempotencyPersistedState = {
  *  mutation to the durable slice. The package stays port-only; a file adapter is injected at the CLI edge. */
 export interface IdempotencyPersistencePort {
   readonly initial?: IdempotencyPersistedState;
+  readonly onPrepareCreation?: (state: IdempotencyPersistedState) => Promise<void>;
   readonly onChange?: (state: IdempotencyPersistedState) => void;
 }
 
 export interface IdempotencyStore {
+  readonly prepareCreation: (key: string, operationId: string) => Promise<void>;
   readonly run: (
     key: string,
     exec: () => Promise<CreateVaultResult>
@@ -55,6 +58,7 @@ export const createIdempotencyStore = (
   const pending = new Map<string, TxId>(
     Object.entries(persistence?.initial?.pending ?? {})
   );
+  const prepared = new Map<string,string>(Object.entries(persistence?.initial?.prepared ?? {}));
   const inFlight = new Map<string, Promise<CreateVaultResult>>();
   const failures = new Map<string, IdempotencyFailureRecord[]>();
   const exclusiveChains = new Map<string, Promise<unknown>>();
@@ -62,7 +66,8 @@ export const createIdempotencyStore = (
   const persist = (): void => {
     persistence?.onChange?.({
       settled: Object.fromEntries(settled),
-      pending: Object.fromEntries(pending)
+      pending: Object.fromEntries(pending),
+      prepared: Object.fromEntries(prepared)
     });
   };
 
@@ -73,6 +78,11 @@ export const createIdempotencyStore = (
   };
 
   return {
+    prepareCreation: async (key, operationId) => {
+      prepared.set(key,operationId);
+      if (persistence?.onPrepareCreation) await persistence.onPrepareCreation({settled:Object.fromEntries(settled),pending:Object.fromEntries(pending),prepared:Object.fromEntries(prepared)});
+      else persist();
+    },
     run: async (key, exec) => {
       const cached = settled.get(key);
       if (cached !== undefined) {

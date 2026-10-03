@@ -55,6 +55,7 @@ export const validateBookmakerChainConfig = (input: unknown): BookmakerChainConf
       : requireNonEmptyString(input.readRpcUrl, "readRpcUrl");
 
   return {
+    ...(typeof input.hostUrl === "string" ? { hostUrl: input.hostUrl } : {}),
     walletInit: walletInit as WalletInit,
     seed,
     addresses,

@@ -10,6 +10,7 @@ import {
   type CallActionEnvelope,
   type CapabilityGrant,
   type FunctionDescriptor,
+  type RemoteCallOutcome as RemoteResult,
   type UiServerFrame
 } from "@livestreak/schema";
 import { enrichRelayErrorMessage } from "../decode-revert.js";
@@ -25,7 +26,7 @@ export interface RemoteUiClientOptions {
 
 export interface RemoteCallOutcome {
   readonly ok: boolean;
-  readonly result?: { readonly txId?: string; readonly tokenId?: string };
+  readonly result?: RemoteResult;
   readonly error?: string;
 }
 

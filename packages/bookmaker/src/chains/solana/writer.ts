@@ -1,3 +1,10 @@
+import { createMandateClient } from "@livestreak/host";
+import {
+  canonicalMandateBytes,
+  mandateCommitment,
+  verifyMandate,
+} from "@livestreak/schema";
+import { decodeProtocolState } from "@livestreak/contracts/solana";
 // --- exports ---
 
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
@@ -12,10 +19,12 @@ import {
   createWalletManager,
   getBase64Encoder,
   hex32FromBytes,
+  findProtocolStatePda,
+  getBase58Encoder,
   pollUntilUserOperationIncluded as pollUntilUserOperationIncludedShared,
   UserOperationPollTimeoutError,
   type Address,
-  type LiveStreakSolanaWalletConfig
+  type LiveStreakSolanaWalletConfig,
 } from "@livestreak/wallet";
 
 import type {
@@ -24,7 +33,7 @@ import type {
   CreateVaultInput,
   CreateVaultResult,
   TxId,
-  VaultId
+  VaultId,
 } from "../types.js";
 import { asTxId, asVaultId } from "../types.js";
 import type { BookmakerSolanaAddresses } from "../addresses.js";
@@ -41,7 +50,7 @@ const base64Encoder = getBase64Encoder();
 type SolanaReadRpc = {
   getTransaction: (
     signature: string,
-    config: { commitment: string; maxSupportedTransactionVersion: number }
+    config: { commitment: string; maxSupportedTransactionVersion: number },
   ) => { send: () => Promise<SolanaTransactionResult | null> };
 };
 
@@ -52,10 +61,12 @@ type SolanaTransactionResult = {
   } | null;
 };
 
-export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): BookmakerChainWriter => {
+export const createSolanaBookmakerWriter = (
+  config: BookmakerChainConfig,
+): BookmakerChainWriter => {
   if (config.walletInit.chain !== "solana") {
     throw new LiveStreakConfigError({
-      message: "Solana bookmaker writer requires walletInit.chain === solana"
+      message: "Solana bookmaker writer requires walletInit.chain === solana",
     });
   }
 
@@ -91,8 +102,72 @@ export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): Bookm
     return contextPromise;
   };
 
+  const chainRpc = createSolanaRpc(rpcUrl);
+  const readCreation = async (
+    input: CreateVaultInput,
+    commitment: string,
+  ): Promise<CreateVaultResult | undefined> => {
+    if (!input.mandate || !input.operationId)
+      throw new Error("Complete creation input required");
+    const { owner } = await getSolana();
+    const [pda] = await findProtocolStatePda(programId, input.marketId as `0x${string}`);
+    const { value } = await chainRpc
+      .getAccountInfo(pda, { encoding: "base64", commitment: "confirmed" })
+      .send();
+    if (!value) throw new Error("Solana protocol not initialized");
+    const view = await decodeProtocolState(
+      new Uint8Array(base64Encoder.encode(value.data[0])),
+    );
+    try {
+      const creator = hex32FromBytes(new Uint8Array(getBase58Encoder().encode(owner)));
+      const prior = view
+        .listVaultIds()
+        .map((id) => view.vault(id))
+        .find((v) => v.creator === creator && v.operationId === input.operationId);
+      if (!prior) return undefined;
+      if (
+        prior.marketId !== input.marketId ||
+        prior.question !== input.question ||
+        prior.commitment !== commitment ||
+        prior.fundingClose !== input.mandate.fundingClose ||
+        prior.seedSide !== sideToSolana(input.creatorSide) ||
+        BigInt(prior.seedRate) !== input.seedRate ||
+        BigInt(prior.seedDeposit) !== input.creatorStake
+      )
+        throw new Error("Creation operation conflict");
+      return {
+        txId: asTxId(`reconciled:${input.operationId}`),
+        vaultId: asVaultId(prior.id),
+        commitment,
+      };
+    } finally {
+      view.free();
+    }
+  };
+
   return {
     createVault: async (input: CreateVaultInput): Promise<CreateVaultResult> => {
+      if (!input.mandate || !input.operationId || !config.hostUrl)
+        throw new Error("Complete mandate, operation identity and durable Host required");
+      if (!/^0x(?!0{64}$)[0-9a-f]{64}$/.test(input.operationId))
+        throw new Error("Invalid creation operation identity");
+      const commitment = await mandateCommitment(canonicalMandateBytes(input.mandate));
+      await verifyMandate(input.mandate, {
+        chainId: `solana:${String(await chainRpc.getGenesisHash().send()).slice(0, 32)}`,
+        marketId: input.marketId,
+        question: input.question,
+        vaultId: "pending",
+        commitment,
+        fundingClose: input.mandate.fundingClose,
+      });
+      const previous = await readCreation(input, commitment);
+      if (previous) return previous;
+      const now = await chainRpc
+        .getBlockTime(await chainRpc.getSlot({ commitment: "confirmed" }).send())
+        .send();
+      if (now === null || Number(now) >= input.mandate.fundingClose)
+        throw new Error("Vault funding window already closed or chain time unavailable");
+      await createMandateClient(config.hostUrl).publish(input.mandate);
       const marketId = requireHex32(input.marketId, "marketId");
       const question = new TextEncoder().encode(requireNonEmptyQuestion(input.question));
       const seedSide = sideToSolana(input.creatorSide);
@@ -104,7 +179,11 @@ export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): Bookm
       // The creator seeds the vault from its OWN USDC ATA (create_vault_seeded pulls `deposit`
       // from user_usdc -> escrow). CreateIdempotent first so the ATA existing is never a
       // launch-order precondition; the creator pays its own rent (gasless fee payer owes none).
-      const ensureAta = await buildCreateAtaIdempotentIx({ payer: owner, owner, mint: usdcMint });
+      const ensureAta = await buildCreateAtaIdempotentIx({
+        payer: owner,
+        owner,
+        mint: usdcMint,
+      });
       const ix = await buildCreateVaultSeededIx({
         programId,
         marketId,
@@ -113,7 +192,10 @@ export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): Bookm
         question,
         seedSide,
         rate,
-        deposit
+        deposit,
+        commitment: commitment as `0x${string}`,
+        fundingClose: BigInt(input.mandate.fundingClose),
+        operationId: input.operationId as `0x${string}`,
       });
       const buildTx = (): unknown => buildLivestreakTransaction([ensureAta, ix]);
 
@@ -129,17 +211,19 @@ export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): Bookm
       } catch (error) {
         if (detectSolanaCapacityError(error) !== "StateFull") {
           throw new LiveStreakRuntimeError({
-            message: `Solana createVault failed: ${error instanceof Error ? error.message : String(error)}`
+            message: `Solana createVault failed: ${error instanceof Error ? error.message : String(error)}`,
           });
         }
         try {
           const grow = await buildGrowProtocolIx({ programId, marketId, payer: owner });
-          const growResult = await account.sendTransaction(buildLivestreakTransaction([grow]));
+          const growResult = await account.sendTransaction(
+            buildLivestreakTransaction([grow]),
+          );
           await pollUntilUserOperationIncluded(readOnly, growResult.hash);
           sendResult = await account.sendTransaction(buildTx());
         } catch (retryError) {
           throw new LiveStreakRuntimeError({
-            message: `Solana createVault failed after grow_protocol recovery: ${retryError instanceof Error ? retryError.message : String(retryError)}`
+            message: `Solana createVault failed after grow_protocol recovery: ${retryError instanceof Error ? retryError.message : String(retryError)}`,
           });
         }
       }
@@ -149,10 +233,13 @@ export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): Bookm
       const vaultId = await recoverVaultId(rpc, sendResult.hash);
       if (vaultId === undefined) {
         throw new LiveStreakRuntimeError({
-          message: `Solana createVault did not return a decodable vault id for ${sendResult.hash}`
+          message: `Solana createVault did not return a decodable vault id for ${sendResult.hash}`,
         });
       }
-      return { txId: asTxId(sendResult.hash), vaultId };
+      const created = await readCreation(input, commitment);
+      if (created?.vaultId !== vaultId)
+        throw new Error("Created vault mandate readback mismatch");
+      return { txId: asTxId(sendResult.hash), vaultId, commitment };
     },
 
     // Solana confirms signatures directly (no pending-userOp recovery like EVM). Best-effort re-fetch
@@ -165,7 +252,7 @@ export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): Bookm
       } catch {
         return undefined;
       }
-    }
+    },
   };
 };
 
@@ -174,9 +261,15 @@ export const createSolanaBookmakerWriter = (config: BookmakerChainConfig): Bookm
 // vault_id is engine-derived (keccak(market_id ++ question ++ nonce ++ ts)) — NOT reproducible
 // client-side, so recover it from the program return data: handle_create_vault_seeded returns
 // `Vec<u8>`, which Anchor borsh-serializes as a 4-byte LE length prefix + the 32 raw bytes.
-const recoverVaultId = async (rpc: SolanaReadRpc, signature: string): Promise<VaultId | undefined> => {
+const recoverVaultId = async (
+  rpc: SolanaReadRpc,
+  signature: string,
+): Promise<VaultId | undefined> => {
   const tx = await rpc
-    .getTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 })
+    .getTransaction(signature, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0,
+    })
     .send();
   if (tx === null || tx.meta === null || tx.meta === undefined) {
     return undefined;
@@ -201,18 +294,20 @@ const recoverVaultId = async (rpc: SolanaReadRpc, signature: string): Promise<Va
 // success read as boolean|hex|number|string). Re-map its errors to the bookmaker runtime type.
 const pollUntilUserOperationIncluded = async (
   readOnly: { getUserOperationReceipt(hash: string): Promise<unknown> },
-  signature: string
+  signature: string,
 ): Promise<unknown> => {
   try {
-    return await pollUntilUserOperationIncludedShared(readOnly, signature, { timeoutMs: 60_000 });
+    return await pollUntilUserOperationIncludedShared(readOnly, signature, {
+      timeoutMs: 60_000,
+    });
   } catch (error) {
     if (error instanceof UserOperationPollTimeoutError) {
       throw new LiveStreakRuntimeError({
-        message: `Solana createVault confirmation timed out for ${signature}`
+        message: `Solana createVault confirmation timed out for ${signature}`,
       });
     }
     throw new LiveStreakRuntimeError({
-      message: error instanceof Error ? error.message : String(error)
+      message: error instanceof Error ? error.message : String(error),
     });
   }
 };
@@ -225,7 +320,9 @@ const pollUntilUserOperationIncluded = async (
 // Pure + exported for unit tests. Self-contained per package — the writers share no module.
 export type SolanaCapacityError = "StateFull" | "VaultBoardBehind";
 
-export const detectSolanaCapacityError = (error: unknown): SolanaCapacityError | undefined => {
+export const detectSolanaCapacityError = (
+  error: unknown,
+): SolanaCapacityError | undefined => {
   const parts: string[] = [];
   let cur: unknown = error;
   for (let depth = 0; cur !== undefined && cur !== null && depth < 8; depth += 1) {
@@ -241,7 +338,8 @@ export const detectSolanaCapacityError = (error: unknown): SolanaCapacityError |
     parts.push(String(cur));
     break;
   }
-  const logs = (error as { context?: { logs?: readonly string[] } } | null)?.context?.logs ?? [];
+  const logs =
+    (error as { context?: { logs?: readonly string[] } } | null)?.context?.logs ?? [];
   const haystack = [...parts, ...logs].join(" ");
   if (haystack.includes("StateFull")) return "StateFull";
   if (haystack.includes("VaultBoardBehind")) return "VaultBoardBehind";
@@ -252,7 +350,7 @@ const requireHex32 = (id: string, field: string): string => {
   if (!SOLANA_HEX32_RE.test(id)) {
     throw new LiveStreakConfigError({
       message: `Bookmaker Solana write requires a bytes32 ${field}`,
-      metadata: { details: id }
+      metadata: { details: id },
     });
   }
   return id;
@@ -261,17 +359,22 @@ const requireHex32 = (id: string, field: string): string => {
 const requireNonEmptyQuestion = (question: string): string => {
   if (typeof question !== "string" || question.length === 0) {
     throw new LiveStreakConfigError({
-      message: "Solana createVault requires a non-empty question"
+      message: "Solana createVault requires a non-empty question",
     });
   }
   return question;
 };
 
 const requirePositiveBigInt = (value: bigint, field: string): bigint => {
-  if (typeof value !== "bigint" || value <= 0n) {
+  if (
+    typeof value !== "bigint" ||
+    value <= 0n ||
+    (field != "seedRate" && value > 18446744073709551615n) ||
+    value > 18446744073709551615n
+  ) {
     throw new LiveStreakConfigError({
       message: `Solana createVault requires ${field} to be a bigint > 0`,
-      metadata: { details: String(value) }
+      metadata: { details: String(value) },
     });
   }
   return value;

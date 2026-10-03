@@ -1,3 +1,4 @@
+import { fixtureMandate } from "../../../schema/test/helpers/mandate.js";
 import { describe, expect, it } from "vitest";
 
 import { originateVault } from "../../src/flows/originate.js";
@@ -19,6 +20,8 @@ describe("OriginateVaultInput", () => {
       policy: { duplicatePolicy: "always-create", detection: detection() },
       similarityClient: { findSimilar: async () => similarityResult({ marketId: FAKE_MARKET_ID }) },
       nowMs: 10_000,
+      mandate: {...fixtureMandate(FAKE_MARKET_ID, "Will Team A score in the next 10 minutes?"),fundingClose:300,decisionStart:300,decisionEnd:610,missingEvidence:{deadline:710,treatment:"unresolved-escalate-no-guaranteed-refund",procedure:"Fixture escalation"}},
+      operationId: `0x${"41".repeat(32)}`,
       guardedCreateVault: createTestRuntime(createFakeBookmakerChain()).createVaultOnce.bind(
         createTestRuntime(createFakeBookmakerChain())
       )
@@ -57,6 +60,8 @@ describe("originate and bridge share runtime idempotency store", () => {
       policy: { duplicatePolicy: "always-create", detection: evaluation.detection },
       similarityClient: { findSimilar: async () => similarityResult({ marketId: FAKE_MARKET_ID }) },
       nowMs,
+      mandate: {...fixtureMandate(FAKE_MARKET_ID, "Will Team A score in the next 10 minutes?"),fundingClose:300,decisionStart:300,decisionEnd:610,missingEvidence:{deadline:710,treatment:"unresolved-escalate-no-guaranteed-refund",procedure:"Fixture escalation"}},
+      operationId: `0x${"41".repeat(32)}`,
       guardedCreateVault: runtime.createVaultOnce.bind(runtime)
     });
 

@@ -5,6 +5,7 @@ import type { SimilarityCandidate, SimilarityResult } from "./similarity.js";
 import type { VaultDraft, VaultResolutionWindow } from "./vault-draft.js";
 import type { BookmakerWatchSource } from "./watch-source.js";
 import type { BookmakerWriteIntent, CreateVaultIntent } from "./write-intent.js";
+import { canonicalMandateBytes, type VaultMandate } from "@livestreak/schema";
 
 // --- exports ---
 
@@ -248,6 +249,7 @@ export const validateVaultDraft = (input: unknown): ValidationResult<VaultDraft>
   }
 
   return validationSuccess({
+    ...(value.mandate === undefined ? {} : { mandate: value.mandate as VaultMandate, operationId: value.operationId as string }),
     marketId: marketId!,
     question: question!,
     outcomeKind: "binary",
@@ -394,6 +396,14 @@ export const validateCreateVaultIntent = (
     issues
   );
 
+  if (value.mandate !== undefined) {
+    try {
+      canonicalMandateBytes(value.mandate);
+      const mandate = value.mandate as VaultMandate;
+      if (mandate.marketId !== marketId || mandate.question !== question || mandate.decisionEnd * 1000 !== resolutionWindowExpiresAtMs) issues.push("Mandate intent binding mismatch");
+    } catch (error) { issues.push(error instanceof Error ? error.message : "Invalid mandate"); }
+    if (typeof value.operationId !== "string" || !/^0x[0-9a-f]{64}$/.test(value.operationId) || /^0x0{64}$/.test(value.operationId)) issues.push("Creation operationId must be nonzero bytes32");
+  }
   if (typeof nowMs !== "number" || Number.isFinite(nowMs) === false) {
     issues.push("nowMs must be a finite number");
   }
@@ -404,6 +414,7 @@ export const validateCreateVaultIntent = (
 
   return validationSuccess({
     action: "createVault",
+    ...(value.mandate === undefined ? {} : { mandate: value.mandate as VaultMandate, operationId: value.operationId as string }),
     marketId: marketId!,
     question: question!,
     creatorSide: creatorSide!,

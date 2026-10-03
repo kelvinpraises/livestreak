@@ -22,6 +22,7 @@ export const stewardConfigScope = "steward:config" as const;
 export const stewardConfigCloseScope = "steward:config:close" as const;
 
 export interface CreateStewardBridgeInput {
+  readonly readMandate?: (vaultId: string) => Promise<import("@livestreak/schema").VerifiedVaultMandate>;
   readonly runtime: import("../runtime/runtime.js").StewardRuntime;
 }
 
@@ -32,7 +33,8 @@ export interface StewardActionAck {
 
 export type StewardActionResult =
   | import("../model/action-plan.js").StewardActionPlan
-  | StewardActionAck;
+  | StewardActionAck
+  | import("@livestreak/schema").VerifiedVaultMandate;
 
 export interface StewardBridge {
   readonly runtime: import("../runtime/runtime.js").StewardRuntime;

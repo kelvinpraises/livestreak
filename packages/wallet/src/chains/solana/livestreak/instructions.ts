@@ -305,6 +305,9 @@ async function userEngineOpAccounts(
 }
 
 export interface CreateVaultSeededInput extends MarketScoped {
+  commitment: Hex32
+  fundingClose: bigint
+  operationId: Hex32
   user: Address
   usdcMint: Address
   question: Uint8Array
@@ -324,6 +327,9 @@ export async function buildCreateVaultSeededIx(input: CreateVaultSeededInput): P
       enc(u8, input.seedSide),
       enc(u64, input.rate),
       enc(u64, input.deposit),
+      enc(id32, bytesFromHex32(input.commitment)),
+      enc(u64, input.fundingClose),
+      enc(id32, bytesFromHex32(input.operationId)),
     ),
   }
 }

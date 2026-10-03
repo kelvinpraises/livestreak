@@ -296,13 +296,19 @@ export const runRemoteDrive = async (input: {
   readonly settingsPath?: string;
   readonly marketId?: string;
   readonly observeOnly?: boolean;
+  readonly mandate?: import("@livestreak/schema").VaultMandate;
+  readonly mandateFile?: string;
+  readonly operationId?: string;
   readonly fundDeposit?: string;
   readonly resolveOutcome?: string;
   readonly directVideo?: string;
   readonly directPort?: number;
 }): Promise<string> => {
+  const mandate = input.mandate ?? (input.mandateFile ? JSON.parse(await readFile(input.mandateFile, "utf8")) as import("@livestreak/schema").VaultMandate : undefined);
   const result = await executeRemoteDrive({
     sessionId: input.session,
+    ...(mandate === undefined ? {} : { mandate }),
+    ...(input.operationId === undefined ? {} : { operationId: input.operationId }),
     pairingPassword: input.pairPassword,
     ...(input.stewardSession === undefined ? {} : { stewardSessionId: input.stewardSession }),
     ...(input.stewardPairPassword === undefined
@@ -497,6 +503,8 @@ const remoteDriveCommand = Command.make(
     settings: settingsPathOpt,
     marketId: Options.text("market-id").pipe(Options.optional),
     observeOnly: Options.boolean("observe-only").pipe(Options.optional),
+    mandateFile: Options.text("mandate-file").pipe(Options.withDescription("Explicit livestreak-mandate/1 JSON; bind it to the intended market"), Options.optional),
+    operationId: Options.text("operation-id").pipe(Options.optional),
     fundDeposit: Options.text("fund-deposit").pipe(Options.optional),
     resolveOutcome: Options.text("resolve-outcome").pipe(Options.optional),
     directVideo: Options.text("direct-video").pipe(
@@ -505,7 +513,7 @@ const remoteDriveCommand = Command.make(
     ),
     directPort: Options.integer("direct-port").pipe(Options.optional)
   },
-  ({ session, pairPassword, stewardSession, stewardPairPassword, hostUrl, settings, marketId, observeOnly, fundDeposit, resolveOutcome, directVideo, directPort }) =>
+  ({ session, pairPassword, stewardSession, stewardPairPassword, hostUrl, settings, marketId, observeOnly, mandateFile, operationId, fundDeposit, resolveOutcome, directVideo, directPort }) =>
     Effect.tryPromise({
       try: () =>
         runRemoteDrive({
@@ -519,6 +527,8 @@ const remoteDriveCommand = Command.make(
           ...(Option.isSome(settings) ? { settingsPath: settings.value } : {}),
           ...(Option.isSome(marketId) ? { marketId: marketId.value } : {}),
           ...(Option.isSome(observeOnly) ? { observeOnly: observeOnly.value } : {}),
+          ...(Option.isSome(mandateFile) ? { mandateFile: mandateFile.value } : {}),
+          ...(Option.isSome(operationId) ? { operationId: operationId.value } : {}),
           ...(Option.isSome(fundDeposit) ? { fundDeposit: fundDeposit.value } : {}),
           ...(Option.isSome(resolveOutcome) ? { resolveOutcome: resolveOutcome.value } : {}),
           ...(Option.isSome(directVideo) ? { directVideo: directVideo.value } : {}),

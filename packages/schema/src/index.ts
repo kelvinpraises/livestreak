@@ -6,3 +6,5 @@ export * from "./capability.js";
 export * from "./coerce.js";
 export * from "./descriptor.js";
 export * from "./remote-protocol.js";
+
+export * from "./mandate.js";

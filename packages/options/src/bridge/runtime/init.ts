@@ -69,6 +69,7 @@ export const optionsChainConfigFromPackageInit = (
   init: PackageRuntimeInit,
   options?: { readonly readRpcUrl?: string }
 ): OptionsChainConfig => ({
+  hostUrl: init.hostUrl,
   walletInit: init.wallet.walletInit,
   seed: init.wallet.seed,
   addresses:

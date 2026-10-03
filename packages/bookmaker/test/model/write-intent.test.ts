@@ -16,6 +16,8 @@ describe("buildWriteIntentsFromDecision", () => {
     expect(intents).toEqual([
       {
         action: "createVault",
+        mandate: draft.mandate,
+        operationId: draft.operationId,
         marketId: "market-1",
         question: draft.question,
         creatorSide: "yes",

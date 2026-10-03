@@ -3,11 +3,24 @@
   "chain": "eip155:31337",
   "title": "RTMP audiovisual broadcast",
   "port": 48785,
-  "broadcaster": { "sessionId": "REPLACE", "pairingPassword": "REPLACE" },
-  "bookmaker": { "sessionId": "REPLACE", "pairingPassword": "REPLACE" },
-  "viewer": { "sessionId": "REPLACE", "pairingPassword": "REPLACE" },
+  "broadcaster": {
+    "sessionId": "REPLACE",
+    "pairingPassword": "REPLACE"
+  },
+  "bookmaker": {
+    "sessionId": "REPLACE",
+    "pairingPassword": "REPLACE"
+  },
+  "viewer": {
+    "sessionId": "REPLACE",
+    "pairingPassword": "REPLACE"
+  },
   "exerciseControls": true,
   "keepAliveMs": 30000,
   "receiptFile": "receipt.json",
-  "mediaFile": "viewer.mp4"
+  "mediaFile": "viewer.mp4",
+  "steward": {
+    "sessionId": "REPLACE",
+    "pairingPassword": "REPLACE"
+  }
 }

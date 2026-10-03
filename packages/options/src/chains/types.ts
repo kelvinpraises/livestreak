@@ -137,6 +137,7 @@ export type AdvanceInput = {
 };
 
 export interface OptionsReader {
+  readVaultMandate?(vaultId: VaultId): Promise<{ readonly terms: import("@livestreak/schema").BoundVaultTerms; readonly mandate: import("@livestreak/schema").VaultMandate }>;
   readMarket(marketId: MarketId): Promise<OptionsMarket>;
   readStreamState(marketId: MarketId): Promise<OptionsStreamState>;
   // Enumerate every registered market off the on-chain registry. The host indexer uses this
@@ -211,6 +212,7 @@ export type OptionsChainConfig = {
   readonly walletInit: WalletInit;
   readonly seed: string | Uint8Array;
   readonly addresses: OptionsContractAddresses | OptionsSuiObjectIds | OptionsSolanaAddresses;
+  readonly hostUrl?: string;
   readonly readRpcUrl?: string;
   readonly includeProtocolSummary?: boolean;
   readonly transferOperator?: UserAddress;

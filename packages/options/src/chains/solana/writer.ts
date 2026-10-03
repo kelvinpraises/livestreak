@@ -1,3 +1,5 @@
+import { requireOpenMandate } from "../../flows/rule.js";
+import { createSolanaOptionsReader } from "./reader.js";
 // --- exports ---
 
 // The Solana options writer. Maps the canonical writer surface onto the 24 deployed livestreak
@@ -29,7 +31,7 @@ import {
   type Hex32,
   type Instruction,
   type LaneArgInput,
-  type LiveStreakSolanaWalletConfig
+  type LiveStreakSolanaWalletConfig,
 } from "@livestreak/wallet";
 
 import { validateOptionsVaultSide } from "../../model/vault.js";
@@ -54,7 +56,7 @@ import {
   type TxId,
   type UnstakeLvstInput,
   type WithdrawInput,
-  type WithdrawManyInput
+  type WithdrawManyInput,
 } from "../types.js";
 import { validateSolanaUserAddress } from "./account.js";
 import {
@@ -63,7 +65,7 @@ import {
   resolveSolanaContext,
   tokenIdToHex32,
   vaultIdHex,
-  type SolanaOptionsContext
+  type SolanaOptionsContext,
 } from "./config.js";
 import { sideToSolana } from "./decode.js";
 
@@ -76,6 +78,15 @@ type SolanaWriteAccount = {
 export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWriter => {
   const ctx: SolanaOptionsContext = resolveSolanaContext(config);
   const solanaConfig = config.walletInit.config as LiveStreakSolanaWalletConfig;
+  const mandateReader = createSolanaOptionsReader(ctx, { hostUrl: config.hostUrl });
+  const chainNow = async (): Promise<number> => {
+    const slot = await ctx.rpc.getSlot({ commitment: "confirmed" }).send();
+    const timestamp = await ctx.rpc.getBlockTime(slot).send();
+    if (timestamp === null) throw new Error("Solana chain time unavailable");
+    return Number(timestamp);
+  };
+  const requireMandate = async (vaultId: VaultId) =>
+    requireOpenMandate(await mandateReader.readVaultMandate!(vaultId), await chainNow());
 
   // OPT.rederive: open the wallet account ONCE per writer (deterministic Ed25519 signer) and reuse
   // it + the cached signer address across every send, instead of re-deriving per call.
@@ -118,7 +129,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       const capacity = detectSolanaCapacityError(error);
       const detail = error instanceof Error ? error.message : String(error);
       throw new LiveStreakRuntimeError({
-        message: `Solana transaction failed: ${detail}${settlement === undefined ? "" : ` (${settlement})`}${capacity === undefined ? "" : ` (${capacity})`}`
+        message: `Solana transaction failed: ${detail}${settlement === undefined ? "" : ` (${settlement})`}${capacity === undefined ? "" : ` (${capacity})`}`,
       });
     }
     const readOnly = await account.toReadOnlyAccount();
@@ -132,12 +143,16 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
   // crossing `ready_at` makes it deliverable, so retry across ~one cycle before surfacing the
   // failure. When the program surfaced a precise `ready_at` in the error, wait exactly until then
   // (see settlementRetryWaitMs); otherwise fall back to the fixed one-cycle sleep.
-  const sendWithCycleRetry = async (build: () => Promise<Instruction[]>): Promise<string> => {
+  const sendWithCycleRetry = async (
+    build: () => Promise<Instruction[]>,
+  ): Promise<string> => {
     const CYCLE_MS = 11_000;
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (attempt > 0) {
-        await new Promise((r) => setTimeout(r, settlementRetryWaitMs(lastError, Date.now(), CYCLE_MS)));
+        await new Promise((r) =>
+          setTimeout(r, settlementRetryWaitMs(lastError, Date.now(), CYCLE_MS)),
+        );
       }
       try {
         return await send(await build());
@@ -161,7 +176,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
   const withCapacityRecovery = async (
     marketId: Hex32,
     vaultId: VaultId | undefined,
-    attempt: () => Promise<string>
+    attempt: () => Promise<string>,
   ): Promise<string> => {
     try {
       return await attempt();
@@ -169,7 +184,9 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       const capacity = detectSolanaCapacityError(error);
       if (capacity === "StateFull") {
         const { signer } = await getWriter();
-        await send([await buildGrowProtocolIx({ programId: ctx.programId, marketId, payer: signer })]);
+        await send([
+          await buildGrowProtocolIx({ programId: ctx.programId, marketId, payer: signer }),
+        ]);
         return await attempt();
       }
       if (capacity === "VaultBoardBehind" && vaultId !== undefined) {
@@ -181,8 +198,8 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
               marketId,
               vaultId: vaultIdHex(vaultId),
               side,
-              maxSteps: ADVANCE_RECOVERY_MAX_STEPS
-            })
+              maxSteps: ADVANCE_RECOVERY_MAX_STEPS,
+            }),
           ]);
         }
         return await attempt();
@@ -196,7 +213,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
     if (marketId === undefined) {
       throw new LiveStreakConfigError({
         message: "Solana: could not resolve the market shard owning this vault",
-        metadata: { details: vaultId }
+        metadata: { details: vaultId },
       });
     }
     return marketId;
@@ -207,7 +224,8 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
   const requireLvstMint = (): Address => {
     if (ctx.lvstMint === undefined) {
       throw new LiveStreakConfigError({
-        message: "Solana: claimLossLvst requires lvstMint in the options Solana addresses config"
+        message:
+          "Solana: claimLossLvst requires lvstMint in the options Solana addresses config",
       });
     }
     return ctx.lvstMint;
@@ -217,21 +235,27 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
     const marketId = await resolveMarketForToken(ctx, tokenId);
     if (marketId === undefined) {
       throw new LiveStreakConfigError({
-        message: "Solana: could not resolve the market shard for this position (no funded lanes yet)",
-        metadata: { details: tokenId.toString() }
+        message:
+          "Solana: could not resolve the market shard for this position (no funded lanes yet)",
+        metadata: { details: tokenId.toString() },
       });
     }
     return marketId;
   };
 
-  const doMint = async (marketId: string, to: string, salt: bigint): Promise<MintResult> => {
+  const doMint = async (
+    marketId: string,
+    to: string,
+    salt: bigint,
+  ): Promise<MintResult> => {
     const { account, signer } = await getWriter();
     const recipient = validateSolanaUserAddress(to, "to");
     // mint_position mints to the SIGNER (PositionOwner PDA owner = minter). Solana has no mint-to-
     // third-party path this phase; require the recipient to be the wallet signer.
     if (String(recipient) !== String(signer)) {
       throw new LiveStreakConfigError({
-        message: "Solana: mint recipient must be the wallet signer (no mint-to-third-party instruction)"
+        message:
+          "Solana: mint recipient must be the wallet signer (no mint-to-third-party instruction)",
       });
     }
     // The PositionOwner rent payer must equal the tx fee payer (sponsored → paymaster, self-pay →
@@ -242,7 +266,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       marketId: marketId as unknown as Hex32,
       payer: rentPayer,
       minter: signer,
-      salt
+      salt,
     });
     const tokenHex = computePositionTokenId(signer, salt);
     void account;
@@ -265,6 +289,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       const side = sideToSolana(validateOptionsVaultSide(input.side));
       const rate = requirePositiveBigInt(input.rate, "rate");
       const deposit = requirePositiveBigInt(input.deposit, "deposit");
+      await requireMandate(input.vaultId);
       const marketId = await requireMarketForVault(input.vaultId);
       const { signer } = await getWriter();
       const ix = await buildFundIx({
@@ -276,7 +301,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         vaultId: vaultIdHex(input.vaultId),
         side,
         rate,
-        deposit
+        deposit,
       });
       // Vault-scoped funding: recover both StateFull (grow) and VaultBoardBehind (advance this vault).
       return asTxId(await withCapacityRecovery(marketId, input.vaultId, () => send([ix])));
@@ -290,7 +315,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         marketId,
         vaultId: vaultIdHex(input.vaultId),
         side,
-        maxSteps: input.maxSteps ?? 0n
+        maxSteps: input.maxSteps ?? 0n,
       });
       return asTxId(await send([ix]));
     },
@@ -303,7 +328,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         marketId,
         user: signer,
         tokenId: tokenIdToHex32(input.tokenId),
-        usdcMint: ctx.usdcMint
+        usdcMint: ctx.usdcMint,
       });
       // Token-scoped: stopAll stops EVERY lane across many vaults, so there is no single board to
       // advance — VaultBoardBehind is skipped (re-thrown); only StateFull (grow) is recoverable here.
@@ -319,7 +344,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       const collect = await buildCollectIx({
         programId: ctx.programId,
         marketId,
-        vaultId: vaultIdHex(input.vaultId)
+        vaultId: vaultIdHex(input.vaultId),
       });
       const ix = await buildWithdrawIx({
         programId: ctx.programId,
@@ -327,7 +352,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         user: signer,
         tokenId: tokenIdToHex32(input.tokenId),
         usdcMint: ctx.usdcMint,
-        vaultId: vaultIdHex(input.vaultId)
+        vaultId: vaultIdHex(input.vaultId),
       });
       // Each attempt re-runs collect: the HARVEST lives in collect, so cash delivered by a new
       // cycle boundary only becomes payable after another collect pass. Vault-scoped, so wrap the
@@ -337,14 +362,16 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
           sendWithCycleRetry(async () => {
             await send([collect]);
             return [ix];
-          })
-        )
+          }),
+        ),
       );
     },
 
     withdrawMany: async (input: WithdrawManyInput): Promise<TxId> => {
       if (input.vaultIds.length === 0) {
-        throw new LiveStreakConfigError({ message: "Solana: withdrawMany requires at least one vaultId" });
+        throw new LiveStreakConfigError({
+          message: "Solana: withdrawMany requires at least one vaultId",
+        });
       }
       // A position is single-market, so all its vaults share one shard — resolve once from the first.
       const marketId = await requireMarketForVault(input.vaultIds[0]!);
@@ -352,7 +379,11 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       const collects: Instruction[] = [];
       for (const vaultId of input.vaultIds) {
         collects.push(
-          await buildCollectIx({ programId: ctx.programId, marketId, vaultId: vaultIdHex(vaultId) })
+          await buildCollectIx({
+            programId: ctx.programId,
+            marketId,
+            vaultId: vaultIdHex(vaultId),
+          }),
         );
       }
       const ixs: Instruction[] = [];
@@ -364,8 +395,8 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
             user: signer,
             tokenId: tokenIdToHex32(input.tokenId),
             usdcMint: ctx.usdcMint,
-            vaultId: vaultIdHex(vaultId)
-          })
+            vaultId: vaultIdHex(vaultId),
+          }),
         );
       }
       // Multi-vault withdraw path: one shared market shard, but the tx spans several boards — no
@@ -380,11 +411,42 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
     // the first lane's vault rather than pre-scanning them all. An empty set (clear all lanes) has no
     // lane to resolve from, so fall back to the token's own market footprint.
     setLanes: async (input: SetLanesInput): Promise<TxId> => {
+      requireNonNegativeBigInt(input.addDeposit, "addDeposit");
+      for (const lane of input.lanes) {
+        validateOptionsVaultSide(lane.side);
+        requirePositiveBigInt(lane.rate, "rate");
+      }
+      const current = input.lanes.length
+        ? await mandateReader.readNft(
+            input.tokenId,
+            String((await getWriter()).signer) as import("../../model/ids.js").UserAddress,
+          )
+        : undefined;
+      const now = input.lanes.length ? await chainNow() : 0;
+      for (const lane of input.lanes) {
+        const held = current?.lanes.find(
+          (l) =>
+            l.vaultId === lane.vaultId &&
+            l.side === lane.side &&
+            l.committedRate === lane.rate,
+        );
+        if (held && input.addDeposit === 0n) {
+          const market = await requireMarketForVault(lane.vaultId);
+          const { withProtocolView } = await import("./config.js");
+          const data = await withProtocolView(ctx, market, (v) => v.vault(lane.vaultId));
+          if (
+            data.fundingClose <= now ||
+            (!held.depleted && held.maxEndMs !== undefined && held.maxEndMs > now * 1000)
+          )
+            continue;
+        }
+        await requireMandate(lane.vaultId);
+      }
       const addDeposit = requireNonNegativeBigInt(input.addDeposit, "addDeposit");
       const lanes: LaneArgInput[] = input.lanes.map((lane) => ({
         vaultId: vaultIdHex(lane.vaultId),
         side: sideToSolana(validateOptionsVaultSide(lane.side)),
-        rate: requirePositiveBigInt(lane.rate, "rate")
+        rate: requirePositiveBigInt(lane.rate, "rate"),
       }));
       const marketId =
         input.lanes.length > 0
@@ -398,7 +460,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         tokenId: tokenIdToHex32(input.tokenId),
         usdcMint: ctx.usdcMint,
         lanes,
-        addDeposit
+        addDeposit,
       });
       // A lane-set reshape touches every lane's vault board in the market — no single vault to
       // advance, so VaultBoardBehind re-throws; only StateFull (grow, from the addDeposit store) recovers.
@@ -416,7 +478,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         user: signer,
         tokenId: tokenIdToHex32(input.tokenId),
         vaultId: vaultIdHex(input.vaultId),
-        side
+        side,
       });
       // Vault-scoped single-lane stop: recover both StateFull (grow) and VaultBoardBehind (this vault).
       return asTxId(await withCapacityRecovery(marketId, input.vaultId, () => send([ix])));
@@ -433,7 +495,8 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       const { signer } = await getWriter();
       if (String(recipient) !== String(signer)) {
         throw new LiveStreakConfigError({
-          message: "Solana: claimLossLvst recipient must be the wallet signer (LVST is minted to the claimer's own ATA)"
+          message:
+            "Solana: claimLossLvst recipient must be the wallet signer (LVST is minted to the claimer's own ATA)",
         });
       }
       const marketId = await requireMarketForVault(input.vaultId);
@@ -442,7 +505,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       const ensureAta = await buildCreateAtaIdempotentIx({
         payer: rentPayerFor(signer),
         owner: signer,
-        mint: lvstMint
+        mint: lvstMint,
       });
       const ix = await buildClaimLossLvstIx({
         programId: ctx.programId,
@@ -451,7 +514,7 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         tokenId: tokenIdToHex32(input.tokenId),
         lvstMint,
         vaultId: vaultIdHex(input.vaultId),
-        side
+        side,
       });
       return asTxId(await send([ensureAta, ix]));
     },
@@ -461,18 +524,23 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
     // the canonical input to name a Solana market, and inventing one would silently stake into an
     // arbitrary shard — so these stay a typed failure until the canonical types gain a market seam.
     stakeLvst: async (_input: StakeLvstInput): Promise<never> => {
+      void _input;
       throw new LiveStreakConfigError({
-        message: "Solana: stakeLvst not supported (per-market staking escrow, but the canonical input carries no market to scope it to)"
+        message:
+          "Solana: stakeLvst not supported (per-market staking escrow, but the canonical input carries no market to scope it to)",
       });
     },
     unstakeLvst: async (_input: UnstakeLvstInput): Promise<never> => {
+      void _input;
       throw new LiveStreakConfigError({
-        message: "Solana: unstakeLvst not supported (per-market staking escrow, but the canonical input carries no market to scope it to)"
+        message:
+          "Solana: unstakeLvst not supported (per-market staking escrow, but the canonical input carries no market to scope it to)",
       });
     },
     claimDividends: async (): Promise<never> => {
       throw new LiveStreakConfigError({
-        message: "Solana: claimDividends not supported (per-market dividend escrow, but the canonical call carries no market to scope it to)"
+        message:
+          "Solana: claimDividends not supported (per-market dividend escrow, but the canonical call carries no market to scope it to)",
       });
     },
     // transfer_position reassigns the PositionOwner PDA — the CURRENT owner signs, no SPL token moves.
@@ -484,7 +552,8 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       const from = validateSolanaUserAddress(input.from, "from");
       if (String(from) !== String(signer)) {
         throw new LiveStreakConfigError({
-          message: "Solana: transferNft sender must be the wallet signer (transfer_position is signed by the current owner)"
+          message:
+            "Solana: transferNft sender must be the wallet signer (transfer_position is signed by the current owner)",
         });
       }
       const newOwner = validateSolanaUserAddress(input.to, "to");
@@ -492,13 +561,14 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
         programId: ctx.programId,
         owner: signer,
         tokenId: tokenIdToHex32(input.tokenId),
-        newOwner: address(String(newOwner))
+        newOwner: address(String(newOwner)),
       });
       return asTxId(await send([ix]));
     },
     approveNft: async (_input: ApproveNftInput): Promise<never> => {
+      void _input;
       throw new LiveStreakConfigError({
-        message: "Solana: approveNft not supported (PositionOwner PDA model, no approvals)"
+        message: "Solana: approveNft not supported (PositionOwner PDA model, no approvals)",
       });
     },
     setApprovalForAll: async (input: SetApprovalForAllInput): Promise<TxId> => {
@@ -508,11 +578,12 @@ export const createSolanaOptionsWriter = (config: OptionsChainConfig): OptionsWr
       // Arbitrary operators have no on-chain counterpart — honest throw.
       if (input.operator !== undefined) {
         throw new LiveStreakConfigError({
-          message: "Solana: setApprovalForAll for an arbitrary operator not supported (program authority is PDA-structural)"
+          message:
+            "Solana: setApprovalForAll for an arbitrary operator not supported (program authority is PDA-structural)",
         });
       }
       return asTxId(`0x${"0".repeat(64)}`);
-    }
+    },
   };
 };
 
@@ -553,7 +624,11 @@ const errorMessageChain = (error: unknown): string => {
 // Wait before the next settlement retry: precise when the program surfaced a `ready_at` (sleep until
 // ready_at + 500ms, clamped to [0, 15s]), else the fixed one-cycle fallback. Pure + exported so the
 // branch is unit-testable without a live send.
-export const settlementRetryWaitMs = (error: unknown, nowMs: number, fallbackMs: number): number => {
+export const settlementRetryWaitMs = (
+  error: unknown,
+  nowMs: number,
+  fallbackMs: number,
+): number => {
   const readyAt = parseSettlementReadyAt(errorMessageChain(error));
   if (readyAt === undefined) return fallbackMs;
   return Math.min(15_000, Math.max(0, readyAt * 1000 - nowMs + 500));
@@ -568,8 +643,11 @@ export type SolanaCapacityError = "StateFull" | "VaultBoardBehind";
 // `context.logs` into one haystack and matching the anchor error NAME. Works on the raw kit error
 // (name in logs) and on the wrapped LiveStreakRuntimeError (name folded into the message by send()).
 // Pure + exported for unit tests.
-export const detectSolanaCapacityError = (error: unknown): SolanaCapacityError | undefined => {
-  const logs = (error as { context?: { logs?: readonly string[] } } | null)?.context?.logs ?? [];
+export const detectSolanaCapacityError = (
+  error: unknown,
+): SolanaCapacityError | undefined => {
+  const logs =
+    (error as { context?: { logs?: readonly string[] } } | null)?.context?.logs ?? [];
   const haystack = [errorMessageChain(error), ...logs].join(" ");
   if (haystack.includes("StateFull")) return "StateFull";
   if (haystack.includes("VaultBoardBehind")) return "VaultBoardBehind";
@@ -580,7 +658,7 @@ const requirePositiveBigInt = (value: bigint, field: string): bigint => {
   if (typeof value !== "bigint" || value <= 0n) {
     throw new LiveStreakConfigError({
       message: `Solana write requires ${field} to be a bigint > 0`,
-      metadata: { details: String(value) }
+      metadata: { details: String(value) },
     });
   }
   return value;
@@ -591,7 +669,7 @@ const requireNonNegativeBigInt = (value: bigint, field: string): bigint => {
   if (typeof value !== "bigint" || value < 0n) {
     throw new LiveStreakConfigError({
       message: `Solana write requires ${field} to be a bigint >= 0`,
-      metadata: { details: String(value) }
+      metadata: { details: String(value) },
     });
   }
   return value;

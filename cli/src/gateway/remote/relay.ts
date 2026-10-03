@@ -7,6 +7,7 @@ import type {
   BridgeCaller,
   CallActionEnvelope,
   CallResultFrame,
+  RemoteCallOutcome,
   HostCallFrame
 } from "@livestreak/schema";
 import type { SessionRegistry } from "../session/registry.js";
@@ -18,7 +19,7 @@ export type DispatchFn = (
   caller: BridgeCaller,
   envelope: CallActionEnvelope,
   target?: string
-) => Promise<{ readonly txId?: string; readonly tokenId?: string }>;
+) => Promise<RemoteCallOutcome>;
 
 export interface RelayDeps {
   readonly registry: SessionRegistry;
@@ -75,7 +76,11 @@ export const createRelay = (deps: RelayDeps): Relay => {
         deps.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS
       );
       deps.registry.commitSpend(frame.sessionId, frame.envelope);
-      const payload: { txId?: string; tokenId?: string } = {};
+      const payload = {
+        ...(result.commitment === undefined ? {} : { commitment: result.commitment }),
+        ...(result.terms === undefined ? {} : { terms: result.terms }),
+        ...(result.mandate === undefined ? {} : { mandate: result.mandate })
+      } as { -readonly [K in keyof RemoteCallOutcome]: RemoteCallOutcome[K] };
       if (result.txId !== undefined) {
         payload.txId = result.txId;
       }

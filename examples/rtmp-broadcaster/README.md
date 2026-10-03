@@ -1,10 +1,10 @@
 # RTMP broadcaster example
 
-A standalone consumer of `@livestreak/cli/agent-client`. It creates an observation, selects RTMP, registers a market, publishes FFmpeg video and audio, proves a separate viewer receives init plus advancing fragments, and then marks the market live. Independent Bookmaker and viewer gateways create a vault and fund a position while the producer continues. It also pauses, resumes, verifies fresh fragments, and stops the run in cleanup.
+A standalone consumer of `@livestreak/cli/agent-client`. It creates an observation, selects RTMP, registers a market, publishes FFmpeg video and audio, proves a separate viewer receives init plus advancing fragments, and then marks the market live. Independent Bookmaker and viewer gateways create a vault and fund a position while the producer continues. It creates a bound discretionary mandate, verifies identical authoritative terms through independent Viewer and Steward gateways, retries creation against the same operation identity, pauses/resumes, and stops the run in cleanup. This is a local integration demonstration, not a production bot authorized to operate the Viewer or Steward roles.
 
 ## Run
 
-Requires Node 22, FFmpeg with RTMP, libx264 and AAC, a running Host, deployed local EVM contracts with a funded paymaster, and three independently authenticated/funded role gateways. Their scoped grants must permit the actions and board reads/subscriptions used here. The bot receives gateway pairing credentials, never signing keys.
+Requires Node 22, FFmpeg with RTMP, libx264 and AAC, a running Host, deployed local EVM contracts with a funded paymaster and the Flow03 bound-vault contract version (legacy deployments explicitly reject this feature), and four independently authenticated role gateways (Broadcaster, Bookmaker, Viewer and Steward), with seed/funding balances. Their scoped grants must permit the actions and board reads/subscriptions used here. The bot receives gateway pairing credentials, never signing keys.
 
 Build and pack the CLI from the repository, then install that tarball in this example (or a fresh copy):
 
@@ -14,7 +14,7 @@ npm pack --workspace=cli
 cd examples/rtmp-broadcaster
 npm install ../../livestreak-cli-0.1.0.tgz ws
 cp broadcast.example.json broadcast.json
-# Fill in the three role session IDs and pairing passwords.
+# Fill in the four independent role session IDs and pairing passwords.
 LIVESTREAK_BROADCAST_CONFIG=broadcast.json npm run broadcast
 ```
 

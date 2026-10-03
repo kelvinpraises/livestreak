@@ -1,3 +1,4 @@
+import { fixtureMandate } from "../../../schema/test/helpers/mandate.js";
 import { describe, expect, it } from "vitest";
 import { LiveStreakConfigError, LiveStreakRuntimeError, isLiveStreakError } from "@livestreak/core";
 
@@ -67,6 +68,8 @@ describe("originateVault idempotency", () => {
       policy: { duplicatePolicy: "always-create" as const, detection: evaluation.detection },
       similarityClient: { findSimilar: async () => similarityResult({ marketId: FAKE_MARKET_ID }) },
       nowMs: 10_000,
+      mandate: {...fixtureMandate(FAKE_MARKET_ID, "Will Team A score in the next 10 minutes?"),fundingClose:300,decisionStart:300,decisionEnd:610,missingEvidence:{deadline:710,treatment:"unresolved-escalate-no-guaranteed-refund",procedure:"Fixture escalation"}},
+      operationId: `0x${"41".repeat(32)}`,
       guardedCreateVault: runtime.createVaultOnce.bind(runtime)
     };
 
@@ -98,7 +101,9 @@ describe("originateVault core errors", () => {
         policy: { duplicatePolicy: "always-create", detection: detection() },
         similarityClient: { findSimilar: async () => similarityResult() },
         nowMs: 1,
-        guardedCreateVault: runtime.createVaultOnce.bind(runtime)
+        mandate: {...fixtureMandate(FAKE_MARKET_ID, "Will Team A score in the next 10 minutes?"),fundingClose:300,decisionStart:300,decisionEnd:610,missingEvidence:{deadline:710,treatment:"unresolved-escalate-no-guaranteed-refund",procedure:"Fixture escalation"}},
+      operationId: `0x${"41".repeat(32)}`,
+      guardedCreateVault: runtime.createVaultOnce.bind(runtime)
       })
     ).rejects.toBeInstanceOf(LiveStreakConfigError);
   });

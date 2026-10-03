@@ -3,7 +3,7 @@
 // Drives the REAL cli edge (cli/src/adapters/steward-edge.ts): the describeFunctions/dispatch surface
 // the gateway relays to the remote console. Pins the invariants the stub purge must not regress:
 //
-//   1. Pristine T0 (no watched subjects): only Configure + Close are visible — no resolve.
+//   1. Pristine T0 (no watched subjects): Configure, Close and rule lookup are visible — no resolve.
 //   2. Tree contract: one root group; every action's parentId points at an emitted node.
 //   3. No fieldless forms: the revealed resolve action exposes an inputSchema whose properties cover
 //      every field submitBridgeAction requires (subjectId + outcome).
@@ -39,12 +39,12 @@ const fieldNames = (descriptor: FunctionDescriptor | undefined): readonly string
   );
 
 describe("steward console edge — pristine operator flow", () => {
-  it("pristine T0: only Configure + Close are visible (no watched subject)", async () => {
+  it("pristine T0: Configure, Close and rule lookup are visible (no watched subject)", async () => {
     const edge = makeEdge(recordingSink());
     const descriptors = await edge.describeFunctions();
 
     const visibleActions = descriptors.filter((d) => d.nodeKind === "action" && d.visible === true);
-    expect(visibleActions.map((d) => d.name).sort()).toEqual(["close", "configure"]);
+    expect(visibleActions.map((d) => d.name).sort()).toEqual(["close", "configure", "readMandate"]);
     expect(descriptors.some((d) => d.name === "resolve" && d.visible === true)).toBe(false);
   });
 

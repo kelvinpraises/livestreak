@@ -14,7 +14,7 @@ export {
   type RemoteUiClient,
   type RemoteUiClientOptions
 } from "./gateway/remote/ui-client.js";
-export type { FunctionDescriptor } from "@livestreak/schema";
+export type { FunctionDescriptor, NumericEvaluation, VaultMandate, BoundVaultTerms, VerifiedVaultMandate } from "@livestreak/schema";
 
 /** Stable alias: one name for docs and examples to use. */
 export { createRemoteUiClient as createAgentClient } from "./gateway/remote/ui-client.js";

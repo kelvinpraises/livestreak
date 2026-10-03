@@ -1,3 +1,4 @@
+import { createMandateClient } from "@livestreak/host";
 // --- exports ---
 
 // The Solana options reader. THE architectural win: nearly the whole surface collapses into ONE
@@ -18,7 +19,7 @@ import {
   findUsdcAta,
   getBase58Decoder,
   getBase64Encoder,
-  type Hex32
+  type Hex32,
 } from "@livestreak/wallet";
 import { decodeProtocolState, type EngineView } from "@livestreak/contracts/solana";
 
@@ -27,29 +28,23 @@ import { WAD } from "../../model/math/curve.js";
 import { computeWinClaimable, lossBasisToLvst } from "../../model/units.js";
 import type { LvstAccount } from "../../model/lvst.js";
 import type { MarketId, TokenId, UserAddress, VaultId } from "../../model/ids.js";
-import type { OptionsBoardState } from "../../model/math/accrual.js";
 import type { FunderBoundary } from "../../model/math/live-pool.js";
 import type { OptionsLane } from "../../model/lane.js";
 import type { OptionsMarket } from "../../model/market.js";
 import type { OptionsNft } from "../../model/nft.js";
 import type { OptionsProtocolSummary } from "../../model/snapshot.js";
 import type { OptionsStreamState } from "../../model/stream.js";
-import type {
-  OptionsVault,
-  OptionsVaultShareTotals,
-  OptionsVaultSide
-} from "../../model/vault.js";
+import type { OptionsVault, OptionsVaultSide } from "../../model/vault.js";
 import type { OptionsReader } from "../types.js";
 import { validateSolanaUserAddress } from "./account.js";
 import {
   fetchAccountBytes,
   listMarketIds as listMarketIdsCtx,
   resolveMarketForTokenOrOwner,
-  resolveSolanaContext,
   tokenIdToHex32,
   vaultIdHex,
   withProtocolView,
-  type SolanaOptionsContext
+  type SolanaOptionsContext,
 } from "./config.js";
 import {
   mapSolanaBoard,
@@ -61,7 +56,7 @@ import {
   mapSolanaVault,
   mapSolanaVaultShareTotals,
   sideFromSolana,
-  sideToSolana
+  sideToSolana,
 } from "./decode.js";
 
 const nowSec = (): number => Math.floor(Date.now() / 1000);
@@ -69,17 +64,19 @@ const ZERO_ID = `0x${"0".repeat(64)}`;
 
 const utf8 = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 const bytesToHex = (bytes: Uint8Array): string =>
-  `0x${Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+  `0x${Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")}`;
 
 export const createSolanaOptionsReader = (
   ctx: SolanaOptionsContext,
-  options?: { readonly includeProtocolSummary?: boolean }
+  options?: { readonly includeProtocolSummary?: boolean; readonly hostUrl?: string },
 ): OptionsReader => {
   // Open the ONE engine view that holds `vaultId` (scanning market shards), run `fn`, always free().
   // Single fetch+decode per candidate market until the owning shard is found.
   const withVaultView = async <T>(
     vaultId: VaultId,
-    fn: (view: EngineView, target: Hex32, marketId: Hex32) => T
+    fn: (view: EngineView, target: Hex32, marketId: Hex32) => T,
   ): Promise<T> => {
     const target = vaultIdHex(vaultId);
     for (const marketId of await listMarketIdsCtx(ctx)) {
@@ -97,7 +94,7 @@ export const createSolanaOptionsReader = (
     }
     throw new LiveStreakConfigError({
       message: "Solana: vault not found in any market shard",
-      metadata: { details: vaultId }
+      metadata: { details: vaultId },
     });
   };
 
@@ -105,7 +102,7 @@ export const createSolanaOptionsReader = (
   // undefined for a laneless token (freshly minted, never funded — no engine footprint yet).
   const withTokenView = async <T>(
     tokenId: TokenId,
-    fn: (view: EngineView, tokenHex: Hex32, marketId: Hex32) => T
+    fn: (view: EngineView, tokenHex: Hex32, marketId: Hex32) => T,
   ): Promise<T | undefined> => {
     const tokenHex = tokenIdToHex32(tokenId);
     for (const marketId of await listMarketIdsCtx(ctx)) {
@@ -125,6 +122,23 @@ export const createSolanaOptionsReader = (
   };
 
   const reader: OptionsReader = {
+    readVaultMandate: async (vaultId) => {
+      if (!options?.hostUrl) throw new Error("Durable mandate Host unavailable");
+      const data = await withVaultView(vaultId, (view, id) => view.vault(id));
+      const chainId = `solana:${String(await ctx.rpc.getGenesisHash().send()).slice(0, 32)}`;
+      const terms = {
+        vaultId,
+        marketId: data.marketId,
+        question: data.question,
+        commitment: data.commitment,
+        fundingClose: data.fundingClose,
+        chainId,
+      };
+      return {
+        terms,
+        mandate: await createMandateClient(options.hostUrl).readVerified(terms),
+      };
+    },
     readMarket: (marketId) => readMarket(ctx, marketId),
     readStreamState: (marketId) => readStreamState(ctx, marketId),
     listMarketIds: () => listMarketIds(ctx),
@@ -134,10 +148,15 @@ export const createSolanaOptionsReader = (
       withVaultView(vaultId, (view, target) => {
         const vault = mapSolanaVault(view.vault(target));
         const pools = view.vaultPools(target);
-        return { ...vault, pools: { yes: pools.yesPool, no: pools.noPool } } satisfies OptionsVault;
+        return {
+          ...vault,
+          pools: { yes: pools.yesPool, no: pools.noPool },
+        } satisfies OptionsVault;
       }),
     readVaultShareTotals: (vaultId) =>
-      withVaultView(vaultId, (view, target) => mapSolanaVaultShareTotals(view.vaultPools(target))),
+      withVaultView(vaultId, (view, target) =>
+        mapSolanaVaultShareTotals(view.vaultPools(target)),
+      ),
     readWinningSide: (vaultId) =>
       withVaultView(vaultId, (view, target) => {
         const vault = view.vault(target);
@@ -148,25 +167,29 @@ export const createSolanaOptionsReader = (
       }),
     readBoard: (vaultId, side) =>
       withVaultView(vaultId, (view, target) =>
-        mapSolanaBoard(view.board(target, sideToSolana(side)))
+        mapSolanaBoard(view.board(target, sideToSolana(side))),
       ),
     readSharePrice: (vaultId, side) =>
       withVaultView(vaultId, (view, target) => view.sharePrice(target, sideToSolana(side))),
     readPendingBoundaries: (vaultId, side) =>
-      withVaultView(vaultId, (view, target) => view.pendingBoundaries(target, sideToSolana(side))),
+      withVaultView(vaultId, (view, target) =>
+        view.pendingBoundaries(target, sideToSolana(side)),
+      ),
     readBoundaries: (vaultId, side) =>
       withVaultView(vaultId, (view, target) =>
         view
           .boundaries(target, sideToSolana(side))
-          .map((b) => ({ maxEndMs: b.maxEnd * 1000, rate: b.rate }) satisfies FunderBoundary)
+          .map(
+            (b) => ({ maxEndMs: b.maxEnd * 1000, rate: b.rate }) satisfies FunderBoundary,
+          ),
       ),
     readPendingShares: (vaultId, side, tokenId) =>
       withVaultView(vaultId, (view, target) =>
-        view.pendingShares(target, sideToSolana(side), tokenIdToHex32(tokenId), nowSec())
+        view.pendingShares(target, sideToSolana(side), tokenIdToHex32(tokenId), nowSec()),
       ),
     readClaimable: (tokenId, vaultId, side) =>
       withVaultView(vaultId, (view, target) =>
-        view.claimable(tokenIdToHex32(tokenId), target, sideToSolana(side))
+        view.claimable(tokenIdToHex32(tokenId), target, sideToSolana(side)),
       ),
     readLossClaimable: (tokenId, vaultId, side) =>
       withVaultView(vaultId, (view, target) =>
@@ -174,15 +197,16 @@ export const createSolanaOptionsReader = (
         // is a separate flag (readNft derives it from the claimed-aware view) so the row can say "claimed".
         lossBasisToLvst(
           view.lossClaimable(tokenIdToHex32(tokenId), target, sideToSolana(side)),
-          BigInt(view.mintRate())
-        )
+          BigInt(view.mintRate()),
+        ),
       ),
     readPot: (vaultId) => withVaultView(vaultId, (view, target) => view.pot(target)),
-    readCollected: (vaultId) => withVaultView(vaultId, (view, target) => view.collected(target)),
+    readCollected: (vaultId) =>
+      withVaultView(vaultId, (view, target) => view.collected(target)),
 
     readAccountVaultIds: async (tokenId) => {
       const result = await withTokenView(tokenId, (view, tokenHex) =>
-        view.accountVaultIds(tokenHex).map((id) => asVaultId(id))
+        view.accountVaultIds(tokenHex).map((id) => asVaultId(id)),
       );
       return result ?? [];
     },
@@ -211,7 +235,9 @@ export const createSolanaOptionsReader = (
       const marketId = await resolveMarketForTokenOrOwner(ctx, tokenId);
       if (marketId === undefined) return 0n;
       try {
-        return await withProtocolView(ctx, marketId, (view) => view.nftBalance(tokenIdToHex32(tokenId)));
+        return await withProtocolView(ctx, marketId, (view) =>
+          view.nftBalance(tokenIdToHex32(tokenId)),
+        );
       } catch {
         return 0n; // ProtocolState not allocated for the market yet
       }
@@ -220,14 +246,16 @@ export const createSolanaOptionsReader = (
     readOwnerOf: (tokenId) => readOwnerOf(ctx, tokenId),
     readApproved: async () => {
       throw new LiveStreakConfigError({
-        message: "Solana: readApproved not supported (PositionOwner PDA model, no approvals)"
+        message:
+          "Solana: readApproved not supported (PositionOwner PDA model, no approvals)",
       });
     },
     readIsApprovedForAll: async () => {
       throw new LiveStreakConfigError({
-        message: "Solana: readIsApprovedForAll not supported (PositionOwner PDA model, no approvals)"
+        message:
+          "Solana: readIsApprovedForAll not supported (PositionOwner PDA model, no approvals)",
       });
-    }
+    },
   };
 
   if (options?.includeProtocolSummary === true) {
@@ -239,18 +267,24 @@ export const createSolanaOptionsReader = (
 
 // --- reads ---
 
-const readMarket = async (ctx: SolanaOptionsContext, marketId: MarketId): Promise<OptionsMarket> => {
+const readMarket = async (
+  ctx: SolanaOptionsContext,
+  marketId: MarketId,
+): Promise<OptionsMarket> => {
   const [marketPda] = await findMarketPda(ctx.programId, marketId as unknown as Hex32);
   const bytes = await fetchAccountBytes(ctx.rpc, marketPda);
   if (bytes === undefined) {
-    throw new LiveStreakConfigError({ message: "Solana: market not found", metadata: { details: marketId } });
+    throw new LiveStreakConfigError({
+      message: "Solana: market not found",
+      metadata: { details: marketId },
+    });
   }
   const m = decodeMarketAccount(bytes);
 
   let vaultIds: readonly VaultId[] = [];
   try {
     vaultIds = await withProtocolView(ctx, marketId as unknown as Hex32, (view) =>
-      view.listVaultIds().map((id) => asVaultId(id))
+      view.listVaultIds().map((id) => asVaultId(id)),
     );
   } catch {
     // ProtocolState not yet allocated (init_protocol not run) — no vaults.
@@ -262,18 +296,21 @@ const readMarket = async (ctx: SolanaOptionsContext, marketId: MarketId): Promis
     validateSolanaUserAddress(String(m.creator), "creator"),
     bytesToHex(m.streamId),
     m.createdAt,
-    vaultIds
+    vaultIds,
   );
 };
 
 const readStreamState = async (
   ctx: SolanaOptionsContext,
-  marketId: MarketId
+  marketId: MarketId,
 ): Promise<OptionsStreamState> => {
   const [marketPda] = await findMarketPda(ctx.programId, marketId as unknown as Hex32);
   const bytes = await fetchAccountBytes(ctx.rpc, marketPda);
   if (bytes === undefined) {
-    throw new LiveStreakConfigError({ message: "Solana: market not found", metadata: { details: marketId } });
+    throw new LiveStreakConfigError({
+      message: "Solana: market not found",
+      metadata: { details: marketId },
+    });
   }
   const m = decodeMarketAccount(bytes);
   return mapSolanaStreamState({
@@ -281,7 +318,7 @@ const readStreamState = async (
     scheme: m.streamScheme,
     pointer: utf8(m.streamPointer),
     endedAtSec: m.streamEndedAt,
-    updatedAtSec: m.streamUpdatedAt
+    updatedAtSec: m.streamUpdatedAt,
   });
 };
 
@@ -290,11 +327,11 @@ const listMarketIds = async (ctx: SolanaOptionsContext): Promise<readonly Market
 
 const listMarketVaults = async (
   ctx: SolanaOptionsContext,
-  marketId: MarketId
+  marketId: MarketId,
 ): Promise<readonly VaultId[]> => {
   try {
     return await withProtocolView(ctx, marketId as unknown as Hex32, (view) =>
-      view.listVaultIds().map((id) => asVaultId(id))
+      view.listVaultIds().map((id) => asVaultId(id)),
     );
   } catch {
     return [];
@@ -306,23 +343,26 @@ const listMarketVaults = async (
 // when the PDA doesn't exist (unminted token).
 const readOwnerRecord = async (
   ctx: SolanaOptionsContext,
-  tokenId: TokenId
+  tokenId: TokenId,
 ): Promise<{ owner: UserAddress; marketId: Hex32 } | undefined> => {
   const [posPda] = await findPositionPda(ctx.programId, tokenIdToHex32(tokenId));
   const bytes = await fetchAccountBytes(ctx.rpc, posPda);
   if (bytes === undefined) return undefined;
   const rec = decodePositionOwnerAccount(bytes);
-  return { owner: validateSolanaUserAddress(String(rec.owner), "owner"), marketId: rec.marketId };
+  return {
+    owner: validateSolanaUserAddress(String(rec.owner), "owner"),
+    marketId: rec.marketId,
+  };
 };
 
 const readNft = async (
   ctx: SolanaOptionsContext,
   withTokenView: <T>(
     tokenId: TokenId,
-    fn: (view: EngineView, tokenHex: Hex32, marketId: Hex32) => T
+    fn: (view: EngineView, tokenHex: Hex32, marketId: Hex32) => T,
   ) => Promise<T | undefined>,
   tokenId: TokenId,
-  owner: UserAddress
+  owner: UserAddress,
 ): Promise<OptionsNft> => {
   const now = nowSec();
   const nft = await withTokenView(tokenId, (view, tokenHex, marketId) => {
@@ -355,13 +395,19 @@ const readNft = async (
           const winPool = winning === "yes" ? pools.yesPool : pools.noPool;
           const losePool = winning === "yes" ? pools.noPool : pools.yesPool;
           const winShares = winning === "yes" ? pools.yesShares : pools.noShares;
-          claimable = computeWinClaimable(winPool, losePool, pos.sharesAccrued / WAD, winShares);
+          claimable = computeWinClaimable(
+            winPool,
+            losePool,
+            pos.sharesAccrued / WAD,
+            winShares,
+          );
         }
         // Earned LVST for this loss (basis × mintRate) — shown even after claiming. The claimed-aware view
         // (loss_lvst_claimable) drops to 0 once claimed, so basis>0 with a zero claimable ⇒ already claimed.
         const basis = view.lossClaimable(tokenHex, vId, sideNum);
         const lossClaimable = lossBasisToLvst(basis, mintRate);
-        const lossClaimed = basis > 0n && view.lossLvstClaimable(tokenHex, vId, sideNum) === 0n;
+        const lossClaimed =
+          basis > 0n && view.lossLvstClaimable(tokenHex, vId, sideNum) === 0n;
         // TRUE live shares = settled + real bonding-curve accrual to now (engine pending_shares), so the
         // absolute "sh" display grows honestly between advances instead of the app guessing with a rate.
         const livePendingRaw = view.pendingShares(vId, sideNum, tokenHex, now);
@@ -378,8 +424,8 @@ const readNft = async (
             Number(vault.resolvedAt ?? 0),
             lossClaimed,
             basis,
-            livePendingRaw
-          )
+            livePendingRaw,
+          ),
         );
       }
     }
@@ -396,7 +442,9 @@ const readNft = async (
   let balance = 0n;
   if (rec?.marketId !== undefined) {
     try {
-      balance = await withProtocolView(ctx, rec.marketId, (view) => view.nftBalance(tokenIdToHex32(tokenId)));
+      balance = await withProtocolView(ctx, rec.marketId, (view) =>
+        view.nftBalance(tokenIdToHex32(tokenId)),
+      );
     } catch {
       // ProtocolState not allocated — no balance to report
     }
@@ -406,7 +454,7 @@ const readNft = async (
 
 const listOwnerTokens = async (
   ctx: SolanaOptionsContext,
-  owner: UserAddress
+  owner: UserAddress,
 ): Promise<readonly TokenId[]> => {
   // No on-chain owner→tokens index — scan PositionOwner PDAs by discriminator + owner memcmp. Owner
   // field sits at offset 40 (8 discriminator + 32 token_id); its base58 IS the owner address string.
@@ -417,8 +465,8 @@ const listOwnerTokens = async (
       encoding: "base64",
       filters: [
         { memcmp: { offset: 0n, bytes: discBase58 as never, encoding: "base58" } },
-        { memcmp: { offset: 40n, bytes: String(owner) as never, encoding: "base58" } }
-      ]
+        { memcmp: { offset: 40n, bytes: String(owner) as never, encoding: "base58" } },
+      ],
     })
     .send();
   const accounts = Array.isArray(response)
@@ -433,18 +481,24 @@ const listOwnerTokens = async (
   return tokens;
 };
 
-const readOwnerOf = async (ctx: SolanaOptionsContext, tokenId: TokenId): Promise<UserAddress> => {
+const readOwnerOf = async (
+  ctx: SolanaOptionsContext,
+  tokenId: TokenId,
+): Promise<UserAddress> => {
   const rec = await readOwnerRecord(ctx, tokenId);
   if (rec === undefined) {
     throw new LiveStreakConfigError({
       message: "Solana: position owner not found",
-      metadata: { details: tokenId.toString() }
+      metadata: { details: tokenId.toString() },
     });
   }
   return rec.owner;
 };
 
-const readUsdcBalance = async (ctx: SolanaOptionsContext, owner: UserAddress): Promise<bigint> => {
+const readUsdcBalance = async (
+  ctx: SolanaOptionsContext,
+  owner: UserAddress,
+): Promise<bigint> => {
   const [ata] = await findUsdcAta(address(String(owner)), ctx.usdcMint);
   const bytes = await fetchAccountBytes(ctx.rpc, ata);
   if (bytes === undefined || bytes.length < 72) return 0n;
@@ -458,7 +512,10 @@ const readUsdcBalance = async (ctx: SolanaOptionsContext, owner: UserAddress): P
 // both matches the mint and clears the row after Cash out.
 
 // Same SPL token-account read as USDC, against the LVST mint's ATA (loss-mint / future staking credit it).
-const readLvstBalance = async (ctx: SolanaOptionsContext, owner: UserAddress): Promise<bigint> => {
+const readLvstBalance = async (
+  ctx: SolanaOptionsContext,
+  owner: UserAddress,
+): Promise<bigint> => {
   if (ctx.lvstMint === undefined) return 0n;
   const [ata] = await findUsdcAta(address(String(owner)), ctx.lvstMint);
   const bytes = await fetchAccountBytes(ctx.rpc, ata);
@@ -467,7 +524,9 @@ const readLvstBalance = async (ctx: SolanaOptionsContext, owner: UserAddress): P
   return dv.getBigUint64(64, true);
 };
 
-const loadProtocolSummary = async (ctx: SolanaOptionsContext): Promise<OptionsProtocolSummary> => {
+const loadProtocolSummary = async (
+  ctx: SolanaOptionsContext,
+): Promise<OptionsProtocolSummary> => {
   const ids = await listMarketIdsCtx(ctx);
   let vaultCount = 0;
   for (const id of ids) {

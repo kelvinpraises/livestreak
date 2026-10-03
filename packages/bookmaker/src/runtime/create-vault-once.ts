@@ -1,7 +1,8 @@
+import { idempotencyKeyFromCreateIntent } from "../model/idempotency.js";
+import { canonicalMandateBytes } from "@livestreak/schema";
 import { LiveStreakConfigError } from "@livestreak/core";
 
 import type { BookmakerChain, CreateVaultResult } from "../chains/types.js";
-import { idempotencyKeyFromCreateIntent } from "../model/idempotency.js";
 import type { CreateVaultIntent } from "../model/write-intent.js";
 import { validateCreateVaultIntent } from "../model/validate.js";
 import {
@@ -35,6 +36,8 @@ export const createVaultOnce = async (
   }
 
   const intent = validated.value;
+  if (!intent.mandate || !intent.operationId) throw new LiveStreakConfigError({ message: "Complete mandate and creation operationId required" });
+  canonicalMandateBytes(intent.mandate);
   const idempotencyKey = idempotencyKeyFromCreateIntent(intent);
 
   return deps.store.runExclusive(idempotencyKey, async () => {
@@ -62,8 +65,11 @@ export const createVaultOnce = async (
       throw createVaultUnconfirmedError(pendingHash);
     }
 
+    await deps.store.prepareCreation(idempotencyKey, intent.operationId!);
     try {
       const result = await deps.chain.writer.createVault({
+        mandate: intent.mandate,
+        operationId: intent.operationId,
         marketId: intent.marketId,
         question: intent.question,
         creatorSide: intent.creatorSide,

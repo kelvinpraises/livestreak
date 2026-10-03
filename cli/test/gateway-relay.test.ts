@@ -25,6 +25,18 @@ describe("gateway/relay", () => {
     expect(dispatch.mock.calls[0]?.[0].trusted).toBe(false);
   });
 
+  it("preserves verified rule replies without exposing extra dispatch fields", async () => {
+    const reg = new SessionRegistry();
+    const rec = reg.mint({ scopes: ["bridge:action:readMandate"], ttlMs: 60_000 });
+    const { fixtureMandate } = await import("../../packages/schema/test/helpers/mandate.js");
+    const mandate = fixtureMandate();
+    const terms = { chainId: mandate.chainId, marketId: mandate.marketId, vaultId: "42", question: mandate.question, commitment: `0x${"ab".repeat(32)}`, fundingClose: mandate.fundingClose };
+    const relay = createRelay({ registry: reg, dispatch: async () => ({ terms, mandate, secret: "must stay private" }) });
+    const result = await relay.handleCall(callFrame(rec.sessionId, "readMandate"));
+    expect(result.result).toEqual({ terms, mandate });
+    expect(JSON.stringify(result)).not.toContain("must stay private");
+  });
+
   it("denies an out-of-scope call WITHOUT dispatching (seed never touched)", async () => {
     const reg = new SessionRegistry();
     const rec = reg.mint({ scopes: ["bridge:action:fund"], ttlMs: 60_000 });

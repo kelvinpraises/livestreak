@@ -32,10 +32,17 @@ const makeChainedWriter = (path: string, file: string): ((value: unknown) => voi
 export const loadIdempotencyPersistencePort = async (): Promise<IdempotencyPersistencePort> => {
   const path = stateFilePath(IDEMPOTENCY_FILE);
   const initial = await readStateFile<IdempotencyPersistedState>(path);
-  const write = makeChainedWriter(path, IDEMPOTENCY_FILE);
+  let writes: Promise<void> = Promise.resolve();
+  const write = (state: IdempotencyPersistedState): Promise<void> => {
+    const next = writes.then(() => writeStateFile(path,state));
+    // Keep queue usable while allowing prepare-before-send to fail closed.
+    writes = next.catch(error => warnPersistFailure(IDEMPOTENCY_FILE,error));
+    return next;
+  };
   return {
     ...(initial === undefined ? {} : { initial }),
-    onChange: (state) => write(state)
+    onPrepareCreation: (state) => write(state),
+    onChange: (state) => { void write(state).catch(error => warnPersistFailure(IDEMPOTENCY_FILE,error)); }
   };
 };
 

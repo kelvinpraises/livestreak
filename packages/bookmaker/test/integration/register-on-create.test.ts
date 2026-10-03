@@ -1,3 +1,4 @@
+import { fixtureMandate } from "../../../schema/test/helpers/mandate.js";
 import { describe, expect, it } from "vitest";
 import { detectOpportunity } from "../../src/pipeline/detection/evaluate.js";
 import { createEventKindDetector } from "../../src/pipeline/detection/factories.js";
@@ -98,7 +99,9 @@ describe("register-on-create + deterministic dedup", () => {
         policy: { duplicatePolicy: "prefer-join", detection: evaluation.detection },
         similarityClient: discovery,
         nowMs,
-        guardedCreateVault: runtime.createVaultOnce.bind(runtime)
+        mandate: {...fixtureMandate(FAKE_MARKET_ID, "Will Team A score in the next 10 minutes?"),fundingClose:300,decisionStart:300,decisionEnd:610,missingEvidence:{deadline:710,treatment:"unresolved-escalate-no-guaranteed-refund",procedure:"Fixture escalation"}},
+      operationId: `0x${"41".repeat(32)}`,
+      guardedCreateVault: runtime.createVaultOnce.bind(runtime)
       });
     };
 
@@ -148,6 +151,8 @@ describe("register-on-create + deterministic dedup", () => {
       policy: { duplicatePolicy: "always-create", detection: evaluation.detection },
       similarityClient: failingDiscovery,
       nowMs,
+      mandate: {...fixtureMandate(FAKE_MARKET_ID, "Will Team A score in the next 10 minutes?"),fundingClose:300,decisionStart:300,decisionEnd:610,missingEvidence:{deadline:710,treatment:"unresolved-escalate-no-guaranteed-refund",procedure:"Fixture escalation"}},
+      operationId: `0x${"41".repeat(32)}`,
       guardedCreateVault: runtime.createVaultOnce.bind(runtime),
       onIndexError: (error) => indexErrors.push(error)
     });

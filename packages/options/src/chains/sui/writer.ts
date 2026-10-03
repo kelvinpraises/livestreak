@@ -1,3 +1,5 @@
+import { requireOpenMandate } from "../../flows/rule.js";
+import { createSuiOptionsReader } from "./reader.js";
 // --- exports ---
 
 import { LiveStreakConfigError, LiveStreakRuntimeError } from "@livestreak/core";
@@ -9,12 +11,12 @@ import {
   bcs,
   createSuiReadClient,
   createWalletManager,
-  type SuiWalletConfig
+  type SuiWalletConfig,
 } from "@livestreak/wallet";
 import { MODULES, suiBytes32IdBytes, target } from "@livestreak/contracts/sui";
 
 import { validateOptionsVaultSide } from "../../model/vault.js";
-import { asTokenId, type TokenId } from "../../model/ids.js";
+import { asTokenId } from "../../model/ids.js";
 import {
   asTxId,
   type AdvanceInput,
@@ -34,7 +36,7 @@ import {
   type TransferNftInput,
   type UnstakeLvstInput,
   type WithdrawInput,
-  type WithdrawManyInput
+  type WithdrawManyInput,
 } from "../types.js";
 import { validateSuiBytes32Id, type OptionsSuiObjectIds } from "./addresses.js";
 import { sideToSuiValue } from "./decode.js";
@@ -55,7 +57,7 @@ const vaultIdBytes = (id: string): Uint8Array =>
 export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWriter => {
   if (config.walletInit.chain !== "sui") {
     throw new LiveStreakConfigError({
-      message: "Sui options writer requires walletInit.chain === sui"
+      message: "Sui options writer requires walletInit.chain === sui",
     });
   }
 
@@ -63,11 +65,42 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
   const ids = config.addresses as OptionsSuiObjectIds;
   const packageId = ids.packageId;
   const coinType = `${packageId}::mock_usdc::MOCK_USDC`;
+  const rpcUrl =
+    config.readRpcUrl ??
+    (Array.isArray(suiConfig.rpcUrl) ? suiConfig.rpcUrl[0] : suiConfig.rpcUrl) ??
+    "http://127.0.0.1:9000";
+  const mandateReader = createSuiOptionsReader(ids, rpcUrl, suiConfig.network, {
+    hostUrl: config.hostUrl,
+  });
+  const chainNow = async (): Promise<number> => {
+    const { client } = await getSui();
+    const clock = await client.getObject({
+      id: SUI_CLOCK_OBJECT_ID,
+      options: { showContent: true },
+    });
+    if (clock.data?.content?.dataType !== "moveObject")
+      throw new Error("Sui chain time unavailable");
+    const ms = Number(
+      (clock.data.content.fields as { timestamp_ms?: string }).timestamp_ms,
+    );
+    if (!Number.isSafeInteger(ms)) throw new Error("Sui chain time unavailable");
+    return Math.floor(ms / 1000);
+  };
+  const requireMandate = async (vaultId: string) =>
+    requireOpenMandate(
+      await mandateReader.readVaultMandate!(
+        vaultId as import("../../model/ids.js").VaultId,
+      ),
+      await chainNow(),
+    );
 
   // OPT.rederive: derive the account/owner/client ONCE per writer (deterministic) and reuse across
   // send + findNftObjectId + findCoinObject instead of re-deriving the wallet on every call.
   type SuiContext = {
-    account: { sendTransaction(tx: Transaction): Promise<{ hash: string }>; getAddress(): Promise<string> };
+    account: {
+      sendTransaction(tx: Transaction): Promise<{ hash: string }>;
+      getAddress(): Promise<string>;
+    };
     owner: string;
     client: SuiJsonRpcClient;
   };
@@ -97,7 +130,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new LiveStreakRuntimeError({
-        message: `Sui transaction failed: ${message}`
+        message: `Sui transaction failed: ${message}`,
       });
     }
     return result.hash;
@@ -110,7 +143,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     try {
       const block = await client.waitForTransaction({
         digest: hash,
-        options: { showEvents: true }
+        options: { showEvents: true },
       });
       const event = block.events?.find((e) => e.type.includes("MarketNftMinted"));
       const parsed = event?.parsedJson as { token_id?: string } | undefined;
@@ -121,11 +154,11 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       throw new LiveStreakRuntimeError({
         message: `Sui: failed to read MarketNftMinted event: ${
           error instanceof Error ? error.message : String(error)
-        }`
+        }`,
       });
     }
     throw new LiveStreakRuntimeError({
-      message: "Sui: mint tx did not emit a decodable MarketNftMinted event"
+      message: "Sui: mint tx did not emit a decodable MarketNftMinted event",
     });
   };
 
@@ -136,7 +169,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     const owned = await client.getOwnedObjects({
       owner,
       filter: { StructType: nftType },
-      options: { showContent: true }
+      options: { showContent: true },
     });
     for (const obj of owned.data) {
       if (obj.data?.content?.dataType === "moveObject") {
@@ -147,7 +180,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       }
     }
     throw new LiveStreakConfigError({
-      message: `Sui: NFT object not found for tokenId ${tokenId.toString()}`
+      message: `Sui: NFT object not found for tokenId ${tokenId.toString()}`,
     });
   };
 
@@ -164,7 +197,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     if (total < amount) {
       throw new LiveStreakConfigError({
         message: `Sui: insufficient ${coinType_} balance`,
-        metadata: { details: `need ${amount}, have ${total}` }
+        metadata: { details: `need ${amount}, have ${total}` },
       });
     }
     return objectIds;
@@ -184,8 +217,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.object(ids.marketRegistry),
           tx.pure(bcs.vector(bcs.u8()).serialize(marketBytes).toBytes()),
           tx.pure.address(to),
-          tx.makeMoveVec({ type: metadataType, elements: [] })
-        ]
+          tx.makeMoveVec({ type: metadataType, elements: [] }),
+        ],
       });
       return sendMint(tx);
     },
@@ -193,8 +226,10 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
     // Sui's market_driver has no salted-mint entry (tokenId is auto-assigned on chain); deterministic
     // mintWithSalt is an EVM-only feature (calcTokenIdWithSalt). Surface it explicitly.
     mintWithSalt: async (_input: MintWithSaltInput): Promise<never> => {
+      void _input;
       throw new LiveStreakConfigError({
-        message: "Sui: mintWithSalt not supported (no salted-mint Move entry; tokenId is auto-assigned)"
+        message:
+          "Sui: mintWithSalt not supported (no salted-mint Move entry; tokenId is auto-assigned)",
       });
     },
 
@@ -203,6 +238,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       const side = sideToSuiValue(validateOptionsVaultSide(input.side));
       const rate = requirePositiveBigInt(input.rate, "rate");
       const deposit = requirePositiveBigInt(input.deposit, "deposit");
+      await requireMandate(input.vaultId);
 
       const nftObjectId = await findNftObjectId(input.tokenId);
       const usdcCoins = await findCoinObject(coinType, deposit);
@@ -211,9 +247,12 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       const tx = new Transaction();
       const primaryCoin = tx.object(usdcCoins[0]!);
       if (usdcCoins.length > 1) {
-        tx.mergeCoins(primaryCoin, usdcCoins.slice(1).map((id) => tx.object(id)));
+        tx.mergeCoins(
+          primaryCoin,
+          usdcCoins.slice(1).map((id) => tx.object(id)),
+        );
       }
-      const [payment] = tx.splitCoins(primaryCoin, [tx.pure.u128(deposit)]);
+      const [payment] = tx.splitCoins(primaryCoin, [tx.pure.u64(deposit)]);
       tx.moveCall({
         target: target(packageId, MODULES.marketDriver, "fund"),
         typeArguments: [coinType],
@@ -229,8 +268,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.pure.u256(rate),
           tx.pure.u128(deposit),
           payment,
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
       return asTxId(await send(tx));
     },
@@ -249,18 +288,69 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.pure(vaultBytes),
           tx.pure.u8(side),
           tx.pure.u64(maxSteps),
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
       return asTxId(await send(tx));
     },
 
     setLanes: async (input: SetLanesInput) => {
+      requireNonNegativeBigInt(input.addDeposit, "addDeposit");
+      for (const lane of input.lanes) {
+        validateOptionsVaultSide(lane.side);
+        requirePositiveBigInt(lane.rate, "rate");
+      }
+      const current = input.lanes.length
+        ? await mandateReader.readNft(
+            input.tokenId,
+            (await getSui()).owner as import("../../model/ids.js").UserAddress,
+          )
+        : undefined;
+      for (const lane of input.lanes) {
+        const held = current?.lanes.find(
+          (l) =>
+            l.vaultId === lane.vaultId &&
+            l.side === lane.side &&
+            l.committedRate === lane.rate,
+        );
+        if (
+          held &&
+          input.addDeposit === 0n &&
+          !held.depleted &&
+          held.maxEndMs !== undefined &&
+          held.maxEndMs > (await chainNow()) * 1000
+        )
+          continue;
+        if (held && input.addDeposit === 0n) {
+          const { client } = await getSui();
+          const tx = new Transaction();
+          tx.moveCall({
+            target: target(packageId, MODULES.vault, "funding_close"),
+            typeArguments: [coinType],
+            arguments: [tx.object(ids.vaultRegistry), tx.pure(vaultIdBytes(lane.vaultId))],
+          });
+          const result = await client.devInspectTransactionBlock({
+            sender: (await getSui()).owner,
+            transactionBlock: tx,
+          });
+          const value = result.results?.[0]?.returnValues?.[0];
+          if (
+            value &&
+            Number(bcs.u64().parse(Uint8Array.from(value[0]))) <= (await chainNow())
+          )
+            continue;
+        }
+        await requireMandate(lane.vaultId);
+      }
       const nftObjectId = await findNftObjectId(input.tokenId);
       const addDeposit = requireNonNegativeBigInt(input.addDeposit, "addDeposit");
 
-      const desiredVaultIds = input.lanes.map((l) => vaultIdByteArray(l.vaultId, "vaultId"));
-      const desiredSides = input.lanes.map((l) => sideToSuiValue(validateOptionsVaultSide(l.side)));
+      const desiredVaultIds = input.lanes.map((l) =>
+        vaultIdByteArray(l.vaultId, "vaultId"),
+      );
+      const desiredSides = input.lanes.map((l) =>
+        sideToSuiValue(validateOptionsVaultSide(l.side)),
+      );
       const desiredRates = input.lanes.map((l) => requirePositiveBigInt(l.rate, "rate"));
 
       // O7: when add_deposit > 0, resolve + split a USDC coin and pass Some(coin); else None. The Move
@@ -274,18 +364,21 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
         const usdcCoins = await findCoinObject(coinType, addDeposit);
         const primaryCoin = tx.object(usdcCoins[0]!);
         if (usdcCoins.length > 1) {
-          tx.mergeCoins(primaryCoin, usdcCoins.slice(1).map((id) => tx.object(id)));
+          tx.mergeCoins(
+            primaryCoin,
+            usdcCoins.slice(1).map((id) => tx.object(id)),
+          );
         }
-        const [payment] = tx.splitCoins(primaryCoin, [tx.pure.u128(addDeposit)]);
+        const [payment] = tx.splitCoins(primaryCoin, [tx.pure.u64(addDeposit)]);
         paymentArg = tx.moveCall({
           target: "0x1::option::some",
           typeArguments: [coinOptionInner],
-          arguments: [payment!]
+          arguments: [payment!],
         });
       } else {
         paymentArg = tx.moveCall({
           target: "0x1::option::none",
-          typeArguments: [coinOptionInner]
+          typeArguments: [coinOptionInner],
         });
       }
 
@@ -304,8 +397,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.pure(bcs.vector(bcs.u256()).serialize(desiredRates).toBytes()),
           tx.pure.u128(addDeposit),
           paymentArg,
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
       return asTxId(await send(tx));
     },
@@ -328,8 +421,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.object(ids.streamsRegistry),
           tx.pure(vaultBytes),
           tx.pure.u8(side),
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
       return asTxId(await send(tx));
     },
@@ -348,8 +441,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.object(ids.vaultRegistry),
           tx.object(ids.dripsRegistry),
           tx.object(ids.streamsRegistry),
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
       return asTxId(await send(tx));
     },
@@ -374,8 +467,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.object(ids.streamsRegistry),
           tx.object(ids.treasuryRegistry),
           tx.pure(vaultBytes),
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
       tx.moveCall({
         target: target(packageId, MODULES.marketDriver, "withdraw"),
@@ -386,8 +479,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.object(ids.vaultRegistry),
           tx.pure(vaultBytes),
           tx.pure.address(to),
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
       return asTxId(await send(tx));
     },
@@ -410,8 +503,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.object(ids.vaultRegistry),
           tx.pure(vaultIds),
           tx.pure.address(to),
-          tx.object(SUI_CLOCK_OBJECT_ID)
-        ]
+          tx.object(SUI_CLOCK_OBJECT_ID),
+        ],
       });
       return asTxId(await send(tx));
     },
@@ -424,7 +517,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
 
       if (ids.lvstTreasuryCap === undefined) {
         throw new LiveStreakConfigError({
-          message: "Sui: claimLossLvst requires lvstTreasuryCap in addresses config"
+          message: "Sui: claimLossLvst requires lvstTreasuryCap in addresses config",
         });
       }
       const tx = new Transaction();
@@ -439,8 +532,8 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
           tx.object(ids.vaultRegistry),
           tx.pure(vaultBytes),
           tx.pure.u8(side),
-          tx.pure.address(to)
-        ]
+          tx.pure.address(to),
+        ],
       });
       return asTxId(await send(tx));
     },
@@ -453,13 +546,16 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       const tx = new Transaction();
       const primaryCoin = tx.object(lvstCoins[0]!);
       if (lvstCoins.length > 1) {
-        tx.mergeCoins(primaryCoin, lvstCoins.slice(1).map((id) => tx.object(id)));
+        tx.mergeCoins(
+          primaryCoin,
+          lvstCoins.slice(1).map((id) => tx.object(id)),
+        );
       }
       const [payment] = tx.splitCoins(primaryCoin, [tx.pure.u64(amount)]);
       tx.moveCall({
         target: target(packageId, MODULES.treasury, "stake_lvst"),
         typeArguments: [coinType],
-        arguments: [tx.object(ids.treasuryRegistry), payment]
+        arguments: [tx.object(ids.treasuryRegistry), payment],
       });
       return asTxId(await send(tx));
     },
@@ -471,7 +567,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       tx.moveCall({
         target: target(packageId, MODULES.treasury, "unstake_lvst"),
         typeArguments: [coinType],
-        arguments: [tx.object(ids.treasuryRegistry), tx.pure.u128(amount)]
+        arguments: [tx.object(ids.treasuryRegistry), tx.pure.u128(amount)],
       });
       return asTxId(await send(tx));
     },
@@ -481,7 +577,7 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
       tx.moveCall({
         target: target(packageId, MODULES.treasury, "claim_dividends"),
         typeArguments: [coinType],
-        arguments: [tx.object(ids.treasuryRegistry)]
+        arguments: [tx.object(ids.treasuryRegistry)],
       });
       return asTxId(await send(tx));
     },
@@ -500,16 +596,18 @@ export const createSuiOptionsWriter = (config: OptionsChainConfig): OptionsWrite
 
     // Sui owned-object model has no approval mechanism.
     approveNft: async (_input: ApproveNftInput): Promise<never> => {
+      void _input;
       throw new LiveStreakConfigError({
-        message: "Sui: approveNft not supported (owned-object model)"
+        message: "Sui: approveNft not supported (owned-object model)",
       });
     },
 
     setApprovalForAll: async (_input: SetApprovalForAllInput): Promise<never> => {
+      void _input;
       throw new LiveStreakConfigError({
-        message: "Sui: setApprovalForAll not supported (owned-object model)"
+        message: "Sui: setApprovalForAll not supported (owned-object model)",
       });
-    }
+    },
   };
 };
 
@@ -519,7 +617,7 @@ const requirePositiveBigInt = (value: bigint, field: string): bigint => {
   if (typeof value !== "bigint" || value <= 0n) {
     throw new LiveStreakConfigError({
       message: `Sui write requires ${field} to be a bigint > 0`,
-      metadata: { details: String(value) }
+      metadata: { details: String(value) },
     });
   }
   return value;
@@ -529,7 +627,7 @@ const requireNonNegativeBigInt = (value: bigint, field: string): bigint => {
   if (typeof value !== "bigint" || value < 0n) {
     throw new LiveStreakConfigError({
       message: `Sui write requires ${field} to be a bigint >= 0`,
-      metadata: { details: String(value) }
+      metadata: { details: String(value) },
     });
   }
   return value;

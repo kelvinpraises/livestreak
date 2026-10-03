@@ -74,9 +74,52 @@ export interface RemoteUiClientOptions {
   readonly log?: (line: string) => void;
 }
 
+/** Shared, provider-neutral judging terms. Canonical bytes have no vault-ID dependency. */
+
+export interface NumericEvaluation {
+  readonly kind: "numeric-threshold";
+  readonly sourceId: string;
+  readonly field: string;
+  readonly units: string;
+  readonly comparator: ">" | ">=" | "<" | "<=";
+  readonly threshold: string;
+  readonly tie: "yes" | "no";
+}
+export interface VaultMandate {
+  readonly version: "livestreak-mandate/1";
+  readonly chainId: string;
+  readonly marketId: string;
+  readonly question: string;
+  readonly yesMeaning: string;
+  readonly noMeaning: string;
+  readonly method: "deterministic" | "discretionary" | "mixed";
+  readonly evaluation: NumericEvaluation | { readonly kind: "rubric"; readonly rubric: string } |
+    { readonly kind: "mixed"; readonly rubric: string; readonly checks: readonly NumericEvaluation[] };
+  readonly evidence: readonly { readonly sourceId: string; readonly kind: "data" | "video" | "record" | "testimony"; readonly description: string }[];
+  readonly authority: "market-designated-steward";
+  readonly authorityChanges: "registry-authority-may-change";
+  readonly fundingClose: number;
+  readonly decisionStart: number;
+  readonly decisionEnd: number;
+  readonly missingEvidence: { readonly deadline: number; readonly treatment: "unresolved-escalate-no-guaranteed-refund"; readonly procedure: string };
+  readonly ambiguityProcedure: string;
+}
+export interface BoundVaultTerms {
+  readonly chainId: string;
+  readonly marketId: string;
+  readonly vaultId: string;
+  readonly question: string;
+  readonly commitment: string;
+  readonly fundingClose: number;
+}
+export interface VerifiedVaultMandate {
+  readonly terms: BoundVaultTerms;
+  readonly mandate: VaultMandate;
+}
+
 export interface RemoteCallOutcome {
   readonly ok: boolean;
-  readonly result?: { readonly txId?: string; readonly tokenId?: string };
+  readonly result?: { readonly txId?: string; readonly tokenId?: string; readonly commitment?: string; readonly terms?: BoundVaultTerms; readonly mandate?: VaultMandate };
   readonly error?: string;
 }
 
@@ -129,6 +172,9 @@ export interface RemoteDriveInput {
   readonly ingest?: IngestDriveInput;
   /** Media-only proof: vault + fund + re-probe, then return without steward legs. Requires `ingest`. */
   readonly mediaOnly?: boolean;
+  readonly mandate?: VaultMandate;
+  readonly mandateForMarket?: (marketId: string) => VaultMandate | Promise<VaultMandate>;
+  readonly operationId?: string;
   readonly log?: (line: string) => void;
 }
 

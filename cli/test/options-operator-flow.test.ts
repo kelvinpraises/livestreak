@@ -3,7 +3,7 @@
 // Drives the REAL cli edge (cli/src/adapters/options-edge.ts): the describeFunctions/dispatch surface
 // the gateway relays to the remote console. Pins the invariants the stub purge must not regress:
 //
-//   1. Pristine T0 (unconfigured lens): only Configure + Close are visible — no mint/fund/withdraw.
+//   1. Pristine T0 (unconfigured lens): Configure, Close and rule lookup are visible — no mint/fund/withdraw.
 //   2. Tree contract: one root group, every action parented to it.
 //   3. No fieldless forms: every VISIBLE action exposes an inputSchema whose properties cover every
 //      field its writer requires (cross-checked against the options writer inputs).
@@ -45,12 +45,12 @@ const WRITER_REQUIRED_FIELDS: Readonly<Record<string, readonly string[]>> = {
 };
 
 describe("options console edge — pristine operator flow", () => {
-  it("pristine T0: only Configure + Close are visible (no market lens)", async () => {
+  it("pristine T0: Configure, Close and rule lookup are visible (no market lens)", async () => {
     const { edge } = makeEdge();
     const descriptors = await edge.describeFunctions();
 
     const visibleActions = descriptors.filter((d) => d.nodeKind === "action" && d.visible === true);
-    expect(visibleActions.map((d) => d.name).sort()).toEqual(["close", "configure"]);
+    expect(visibleActions.map((d) => d.name).sort()).toEqual(["close", "configure", "readMandate"]);
     // With no market lens, no mint is even projected — and certainly none is visible.
     expect(descriptors.some((d) => d.name === "mint" && d.visible === true)).toBe(false);
   });
@@ -131,6 +131,6 @@ describe("options console edge — pristine operator flow", () => {
     await edge.dispatch(trustedCaller(), { scope: "bridge:action", action: "close", args: {} });
     const afterClose = await edge.describeFunctions();
     const visibleActions = afterClose.filter((d) => d.nodeKind === "action" && d.visible === true);
-    expect(visibleActions.map((d) => d.name).sort()).toEqual(["close", "configure"]);
+    expect(visibleActions.map((d) => d.name).sort()).toEqual(["close", "configure", "readMandate"]);
   });
 });

@@ -18,6 +18,7 @@
 // action) or `bridge:action:*` (all actions); the depth-guarded matcher authorizes accordingly.
 
 import type { CallActionEnvelope, CapabilityGrant, CapabilityScope } from "./capability.js";
+import type { BoundVaultTerms, VaultMandate } from "./mandate.js";
 import type { FunctionDescriptor } from "./descriptor.js";
 
 // Shared payloads -------------------------------------------------------------
@@ -28,6 +29,9 @@ export interface RemoteCallError {
 export interface RemoteCallOutcome {
   readonly txId?: string;
   readonly tokenId?: string;
+  readonly commitment?: string;
+  readonly terms?: BoundVaultTerms;
+  readonly mandate?: VaultMandate;
 }
 export type SessionClosedReason = "ttl_expired" | "revoked" | "gateway_down";
 

@@ -103,21 +103,22 @@ describe("projectBookmakerDescriptors — canonical FunctionDescriptors", () => 
       props.find((entry) => entry.name === name)?.value;
 
     expect(props.map((entry) => entry.name)).toEqual([
+      "mandate",
+      "operationId",
       "marketId",
       "question",
       "creatorSide",
       "creatorStake",
-      "seedRate",
-      "resolutionSource",
-      "resolutionWindowExpiresAtMs"
+      "seedRate"
     ]);
     expect(prop("creatorSide")?.type).toBe("enum");
     expect(prop("creatorSide")?.values).toEqual(["yes", "no"]);
     expect(prop("creatorStake")?.type).toBe("string");
     expect(prop("seedRate")?.type).toBe("string");
-    expect(prop("resolutionSource")?.type).toBe("string");
-    expect(prop("resolutionSource")?.default).toBe("manual");
-    expect(prop("resolutionWindowExpiresAtMs")?.type).toBe("integer");
+    expect(prop("mandate")?.type).toBe("string");
+    expect(prop("mandate")?.description).toContain("JSON");
+    expect(prop("operationId")?.type).toBe("string");
+    expect(prop("resolutionSource")).toBeUndefined();
   });
 
   it("disables createVault when there is no market context", () => {

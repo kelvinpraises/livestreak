@@ -1,3 +1,4 @@
+import { fixtureMandate } from "../../packages/schema/test/helpers/mandate.js";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { AddressInfo } from "node:net";
@@ -99,6 +100,7 @@ describe("remote drive", () => {
 
   it("observe-only calls configure then register and skips options/steward", async () => {
     const result = await runRemoteDrive({
+      mandate: fixtureMandate("0xmarketdeadbeef"), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_observe",
       pairingPassword: "pw",
       settingsPath,
@@ -117,8 +119,22 @@ describe("remote drive", () => {
     expect(mockClient.call.mock.calls.some((c) => c[0] === "steward")).toBe(false);
   });
 
+  it("binds caller-authored terms to the newly discovered market without inventing rules", async () => {
+    const mandateForMarket = vi.fn((marketId: string) => fixtureMandate(marketId));
+    await runRemoteDrive({ sessionId: "explicit-terms", pairingPassword: "pw", settingsPath, mandateForMarket, operationId: `0x${"aa".repeat(32)}`, log: () => {} });
+    expect(mandateForMarket).toHaveBeenCalledWith("0xmarketdeadbeef");
+    const args = mockClient.call.mock.calls.find(c => c[1] === "createVault")?.[2];
+    expect(args).toMatchObject({ mandate: fixtureMandate("0xmarketdeadbeef"), operationId: `0x${"aa".repeat(32)}` });
+  });
+
+  it("rejects explicit terms for a different market before Bookmaker creation", async () => {
+    await expect(runRemoteDrive({ sessionId: "wrong-terms", pairingPassword: "pw", settingsPath, mandate: fixtureMandate("other-market"), operationId: `0x${"aa".repeat(32)}`, log: () => {} })).rejects.toThrow("does not belong");
+    expect(mockClient.call.mock.calls.some(c => c[1] === "createVault")).toBe(false);
+  });
+
   it("full path runs configure through withdraw", async () => {
     const result = await runRemoteDrive({
+      mandate: fixtureMandate("0xmarketdeadbeef"), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_full",
       pairingPassword: "pw",
       settingsPath,
@@ -154,6 +170,7 @@ describe("remote drive", () => {
 
   it("runRemoteDrive command wrapper prints step summary", async () => {
     const output = await runRemoteDriveCommand({
+      mandate: fixtureMandate("0xmarketdeadbeef"), operationId: `0x${"aa".repeat(32)}`,
       session: "sess_cmd",
       pairPassword: "pw",
       settingsPath,
@@ -208,6 +225,7 @@ describe("remote drive watchability gate", () => {
     stubAnnounce(await startDoor(fullProof));
     const lines: string[] = [];
     const result = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_gate_ok",
       pairingPassword: "pw",
       settingsPath,
@@ -244,6 +262,7 @@ describe("remote drive watchability gate", () => {
         })
       );
       const err = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
         sessionId: "sess_gate_nobytes",
         pairingPassword: "pw",
         settingsPath,
@@ -277,6 +296,7 @@ describe("remote drive watchability gate", () => {
       };
     });
     const err = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_gate_fundfail",
       pairingPassword: "pw",
       settingsPath,
@@ -311,6 +331,7 @@ describe("remote drive watchability gate", () => {
       return { ok: true };
     });
     const err = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_gate_startfail",
       pairingPassword: "pw",
       settingsPath,
@@ -339,6 +360,7 @@ describe("remote drive watchability gate", () => {
       return { ok: true };
     });
     const err = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_gate_ambiguous",
       pairingPassword: "pw",
       settingsPath,
@@ -372,6 +394,7 @@ describe("remote drive watchability gate", () => {
         })
       );
       const err = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
         sessionId: "sess_gate_outoforder",
         pairingPassword: "pw",
         settingsPath,
@@ -405,6 +428,7 @@ describe("remote drive watchability gate", () => {
         })
       );
       const err = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
         sessionId: "sess_gate_midfund",
         pairingPassword: "pw",
         settingsPath,
@@ -518,6 +542,7 @@ describe("remote drive ingest leg", () => {
 
   const driveIngest = (session: string, port: number) =>
     runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: session,
       pairingPassword: "pw",
       settingsPath,
@@ -657,6 +682,7 @@ describe("remote drive ingest leg", () => {
 
   it("mediaOnly without ingest is rejected before any client call", async () => {
     const err = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_mediaonly_bare",
       pairingPassword: "pw",
       settingsPath,
@@ -673,6 +699,7 @@ describe("remote drive ingest leg", () => {
   it("file and ingest producers cannot be combined", async () => {
     const stub = await startIngestStub(() => 200);
     const err = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_both_producers",
       pairingPassword: "pw",
       settingsPath,
@@ -691,6 +718,7 @@ describe("remote drive ingest leg", () => {
     const stub = await startIngestStub(() => 200);
     stubAnnounceForwarding(await startDoor(fullProof));
     const result = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_ingest_handover",
       pairingPassword: "pw",
       settingsPath,
@@ -720,6 +748,7 @@ describe("remote drive ingest leg", () => {
     stubAnnounceForwarding(await startDoor(fullProof));
     const lines: string[] = [];
     const result = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_ingest_exhausted",
       pairingPassword: "pw",
       settingsPath,
@@ -750,6 +779,7 @@ describe("remote drive ingest leg", () => {
       await new Promise(() => {});
     }
     const result = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_ingest_blocked",
       pairingPassword: "pw",
       settingsPath,
@@ -783,6 +813,7 @@ describe("remote drive ingest leg", () => {
       action === "goLive" ? { ok: false, error: "denied: ambiguous relay write" } : { ok: true }
     );
     const err: unknown = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_ingest_uncertain",
       pairingPassword: "pw",
       settingsPath,
@@ -816,6 +847,7 @@ describe("remote drive ingest leg", () => {
       return { ok: true };
     });
     const err: unknown = await runRemoteDrive({
+      mandate: fixtureMandate(LIVE_MARKET), operationId: `0x${"aa".repeat(32)}`,
       sessionId: "sess_ingest_fundfail",
       pairingPassword: "pw",
       settingsPath,

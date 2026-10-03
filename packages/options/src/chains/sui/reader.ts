@@ -1,7 +1,14 @@
+import { createMandateClient } from "@livestreak/host";
 // --- exports ---
 
 // Multichain-hygiene: read VIA @livestreak/wallet (the single @mysten/sui v2 owner).
-import { bcs, SuiJsonRpcClient, Transaction, createSuiReadClient, type SuiNetwork } from "@livestreak/wallet";
+import {
+  bcs,
+  SuiJsonRpcClient,
+  Transaction,
+  createSuiReadClient,
+  type SuiNetwork,
+} from "@livestreak/wallet";
 import { LiveStreakConfigError } from "@livestreak/core";
 import { MODULES, target } from "@livestreak/contracts/sui";
 
@@ -19,7 +26,7 @@ import type { OptionsStreamState } from "../../model/stream.js";
 import type {
   OptionsVault,
   OptionsVaultShareTotals,
-  OptionsVaultSide
+  OptionsVaultSide,
 } from "../../model/vault.js";
 import type { OptionsReader } from "../types.js";
 import type { OptionsSuiObjectIds } from "./addresses.js";
@@ -47,15 +54,14 @@ import {
   type SuiHotState,
   type SuiPosition,
   type SuiVaultData,
-  type SuiVaultPools
+  type SuiVaultPools,
 } from "./decode.js";
 
 // Sui clock object is always the same system object.
 const SUI_CLOCK_OBJECT_ID = "0x6";
 
 // USDC coin type is constructed from the package ID.
-const usdcCoinType = (packageId: string): string =>
-  `${packageId}::mock_usdc::MOCK_USDC`;
+const usdcCoinType = (packageId: string): string => `${packageId}::mock_usdc::MOCK_USDC`;
 
 // Bytes32-encoded ID → hex string for model types.
 const bytesVecToHex = (bytes: readonly number[]): `0x${string}` =>
@@ -73,17 +79,48 @@ export const createSuiOptionsReader = (
   ids: OptionsSuiObjectIds,
   rpcUrl: string,
   network?: SuiNetwork,
-  options?: { readonly includeProtocolSummary?: boolean }
+  options?: { readonly includeProtocolSummary?: boolean; readonly hostUrl?: string },
 ): OptionsReader => {
   const client = createSuiReadClient(rpcUrl, network);
   const ctx: ReaderContext = {
     client,
     ids,
     packageId: ids.packageId,
-    coinType: usdcCoinType(ids.packageId)
+    coinType: usdcCoinType(ids.packageId),
   };
 
   const reader = buildReader(ctx);
+  reader.readVaultMandate = async (vaultId) => {
+    if (!options?.hostUrl) throw new Error("Durable mandate Host unavailable");
+    const vault = await readVault(ctx, vaultId);
+    const tx = new Transaction();
+    tx.moveCall({
+      target: target(ctx.packageId, MODULES.vault, "bound_terms"),
+      typeArguments: [ctx.coinType],
+      arguments: [
+        tx.object(ctx.ids.vaultRegistry),
+        tx.pure(bcs.vector(bcs.u8()).serialize(hexIdBytes(vaultId)).toBytes()),
+      ],
+    });
+    const values = (await inspect(ctx, tx))[0];
+    if (!values?.[0] || !values[1])
+      throw new Error("Sui deployment does not support bound mandates");
+    const commitment = bytesVecToHex(
+      bcs.vector(bcs.u8()).parse(Uint8Array.from(values[0][0])),
+    );
+    const terms = {
+      vaultId,
+      marketId: vault.marketId,
+      question: vault.question,
+      commitment,
+      fundingClose: Number(readU64(values[1])),
+      chainId: `sui:${await ctx.client.getChainIdentifier()}`,
+    };
+    return {
+      terms,
+      mandate: await createMandateClient(options.hostUrl).readVerified(terms),
+    };
+  };
 
   if (options?.includeProtocolSummary === true) {
     reader.readProtocolSummary = async () => loadProtocolSummary(ctx);
@@ -103,7 +140,8 @@ const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readNft: (tokenId, owner) => readNft(ctx, tokenId, owner),
   readLvstAccount: (user) => readLvstAccount(ctx, user),
   readClaimable: (tokenId, vaultId, side) => readClaimable(ctx, tokenId, vaultId, side),
-  readLossClaimable: (tokenId, vaultId, side) => readLossClaimable(ctx, tokenId, vaultId, side),
+  readLossClaimable: (tokenId, vaultId, side) =>
+    readLossClaimable(ctx, tokenId, vaultId, side),
   readPot: (vaultId) => readPot(ctx, vaultId),
   readCollected: (vaultId) => readCollected(ctx, vaultId),
   readAccountVaultIds: (tokenId) => readAccountVaultIds(ctx, tokenId),
@@ -112,48 +150,51 @@ const buildReader = (ctx: ReaderContext): OptionsReader => ({
   readSharePrice: (vaultId, side) => readSharePrice(ctx, vaultId, side),
   readPendingBoundaries: (vaultId, side) => readPendingBoundaries(ctx, vaultId, side),
   readBoundaries: (vaultId, side) => readBoundaries(ctx, vaultId, side),
-  readPendingShares: (vaultId, side, tokenId) => readPendingShares(ctx, vaultId, side, tokenId),
+  readPendingShares: (vaultId, side, tokenId) =>
+    readPendingShares(ctx, vaultId, side, tokenId),
   readUsdcAddress: () => readUsdcAddress(ctx),
   readUsdcBalance: (owner) => readUsdcBalance(ctx, owner),
   readNftBalance: (tokenId) => readNftBalance(ctx, tokenId),
   readOwnerOf: async () => {
     throw new LiveStreakConfigError({
-      message: "Sui: readOwnerOf not supported (owned-object model)"
+      message: "Sui: readOwnerOf not supported (owned-object model)",
     });
   },
   readApproved: async () => {
     throw new LiveStreakConfigError({
-      message: "Sui: readApproved not supported (owned-object model)"
+      message: "Sui: readApproved not supported (owned-object model)",
     });
   },
   readIsApprovedForAll: async () => {
     throw new LiveStreakConfigError({
-      message: "Sui: readIsApprovedForAll not supported (owned-object model)"
+      message: "Sui: readIsApprovedForAll not supported (owned-object model)",
     });
-  }
+  },
 });
 
 // --- reads ---
 
 const inspect = async (
   ctx: ReaderContext,
-  tx: Transaction
+  tx: Transaction,
 ): Promise<readonly InspectReturnValue[][]> => {
   // devInspect uses the zero address as sender for read-only calls.
   const result = await ctx.client.devInspectTransactionBlock({
     sender: "0x0000000000000000000000000000000000000000000000000000000000000000",
-    transactionBlock: tx
+    transactionBlock: tx,
   });
 
-  return (result.results ?? []).map((r) =>
-    (r.returnValues ?? []) as InspectReturnValue[]
-  );
+  if (result.error) throw new Error(`Sui read aborted: ${result.error}`);
+  return (result.results ?? []).map((r) => (r.returnValues ?? []) as InspectReturnValue[]);
 };
 
-const readMarket = async (ctx: ReaderContext, marketId: MarketId): Promise<OptionsMarket> => {
+const readMarket = async (
+  ctx: ReaderContext,
+  marketId: MarketId,
+): Promise<OptionsMarket> => {
   const marketHex = marketId.startsWith("0x") ? marketId.slice(2) : marketId;
   const marketBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(marketHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(marketHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
   const marketBytesArg = (tx: Transaction) =>
     tx.pure(bcs.vector(bcs.u8()).serialize(marketBytes).toBytes());
@@ -163,7 +204,7 @@ const readMarket = async (ctx: ReaderContext, marketId: MarketId): Promise<Optio
     const existsTx = new Transaction();
     existsTx.moveCall({
       target: target(ctx.packageId, MODULES.marketRegistry, "market_exists"),
-      arguments: [existsTx.object(ctx.ids.marketRegistry), marketBytesArg(existsTx)]
+      arguments: [existsTx.object(ctx.ids.marketRegistry), marketBytesArg(existsTx)],
     });
     const existsResults = await inspect(ctx, existsTx);
     const existsVal = existsResults[0]?.[0];
@@ -175,7 +216,7 @@ const readMarket = async (ctx: ReaderContext, marketId: MarketId): Promise<Optio
     const dataTx = new Transaction();
     dataTx.moveCall({
       target: target(ctx.packageId, MODULES.marketRegistry, "get_market"),
-      arguments: [dataTx.object(ctx.ids.marketRegistry), marketBytesArg(dataTx)]
+      arguments: [dataTx.object(ctx.ids.marketRegistry), marketBytesArg(dataTx)],
     });
     const dataResults = await inspect(ctx, dataTx);
     const dataVal = dataResults[0]?.[0];
@@ -188,7 +229,7 @@ const readMarket = async (ctx: ReaderContext, marketId: MarketId): Promise<Optio
     const vaultIdsTx = new Transaction();
     vaultIdsTx.moveCall({
       target: target(ctx.packageId, MODULES.marketRegistry, "get_vault_ids"),
-      arguments: [vaultIdsTx.object(ctx.ids.marketRegistry), marketBytesArg(vaultIdsTx)]
+      arguments: [vaultIdsTx.object(ctx.ids.marketRegistry), marketBytesArg(vaultIdsTx)],
     });
     const vaultIdsResults = await inspect(ctx, vaultIdsTx);
     const vaultIdsVal = vaultIdsResults[0]?.[0];
@@ -200,9 +241,9 @@ const readMarket = async (ctx: ReaderContext, marketId: MarketId): Promise<Optio
         title,
         streamId: streamId as `0x${string}`,
         creator,
-        createdAt
+        createdAt,
       },
-      vaultIds
+      vaultIds,
     );
   } catch (error) {
     if (error instanceof LiveStreakConfigError) throw error;
@@ -214,7 +255,7 @@ const readMarket = async (ctx: ReaderContext, marketId: MarketId): Promise<Optio
 // id: vector<u8> (length-prefixed), title: vector<u8>, stream_id: vector<u8>,
 // creator: address (32 bytes), created_at: u64 (LE), exists: bool
 const decodeMarketDataStruct = (
-  ret: InspectReturnValue
+  ret: InspectReturnValue,
 ): { title: string; streamId: string; creator: string; createdAt: bigint } => {
   const bytes = Uint8Array.from(ret[0]);
   const MarketDataBcs = bcs.struct("MarketData", {
@@ -223,7 +264,7 @@ const decodeMarketDataStruct = (
     stream_id: bcs.vector(bcs.u8()),
     creator: bcs.bytes(32),
     created_at: bcs.u64(),
-    exists: bcs.bool()
+    exists: bcs.bool(),
   });
   const parsed = MarketDataBcs.parse(bytes);
   const title = new TextDecoder().decode(Uint8Array.from(parsed.title as number[]));
@@ -233,7 +274,7 @@ const decodeMarketDataStruct = (
     title,
     streamId: streamIdHex,
     creator: `0x${creatorHex.slice(2)}`,
-    createdAt: BigInt(parsed.created_at)
+    createdAt: BigInt(parsed.created_at),
   };
 };
 
@@ -247,11 +288,11 @@ const decodeVaultIdsList = (ret: InspectReturnValue): readonly VaultId[] => {
 
 const readStreamState = async (
   ctx: ReaderContext,
-  marketId: MarketId
+  marketId: MarketId,
 ): Promise<OptionsStreamState> => {
   const marketHex = marketId.startsWith("0x") ? marketId.slice(2) : marketId;
   const marketBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(marketHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(marketHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
 
   try {
@@ -260,8 +301,8 @@ const readStreamState = async (
       target: target(ctx.packageId, MODULES.marketRegistry, "stream_state"),
       arguments: [
         tx.object(ctx.ids.marketRegistry),
-        tx.pure(bcs.vector(bcs.u8()).serialize(marketBytes).toBytes())
-      ]
+        tx.pure(bcs.vector(bcs.u8()).serialize(marketBytes).toBytes()),
+      ],
     });
     const results = await inspect(ctx, tx);
     const structVal = results[0]?.[0];
@@ -274,7 +315,7 @@ const readStreamState = async (
       scheme: bcs.u8(),
       id: bcs.vector(bcs.u8()),
       updated_at: bcs.u64(),
-      ended_at: bcs.u64()
+      ended_at: bcs.u64(),
     });
     const parsed = StreamStateBcs.parse(Uint8Array.from(structVal[0]));
     const contentId = new TextDecoder().decode(Uint8Array.from(parsed.id as number[]));
@@ -283,7 +324,7 @@ const readStreamState = async (
       status: parsed.status as number,
       scheme: parsed.scheme as number,
       contentId,
-      endedAt: BigInt(parsed.ended_at)
+      endedAt: BigInt(parsed.ended_at),
     });
   } catch (error) {
     if (error instanceof LiveStreakConfigError) throw error;
@@ -293,7 +334,7 @@ const readStreamState = async (
 
 const listMarketVaults = async (
   ctx: ReaderContext,
-  marketId: MarketId
+  marketId: MarketId,
 ): Promise<readonly VaultId[]> => {
   const market = await readMarket(ctx, marketId);
   return market.vaultIds;
@@ -312,14 +353,14 @@ const loadProtocolSummary = async (ctx: ReaderContext): Promise<OptionsProtocolS
     for (const marketId of marketIds) {
       const marketHex = marketId.startsWith("0x") ? marketId.slice(2) : marketId;
       const marketBytes = Array.from({ length: 32 }, (_, i) =>
-        parseInt(marketHex.slice(i * 2, i * 2 + 2) || "0", 16)
+        parseInt(marketHex.slice(i * 2, i * 2 + 2) || "0", 16),
       );
       tx.moveCall({
         target: target(ctx.packageId, MODULES.marketRegistry, "get_vault_ids"),
         arguments: [
           tx.object(ctx.ids.marketRegistry),
-          tx.pure(bcs.vector(bcs.u8()).serialize(marketBytes).toBytes())
-        ]
+          tx.pure(bcs.vector(bcs.u8()).serialize(marketBytes).toBytes()),
+        ],
       });
     }
     const results = await inspect(ctx, tx);
@@ -344,7 +385,7 @@ const listMarketIds = async (ctx: ReaderContext): Promise<readonly MarketId[]> =
     const countTx = new Transaction();
     countTx.moveCall({
       target: target(ctx.packageId, MODULES.marketRegistry, "market_count"),
-      arguments: [countTx.object(ctx.ids.marketRegistry)]
+      arguments: [countTx.object(ctx.ids.marketRegistry)],
     });
     const countResults = await inspect(ctx, countTx);
     const countVal = countResults[0]?.[0];
@@ -356,7 +397,7 @@ const listMarketIds = async (ctx: ReaderContext): Promise<readonly MarketId[]> =
     for (let index = 0; index < count; index += 1) {
       idsTx.moveCall({
         target: target(ctx.packageId, MODULES.marketRegistry, "market_id_at"),
-        arguments: [idsTx.object(ctx.ids.marketRegistry), idsTx.pure.u64(BigInt(index))]
+        arguments: [idsTx.object(ctx.ids.marketRegistry), idsTx.pure.u64(BigInt(index))],
       });
     }
     const idsResults = await inspect(ctx, idsTx);
@@ -376,11 +417,11 @@ const listMarketIds = async (ctx: ReaderContext): Promise<readonly MarketId[]> =
 
 const readVaultData = async (
   ctx: ReaderContext,
-  vaultId: VaultId
+  vaultId: VaultId,
 ): Promise<{ data: SuiVaultData; pools: SuiVaultPools; hot: SuiHotState }> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
   const vaultBytesArg = (tx: Transaction) =>
     tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes());
@@ -390,7 +431,7 @@ const readVaultData = async (
   existsTx.moveCall({
     target: target(ctx.packageId, MODULES.vault, "vault_exists"),
     typeArguments: [ctx.coinType],
-    arguments: [existsTx.object(ctx.ids.vaultRegistry), vaultBytesArg(existsTx)]
+    arguments: [existsTx.object(ctx.ids.vaultRegistry), vaultBytesArg(existsTx)],
   });
   const existsResults = await inspect(ctx, existsTx);
   const existsVal = existsResults[0]?.[0];
@@ -403,7 +444,7 @@ const readVaultData = async (
   dataTx.moveCall({
     target: target(ctx.packageId, MODULES.vault, "get_vault"),
     typeArguments: [ctx.coinType],
-    arguments: [dataTx.object(ctx.ids.vaultRegistry), vaultBytesArg(dataTx)]
+    arguments: [dataTx.object(ctx.ids.vaultRegistry), vaultBytesArg(dataTx)],
   });
   const dataResults = await inspect(ctx, dataTx);
   const dataVal = dataResults[0]?.[0];
@@ -421,7 +462,7 @@ const readVaultData = async (
     status: bcs.u8(),
     outcome: bcs.u8(),
     resolved_at: bcs.u64(),
-    exists: bcs.bool()
+    exists: bcs.bool(),
   });
   const parsedData = VaultDataBcs.parse(Uint8Array.from(dataVal[0]));
 
@@ -432,7 +473,7 @@ const readVaultData = async (
     creator: `0x${bytesVecToHex(Array.from(parsedData.creator as Uint8Array)).slice(2)}`,
     status: parsedData.status as number,
     outcome: parsedData.outcome as number,
-    resolvedAt: BigInt(parsedData.resolved_at as unknown as string)
+    resolvedAt: BigInt(parsedData.resolved_at as unknown as string),
   };
 
   // Read pools.
@@ -440,7 +481,7 @@ const readVaultData = async (
   poolsTx.moveCall({
     target: target(ctx.packageId, MODULES.vault, "get_vault_pools"),
     typeArguments: [ctx.coinType],
-    arguments: [poolsTx.object(ctx.ids.vaultRegistry), vaultBytesArg(poolsTx)]
+    arguments: [poolsTx.object(ctx.ids.vaultRegistry), vaultBytesArg(poolsTx)],
   });
   const poolsResults = await inspect(ctx, poolsTx);
   const poolsVals = poolsResults[0] ?? [];
@@ -448,7 +489,7 @@ const readVaultData = async (
     yesPool: poolsVals[0] !== undefined ? readU256(poolsVals[0]) : 0n,
     noPool: poolsVals[1] !== undefined ? readU256(poolsVals[1]) : 0n,
     yesShares: poolsVals[2] !== undefined ? readU256(poolsVals[2]) : 0n,
-    noShares: poolsVals[3] !== undefined ? readU256(poolsVals[3]) : 0n
+    noShares: poolsVals[3] !== undefined ? readU256(poolsVals[3]) : 0n,
   };
 
   // Read hot state via an Option<HotState> return from hot_state.
@@ -456,7 +497,7 @@ const readVaultData = async (
   const hotTx = new Transaction();
   hotTx.moveCall({
     target: target(ctx.packageId, MODULES.stewardRegistry, "hot_state"),
-    arguments: [hotTx.object(ctx.ids.stewardRegistry), vaultBytesArg(hotTx)]
+    arguments: [hotTx.object(ctx.ids.stewardRegistry), vaultBytesArg(hotTx)],
   });
   const hotResults = await inspect(ctx, hotTx);
   const hotVal = hotResults[0]?.[0];
@@ -477,7 +518,7 @@ const decodeHotState = (ret: InspectReturnValue | undefined): SuiHotState => {
       active: bcs.bool(),
       until: bcs.u64(),
       severity: bcs.u8(),
-      reason_hash: bcs.vector(bcs.u8())
+      reason_hash: bcs.vector(bcs.u8()),
     });
     const parsed = HotStateBcs.parse(bytes.slice(1));
     const reasonBytes = parsed.reason_hash as number[];
@@ -489,7 +530,7 @@ const decodeHotState = (ret: InspectReturnValue | undefined): SuiHotState => {
       active: parsed.active as boolean,
       until: BigInt(parsed.until as unknown as string),
       severity: parsed.severity as number,
-      ...(reasonHash === undefined ? {} : { reasonHash })
+      ...(reasonHash === undefined ? {} : { reasonHash }),
     };
   } catch {
     return { active: false, until: 0n, severity: 0 };
@@ -508,7 +549,7 @@ const readVault = async (ctx: ReaderContext, vaultId: VaultId): Promise<OptionsV
 
 const readVaultShareTotals = async (
   ctx: ReaderContext,
-  vaultId: VaultId
+  vaultId: VaultId,
 ): Promise<OptionsVaultShareTotals> => {
   try {
     const { pools } = await readVaultData(ctx, vaultId);
@@ -521,7 +562,7 @@ const readVaultShareTotals = async (
 
 const readWinningSide = async (
   ctx: ReaderContext,
-  vaultId: VaultId
+  vaultId: VaultId,
 ): Promise<OptionsVaultSide | undefined> => {
   try {
     const vault = await readVault(ctx, vaultId);
@@ -538,11 +579,11 @@ const readWinningSide = async (
 const readBoard = async (
   ctx: ReaderContext,
   vaultId: VaultId,
-  side: OptionsVaultSide
+  side: OptionsVaultSide,
 ): Promise<OptionsBoardState> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
 
   try {
@@ -553,8 +594,8 @@ const readBoard = async (
       arguments: [
         tx.object(ctx.ids.vaultRegistry),
         tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
-        tx.pure.u8(sideToSuiValue(side))
-      ]
+        tx.pure.u8(sideToSuiValue(side)),
+      ],
     });
     const results = await inspect(ctx, tx);
     const vals = results[0] ?? [];
@@ -562,7 +603,7 @@ const readBoard = async (
       pool: vals[0] !== undefined ? readU256(vals[0]) : 0n,
       sideRate: vals[1] !== undefined ? readU256(vals[1]) : 0n,
       g: vals[2] !== undefined ? readU256(vals[2]) : 0n,
-      lastAdvance: vals[3] !== undefined ? readU64(vals[3]) : 0n
+      lastAdvance: vals[3] !== undefined ? readU64(vals[3]) : 0n,
     };
     return mapSuiBoard(board);
   } catch (error) {
@@ -574,7 +615,7 @@ const readBoard = async (
 const readSharePrice = async (
   ctx: ReaderContext,
   vaultId: VaultId,
-  side: OptionsVaultSide
+  side: OptionsVaultSide,
 ): Promise<bigint> => {
   // O4: share price is the bonding-curve price of the pool (BASE_PRICE + BASE_PRICE*pool/CURVE_K),
   // byte-identical to Move `bonding_board::price` and the EVM `getSharePrice` — NOT the raw pool.
@@ -585,11 +626,11 @@ const readSharePrice = async (
 const readPendingBoundaries = async (
   ctx: ReaderContext,
   vaultId: VaultId,
-  side: OptionsVaultSide
+  side: OptionsVaultSide,
 ): Promise<bigint> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
 
   try {
@@ -600,8 +641,8 @@ const readPendingBoundaries = async (
       arguments: [
         tx.object(ctx.ids.vaultRegistry),
         tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
-        tx.pure.u8(sideToSuiValue(side))
-      ]
+        tx.pure.u8(sideToSuiValue(side)),
+      ],
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
@@ -618,11 +659,11 @@ const readPendingBoundaries = async (
 const readBoundaries = async (
   ctx: ReaderContext,
   vaultId: VaultId,
-  side: OptionsVaultSide
+  side: OptionsVaultSide,
 ): Promise<readonly FunderBoundary[]> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
 
   try {
@@ -633,14 +674,21 @@ const readBoundaries = async (
       arguments: [
         tx.object(ctx.ids.vaultRegistry),
         tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
-        tx.pure.u8(sideToSuiValue(side))
-      ]
+        tx.pure.u8(sideToSuiValue(side)),
+      ],
     });
     const results = await inspect(ctx, tx);
     const vals = results[0] ?? [];
-    const maxEnds = vals[0] ? (bcs.vector(bcs.u64()).parse(Uint8Array.from(vals[0][0])) as string[]) : [];
-    const rates = vals[1] ? (bcs.vector(bcs.u256()).parse(Uint8Array.from(vals[1][0])) as string[]) : [];
-    return maxEnds.map((maxEnd, i) => ({ maxEndMs: Number(maxEnd) * 1000, rate: BigInt(rates[i] ?? "0") }));
+    const maxEnds = vals[0]
+      ? (bcs.vector(bcs.u64()).parse(Uint8Array.from(vals[0][0])) as string[])
+      : [];
+    const rates = vals[1]
+      ? (bcs.vector(bcs.u256()).parse(Uint8Array.from(vals[1][0])) as string[])
+      : [];
+    return maxEnds.map((maxEnd, i) => ({
+      maxEndMs: Number(maxEnd) * 1000,
+      rate: BigInt(rates[i] ?? "0"),
+    }));
   } catch (error) {
     if (error instanceof LiveStreakConfigError) throw error;
     throw suiReadFailed("boundaries", error);
@@ -651,11 +699,11 @@ const readPendingShares = async (
   ctx: ReaderContext,
   vaultId: VaultId,
   side: OptionsVaultSide,
-  tokenId: TokenId
+  tokenId: TokenId,
 ): Promise<bigint> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
 
   try {
@@ -668,8 +716,8 @@ const readPendingShares = async (
         tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
         tx.pure.u8(sideToSuiValue(side)),
         tx.pure.u256(tokenId),
-        tx.object(SUI_CLOCK_OBJECT_ID)
-      ]
+        tx.object(SUI_CLOCK_OBJECT_ID),
+      ],
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
@@ -684,11 +732,11 @@ const readClaimable = async (
   ctx: ReaderContext,
   tokenId: TokenId,
   vaultId: VaultId,
-  side: OptionsVaultSide
+  side: OptionsVaultSide,
 ): Promise<bigint> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
 
   try {
@@ -700,8 +748,8 @@ const readClaimable = async (
         tx.object(ctx.ids.vaultRegistry),
         tx.pure.u256(tokenId),
         tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
-        tx.pure.u8(sideToSuiValue(side))
-      ]
+        tx.pure.u8(sideToSuiValue(side)),
+      ],
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
@@ -721,7 +769,7 @@ const readMintRate = async (ctx: ReaderContext): Promise<bigint> => {
     tx.moveCall({
       target: target(ctx.packageId, MODULES.treasury, "mint_rate"),
       typeArguments: [ctx.coinType],
-      arguments: [tx.object(ctx.ids.treasuryRegistry)]
+      arguments: [tx.object(ctx.ids.treasuryRegistry)],
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
@@ -737,11 +785,11 @@ const readLossClaimable = async (
   ctx: ReaderContext,
   tokenId: TokenId,
   vaultId: VaultId,
-  side: OptionsVaultSide
+  side: OptionsVaultSide,
 ): Promise<bigint> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
 
   try {
@@ -753,8 +801,8 @@ const readLossClaimable = async (
         tx.object(ctx.ids.vaultRegistry),
         tx.pure.u256(tokenId),
         tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
-        tx.pure.u8(sideToSuiValue(side))
-      ]
+        tx.pure.u8(sideToSuiValue(side)),
+      ],
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
@@ -772,7 +820,7 @@ const readLossClaimable = async (
 const readPot = async (ctx: ReaderContext, vaultId: VaultId): Promise<bigint> => {
   const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
   const vaultBytes = Array.from({ length: 32 }, (_, i) =>
-    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16)
+    parseInt(vaultHex.slice(i * 2, i * 2 + 2) || "0", 16),
   );
 
   try {
@@ -782,8 +830,8 @@ const readPot = async (ctx: ReaderContext, vaultId: VaultId): Promise<bigint> =>
       typeArguments: [ctx.coinType],
       arguments: [
         tx.object(ctx.ids.vaultRegistry),
-        tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes())
-      ]
+        tx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
+      ],
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
@@ -813,14 +861,14 @@ const readCollected = async (ctx: ReaderContext, vaultId: VaultId): Promise<bool
 // (held positions), so the position model was Sui-incomplete — see project_position_model.
 const readAccountVaultIds = async (
   ctx: ReaderContext,
-  tokenId: TokenId
+  tokenId: TokenId,
 ): Promise<readonly VaultId[]> => {
   try {
     const tx = new Transaction();
     tx.moveCall({
       target: target(ctx.packageId, MODULES.vault, "get_account_vault_ids"),
       typeArguments: [ctx.coinType],
-      arguments: [tx.object(ctx.ids.vaultRegistry), tx.pure.u256(tokenId)]
+      arguments: [tx.object(ctx.ids.vaultRegistry), tx.pure.u256(tokenId)],
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
@@ -837,7 +885,7 @@ const readLaneCount = async (ctx: ReaderContext, tokenId: TokenId): Promise<numb
   const tx = new Transaction();
   tx.moveCall({
     target: target(ctx.packageId, MODULES.marketDriver, "lane_count"),
-    arguments: [tx.object(ctx.ids.marketDriverRegistry), tx.pure.u256(tokenId)]
+    arguments: [tx.object(ctx.ids.marketDriverRegistry), tx.pure.u256(tokenId)],
   });
   const results = await inspect(ctx, tx);
   const val = results[0]?.[0];
@@ -847,14 +895,14 @@ const readLaneCount = async (ctx: ReaderContext, tokenId: TokenId): Promise<numb
 // listOwnerTokens: no on-chain fn — use Sui RPC getOwnedObjects.
 const listOwnerTokens = async (
   ctx: ReaderContext,
-  owner: UserAddress
+  owner: UserAddress,
 ): Promise<readonly TokenId[]> => {
   try {
     const nftType = `${ctx.packageId}::market_driver::MarketPositionNFT`;
     const owned = await ctx.client.getOwnedObjects({
       owner,
       filter: { StructType: nftType },
-      options: { showContent: true }
+      options: { showContent: true },
     });
 
     const tokenIds: TokenId[] = [];
@@ -876,105 +924,107 @@ const listOwnerTokens = async (
 const readNft = async (
   ctx: ReaderContext,
   tokenId: TokenId,
-  owner: UserAddress
+  owner: UserAddress,
 ): Promise<OptionsNft> => {
   try {
     const laneCount = await readLaneCount(ctx, tokenId);
-    // Wall clock for effective depletion — parity with EVM; a lane reads depleted the moment its runway
-    // elapses in real time, matching the UI countdown (chain clock can lag a frozen dev chain).
-    const nowSec = Math.floor(Date.now() / 1000);
+    const clock = await ctx.client.getObject({
+      id: SUI_CLOCK_OBJECT_ID,
+      options: { showContent: true },
+    });
+    if (clock.data?.content?.dataType !== "moveObject")
+      throw new Error("Sui clock unavailable");
+    const nowSec = Math.floor(
+      Number((clock.data.content.fields as { timestamp_ms: string }).timestamp_ms) / 1000,
+    );
+    if (!Number.isSafeInteger(nowSec)) throw new Error("Invalid Sui clock");
     const lanes = [];
     const vaultByVaultId = new Map<string, OptionsVault>();
-
-    for (let i = 0; i < laneCount; i += 1) {
-      // Get vault ID for this lane.
-      const vaultAtTx = new Transaction();
-      vaultAtTx.moveCall({
-        target: target(ctx.packageId, MODULES.marketDriver, "lane_vault_at"),
-        arguments: [
-          vaultAtTx.object(ctx.ids.marketDriverRegistry),
-          vaultAtTx.pure.u256(tokenId),
-          vaultAtTx.pure.u64(i)
-        ]
-      });
-      const vaultAtResults = await inspect(ctx, vaultAtTx);
-      const vaultAtVal = vaultAtResults[0]?.[0];
-      if (vaultAtVal === undefined) continue;
-      const rawVaultBytes = bcs.vector(bcs.u8()).parse(Uint8Array.from(vaultAtVal[0])) as number[];
-      const vaultId = asVaultId(bytesVecToHex(rawVaultBytes));
-      const vaultHex = vaultId.startsWith("0x") ? vaultId.slice(2) : vaultId;
-      const vaultBytes = Array.from({ length: 32 }, (_, j) =>
-        parseInt(vaultHex.slice(j * 2, j * 2 + 2) || "0", 16)
-      );
-
-      // Get side and rate for this lane.
+    const vaultIds = await readAccountVaultIds(ctx, tokenId);
+    for (const vaultId of vaultIds) {
+      const vaultBytes = hexIdBytes(vaultId);
       const laneTx = new Transaction();
       laneTx.moveCall({
         target: target(ctx.packageId, MODULES.marketDriver, "lane_at"),
         arguments: [
           laneTx.object(ctx.ids.marketDriverRegistry),
           laneTx.pure.u256(tokenId),
-          laneTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes())
-        ]
+          laneTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
+        ],
       });
-      const laneResults = await inspect(ctx, laneTx);
-      const laneVals = laneResults[0] ?? [];
-      const side = laneVals[0] !== undefined ? sideFromSuiValue(readU8(laneVals[0])) : "yes";
-      const laneRate = laneVals[1] !== undefined ? readU256(laneVals[1]) : 0n;
+      const laneVals = (await inspect(ctx, laneTx))[0] ?? [];
+      const activeSide =
+        laneVals[0] !== undefined ? sideFromSuiValue(readU8(laneVals[0])) : "yes";
+      const activeRate = laneVals[1] !== undefined ? readU256(laneVals[1]) : 0n;
+      for (const side of ["yes", "no"] as const) {
+        const laneRate = side === activeSide ? activeRate : 0n;
+        // Get position.
+        const posTx = new Transaction();
+        posTx.moveCall({
+          target: target(ctx.packageId, MODULES.vault, "get_position"),
+          typeArguments: [ctx.coinType],
+          arguments: [
+            posTx.object(ctx.ids.vaultRegistry),
+            posTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
+            posTx.pure.u8(sideToSuiValue(side)),
+            posTx.pure.u256(tokenId),
+          ],
+        });
+        const posResults = await inspect(ctx, posTx);
+        const posVals = posResults[0] ?? [];
+        const position: SuiPosition = {
+          rate: posVals[0] !== undefined ? readU256(posVals[0]) : 0n,
+          gPaid: posVals[1] !== undefined ? readU256(posVals[1]) : 0n,
+          sharesAccrued: posVals[2] !== undefined ? readU256(posVals[2]) : 0n,
+          maxEnd: posVals[3] !== undefined ? readU64(posVals[3]) : 0n,
+          depleted: posVals[4] !== undefined ? readBool(posVals[4]) : false,
+          fundStart: posVals[5] !== undefined ? readU64(posVals[5]) : 0n,
+          lostUsdc: posVals[6] !== undefined ? readU256(posVals[6]) : 0n,
+        };
 
-      // Get position.
-      const posTx = new Transaction();
-      posTx.moveCall({
-        target: target(ctx.packageId, MODULES.vault, "get_position"),
-        typeArguments: [ctx.coinType],
-        arguments: [
-          posTx.object(ctx.ids.vaultRegistry),
-          posTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes).toBytes()),
-          posTx.pure.u8(sideToSuiValue(side)),
-          posTx.pure.u256(tokenId)
-        ]
-      });
-      const posResults = await inspect(ctx, posTx);
-      const posVals = posResults[0] ?? [];
-      const position: SuiPosition = {
-        rate: posVals[0] !== undefined ? readU256(posVals[0]) : 0n,
-        gPaid: posVals[1] !== undefined ? readU256(posVals[1]) : 0n,
-        sharesAccrued: posVals[2] !== undefined ? readU256(posVals[2]) : 0n,
-        maxEnd: posVals[3] !== undefined ? readU64(posVals[3]) : 0n,
-        depleted: posVals[4] !== undefined ? readBool(posVals[4]) : false,
-        fundStart: posVals[5] !== undefined ? readU64(posVals[5]) : 0n,
-        lostUsdc: posVals[6] !== undefined ? readU256(posVals[6]) : 0n
-      };
+        if (
+          position.rate === 0n &&
+          position.sharesAccrued === 0n &&
+          position.lostUsdc === 0n &&
+          laneRate === 0n
+        )
+          continue;
+        const lane = {
+          ...mapSuiLane(tokenId, vaultId, side, laneRate, position, nowSec),
+          sharesLive:
+            (await readPendingShares(ctx, vaultId, side, tokenId)) / 1000000000000000000n,
+        };
 
-      const lane = mapSuiLane(tokenId, vaultId, side, laneRate, position, nowSec);
+        // Cache the whole vault (not just the winning side): the resolved outcome gives the winning side
+        // and resolvedAt drives the overstream (USDC that streamed past resolution, refundable via withdraw).
+        let vault = vaultByVaultId.get(vaultId);
+        if (vault === undefined) {
+          vault = await readVault(ctx, vaultId);
+          vaultByVaultId.set(vaultId, vault);
+        }
+        const winningSide: OptionsVaultSide | undefined =
+          vault.status === "resolved"
+            ? vault.outcome === "yes"
+              ? "yes"
+              : vault.outcome === "no"
+                ? "no"
+                : undefined
+            : undefined;
+        const resolvedAtSec =
+          vault.timing.resolvedAtMs !== undefined
+            ? Math.floor(vault.timing.resolvedAtMs / 1000)
+            : 0;
 
-      // Cache the whole vault (not just the winning side): the resolved outcome gives the winning side
-      // and resolvedAt drives the overstream (USDC that streamed past resolution, refundable via withdraw).
-      let vault = vaultByVaultId.get(vaultId);
-      if (vault === undefined) {
-        vault = await readVault(ctx, vaultId);
-        vaultByVaultId.set(vaultId, vault);
+        const claimable = await readClaimable(ctx, tokenId, vaultId, side);
+        const lossClaimable = await readLossClaimable(ctx, tokenId, vaultId, side);
+        const overstream = computeOverstreamClaimable(
+          laneRate,
+          Number(position.maxEnd),
+          resolvedAtSec,
+          nowSec,
+        );
+        lanes.push(enrichSuiLane(lane, claimable, lossClaimable, winningSide, overstream));
       }
-      const winningSide: OptionsVaultSide | undefined =
-        vault.status === "resolved"
-          ? vault.outcome === "yes"
-            ? "yes"
-            : vault.outcome === "no"
-              ? "no"
-              : undefined
-          : undefined;
-      const resolvedAtSec =
-        vault.timing.resolvedAtMs !== undefined ? Math.floor(vault.timing.resolvedAtMs / 1000) : 0;
-
-      const claimable = await readClaimable(ctx, tokenId, vaultId, side);
-      const lossClaimable = await readLossClaimable(ctx, tokenId, vaultId, side);
-      const overstream = computeOverstreamClaimable(
-        laneRate,
-        Number(position.maxEnd),
-        resolvedAtSec,
-        nowSec
-      );
-      lanes.push(enrichSuiLane(lane, claimable, lossClaimable, winningSide, overstream));
     }
 
     // Derive market ID from the first vault's market_id (no public market_id_of accessor).
@@ -983,9 +1033,11 @@ const readNft = async (
       const firstVaultId = lanes[0]!.vaultId;
       // A Move-level no-value (mktVal undefined) leaves the zero-id; a transport failure propagates
       // to readNft's outer handler rather than silently filtering the NFT out of the snapshot.
-      const vaultHex2 = firstVaultId.startsWith("0x") ? firstVaultId.slice(2) : firstVaultId;
+      const vaultHex2 = firstVaultId.startsWith("0x")
+        ? firstVaultId.slice(2)
+        : firstVaultId;
       const vaultBytes2 = Array.from({ length: 32 }, (_, j) =>
-        parseInt(vaultHex2.slice(j * 2, j * 2 + 2) || "0", 16)
+        parseInt(vaultHex2.slice(j * 2, j * 2 + 2) || "0", 16),
       );
       const mktTx = new Transaction();
       mktTx.moveCall({
@@ -993,13 +1045,15 @@ const readNft = async (
         typeArguments: [ctx.coinType],
         arguments: [
           mktTx.object(ctx.ids.vaultRegistry),
-          mktTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes2).toBytes())
-        ]
+          mktTx.pure(bcs.vector(bcs.u8()).serialize(vaultBytes2).toBytes()),
+        ],
       });
       const mktResults = await inspect(ctx, mktTx);
       const mktVal = mktResults[0]?.[0];
       if (mktVal !== undefined) {
-        const rawMktBytes = bcs.vector(bcs.u8()).parse(Uint8Array.from(mktVal[0])) as number[];
+        const rawMktBytes = bcs
+          .vector(bcs.u8())
+          .parse(Uint8Array.from(mktVal[0])) as number[];
         marketId = asMarketId(bytesVecToHex(rawMktBytes));
       }
     } else {
@@ -1011,7 +1065,7 @@ const readNft = async (
       const owned = await ctx.client.getOwnedObjects({
         owner,
         filter: { StructType: nftType },
-        options: { showContent: true }
+        options: { showContent: true },
       });
       for (const obj of owned.data) {
         if (obj.data?.content?.dataType === "moveObject") {
@@ -1027,7 +1081,39 @@ const readNft = async (
       }
     }
 
-    return mapSuiNft(tokenId, owner, marketId, laneCount, lanes);
+    const stateTx = new Transaction();
+    stateTx.moveCall({
+      target: target(ctx.packageId, MODULES.streams, "streams_state"),
+      typeArguments: [ctx.coinType],
+      arguments: [stateTx.object(ctx.ids.streamsRegistry), stateTx.pure.u256(tokenId)],
+    });
+    const state = (await inspect(ctx, stateTx))[0] ?? [];
+    if (!state[2] || !state[3] || !state[4])
+      throw new Error("Sui streaming balance unavailable");
+    const update = Number(readU64(state[2]));
+    const stored = readU128(state[3]);
+    const end = Number(readU64(state[4]));
+    const spent = lanes.reduce(
+      (sum, lane) =>
+        sum +
+        lane.committedRate *
+          BigInt(
+            Math.max(
+              0,
+              Math.min(
+                nowSec,
+                lane.maxEndMs === undefined ? nowSec : lane.maxEndMs / 1000,
+                end || nowSec,
+              ) - update,
+            ),
+          ),
+      0n,
+    );
+    return {
+      ...mapSuiNft(tokenId, owner, marketId, laneCount, lanes),
+      balance: stored > spent ? stored - spent : 0n,
+      ...(end > 0 ? { runwayEndMs: end * 1000 } : {}),
+    };
   } catch (error) {
     if (error instanceof LiveStreakConfigError) throw error;
     throw suiReadFailed("nft", error);
@@ -1036,7 +1122,7 @@ const readNft = async (
 
 const readLvstAccount = async (
   ctx: ReaderContext,
-  user: UserAddress
+  user: UserAddress,
 ): Promise<LvstAccount> => {
   // The user address MUST be normalized to a full 32-byte Sui address before it hits `pure.address`
   // or `getBalance` — a short/unpadded id is the classic "can't resolve the user/LVST objects against
@@ -1048,7 +1134,10 @@ const readLvstAccount = async (
   let balance = 0n;
   try {
     const lvstCoinType = `${ctx.packageId}::lvst::LVST`;
-    const balanceRes = await ctx.client.getBalance({ owner: account, coinType: lvstCoinType });
+    const balanceRes = await ctx.client.getBalance({
+      owner: account,
+      coinType: lvstCoinType,
+    });
     balance = BigInt(balanceRes.totalBalance);
   } catch (error) {
     if (error instanceof LiveStreakConfigError) throw error;
@@ -1080,21 +1169,22 @@ const normalizeSuiUserAddress = (user: UserAddress): string => {
 const readTreasuryU128 = async (
   ctx: ReaderContext,
   account: string,
-  fn: "lvst_staked" | "pending_dividends"
+  fn: "lvst_staked" | "pending_dividends",
 ): Promise<bigint> => {
   try {
     const tx = new Transaction();
     tx.moveCall({
       target: target(ctx.packageId, MODULES.treasury, fn),
       typeArguments: [ctx.coinType],
-      arguments: [tx.object(ctx.ids.treasuryRegistry), tx.pure.address(account)]
+      arguments: [tx.object(ctx.ids.treasuryRegistry), tx.pure.address(account)],
     });
     const results = await inspect(ctx, tx);
     const val = results[0]?.[0];
     return val !== undefined ? readU128(val) : 0n;
   } catch (error) {
     if (error instanceof LiveStreakConfigError) throw error;
-    const entity = fn === "lvst_staked" ? "treasury lvst_staked" : "treasury pending_dividends";
+    const entity =
+      fn === "lvst_staked" ? "treasury lvst_staked" : "treasury pending_dividends";
     throw suiReadFailed(entity, error);
   }
 };
@@ -1121,7 +1211,7 @@ const readNftBalance = async (ctx: ReaderContext, tokenId: TokenId): Promise<big
     tx.moveCall({
       target: target(ctx.packageId, MODULES.streams, "streams_state"),
       typeArguments: [ctx.coinType],
-      arguments: [tx.object(ctx.ids.streamsRegistry), tx.pure.u256(tokenId)]
+      arguments: [tx.object(ctx.ids.streamsRegistry), tx.pure.u256(tokenId)],
     });
     const vals = (await inspect(ctx, tx))[0] ?? [];
     return vals[3] !== undefined ? readU128(vals[3]) : 0n;
@@ -1130,3 +1220,7 @@ const readNftBalance = async (ctx: ReaderContext, tokenId: TokenId): Promise<big
   }
 };
 
+const hexIdBytes = (id: string): number[] => {
+  if (!/^0x[0-9a-fA-F]{64}$/.test(id)) throw new Error("Invalid bytes32 id");
+  return Array.from({ length: 32 }, (_, i) => parseInt(id.slice(2 + i * 2, 4 + i * 2), 16));
+};

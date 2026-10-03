@@ -12,7 +12,7 @@ export interface BookmakerContractAddresses {
   readonly usdc: string;
 }
 
-// Sui object ids the bookmaker needs for vault_driver::create_vault. Scoped to bookmaker's surface
+// Sui object ids the bookmaker needs for vault_driver::create_bound_vault. Scoped to bookmaker's surface
 // (vault origination), mirroring the shape of OptionsSuiObjectIds.
 export interface BookmakerSuiObjectIds {
   readonly packageId: string;

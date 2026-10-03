@@ -1,6 +1,6 @@
 # Bookmaker flow — detect → draft → discovery → decide → execute
 
-End-to-end vault origination inside `@livestreak/bookmaker`. Bookmaker holds the multichain wallet via `chains/` and executes `VaultDriver.createVault` in-package.
+End-to-end vault origination inside `@livestreak/bookmaker`. Bookmaker holds the multichain wallet via `chains/` and publishes verified mandate bytes before executing bound vault creation in-package.
 
 ## Ideal path
 
@@ -49,7 +49,7 @@ observation events
 | Execute | Insufficient allowance | Partial — writer auto-approves up to deposit |
 | Execute | UserOp send / paymaster failure | Partial — classified `LiveStreakRuntimeError`; key released when no hash |
 | Execute | Receipt missing `VaultCreated` | Yes — `LiveStreakRuntimeError` |
-| Execute | Sui chain | Yes — stub throws `LiveStreakConfigError` |
+| Execute | Solana / Sui | Bound creation with explicit mandate, chain identity and operation; updated chain deployment required |
 | Bridge | Missing scope | Yes — `LiveStreakCapabilityError` |
 | Bridge | Expired capability grant | Yes — injected `nowMs` vs `grant.expiresAt` |
 | Bridge | `createVault` double-submit | Yes — same `createVaultOnce` + store as originate |
@@ -59,7 +59,7 @@ observation events
 ## Idempotency layers
 
 1. **Within-runtime (deterministic):** `idempotencyKeyFromDraft` / `idempotencyKeyFromCreateIntent` hash vault-defining fields. `BookmakerRuntime.createVaultOnce` validates intent, computes key, and enforces at-most-one submit per key: settled → cached; pending `userOpHash` → `confirmCreateVault` (never blind-resubmit); new → `createVault`. Receipt-timeout records the hash as pending. Originate passes `guardedCreateVault: runtime.createVaultOnce`; bridge `callAction("createVault")` calls the same method.
-2. **Cross-runtime (best-effort, v0 single-runtime):** host similarity candidates may carry `vaultKey`; exact match → `joinVault` before fuzzy scoring. v0 assumes one bookmaker runtime per `marketId`. Concurrent creation across separate runtimes is **not** fully closable off-chain — on-chain `vaultId` is non-deterministic (no vaultKey uniqueness constraint); a durable fix would require on-chain enforcement (future concern, not a v0 gap).
+2. **Across runtime restarts:** all three writers look up the caller-supplied operation in authoritative chain state before publication/submission. Identical terms return the original vault, including after the funding deadline; conflicting terms reject. The contract also enforces that identity atomically. Different operations can intentionally create different vaults; similarity discovery does not make distinct operations unique.
 
 ## Multichain layout
 
@@ -72,11 +72,19 @@ bridge/     outward door — panel + scoped callAction
 
 ## Contract truth
 
-`VaultDriver.createVault(marketId, question, seedSide, rate, deposit)` via `vaultDriverAbi` from `@livestreak/contracts`. `vaultId` is read from the `VaultCreated` event on the driver — never precomputed. The inner `Vault` contract emits `VaultOpened` (post-`7461f19`), so `VaultCreated` topic0 is unique to `VaultDriver` and decode needs no emitter filter.
+Creation requires caller-authored `livestreak-mandate/1` terms, a nonzero 32-byte operation ID, and `hostUrl`. The writer verifies the actual RPC chain identity, publishes the canonical bytes and checks their digest before signing. Creation stores the immutable commitment and funding deadline with the seed. Failed publication/readback sends no creation transaction.
+
+- EVM: `VaultDriver.createBoundVault`; `VaultCreated` identifies the vault.
+- Sui: `vault_driver::create_bound_vault`; immutable dynamic fields hold terms and creator/operation recovery. Split-coin values use `u64`.
+- Solana: `create_vault_seeded` now requires commitment, funding close and operation ID; the new v2 protocol state and WASM reader must ship together. Retry skips the SPL deposit transfer.
+
+Independent Options/Steward readers bind the exact body to chain, market, question, commitment and deadline. New funding/top-ups require a verified, open mandate; removal/refund paths remain available without Host content. SDK checks use chain time, and actual streaming/accounting stops at each vault's deadline.
+
+Solana requires a fresh alpha protocol state: old unversioned engine blobs are rejected explicitly. Existing deployment snapshots are not a migration plan. No public deployment is claimed by these local tests.
 
 ## Errors
 
-All thrown errors in `src/` use `@livestreak/core` types (`LiveStreakConfigError`, `LiveStreakRuntimeError`, `LiveStreakCapabilityError`). No raw `Error` in library code.
+Configuration, capability, transaction and mandate-validation failures propagate to the caller. Missing terms are never replaced by inferred settlement defaults.
 
 ## On-chain proof (opt-in)
 

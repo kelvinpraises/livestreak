@@ -14,7 +14,7 @@ export type MarketLifecycleStatus =
  * accepts the NUMERIC scheme — the host's `PointerScheme` → number mapping stays
  * at the CLI edge (observe never imports `@livestreak/host`).
  */
-export type MarketStorageScheme = 0 | 1 | 2 | 3;
+export type MarketStorageScheme = 0 | 1 | 2 | 3 | 4;
 
 export type MarketFailurePhase =
   | "validation"
@@ -137,10 +137,22 @@ export interface MarketLifecycleInput {
   readonly marketId: StreamId;
   readonly scheme: MarketStorageScheme;
   readonly id: string;
+  /** Original submission restored from a market-bound checkpoint; confirmation only, never resend. */
+  readonly submittedHash?: string;
+  readonly onSubmitted?: (hash: string) => import("effect").Effect.Effect<void, import("@livestreak/core").LiveStreakError>;
+}
+
+export interface MarketStreamState {
+  readonly status: "none" | "live" | "ended";
+  readonly scheme: MarketStorageScheme;
+  readonly id: string;
+  readonly endedAtMs: number;
 }
 
 export interface MarketLifecycleTxResult {
   readonly userOpHash: string;
+  readonly endedAtMs?: number;
+  readonly alreadyEnded?: boolean;
 }
 
 export interface MarketRegistrar {

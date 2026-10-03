@@ -254,8 +254,8 @@ export const createControlBus = (
         // Market register establishes preparation input identity: direct registration claims
         // the inactive family (rejected before any registrar call while protected); nested
         // preparation registration reuses the preparing token via explicit authority above.
-        // Market close removes the identity cell: same inactive admission. goLive/setEnded stay
-        // ticketed live bookkeeping with identity preconditions at dispatch and commit.
+        // Market close and end require inactive ownership; goLive remains ticketed
+        // live bookkeeping with identity preconditions at dispatch and commit.
         if (
           (fnName === "configure" || fnName === "close") &&
           (isFamilyPipelineCell(targetCell) ||
@@ -265,7 +265,7 @@ export const createControlBus = (
           const obsId = observationIdOf(targetCell) ?? readPayloadObsId(envelope.payload);
           return { kind: "config", obsKey: runKeyOf(obsId) } as const;
         }
-        if (fnName === "register" && isMarketCellTarget(targetCell)) {
+        if ((fnName === "register" || fnName === "setEnded") && isMarketCellTarget(targetCell)) {
           const obsId = observationIdOf(targetCell) ?? readPayloadObsId(envelope.payload);
           return { kind: "config", obsKey: runKeyOf(obsId) } as const;
         }
@@ -421,7 +421,10 @@ export const createControlBus = (
             const result = yield* match.entry.call(envelope, {
               boardRevision: inputBoard.revision,
               board: inputBoard,
-              cellId: targetCell
+              cellId: targetCell,
+              checkpoint: (boardPatch) => commitDispatchResult(
+                plan, envelope, targetCell, inputBoard, { boardPatch }, held.authority
+              ).pipe(Effect.asVoid)
             });
             return yield* commitDispatchResult(
               plan,
@@ -445,6 +448,19 @@ export const createControlBus = (
     ): Effect.Effect<void, LiveStreakError> =>
       Effect.gen(function* () {
         const fnName = envelope.scope.split(":").at(-1) ?? "";
+        if (fnName === "start") {
+          const targetCell = envelope.cellId ?? cellIdForScope(envelope.scope);
+          const obsId = observationIdOf(targetCell);
+          const marketCell = obsId === undefined ? "market" : `obs:${obsId}:market`;
+          const market = inputBoard.cells[marketCell];
+          const pending = market?.readonly?.endSubmission as { marketId?: string; hash?: string } | undefined;
+          if (pending?.hash && pending.marketId === market?.readonly?.marketId) {
+            return yield* Effect.fail(new LiveStreakConfigError({ message: "Confirm the pending stream end before broadcasting again." }));
+          }
+          if (market?.readonly?.registrationState === "ended" || market?.status[0] === "ended") {
+            return yield* Effect.fail(new LiveStreakConfigError({ message: "This market has ended. Create a new observation to broadcast again." }));
+          }
+        }
         if (fnName === "goLive" || fnName === "setEnded") {
           yield* checkMarketLifecyclePrecondition(envelope, inputBoard);
         }
@@ -464,6 +480,15 @@ export const createControlBus = (
               message: `Market ${fnName} requires marketId — none registered on ${targetCell}`
             })
           );
+        }
+        if (fnName === "setEnded") {
+          const runCell = runCellIdOf(inputBoard, undefined, observationIdOf(targetCell));
+          const status = runCell === undefined ? undefined : inputBoard.cells[runCell]?.status[0];
+          if (status !== undefined && !["created", "prepared", "stopped", "failed"].includes(status)) {
+            return yield* Effect.fail(new LiveStreakConfigError({
+              message: "Stop the producer and wait for finalization before setting the market ended."
+            }));
+          }
         }
         const explicit = readPayloadMarketId(envelope.payload);
         if (explicit !== undefined && explicit !== registered) {

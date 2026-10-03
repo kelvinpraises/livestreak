@@ -3,9 +3,9 @@ import {
   decodeContentBlobStoreRequest,
   type PointerScheme,
   type StorePointer,
-  validationErrorMessage
+  validationErrorMessage,
 } from "@livestreak/host";
-import type { HostServerConfig } from "../../../config/host.js";
+import type { HostServerConfig } from "../../config/host.js";
 import type { ContentStore } from "./content.js";
 
 // --- exports ---
@@ -20,16 +20,18 @@ export type ContentBlobStoreRouteResponse =
   | { readonly ok: false; readonly status: number; readonly error: LiveStreakConfigError };
 
 export type ContentBlobResolveRouteResponse =
-  | { readonly ok: true; readonly status: number; readonly result: { readonly bytesBase64: string } }
+  | {
+      readonly ok: true;
+      readonly status: number;
+      readonly result: { readonly bytesBase64: string };
+    }
   | { readonly ok: false; readonly status: number; readonly error: LiveStreakConfigError };
 
 export const handleContentBlobStore = async (
   body: unknown,
-  deps: ContentRouteDeps
+  deps: ContentRouteDeps,
 ): Promise<ContentBlobStoreRouteResponse> => {
-  // No Walrus gate: deps.store is always present — the Walrus-backed store when configured,
-  // or an in-process local store on a dev stack. A misconfigured backend surfaces as a
-  // store-side error (caught below) rather than a blanket "not configured" rejection.
+  // Missing cloud configuration is a typed unavailable response; there is no local fallback.
   if (body === null || typeof body !== "object") {
     return contentFailure(400, "Request body must be a JSON object");
   }
@@ -46,19 +48,22 @@ export const handleContentBlobStore = async (
 
   try {
     const pointer = await deps.store.store(bytes, decoded.right.contentType, {
-      persistence: decoded.right.persistence ?? "ephemeral"
+      persistence: decoded.right.persistence ?? "ephemeral",
     });
 
     return { ok: true, status: 201, result: pointer };
   } catch (error) {
-    return contentFailure(503, error instanceof Error ? error.message : "content_store_failed");
+    return contentFailure(
+      503,
+      error instanceof Error ? error.message : "content_store_failed",
+    );
   }
 };
 
 export const handleContentBlobResolve = async (
   scheme: string,
   id: string,
-  deps: ContentRouteDeps
+  deps: ContentRouteDeps,
 ): Promise<ContentBlobResolveRouteResponse> => {
   if (!isPointerScheme(scheme) || id.trim().length === 0) {
     return contentFailure(400, "Invalid content pointer");
@@ -69,26 +74,31 @@ export const handleContentBlobResolve = async (
     return {
       ok: true,
       status: 200,
-      result: { bytesBase64: Buffer.from(bytes).toString("base64") }
+      result: { bytesBase64: Buffer.from(bytes).toString("base64") },
     };
   } catch (error) {
-    return contentFailure(404, error instanceof Error ? error.message : "content_resolve_failed");
+    return contentFailure(
+      404,
+      error instanceof Error ? error.message : "content_resolve_failed",
+    );
   }
 };
 
 // --- helpers ---
 
-const contentFailure = <T extends ContentBlobStoreRouteResponse | ContentBlobResolveRouteResponse>(
+const contentFailure = <
+  T extends ContentBlobStoreRouteResponse | ContentBlobResolveRouteResponse,
+>(
   status: number,
-  message: string
+  message: string,
 ): T =>
   ({
     ok: false,
     status,
     error: new LiveStreakConfigError({
       message,
-      metadata: { retryable: false }
-    })
+      metadata: { retryable: false },
+    }),
   }) as T;
 
 const decodeBase64Bytes = (value: string): Uint8Array | null => {
@@ -100,8 +110,4 @@ const decodeBase64Bytes = (value: string): Uint8Array | null => {
   }
 };
 
-const isPointerScheme = (value: string): value is PointerScheme =>
-  value === "walrus-testnet" ||
-  value === "walrus-mainnet" ||
-  value === "ipfs" ||
-  value === "arweave";
+const isPointerScheme = (value: string): value is PointerScheme => value === "host";

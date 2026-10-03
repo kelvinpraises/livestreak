@@ -267,15 +267,14 @@ describe('MSE live player', () => {
 })
 
 describe('source-mode selection', () => {
-  it('resolves a live pointer to the live kind and an ended pointer to vod', () => {
+  it('resolves live routing but does not claim replay from an unverified ended pointer', () => {
     const live = resolveStreamFeed({ status: 'live', scheme: 'x', id: 'y' }, { isLive: true, watchUrl: 'http://w' })
     expect(live.kind).toBe('live')
     const ended = resolveStreamFeed(
       { status: 'ended', scheme: 'walrus-testnet', id: 'blob1' },
       { isLive: false },
     )
-    expect(ended.kind).toBe('vod')
-    expect(ended.src).toContain('blob1')
+    expect(ended).toEqual({ kind: 'none', ended: true })
   })
 })
 

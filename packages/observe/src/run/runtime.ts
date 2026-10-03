@@ -267,6 +267,7 @@ const buildObserveRuntime = (
                 runId,
                 board: yield* prepareBus.readBoard(),
                 hostBaseUrl,
+                ...(sessionInit?.hostApiToken ? { hostApiToken: sessionInit.hostApiToken } : {}),
                 ...(resolvedObsId === undefined ? {} : { obsId: resolvedObsId })
               });
               const sinkDriver =

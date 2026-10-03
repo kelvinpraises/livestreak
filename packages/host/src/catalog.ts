@@ -38,6 +38,10 @@ export const HostStreamDetail = Schema.Struct({
   category: Schema.String,
   watchUrl: Schema.optional(Schema.String),
   isLive: Schema.Boolean,
+  streamStatus: Schema.optional(Schema.Literal("none", "live", "ended")),
+  replayPointerId: Schema.optional(Schema.String),
+  recordingStatus: Schema.optional(Schema.Literal("recording", "processing", "ready", "failed")),
+  replay: Schema.optional(Schema.Struct({ pointerId: Schema.String, url: Schema.String, format: Schema.Literal("hls"), durationSeconds: Schema.Number })),
   activeVaults: Schema.optional(Schema.Number),
   totalPooled: Schema.optional(Schema.Number),
   chain: CatalogChain

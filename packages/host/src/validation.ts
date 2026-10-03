@@ -6,7 +6,7 @@ import { AaPaymasterRequest } from "./aa.js";
 import { HostSimilarityIndexRequest, HostSimilarityRequest } from "./discovery.js";
 import { MemoryRecordInput } from "./memory.js";
 import { ForumMessageInput } from "./forum.js";
-import { ContentBlobStoreRequest } from "./walrus.js";
+import { ContentBlobStoreRequest } from "./content.js";
 
 // --- exports ---
 

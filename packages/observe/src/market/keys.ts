@@ -1,12 +1,7 @@
-/**
- * Cross-slice contract for the market cell's recording pointer.
- *
- * The READER is `decodeLifecyclePayload` (market/control.ts) — it prefers this key over the
- * marketId formality when deriving the on-chain storage pointer for goLive/setEnded. The WRITER
- * is lifecycle Slice 2 (the recording upload), which has not landed yet.
- *
- * It lives in its own module, imported by name on both sides, so the two halves cannot drift:
- * a writer that picks a different literal would leave the reader silently falling back to the
- * formality with every test still green.
- */
+/** Reserved market-bound recording metadata; Flow07 supplies the verified writer. */
 export const RECORDING_POINTER_KEY = "recordingPointer" as const;
+
+/** Ended + scheme 0 + empty id represents no recording across all three chains. */
+export const NO_RECORDING_POINTER_ID = "" as const;
+/** Read-only compatibility with the unaccepted historical marker. Never write it. */
+export const LEGACY_NO_RECORDING_POINTER_ID = "livestreak:no-recording" as const;

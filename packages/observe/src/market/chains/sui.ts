@@ -1,3 +1,5 @@
+import { retainMarketSubmission } from "#market/submission.js";
+import { confirmMarketEnd } from "#market/end.js";
 import { Effect } from "effect";
 import {
   LiveStreakConfigError,
@@ -17,6 +19,7 @@ import { keccak256 } from "viem";
 import type {
   MarketLifecycleInput,
   MarketLifecycleTxResult,
+  MarketStreamState,
   MarketRegisterInput,
   MarketRegisterResult,
   MarketRegistrar,
@@ -52,6 +55,7 @@ const toRuntimeError = (prefix: string, error: unknown): LiveStreakRuntimeError 
 
 const validateLifecycleInput = (
   input: MarketLifecycleInput,
+  ending = false,
 ): Effect.Effect<MarketLifecycleInput, LiveStreakConfigError> => {
   if (!/^0x[0-9a-fA-F]{64}$/.test(input.marketId)) {
     return Effect.fail(
@@ -64,15 +68,17 @@ const validateLifecycleInput = (
     input.scheme !== 0 &&
     input.scheme !== 1 &&
     input.scheme !== 2 &&
-    input.scheme !== 3
+    input.scheme !== 3 &&
+    input.scheme !== 4
   ) {
     return Effect.fail(
       new LiveStreakConfigError({
-        message: `Invalid StorageScheme ${String(input.scheme)} (expected 0..3)`,
+        message: `Invalid StorageScheme ${String(input.scheme)} (expected 0..4)`,
       }),
     );
   }
-  if (input.id.length === 0 || input.id.length > 64) {
+  if (new TextEncoder().encode(input.id).length > 64 ||
+      (input.id.length === 0 && (!ending || input.scheme !== 0))) {
     return Effect.fail(
       new LiveStreakConfigError({
         message: `Storage id length must be 1..64 bytes, got ${input.id.length}`,
@@ -126,6 +132,7 @@ export const createSuiMarketRegistrar = (
   const send = (
     tx: Transaction,
     suiConfig: LiveStreakSuiWalletConfig,
+    lifecycle?: MarketLifecycleInput,
   ): Effect.Effect<string, LiveStreakError> =>
     Effect.gen(function* () {
       const manager = createWalletManager("sui", config.seed, suiConfig);
@@ -134,10 +141,10 @@ export const createSuiMarketRegistrar = (
         catch: (error) => toRuntimeError("Failed to open Sui wallet account", error),
       });
       tx.setGasBudgetIfNotSet(100_000_000);
-      const result = yield* Effect.tryPromise({
+      const result = yield* retainMarketSubmission(lifecycle, Effect.tryPromise({
         try: () => account.sendTransaction(tx),
-        catch: (error) => toRuntimeError("Sui transaction failed", error),
-      });
+        catch: (error) => toRuntimeError("Sui transaction failed", error)
+      }));
       yield* Effect.tryPromise({
         try: async () => {
           const rpc = Array.isArray(suiConfig.rpcUrl)
@@ -150,11 +157,12 @@ export const createSuiMarketRegistrar = (
             options: { showEffects: true },
           });
           if (receipt.effects?.status.status !== "success")
-            throw new Error(
-              receipt.effects?.status.error ?? "Sui transaction has no successful receipt",
-            );
+            throw new LiveStreakRuntimeError({
+              message: receipt.effects?.status.error ?? "Sui transaction has no successful receipt",
+              ...(receipt.effects?.status.status === "failure" ? { metadata: { retryable: false } } : {})
+            });
         },
-        catch: (error) => toRuntimeError("Sui confirmation failed", error),
+        catch: (error) => error instanceof LiveStreakRuntimeError ? error : toRuntimeError("Sui confirmation failed", error),
       });
       return result.hash;
     });
@@ -164,7 +172,7 @@ export const createSuiMarketRegistrar = (
     input: MarketLifecycleInput,
   ): Effect.Effect<MarketLifecycleTxResult, LiveStreakError> =>
     Effect.gen(function* () {
-      const validated = yield* validateLifecycleInput(input);
+      const validated = yield* validateLifecycleInput(input, fn === "set_ended");
       const { suiConfig, packageId, registryId } = yield* requireSuiConfig();
 
       const tx = new Transaction();
@@ -179,9 +187,33 @@ export const createSuiMarketRegistrar = (
         ],
       });
 
-      const hash = yield* send(tx, suiConfig);
+      const hash = yield* send(tx, suiConfig, fn === "set_ended" ? validated : undefined);
       return { userOpHash: hash } satisfies MarketLifecycleTxResult;
     });
+
+  const readStream = (marketId: StreamId): Effect.Effect<MarketStreamState, LiveStreakError> => Effect.gen(function* () {
+    const { suiConfig, packageId, registryId } = yield* requireSuiConfig();
+    return yield* Effect.tryPromise({
+      try: async () => {
+        const tx = new Transaction();
+        tx.moveCall({ target: target(packageId, MODULES.marketRegistry, "stream_state"), arguments: [tx.object(registryId), tx.pure(bytes32Vector(marketId))] });
+        tx.moveCall({ target: target(packageId, MODULES.marketRegistry, "get_market"), arguments: [tx.object(registryId), tx.pure(bytes32Vector(marketId))] });
+        const client = suiConfig.provider ?? createSuiReadClient((Array.isArray(suiConfig.rpcUrl) ? suiConfig.rpcUrl[0] : suiConfig.rpcUrl) ?? "", suiConfig.network);
+        const result = await client.devInspectTransactionBlock({ sender: "0x" + "0".repeat(64), transactionBlock: tx });
+        if (result.error) throw new Error(result.error);
+        const bytes = result.results?.[0]?.returnValues?.[0]?.[0];
+        if (!bytes) throw new Error("No stream_state result");
+        const marketBytes = result.results?.[1]?.returnValues?.[0]?.[0];
+        if (!marketBytes) throw new Error("No get_market result");
+        const market = bcs.struct("MarketData", { id: bcs.vector(bcs.u8()), title: bcs.vector(bcs.u8()), stream_id: bcs.vector(bcs.u8()), creator: bcs.bytes(32), created_at: bcs.u64(), exists: bcs.bool() }).parse(Uint8Array.from(marketBytes));
+        const account = await createWalletManager("sui", config.seed, suiConfig).getAccount();
+        const creator = "0x" + Array.from(market.creator).map(v => v.toString(16).padStart(2, "0")).join("");
+        if (creator !== "0x" + (await account.getAddress()).replace(/^0x/, "").padStart(64, "0")) throw new Error("Market: not creator");
+        const state = bcs.struct("StreamState", { status: bcs.u8(), scheme: bcs.u8(), id: bcs.vector(bcs.u8()), updated_at: bcs.u64(), ended_at: bcs.u64() }).parse(Uint8Array.from(bytes));
+        return { status: state.status === 2 ? "ended" : state.status === 1 ? "live" : "none", scheme: state.scheme as MarketStreamState["scheme"], id: new TextDecoder().decode(Uint8Array.from(state.id)), endedAtMs: Number(state.ended_at) * 1000 } satisfies MarketStreamState;
+      }, catch: (e) => toRuntimeError("Failed to read stream state", e)
+    });
+  });
 
   return {
     registerMarket: (input: MarketRegisterInput) =>
@@ -235,6 +267,7 @@ export const createSuiMarketRegistrar = (
         } satisfies MarketRegisterResult;
       }),
     goLive: (input) => sendLifecycle("go_live", input),
-    setEnded: (input) => sendLifecycle("set_ended", input),
+    setEnded: (input) => validateLifecycleInput(input, true).pipe(Effect.flatMap(() =>
+      confirmMarketEnd(input, readStream(input.marketId), sendLifecycle("set_ended", input)))),
   };
 };

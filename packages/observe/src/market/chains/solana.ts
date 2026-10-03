@@ -1,3 +1,5 @@
+import { retainMarketSubmission } from "#market/submission.js";
+import { confirmMarketEnd } from "#market/end.js";
 import { Effect } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 // Multichain-hygiene: @livestreak/wallet is the single @solana/* owner. The shared livestreak
@@ -16,6 +18,7 @@ import {
   createSolanaRpc,
   createWalletManager,
   decodeRegistryAccount,
+  decodeMarketAccount,
   findMarketPda,
   findRegistryPda,
   getBase64Encoder,
@@ -28,6 +31,7 @@ import { keccak256 } from "viem";
 import type {
   MarketLifecycleInput,
   MarketLifecycleTxResult,
+  MarketStreamState,
   MarketRegisterInput,
   MarketRegisterResult,
   MarketRegistrar,
@@ -53,19 +57,21 @@ const toRuntimeError = (prefix: string, error: unknown): LiveStreakRuntimeError 
 // Shared with the EVM/Sui legs: the storage pointer guards the on-chain `validate_pointer` mirrors
 // (scheme 0..3, id 1..64 bytes). marketId is the 0x-bytes32 the market PDA is derived from.
 const validateLifecycleInput = (
-  input: MarketLifecycleInput
+  input: MarketLifecycleInput,
+  ending = false
 ): Effect.Effect<MarketLifecycleInput, LiveStreakConfigError> => {
   if (!/^0x[0-9a-fA-F]{64}$/.test(input.marketId)) {
     return Effect.fail(
       new LiveStreakConfigError({ message: "goLive/setEnded marketId must be a 0x-prefixed bytes32" })
     );
   }
-  if (input.scheme !== 0 && input.scheme !== 1 && input.scheme !== 2 && input.scheme !== 3) {
+  if (input.scheme !== 0 && input.scheme !== 1 && input.scheme !== 2 && input.scheme !== 3 && input.scheme !== 4) {
     return Effect.fail(
-      new LiveStreakConfigError({ message: `Invalid StorageScheme ${String(input.scheme)} (expected 0..3)` })
+      new LiveStreakConfigError({ message: `Invalid StorageScheme ${String(input.scheme)} (expected 0..4)` })
     );
   }
-  if (input.id.length === 0 || input.id.length > 64) {
+  if (new TextEncoder().encode(input.id).length > 64 ||
+      (input.id.length === 0 && (!ending || input.scheme !== 0))) {
     return Effect.fail(
       new LiveStreakConfigError({ message: `Storage id length must be 1..64 bytes, got ${input.id.length}` })
     );
@@ -152,15 +158,16 @@ export const createSolanaMarketRegistrar = (config: ObserveRunMarketConfig): Mar
       sendTransaction: (tx: SolanaTransaction) => Promise<{ hash: string }>;
       toReadOnlyAccount: () => Promise<unknown>;
     },
-    instructions: import("@livestreak/wallet").Instruction | import("@livestreak/wallet").Instruction[]
+    instructions: import("@livestreak/wallet").Instruction | import("@livestreak/wallet").Instruction[],
+    lifecycle?: MarketLifecycleInput
   ): Effect.Effect<string, LiveStreakError> =>
     Effect.gen(function* () {
       // feePayer omitted: the account attaches its own (paymaster under gasless, creator direct).
       const tx = buildLivestreakTransaction(Array.isArray(instructions) ? instructions : [instructions]);
-      const result = yield* Effect.tryPromise({
+      const result = yield* retainMarketSubmission(lifecycle, Effect.tryPromise({
         try: () => account.sendTransaction(tx),
         catch: (error) => toRuntimeError("Solana transaction failed", error)
-      });
+      }));
       // Confirm inclusion via the shared poller (Solana getSignatureStatuses is mapped onto the
       // receipt contract by the wallet account), matching the EVM leg's inclusion wait.
       const readOnly = (yield* Effect.tryPromise({
@@ -169,7 +176,10 @@ export const createSolanaMarketRegistrar = (config: ObserveRunMarketConfig): Mar
       })) as { getUserOperationReceipt: (hash: string) => Promise<unknown> };
       yield* Effect.tryPromise({
         try: () => pollUntilUserOperationIncludedShared(readOnly, result.hash),
-        catch: (error) => toRuntimeError("Solana signature confirmation failed", error)
+        catch: (error) => new LiveStreakRuntimeError({
+          message: `Solana signature confirmation failed: ${String(error)}`,
+          ...(String(error).includes("UserOperation included but reverted") ? { metadata: { retryable: false } } : {})
+        })
       });
       return result.hash;
     });
@@ -179,7 +189,7 @@ export const createSolanaMarketRegistrar = (config: ObserveRunMarketConfig): Mar
     input: MarketLifecycleInput
   ): Effect.Effect<MarketLifecycleTxResult, LiveStreakError> =>
     Effect.gen(function* () {
-      const validated = yield* validateLifecycleInput(input);
+      const validated = yield* validateLifecycleInput(input, fn === "set_ended");
       const { solanaConfig, programId } = yield* requireSolanaConfig();
       const { account, creator } = yield* openAccount(solanaConfig);
 
@@ -190,9 +200,20 @@ export const createSolanaMarketRegistrar = (config: ObserveRunMarketConfig): Mar
         catch: (error) => toRuntimeError(`Failed to build ${fn} instruction`, error)
       });
 
-      const hash = yield* send(account, instruction);
+      const hash = yield* send(account, instruction, fn === "set_ended" ? validated : undefined);
       return { userOpHash: hash } satisfies MarketLifecycleTxResult;
     });
+
+  const readStream = (marketId: StreamId): Effect.Effect<MarketStreamState, LiveStreakError> => Effect.gen(function* () {
+    const { programId, rpcUrl } = yield* requireSolanaConfig();
+    const pda = yield* Effect.tryPromise({ try: async () => (await findMarketPda(programId, marketId))[0], catch: (e) => toRuntimeError("Failed to derive market", e) });
+    const bytes = yield* fetchAccount(rpcUrl, pda);
+    if (bytes === null) return yield* Effect.fail(new LiveStreakConfigError({ message: "Market not found" }));
+    const m = decodeMarketAccount(bytes);
+    const { creator } = yield* openAccount((yield* requireSolanaConfig()).solanaConfig);
+    if (m.creator !== creator) return yield* Effect.fail(new LiveStreakConfigError({ message: "Market: not creator" }));
+    return { status: m.streamStatus === 2 ? "ended" : m.streamStatus === 1 ? "live" : "none", scheme: m.streamScheme as MarketStreamState["scheme"], id: new TextDecoder().decode(m.streamPointer), endedAtMs: Number(m.streamEndedAt) * 1000 };
+  });
 
   return {
     registerMarket: (input: MarketRegisterInput) =>
@@ -271,6 +292,7 @@ export const createSolanaMarketRegistrar = (config: ObserveRunMarketConfig): Mar
         return { userOpHash: hash, marketId, streamId, title: input.title } satisfies MarketRegisterResult;
       }),
     goLive: (input) => sendLifecycle("go_live", input),
-    setEnded: (input) => sendLifecycle("set_ended", input)
+    setEnded: (input) => validateLifecycleInput(input, true).pipe(Effect.flatMap(() =>
+      confirmMarketEnd(input, readStream(input.marketId), sendLifecycle("set_ended", input))))
   };
 };

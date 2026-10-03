@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Hls from 'hls.js'
 
 import type { StreamMedia } from '#/utils/stream'
 import { useLiveStreamFeed } from '#/hooks/use-live-stream-feed'
@@ -22,6 +23,8 @@ export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
   const isLive = kind === 'live'
   const isVod = kind === 'vod'
   const videoRef = useRef<HTMLVideoElement>(null)
+  const [playbackError, setPlaybackError] = useState(false)
+  const [retry, setRetry] = useState(0)
 
   // Live fMP4 fan-out: when the media carries a `live` descriptor, open the MSE player against THIS video
   // element (init + fragments from the host viewer endpoint). Recording plays as a native <video src>. One
@@ -48,19 +51,31 @@ export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
 
   // The MSE player owns `.src` when live; only bind the `src` attribute for the recording/URL path so we
   // don't clobber the MediaSource object URL.
-  const attributeSrc = live ? undefined : stream ? undefined : src
+  useEffect(() => {
+    const video = videoRef.current
+    setPlaybackError(false)
+    if (!video || media?.format !== 'hls' || !src) return
+    if (video.canPlayType('application/vnd.apple.mpegurl')) { video.src = src; return () => { video.removeAttribute('src'); video.load() } }
+    if (!Hls.isSupported()) { setPlaybackError(true); return }
+    const hls = new Hls()
+    hls.on(Hls.Events.ERROR, (_event, data) => { if (data.fatal) setPlaybackError(true) })
+    hls.loadSource(src); hls.attachMedia(video)
+    return () => { hls.destroy() }
+  }, [src, media?.format, retry])
+  const attributeSrc = live || media?.format === 'hls' ? undefined : stream ? undefined : src
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000' }}>
-      <video
+      {kind !== 'none' && <video
         ref={videoRef}
         key={live ? `live-mse:${live.streamId}` : stream ? 'live-stream' : (src ?? 'offline')}
         src={attributeSrc}
         style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', background: '#000' }}
-        muted autoPlay loop playsInline
+        muted autoPlay loop={isLive} playsInline
+        onError={() => { if (isVod) setPlaybackError(true) }}
         controls={isVod}
         poster={POSTER}
-      />
+      />}
 
       {/* Broadcast vignette */}
       <div style={{
@@ -77,7 +92,7 @@ export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
         position: 'absolute', top: 16, left: 16,
         display: 'flex', alignItems: 'center', gap: 8,
       }}>
-        <StatusBadge ready={ready} isLive={isLive} isVod={isVod} />
+        {playbackError ? <Badge color="rgba(255,255,255,0.6)" border="rgba(255,255,255,0.18)" label="UNAVAILABLE" /> : <StatusBadge ready={ready} isLive={isLive} isVod={isVod} ended={media?.ended === true} />}
         {streamTitle && (
           <div style={{
             background: 'rgba(0,0,0,0.5)',
@@ -90,6 +105,10 @@ export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
         )}
       </div>
 
+      {playbackError && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', background: 'rgba(0,0,0,0.6)' }}>
+        <button type="button" onClick={() => { setPlaybackError(false); setRetry(value => value + 1); if (media?.format !== 'hls') videoRef.current?.load() }} style={{ color: '#fff', background: '#222', border: '1px solid #555', borderRadius: 6, padding: '10px 16px', cursor: 'pointer' }}>Replay unavailable · Retry</button>
+      </div>}
+
       {/* Offline placeholder copy */}
       {ready && kind === 'none' && (
         <div style={{
@@ -97,7 +116,7 @@ export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
           pointerEvents: 'none',
         }}>
           <span className="mono" style={{ fontSize: 12, color: 'rgba(255,255,255,0.3)', letterSpacing: '0.1em' }}>
-            STREAM OFFLINE
+            {media?.processing ? 'Recording processing' : media?.ended ? 'No recording available' : 'STREAM OFFLINE'}
           </span>
         </div>
       )}
@@ -105,12 +124,13 @@ export function VideoPlayer({ streamTitle, media, ready = true }: Props) {
   )
 }
 
-function StatusBadge({ ready, isLive, isVod }: { ready: boolean; isLive: boolean; isVod: boolean }) {
+function StatusBadge({ ready, isLive, isVod, ended }: { ready: boolean; isLive: boolean; isVod: boolean; ended: boolean }) {
   if (!ready) {
     return (
       <Badge color="rgba(255,255,255,0.45)" border="rgba(255,255,255,0.15)" label="…" />
     )
   }
+  if (ended) return <Badge color="rgba(255,255,255,0.6)" border="rgba(255,255,255,0.18)" label="ENDED" />
   if (isLive) {
     return (
       <div style={{

@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { runCellIdOf } from "#run/control/board/index.js";
-import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
+import { LiveStreakConfigError, type LiveStreakError } from "@livestreak/core";
 import type { PackageRuntimeInit } from "@livestreak/schema";
 import type { ControlCallEnvelope } from "#run/control/bus/index.js";
 import type {
@@ -10,7 +10,7 @@ import type {
   ControlSurface
 } from "#run/control/bus/index.js";
 import { marketLifecyclePatch } from "#market/board.js";
-import { RECORDING_POINTER_KEY } from "#market/keys.js";
+import { NO_RECORDING_POINTER_ID } from "#market/keys.js";
 import { createMarketRegistrar } from "#market/chains/index.js";
 import type {
   MarketFailurePhase,
@@ -36,8 +36,8 @@ export interface MarketControlDeps {
   readonly defaultPointerScheme?: MarketStorageScheme;
 }
 
-/** Scheme of last resort: 0 = WalrusTestnet, the substrate the dev/e2e stack runs on. */
-const FALLBACK_POINTER_SCHEME: MarketStorageScheme = 0;
+/** Host routing/storage uses slot 4; slots 0..3 retain their historical decoding. */
+const FALLBACK_POINTER_SCHEME: MarketStorageScheme = 4;
 
 export const createMarketControlSurface = (deps: MarketControlDeps = {}): ControlSurface => ({
   cell: {
@@ -47,13 +47,15 @@ export const createMarketControlSurface = (deps: MarketControlDeps = {}): Contro
       catalog: "market",
       status: ["none", null, Date.now()],
       readonly: { registrationState: "none" },
-      functions: ["register", "goLive", "setEnded", "close"]
+      functions: ["register", "goLive", "setEnded", "recording", "retryRecording", "close"]
     }
   },
   functions: [
     registerFunctionEntry(deps),
     goLiveFunctionEntry(deps),
     setEndedFunctionEntry(deps),
+    { name: "recording", scope: "market:recording", call: (_envelope, context) => recordingCall(context, deps, false) },
+    { name: "retryRecording", scope: "market:retryRecording", call: (_envelope, context) => recordingCall(context, deps, true) },
     closeFunctionEntry()
   ]
 });
@@ -75,6 +77,108 @@ const setEndedFunctionEntry = (deps: MarketControlDeps): ControlFunctionEntry =>
   scope: marketSetEndedScope,
   call: (envelope, context) => lifecycleCall(envelope, context, deps, "setEnded")
 });
+
+// Archive operations update only progress. Publishing the signed chain pointer remains setEnded.
+const recordingCall = (
+  context: ControlFunctionContext,
+  deps: MarketControlDeps,
+  retry: boolean
+): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
+  Effect.gen(function* () {
+    const init = deps.sessionInit;
+    const marketId = context.board.cells[context.cellId]?.readonly?.marketId;
+    if (!init || typeof marketId !== "string" || !/^0x[a-f0-9]{64}$/i.test(marketId))
+      return yield* Effect.fail(
+        new LiveStreakConfigError({
+          message: "Recording lookup requires a registered market and Host"
+        })
+      );
+    const obsId = context.cellId.startsWith("obs:")
+      ? context.cellId.split(":")[1]
+      : undefined;
+    const runId =
+      obsId === undefined ? readRunId(context) : `${readRunId(context)}#${obsId}`;
+    const chain = init.wallet.walletInit.chain;
+    const base = init.hostUrl.replace(/\/$/, "");
+    const request = (path: string, options?: RequestInit) =>
+      Effect.tryPromise({
+        try: async () => {
+          const response = await fetch(base + path, {
+            ...options,
+            signal: AbortSignal.timeout(30000)
+          });
+          if (!response.ok)
+            throw new Error(`Recording request failed (${response.status})`);
+          return response.json() as Promise<{
+            id: string;
+            marketId: string;
+            runId: string;
+            chain: string;
+            status: string;
+            segments: number;
+            bytes: number;
+            durationSeconds: number;
+            error?: string;
+          }>;
+        },
+        catch: (error) =>
+          new LiveStreakConfigError({
+            message: error instanceof Error ? error.message : "Host recording unavailable"
+          })
+      });
+    let receipt = yield* request(
+      `/recordings/by-market/${chain}/${marketId}?runId=${encodeURIComponent(runId)}`
+    );
+    const valid = () =>
+      receipt &&
+      receipt.marketId === marketId.toLowerCase() &&
+      receipt.runId === runId &&
+      receipt.chain === chain &&
+      /^[a-f0-9]{64}$/.test(receipt.id) &&
+      ["recording", "processing", "ready", "failed"].includes(receipt.status) &&
+      [receipt.segments, receipt.bytes, receipt.durationSeconds].every(
+        (value) => Number.isFinite(value) && value >= 0
+      );
+    if (!valid())
+      return yield* Effect.fail(
+        new LiveStreakConfigError({
+          message: "Recording receipt does not belong to this market/run"
+        })
+      );
+    if (retry) {
+      if (!init.hostApiToken)
+        return yield* Effect.fail(
+          new LiveStreakConfigError({
+            message: "Host recording write access is not configured"
+          })
+        );
+      receipt = yield* request(`/recordings/${receipt.id}/retry`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${init.hostApiToken}` }
+      });
+      if (!valid())
+        return yield* Effect.fail(
+          new LiveStreakConfigError({ message: "Retry returned a different recording" })
+        );
+    }
+    return {
+      boardPatch: {
+        cells: {
+          [context.cellId]: {
+            readonly: {
+              set: {
+                recordingState: receipt.status,
+                recordingSegments: receipt.segments,
+                recordingBytes: receipt.bytes,
+                recordingDurationSeconds: receipt.durationSeconds,
+                recordingError: receipt.error ?? ""
+              }
+            }
+          }
+        }
+      }
+    };
+  });
 
 const closeFunctionEntry = (): ControlFunctionEntry => ({
   name: "close",
@@ -151,14 +255,34 @@ const lifecycleCall = (
   phase: "goLive" | "setEnded"
 ): Effect.Effect<{ readonly boardPatch: BoardPatch }, LiveStreakError> =>
   Effect.gen(function* () {
-    const input = yield* decodeLifecyclePayload(envelope.payload, context, deps);
+    const input = yield* decodeLifecyclePayload(envelope.payload, context, deps, phase);
     const registration = yield* buildMarketConfig(deps, "");
     const registrar = yield* resolveRegistrar(deps, registration);
 
-    const tx =
-      phase === "goLive"
-        ? yield* registrar.goLive(input)
-        : yield* registrar.setEnded(input);
+    const saved = context.board.cells[context.cellId]?.readonly?.endSubmission as
+      { marketId?: unknown; scheme?: unknown; id?: unknown; hash?: unknown } | undefined;
+    const submittedHash = phase === "setEnded" && saved?.marketId === input.marketId &&
+      saved.scheme === input.scheme && saved.id === input.id && typeof saved.hash === "string" && saved.hash.length > 0
+      ? saved.hash : undefined;
+    const endInput = {
+      ...input,
+      ...(submittedHash === undefined ? {} : { submittedHash }),
+      onSubmitted: (hash: string) => context.checkpoint?.({
+        cells: { [context.cellId]: { readonly: { set: {
+          endSubmission: { marketId: input.marketId, scheme: input.scheme, id: input.id, hash }
+        } } } }
+      }) ?? Effect.void
+    };
+    const tx = phase === "goLive" ? yield* registrar.goLive(input) : yield* registrar.setEnded(endInput).pipe(
+      Effect.catchAll(error => Effect.gen(function* () {
+        // Only a definitely failed receipt permits a fresh submission. Timeout/disconnect
+        // keeps the original checkpoint so a retry confirms the same hash.
+        if (error.metadata?.retryable === false && context.checkpoint !== undefined) {
+          yield* context.checkpoint({ cells: { [context.cellId]: { readonly: { unset: ["endSubmission"] } } } });
+        }
+        return yield* Effect.fail(error);
+      }))
+    );
 
     const lifecycle: MarketLifecycleState =
       phase === "goLive"
@@ -175,8 +299,8 @@ const lifecycleCall = (
             marketId: input.marketId,
             scheme: input.scheme,
             pointerId: input.id,
-            userOpHash: tx.userOpHash,
-            endedAtMs: Date.now()
+            userOpHash: tx.userOpHash || (context.board.cells[context.cellId]?.readonly?.registrationState === "ended" ? String(context.board.cells[context.cellId]?.readonly?.userOpHash ?? "") : ""),
+            endedAtMs: tx.endedAtMs ?? Date.now()
           };
 
     return { boardPatch: marketLifecyclePatch(lifecycle, Date.now(), context.cellId) };
@@ -304,27 +428,27 @@ const decodeRegisterPayload = (
     return record.title.trim();
   });
 
-// The pointer and scheme are BOARD-DERIVED, never operator-typed — the same design-out the live
-// sink's streamId got (see sinks/live/commands.ts, board-run-config.ts). Derivation order:
-//
-//   pointer := explicit payload (pointerId | id)   — CLI, tests, Slice-2 tooling
-//           ?? board-saved recording pointer        — the Slice-2 seam; nothing writes it yet
-//           ?? the market cell's marketId sans 0x   — the honest formality
-//   scheme  := explicit payload ?? deps default ?? FALLBACK_POINTER_SCHEME
-//
-// Chain-agnostic on purpose: it sits ABOVE the per-chain registrar dispatch, and marketId is a
-// 0x-bytes32 on all three chains (keccak on Solana too, not a base58 pubkey), so `.slice(2)` is
-// exactly the 64 chars every registrar's 1..64 guard accepts.
+// Live routing identity is not an archive. End always represents explicit absence until
+// Flow07 supplies a real market-bound upload/read verification path. Saved metadata alone
+// and user-typed ids cannot assert stored bytes exist.
 const decodeLifecyclePayload = (
   payload: unknown,
   context: ControlFunctionContext,
-  deps: MarketControlDeps = {}
+  deps: MarketControlDeps = {},
+  phase: "goLive" | "setEnded"
 ): Effect.Effect<
-  { readonly marketId: StreamId; readonly scheme: MarketStorageScheme; readonly id: string },
+  {
+    readonly marketId: StreamId;
+    readonly scheme: MarketStorageScheme;
+    readonly id: string;
+  },
   LiveStreakConfigError
 > =>
   Effect.gen(function* () {
-    if (payload !== undefined && (typeof payload !== "object" || payload === null || Array.isArray(payload))) {
+    if (
+      payload !== undefined &&
+      (typeof payload !== "object" || payload === null || Array.isArray(payload))
+    ) {
       return yield* Effect.fail(
         new LiveStreakConfigError({ message: "market lifecycle payload must be an object" })
       );
@@ -346,9 +470,9 @@ const decodeLifecyclePayload = (
     }
 
     const scheme = record.scheme ?? deps.defaultPointerScheme ?? FALLBACK_POINTER_SCHEME;
-    if (scheme !== 0 && scheme !== 1 && scheme !== 2 && scheme !== 3) {
+    if (scheme !== 0 && scheme !== 1 && scheme !== 2 && scheme !== 3 && scheme !== 4) {
       return yield* Effect.fail(
-        new LiveStreakConfigError({ message: "market lifecycle scheme must be 0..3" })
+        new LiveStreakConfigError({ message: "market lifecycle scheme must be 0..4" })
       );
     }
 
@@ -359,20 +483,107 @@ const decodeLifecyclePayload = (
           ? record.id
           : undefined;
 
-    // Slice-2 seam: the recording upload will save its blob id under RECORDING_POINTER_KEY and
-    // this reads it with no further change. Nothing writes the key today — do not build upload
-    // logic for it. The key is a shared constant (market/keys.ts) so the future writer cannot
-    // pick a different literal and leave this silently falling back to the formality.
-    const recorded = marketReadonly?.[RECORDING_POINTER_KEY];
-    const recordedPointer = typeof recorded === "string" && recorded.length > 0 ? recorded : undefined;
+    if (phase === "setEnded") {
+      if (explicitPointer !== undefined) {
+        return yield* Effect.fail(
+          new LiveStreakConfigError({
+            message:
+              "Recording pointer is unverified. End without a recording; verified replay belongs to Flow07."
+          })
+        );
+      }
+      if (record.scheme !== undefined && record.scheme !== 0) {
+        return yield* Effect.fail(
+          new LiveStreakConfigError({ message: "No recording requires scheme 0" })
+        );
+      }
+      if (record.publishReplay === true || record.publishReplay === "true") {
+        const init = deps.sessionInit;
+        if (!init?.hostApiToken)
+          return yield* Effect.fail(
+            new LiveStreakConfigError({
+              message: "Host recording access is not configured"
+            })
+          );
+        const obsId = context.cellId.startsWith("obs:")
+          ? context.cellId.split(":")[1]
+          : undefined;
+        const runId =
+          obsId === undefined ? readRunId(context) : `${readRunId(context)}#${obsId}`;
+        const chain = init.wallet.walletInit.chain;
+        const response = yield* Effect.tryPromise({
+          try: () =>
+            fetch(
+              `${init.hostUrl.replace(/\/$/, "")}/recordings/by-market/${chain}/${marketId}?runId=${encodeURIComponent(runId)}`,
+              { signal: AbortSignal.timeout(15000) }
+            ),
+          catch: () =>
+            new LiveStreakConfigError({
+              message:
+                "Host recording lookup unavailable; end without replay or retry later"
+            })
+        });
+        if (!response.ok)
+          return yield* Effect.fail(
+            new LiveStreakConfigError({
+              message: `Recording lookup failed (${response.status})`
+            })
+          );
+        const receipt = yield* Effect.tryPromise({
+          try: () =>
+            response.json() as Promise<{
+              status: string;
+              marketId: string;
+              runId: string;
+              chain: string;
+              pointer?: { scheme: string; id: string; url: string };
+            }>,
+          catch: () => new LiveStreakConfigError({ message: "Invalid recording receipt" })
+        });
+        if (
+          receipt === null ||
+          typeof receipt !== "object" ||
+          typeof receipt.marketId !== "string" ||
+          typeof receipt.pointer?.url !== "string" ||
+          typeof receipt.pointer?.id !== "string" ||
+          receipt.status !== "ready" ||
+          receipt.marketId.toLowerCase() !== marketId.toLowerCase() ||
+          receipt.runId !== runId ||
+          receipt.chain !== chain ||
+          receipt.pointer?.scheme !== "host" ||
+          !receipt.pointer.url.startsWith("https://") ||
+          !/^[a-f0-9]{64}$/.test(receipt.pointer.id)
+        )
+          return yield* Effect.fail(
+            new LiveStreakConfigError({
+              message: `Recording is not verified for this market/run (${receipt?.status ?? "invalid"})`
+            })
+          );
+        return { marketId: marketId as StreamId, scheme: 4, id: receipt.pointer.id };
+      }
+      const current = context.board.cells[context.cellId]?.readonly;
+      if (
+        current?.registrationState === "ended" &&
+        current.scheme === 4 &&
+        typeof current.pointerId === "string" &&
+        /^[a-f0-9]{64}$/.test(current.pointerId)
+      )
+        return { marketId: marketId as StreamId, scheme: 4, id: current.pointerId };
+      return { marketId: marketId as StreamId, scheme: 0, id: NO_RECORDING_POINTER_ID };
+    }
 
     const derivedPointer = marketId.slice(2);
-    const pointer = explicitPointer ?? recordedPointer ?? derivedPointer;
+    const recordedPointer = undefined;
+    const pointer = explicitPointer ?? derivedPointer;
 
     // Guard the formality branch only: an explicit or recorded pointer is legitimately any 1..64
     // bytes, but the marketId-derived one must be a full bytes32 body. If a chain ever mints a
     // native-address marketId this fails loudly instead of emitting a short/long pointer.
-    if (explicitPointer === undefined && recordedPointer === undefined && derivedPointer.length !== 64) {
+    if (
+      explicitPointer === undefined &&
+      recordedPointer === undefined &&
+      derivedPointer.length !== 64
+    ) {
       return yield* Effect.fail(
         new LiveStreakConfigError({
           message: `market lifecycle derived pointer must be exactly 64 chars, got ${derivedPointer.length} from marketId ${marketId}`
@@ -382,7 +593,9 @@ const decodeLifecyclePayload = (
 
     if (pointer.length === 0 || pointer.length > 64) {
       return yield* Effect.fail(
-        new LiveStreakConfigError({ message: "market lifecycle pointer id must be 1..64 bytes" })
+        new LiveStreakConfigError({
+          message: "market lifecycle pointer id must be 1..64 bytes"
+        })
       );
     }
 
@@ -452,9 +665,13 @@ export const marketCatalogFunctions = (): Readonly<
   setEnded: {
     scope: marketSetEndedScope,
     label: "Set ended",
-    description: "Mark the market stream as ended on-chain. The storage pointer is board-derived.",
-    result: "patch"
+    description:
+      "Mark the market stream as ended on-chain. Ends without an archive by default. publishReplay requests a verified Host recording for the exact market/run.",
+    result: "patch",
+    input: { type: "object", properties: [{ name: "publishReplay", value: { type: "boolean", default: false }, help: "Publish only a verified Host recording." }] }
   },
+  recording: { scope: "market:recording", label: "Check recording", description: "Read cloud recording progress for this exact market/run.", result: "patch" },
+  retryRecording: { scope: "market:retryRecording", label: "Retry recording", description: "Retry verification of a completed cloud recording; never publishes or signs a chain pointer.", result: "patch" },
   close: {
     scope: marketCloseScope,
     label: "Close",

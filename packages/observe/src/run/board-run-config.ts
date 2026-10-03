@@ -25,6 +25,7 @@ export interface RunConfigFromBoardInput {
   readonly board: Board;
   /** Host relay base URL for the local WebRTC sink's signaling channel (the gateway's deployment value). */
   readonly hostBaseUrl: string;
+  readonly hostApiToken?: string;
   /** Which observation to derive. Absent = the session's only one; ambiguity fails closed. */
   readonly obsId?: string;
 }
@@ -201,7 +202,7 @@ export const runConfigFromBoard = (
         // the host `/live/watch/:streamId` endpoint).
         config: {
           streamId: marketId,
-          transport: createHostFmp4IngestTransport({ baseUrl: hostBaseUrl, streamId: marketId })
+          transport: createHostFmp4IngestTransport({ baseUrl: hostBaseUrl, streamId: marketId, runId: `${runId}#${obsId}`, chain: String(index[obsId]?.chain ?? "").startsWith("eip155:") ? "evm" : String(index[obsId]?.chain ?? "").startsWith("solana:") ? "solana" : "sui", ...(input.hostApiToken ? { accessToken: input.hostApiToken } : {}) })
         }
       },
       process: null

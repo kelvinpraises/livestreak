@@ -1,3 +1,5 @@
+> Historical work log. Flow07 replaced the Walrus runtime with generic Host cloud storage; see `host/docs/storage.md` for current behavior.
+
 # Host — TODO
 
 See [architecture.md](./architecture.md), [flow.md](./flow.md). Two halves: `packages/host` (shared

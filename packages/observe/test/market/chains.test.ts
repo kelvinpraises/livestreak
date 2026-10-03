@@ -249,6 +249,10 @@ describe("market chain seam", () => {
       expect.objectContaining({ data: goLiveData })
     );
 
+    viemMocks.readContract.mockResolvedValueOnce({ creator: evmWalletMocks.observer } as never)
+      .mockResolvedValueOnce([1, 2, lifecycleInput.id, 0n, 0n] as never)
+      .mockResolvedValueOnce({ creator: evmWalletMocks.observer } as never)
+      .mockResolvedValueOnce([2, 2, lifecycleInput.id, 1234n, 1234n] as never);
     const setEndedExit = await Effect.runPromiseExit(registrar.setEnded(lifecycleInput));
     expect(Exit.isSuccess(setEndedExit)).toBe(true);
 

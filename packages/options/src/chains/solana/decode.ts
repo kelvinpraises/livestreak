@@ -48,7 +48,8 @@ const STORAGE_SCHEMES = [
   "walrus-testnet",
   "walrus-mainnet",
   "ipfs",
-  "arweave"
+  "arweave",
+  "host"
 ] as const satisfies readonly PointerScheme[];
 
 export const mapVaultStatus = (value: number): OptionsVaultStatus => VAULT_STATUSES[value] ?? "open";

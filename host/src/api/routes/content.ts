@@ -1,5 +1,6 @@
 import { createResolutionStore } from "../../services/resolutions.js";
 import { createMandateStore } from "../../services/mandates.js";
+import { requireContentWrite } from "./recordings.js";
 import { Router } from "express";
 import type { HostRouteDeps } from "../../deps.js";
 import { createContentController } from "../controllers/content.js";
@@ -87,12 +88,12 @@ export const createContentRouter = (deps: HostRouteDeps): Router => {
   });
   const controller = createContentController(deps);
 
-  router.post("/content/blobs", controller.store);
+  router.post("/content/blobs", requireContentWrite(deps.config.contentWriteToken), controller.store);
   router.get("/content/blobs/:scheme/:id", controller.resolve);
 
   // Local VOD/stream metadata: stored as a content blob, pointer recorded on-chain via the
   // normal goLive/VOD path, resolved back through this host (issue 10).
-  router.post("/content/vod", controller.storeVod);
+  router.post("/content/vod", requireContentWrite(deps.config.contentWriteToken), controller.storeVod);
   router.get("/content/vod/:scheme/:id", controller.resolveVod);
 
   return router;

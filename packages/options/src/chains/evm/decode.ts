@@ -95,7 +95,8 @@ const STORAGE_SCHEMES = [
   "walrus-testnet",
   "walrus-mainnet",
   "ipfs",
-  "arweave"
+  "arweave",
+  "host"
 ] as const satisfies readonly PointerScheme[];
 
 // viem's `readContract` returns the value DIRECTLY for a single output (a named object for a single

@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { createLocalContentStore } from "#services/walrus/content/local-store.js";
+import { createContentStore } from "#services/content/content.js";
+import { testObjectStore } from "./helpers/object-store.js";
 import {
   handleVodMetadataResolve,
   handleVodMetadataStore
-} from "#services/walrus/content/vod.js";
+} from "#services/content/vod.js";
 
-describe("local VOD metadata", () => {
-  const store = createLocalContentStore({ baseUrl: "http://127.0.0.1:8787" });
+describe("cloud VOD metadata", () => {
+  const store = createContentStore(testObjectStore());
 
   it("stores metadata as a content blob and resolves it back through the host", async () => {
     const stored = await handleVodMetadataStore(
@@ -22,9 +23,9 @@ describe("local VOD metadata", () => {
     expect(stored.ok).toBe(true);
     if (!stored.ok) return;
 
-    // Pointer uses the local content-addressed scheme — recordable on-chain as-is.
-    expect(stored.result.scheme).toBe("ipfs");
-    expect(stored.result.url).toContain("/content/blobs/ipfs/");
+    // Pointer uses the Host content-addressed scheme — recordable on-chain as-is.
+    expect(stored.result.scheme).toBe("host");
+    expect(stored.result.url).toContain("/content/");
 
     const resolved = await handleVodMetadataResolve(
       stored.result.scheme,
@@ -46,7 +47,7 @@ describe("local VOD metadata", () => {
     const bad = await handleVodMetadataStore({ title: "x" }, { store });
     expect(bad.ok).toBe(false);
 
-    const missing = await handleVodMetadataResolve("ipfs", "deadbeef", { store });
+    const missing = await handleVodMetadataResolve("host", "deadbeef", { store });
     expect(missing.ok).toBe(false);
   });
 });

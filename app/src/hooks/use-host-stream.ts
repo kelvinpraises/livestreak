@@ -21,22 +21,32 @@ export function useHostStream(routeId: string): {
     setReady(false)
     setError(null)
 
-    void resolveStream(env.hostBaseUrl, routeId, demoEdge, fixture)
-      .then(next => {
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async () => {
+      try {
+        const next = await resolveStream(env.hostBaseUrl, routeId, demoEdge, fixture)
         if (!cancelled) {
           setStream(next)
+          setError(null)
           setReady(true)
         }
-      })
-      .catch(err => {
+      } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err))
-          setStream(null)
           setReady(true)
         }
-      })
+      } finally {
+        // Public viewers also need lifecycle updates without a connected Options wallet.
+        // Schedule after settlement: no overlapping requests or loading flicker on refresh.
+        if (!cancelled && !demoEdge) refreshTimer = setTimeout(() => { void refresh() }, 3000)
+      }
+    }
+    void refresh()
 
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      if (refreshTimer !== undefined) clearTimeout(refreshTimer)
+    }
   }, [routeId, demoEdge, fixture])
 
   return { stream, ready, error }

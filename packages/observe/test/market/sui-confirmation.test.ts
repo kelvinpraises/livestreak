@@ -68,3 +68,8 @@ describe("Sui market confirmation", () => {
     ).rejects.toThrow("MoveAbort");
   });
 });
+
+it("Sui accepts the Host pointer scheme and confirms the live transaction", async()=>{
+ const result=await Effect.runPromise(createSuiMarketRegistrar(config).goLive({marketId:id("d") as never,scheme:4,id:"a".repeat(64)}));
+ expect(result.userOpHash).toBe("actual-hash");expect(ports.send).toHaveBeenCalledOnce();expect(ports.wait).toHaveBeenCalledOnce();
+});

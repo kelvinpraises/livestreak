@@ -47,7 +47,7 @@ const boardFixture = {
         subject: { kind: 'vault', id: VAULT, marketId: MARKET, vaultId: VAULT },
         severity: 'warning',
         message: 'pool moving fast',
-        evidenceRefs: ['walrus:0x8c11'],
+        evidenceRefs: ['host:0x8c11'],
       },
     ],
     summary: { watchedSubjectCount: 3, findingCount: 1, pendingPlanCount: 0 },
@@ -74,7 +74,7 @@ describe('mapSteward', () => {
     expect(model.attention[0]).toMatchObject({ title: 'Review market_hot finding', targetId: `vault:${VAULT}`, tone: 'do' })
     const card = model.focus[`vault:${VAULT}`]
     expect(card?.sub).toBe('finding market_hot · warning')
-    expect(card?.history).toEqual(['evidence · walrus:0x8c11'])
+    expect(card?.history).toEqual(['evidence · host:0x8c11'])
     const resolve = card?.verbs.find((v) => v.name === 'Resolve')
     expect(resolve).toMatchObject({ state: 'ready', hot: true, callRef: `steward.subject.${slug(VAULT)}.action.resolve` })
     expect(resolve?.presetArgs).toEqual({ subjectId: VAULT, subjectKind: 'vault', findingId: 'finding-1' })

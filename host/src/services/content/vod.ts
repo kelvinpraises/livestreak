@@ -33,10 +33,13 @@ export type VodResolveResponse =
   | { readonly ok: true; readonly status: number; readonly result: VodMetadata }
   | { readonly ok: false; readonly status: number; readonly error: LiveStreakConfigError };
 
-const fail = (status: number, message: string): { ok: false; status: number; error: LiveStreakConfigError } => ({
+const fail = (
+  status: number,
+  message: string,
+): { ok: false; status: number; error: LiveStreakConfigError } => ({
   ok: false,
   status,
-  error: new LiveStreakConfigError({ message, metadata: { retryable: false } })
+  error: new LiveStreakConfigError({ message, metadata: { retryable: false } }),
 });
 
 const parseMetadata = (body: unknown): VodMetadata | null => {
@@ -57,13 +60,13 @@ const parseMetadata = (body: unknown): VodMetadata | null => {
     category: b.category,
     feed: { kind: feed.kind, pointer: feed.pointer },
     ...(typeof b.poster === "string" ? { poster: b.poster } : {}),
-    ...(typeof b.durationSec === "number" ? { durationSec: b.durationSec } : {})
+    ...(typeof b.durationSec === "number" ? { durationSec: b.durationSec } : {}),
   };
 };
 
 export const handleVodMetadataStore = async (
   body: unknown,
-  deps: VodMetadataDeps
+  deps: VodMetadataDeps,
 ): Promise<VodStoreResponse> => {
   const metadata = parseMetadata(body);
   if (metadata === null) {
@@ -73,7 +76,7 @@ export const handleVodMetadataStore = async (
   try {
     // Metadata is small + long-lived for the VOD's lifetime -> "locked" persistence.
     const pointer = await deps.store.store(bytes, "application/json", {
-      persistence: "locked"
+      persistence: "locked",
     });
     return { ok: true, status: 201, result: pointer };
   } catch (error) {
@@ -81,16 +84,12 @@ export const handleVodMetadataStore = async (
   }
 };
 
-const isPointerScheme = (value: string): value is PointerScheme =>
-  value === "walrus-testnet" ||
-  value === "walrus-mainnet" ||
-  value === "ipfs" ||
-  value === "arweave";
+const isPointerScheme = (value: string): value is PointerScheme => value === "host";
 
 export const handleVodMetadataResolve = async (
   scheme: string,
   id: string,
-  deps: VodMetadataDeps
+  deps: VodMetadataDeps,
 ): Promise<VodResolveResponse> => {
   if (!isPointerScheme(scheme) || id.trim().length === 0) {
     return fail(400, "Invalid VOD metadata pointer");

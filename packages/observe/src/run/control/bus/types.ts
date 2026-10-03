@@ -1,3 +1,5 @@
+import type { Effect } from "effect";
+import type { LiveStreakError } from "@livestreak/core";
 import type { ControlCallEnvelope, ControlArtifact, ControlCallResult } from "./calls.js";
 
 export type BoardCellId = string;
@@ -54,6 +56,8 @@ export interface ControlFunctionContext {
   /** The cell this call was matched to. Implementations patch THIS id, never a literal —
    *  one catalog serves every family (obs:<id>:run …). */
   readonly cellId: string;
+  /** Persist a scoped external-submission checkpoint through the same guarded commit path. */
+  readonly checkpoint?: (patch: BoardPatch) => Effect.Effect<void, LiveStreakError>;
 }
 
 export interface ControlFunctionArtifactDraft {

@@ -76,6 +76,7 @@ export const prepareObserveRun = (
   options: ObserveRunKernelOptions = {}
 ): Effect.Effect<ObserveRun, LiveStreakError> =>
   Effect.gen(function* () {
+    yield* assertMarketCanBroadcast(run.bus === undefined ? run.board : yield* run.bus.readBoard(), run.config.obsId);
     const captureDriver = yield* resolveCaptureDriver(run.config.capture.driverId, options);
     const sinkDriver = yield* resolveSinkDriver(run.config.sink.driverId, options);
 
@@ -131,6 +132,7 @@ export const prepareObserveRun = (
             : Effect.void;
         return yield* restore(
           Effect.gen(function* () {
+            yield* assertMarketCanBroadcast(yield* prepareBus.readBoard(), run.config.obsId);
             yield* prepareBus.commitGuardedUpdate(
               { kind: "owner", lease: preparationLease },
               { kind: "lifecycle", ...(run.config.obsId === undefined ? {} : { obsId: run.config.obsId }) },
@@ -256,6 +258,7 @@ export const startObserveRun = (
       // run.prepared) decides. A demoted board must re-prepare — starting would run stale config.
       // Gate failures retire the lease silently (no terminal publication: nothing started).
       const gateBoard = yield* bus.readBoard();
+      yield* assertMarketCanBroadcast(gateBoard, run.config.obsId);
       if (readBoardRunPrepared(gateBoard, run.config.obsId) === false) {
         return yield* Effect.fail(
           new LiveStreakConfigError({
@@ -437,6 +440,7 @@ export const startObserveRunAsync = (
     // Authoritative start gate (checked before reserving, so a demoted board fails fast with
     // no lease churn and no handle minted): the board's canonical prepared flag decides.
     const gateBoard = yield* run.bus.readBoard();
+    yield* assertMarketCanBroadcast(gateBoard, run.config.obsId);
     if (readBoardRunPrepared(gateBoard, run.config.obsId) === false) {
       return yield* Effect.fail(
         new LiveStreakConfigError({
@@ -996,4 +1000,16 @@ const validateStopTimeoutMs = (
   }
 
   return Effect.succeed(timeoutMs);
+};
+
+/** An ended observation cannot restart a producer under its old public market identity. */
+const assertMarketCanBroadcast = (board: Board, obsId: string | undefined): Effect.Effect<void, LiveStreakConfigError> => {
+  const cell = board.cells[obsId === undefined ? "market" : `obs:${obsId}:market`];
+  const pending = cell?.readonly?.endSubmission as { marketId?: string; hash?: string } | undefined;
+  if (pending?.hash && pending.marketId === cell?.readonly?.marketId) {
+    return Effect.fail(new LiveStreakConfigError({ message: "Confirm the pending stream end before broadcasting again." }));
+  }
+  return cell?.readonly?.registrationState === "ended" || cell?.status[0] === "ended"
+    ? Effect.fail(new LiveStreakConfigError({ message: "This market has ended. Create a new observation to broadcast again." }))
+    : Effect.void;
 };

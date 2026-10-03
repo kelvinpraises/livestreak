@@ -7,10 +7,17 @@ export interface StreamPointer {
   id: string
 }
 
+/** Historical marker remains recognizable; canonical absence is now an empty id. */
+export const NO_RECORDING_POINTER_ID = ''
+export const LEGACY_NO_RECORDING_POINTER_ID = 'livestreak:no-recording'
+
 export type StreamMediaKind = 'live' | 'vod' | 'none'
 
 export interface StreamMedia {
   kind: StreamMediaKind
+  ended?: boolean
+  format?: 'hls'
+  processing?: boolean
   /** Playable URL when resolvable (live watch URL, or a stored-blob aggregator URL for VOD). */
   src?: string
   /** Live real-time WebRTC feed as a `MediaStream` for `<video>.srcObject` (takes precedence over `src`). */
@@ -30,10 +37,6 @@ export interface StreamMedia {
  */
 export function schemeToGatewayUrl(scheme: string, id: string): string | undefined {
   switch (scheme) {
-    case 'walrus-testnet':
-      return `https://aggregator.walrus-testnet.walrus.space/v1/blobs/${id}`
-    case 'walrus-mainnet':
-      return `https://aggregator.walrus-mainnet.walrus.space/v1/blobs/${id}`
     case 'ipfs':
       return `https://ipfs.io/ipfs/${id}`
     case 'arweave':
@@ -46,7 +49,7 @@ export function schemeToGatewayUrl(scheme: string, id: string): string | undefin
 /**
  * Decide player mode + source from the on-chain stream status and the host's live watch URL.
  * - live  → host watch URL (host-forwarded live source) when available, else the gateway URL
- * - ended → the stored-blob gateway URL (replay)
+ * - ended → explicit absence until Flow 07 supplies verified replay
  * - none/absent → offline placeholder
  *
  * Structured as a single seam: when the StreamManifest body schema converges, only this fn changes.
@@ -60,14 +63,17 @@ export function resolveStreamMedia(
   if (pointer.status === 'live') {
     return { kind: 'live', src: hostWatchUrl ?? gatewayUrl }
   }
-  // ended
-  return { kind: 'vod', src: gatewayUrl }
+  // Ended pointers are not proof that bytes exist; Flow 07 owns verified replay.
+  return { kind: 'none', ended: true }
 }
 
 /** Minimal host/fixture stream detail shape this resolver needs (subset of HostStreamDetail). */
 export interface StreamFeedDetail {
   watchUrl?: string
   isLive: boolean
+  streamStatus?: 'none' | 'live' | 'ended'
+  recordingStatus?: 'recording' | 'processing' | 'ready' | 'failed'
+  replay?: { pointerId: string; url: string; format: 'hls'; durationSeconds: number }
 }
 
 /**
@@ -84,6 +90,12 @@ export function resolveStreamFeed(
   pointer: StreamPointer | undefined,
   host: StreamFeedDetail | null | undefined,
 ): StreamMedia {
+  // An explicit no-recording end stays offline even when a host/fixture URL exists —
+  // falling through would dress a demo feed up as this market's replay.
+  if (pointer?.status === 'ended' || host?.streamStatus === 'ended') {
+    if (host?.replay && /^https:\/\//.test(host.replay.url) && (!pointer || pointer.status === 'none' || (pointer.status === 'ended' && pointer.scheme === 'host' && pointer.id === host.replay.pointerId))) return { kind: 'vod', src: host.replay.url, format: 'hls' }
+    return { kind: 'none', ended: true, ...(host?.recordingStatus === 'processing' ? { processing: true } : {}) }
+  }
   if (pointer && pointer.status !== 'none') {
     const fromPointer = resolveStreamMedia(pointer, host?.watchUrl)
     if (fromPointer.kind !== 'none' && fromPointer.src) return fromPointer

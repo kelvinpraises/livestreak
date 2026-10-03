@@ -2,7 +2,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, createHostRouteDeps } from "#server.js";
 import { defaultHostServerConfig } from "#config/host.js";
-import { mapMarket } from "#services/catalog/mapper.js";
+import { mapMarket, snapshotToRows } from "#services/catalog/mapper.js";
 import { createCatalogService, type CatalogReaderProvider } from "#services/catalog/catalog.js";
 import type { OptionsMarketSnapshot, OptionsReader } from "@livestreak/options";
 
@@ -97,7 +97,6 @@ describe("catalog mapper", () => {
       chain: "evm"
     });
     expect(mapped.detail.watchUrl).toBe("http://host/content/blobs/ipfs/feedblob");
-
     expect(mapped.liveVaults).toHaveLength(1);
     expect(mapped.liveVaults[0]).toMatchObject({
       id: "v-open",
@@ -119,6 +118,25 @@ describe("catalog mapper", () => {
       resolvedAgoMs: 30_000,
       chain: "evm"
     });
+  });
+
+  it("an ended market with the no-recording marker exposes no replay URL", () => {
+    const base = snapshot("m2");
+    const snap: OptionsMarketSnapshot = {
+      ...base,
+      streamState:
+        base.streamState === undefined
+          ? undefined
+          : {
+              ...base.streamState,
+              status: "ended",
+              id: "livestreak:no-recording"
+            }
+    };
+
+    const mapped = mapMarket("evm", snap, NOW, "http://host");
+
+    expect(mapped.detail.watchUrl).toBeUndefined();
   });
 });
 
@@ -201,3 +219,17 @@ describe("catalog routes", () => {
     await request(app).post("/catalog/markets").send({ chain: "x" }).expect(400);
   });
 });
+
+ describe("ended catalog truth", () => {
+  it.each(["", "livestreak:no-recording", "ab".repeat(32), "unverified-blob"])("never advertises unverified ended id %s even with stale live signaling", id => {
+    const base = snapshot("m-ended");
+    const snap = { ...base, streamState: { ...base.streamState!, status: "ended" as const, id } };
+    const mapped = mapMarket("evm", snap, NOW, "http://host", undefined, true);
+    expect(mapped.stream.isLive).toBe(false);
+    expect(mapped.detail.streamStatus).toBe("ended");
+    expect(mapped.detail.watchUrl).toBeUndefined();
+    const rows = snapshotToRows("evm", snap, NOW, "http://host", undefined, true);
+    expect(rows.market.is_live).toBe(0);
+    expect(rows.market.watch_url).toBeNull();
+  });
+ });

@@ -53,6 +53,9 @@ export interface HostFmp4IngestInput {
   readonly baseUrl: string;
   /** Stream/market id keying the host ring buffer (the per-stream feed key the viewer consumes under). */
   readonly streamId: string;
+  readonly runId?: string;
+  readonly chain?: "evm" | "sui" | "solana";
+  readonly accessToken?: string;
   /** Injectable WS factory (defaults to a lazily-imported `ws` client — Node only). */
   readonly webSocketFactory?: WebSocketFactory;
   /** Milliseconds to wait for the socket to open before failing; defaults to 15000. */
@@ -125,12 +128,16 @@ export const createHostFmp4IngestTransport = (
     throw new LiveStreakConfigError({ message: "fMP4 ingest requires a streamId" });
   }
 
-  const url = toWsUrl(input.baseUrl, input.streamId);
+  const publicSocketUrl = toWsUrl(input.baseUrl, input.streamId);
+  let url = publicSocketUrl;
   const openTimeoutMs = input.openTimeoutMs ?? defaultOpenTimeoutMs;
   let socket: WebSocketLike | undefined;
   let opening = false;
   // Frames produced before the socket opens queue here and flush in order on open.
   const pending: Uint8Array[] = [];
+  let pendingBytes = 0;
+  let failed = false;
+  let ending = false;
   const errorListeners: Array<(error: Error) => void> = [];
 
   const reportError = (error: Error): void => {
@@ -146,6 +153,7 @@ export const createHostFmp4IngestTransport = (
   const flushPending = (ws: WebSocketLike): void => {
     while (pending.length > 0) {
       const frame = pending.shift()!;
+      pendingBytes -= frame.length;
       try {
         ws.send(frame);
       } catch (cause) {
@@ -155,13 +163,22 @@ export const createHostFmp4IngestTransport = (
   };
 
   const ensureSocket = (): void => {
-    if (socket !== undefined || opening) return;
+    if (socket !== undefined || opening || failed) return;
     opening = true;
-    resolveWebSocketFactory(input.webSocketFactory)
+    (async () => {
+      if(input.accessToken) {
+        const response=await fetch(input.baseUrl.replace(/\/$/, "")+"/recordings", {method:"POST",headers:{"content-type":"application/json",authorization:`Bearer ${input.accessToken}`},body:JSON.stringify({marketId:input.streamId,runId:input.runId,chain:input.chain}),signal:AbortSignal.timeout(openTimeoutMs)});
+        if(!response.ok)throw new Error(`Host recording authorization failed (${response.status})`);
+        const record=await response.json() as {id:string;ingestToken:string};
+        url=publicSocketUrl+`?recording=${encodeURIComponent(record.id)}&capability=${encodeURIComponent(record.ingestToken)}`;
+      }
+      return resolveWebSocketFactory(input.webSocketFactory);
+    })()
       .then((factory) => {
         const ws = factory(url);
         const timer = setTimeout(() => {
-          reportError(new Error(`fMP4 ingest socket open timed out (${url})`));
+          failed = true; pending.length=0; pendingBytes=0; ws.close();
+          reportError(new Error(`fMP4 ingest socket open timed out (${publicSocketUrl})`));
         }, openTimeoutMs);
         if (typeof (timer as { unref?: () => void }).unref === "function") {
           (timer as { unref: () => void }).unref();
@@ -171,6 +188,7 @@ export const createHostFmp4IngestTransport = (
           socket = ws;
           opening = false;
           flushPending(ws);
+          if (ending) { ws.close(1000); socket=undefined; }
         };
         ws.on("open", onOpen);
         ws.on("error", (err) => {
@@ -186,13 +204,14 @@ export const createHostFmp4IngestTransport = (
         if (ws.readyState === OPEN) onOpen();
       })
       .catch((cause) => {
-        opening = false;
+        opening = false; failed=true; pending.length=0; pendingBytes=0;
         reportError(cause instanceof Error ? cause : new Error(String(cause)));
       });
   };
 
   // Synchronous fire-and-forget: send now if the socket is open, else open it and queue the frame.
   const send = (frame: Uint8Array): void => {
+    if (failed) return;
     if (socket !== undefined && socket.readyState === OPEN) {
       try {
         socket.send(frame);
@@ -201,6 +220,8 @@ export const createHostFmp4IngestTransport = (
       }
       return;
     }
+    if(pendingBytes+frame.length>32*1024*1024) { failed=true;pending.length=0;pendingBytes=0;reportError(new Error("fMP4 ingest queue exceeded 32MiB"));return; }
+    pendingBytes+=frame.length;
     pending.push(frame);
     ensureSocket();
   };
@@ -215,6 +236,7 @@ export const createHostFmp4IngestTransport = (
       Effect.sync(() => {
         const body = reason === undefined ? undefined : new TextEncoder().encode(reason);
         // Best-effort end signal, then close — a dead socket at teardown is not an error.
+        ending = true;
         send(frameFmp4(FMP4_FRAME_END, body));
         if (socket !== undefined) {
           try {

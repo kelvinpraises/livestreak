@@ -33,7 +33,8 @@ const STORAGE_SCHEMES = [
   "walrus-testnet",
   "walrus-mainnet",
   "ipfs",
-  "arweave"
+  "arweave",
+  "host"
 ] as const satisfies readonly PointerScheme[];
 
 // Side encoding: 0 = yes, 1 = no (matches EVM).

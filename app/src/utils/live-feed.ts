@@ -15,6 +15,7 @@ export function shouldUseLiveFeed(
   pointer: StreamPointer | undefined,
   host: StreamFeedDetail | null | undefined,
 ): boolean {
+  if (pointer?.status === 'ended' || host?.streamStatus === 'ended') return false
   return pointer?.status === 'live' || host?.isLive === true
 }
 

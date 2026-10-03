@@ -133,6 +133,13 @@ export const mapObserve: PackageMapper = ({ functions, board, pending }) => {
     const beforePrepare = runState === 'created' || runState === 'absent'
     const failed = runState === 'failed'
     const registration = String(market?.readonly?.registrationState ?? 'none')
+    const endSubmission = market?.readonly?.endSubmission as { marketId?: string; hash?: string } | undefined
+    const endPending = !!endSubmission?.hash && endSubmission.marketId === market?.readonly?.marketId
+    const ended = registration === 'ended'
+    const broadcastLocked = ended || endPending
+    const inactive = ['created', 'absent', 'prepared', 'stopped', 'failed'].includes(runState)
+    const endHint = ended ? 'create a new observation to broadcast again' : 'confirm the pending stream end first'
+    const displayState = ended ? 'ended · no recording available' : endPending ? 'end confirmation pending' : failed ? 'failed' : registration === 'live' ? 'live' : runState
     const marketId = typeof market?.readonly?.marketId === 'string' ? market.readonly.marketId : undefined
     const registered = registration === 'registered' || registration === 'live' || registration === 'ended'
     const publishKind = typeof publish?.readonly?.kind === 'string' ? publish.readonly.kind : 'live'
@@ -142,7 +149,7 @@ export const mapObserve: PackageMapper = ({ functions, board, pending }) => {
       parentId: 'session',
       kind: 'observation',
       label: title,
-      note: failed ? 'failed' : registration === 'live' ? 'live' : runState,
+      note: displayState,
       tone: failed ? 'err' : running || registration === 'live' ? 'ok' : 'warn',
     })
 
@@ -229,7 +236,9 @@ export const mapObserve: PackageMapper = ({ functions, board, pending }) => {
     verbs.push(
       verbFor(
         prepareFn,
-        beforePrepare
+        broadcastLocked
+          ? { name: 'Prepare', state: 'locked', hint: endHint }
+          : beforePrepare
           ? { name: 'Prepare', state: 'ready', hot: true, hint: 'registers the market on-chain first' }
           : runState === 'preparing'
             ? { name: 'Prepare', state: 'busy' }
@@ -241,7 +250,9 @@ export const mapObserve: PackageMapper = ({ functions, board, pending }) => {
     verbs.push(
       verbFor(
         startFn,
-        prepared
+        broadcastLocked
+          ? { name: 'Start', state: 'locked', hint: endHint }
+          : prepared
           ? { name: 'Start', state: 'ready', hot: true }
           : runState === 'starting'
             ? { name: 'Start', state: 'busy' }
@@ -279,24 +290,39 @@ export const mapObserve: PackageMapper = ({ functions, board, pending }) => {
     } else {
       verbs.push({ name: 'Pause', state: 'locked', hint: 'needs · running', path: 'prepare → start' })
     }
+    const stopFn = familyFn(obsId, 'run', 'stop')
+    verbs.push(verbFor(stopFn, runState === 'stopping'
+      ? { name: 'Stop producer', state: 'busy' }
+      : inactive
+        ? { name: 'Stop producer', state: runState === 'stopped' || failed ? 'done' : 'locked', hint: 'needs · active producer' }
+        : { name: 'Stop producer', state: 'ready', hint: 'stops capture and publishing before ending on-chain' }))
     const setEndedFn = familyFn(obsId, 'market', 'setEnded')
     verbs.push(
       verbFor(
         setEndedFn,
         registration === 'ended'
           ? { name: 'Set ended', state: 'done' }
-          : registration === 'live'
+          : registration === 'live' && inactive
             ? {
                 // Guarded, not ready: field-less and irreversible. The first call freezes endedAt
                 // on-chain and starts the 24h lock, after which the pointer can never be revised.
                 name: 'Set ended',
                 state: 'guarded',
                 consequence:
-                  'ends the stream on-chain. The end time is frozen immediately and the recording pointer can only be revised for 24 hours after that',
+                  'ends the stream on-chain with no recording available. The original end time is frozen; a verified recording pointer can only be added within 24 hours',
               }
-            : { name: 'Set ended', state: 'locked', hint: 'needs · live' }
+            : { name: 'Set ended', state: 'locked', hint: registration === 'live' ? 'stop the producer first' : 'needs · live', ...(registration === 'live' ? { path: 'stop producer' } : {}) }
       )
     )
+
+    if (registered && publishKind === 'live' && inactive) {
+      verbs.push(verbFor(familyFn(obsId, 'market', 'recording'), { name: 'Check recording', state: 'ready' }))
+      if (market?.readonly?.recordingState === 'failed') verbs.push(verbFor(familyFn(obsId, 'market', 'retryRecording'), { name: 'Retry recording', state: 'guarded', consequence: 'rechecks a completed recording in cloud storage; an interrupted producer cannot be turned into a replay' }))
+    }
+
+    if (ended && publishKind === 'live' && !market?.readonly?.pointerId) {
+      verbs.push(verbFor(setEndedFn, { name: 'Publish replay', state: 'guarded', presetArgs: { publishReplay: 'true' }, consequence: "verifies the Host archive for this market and publishes its recording reference within the original 24-hour window" }))
+    }
 
     const removeFn = sessionFn('remove')
     if (removeFn !== undefined) {
@@ -314,16 +340,22 @@ export const mapObserve: PackageMapper = ({ functions, board, pending }) => {
     focus[thingId] = {
       title,
       sub: [
-        failed ? 'failed' : registration === 'live' ? 'live' : runState,
+        displayState,
         entry.chain ?? 'chain unknown',
         registered && marketId !== undefined ? `${short(marketId)} registered` : 'no market yet',
       ].join(' · '),
       verbs,
-      ...(marketId !== undefined ? { history: [`marketId · ${marketId}`] } : {}),
+      ...(marketId !== undefined ? { history: [`marketId · ${marketId}`, ...(market?.readonly?.recordingState ? [`recording · ${market.readonly.recordingState} · ${market.readonly.recordingSegments ?? 0} segments · ${market.readonly.recordingDurationSeconds ?? 0}s`, ...(market.readonly.recordingError ? [String(market.readonly.recordingError)] : [])] : [])] } : {}),
     }
 
     // The frontier per observation: one next step.
-    if (failed) {
+    if (ended) {
+      // Terminal market: there is no producer restart frontier.
+    } else if (endPending) {
+      attention.push({ title: `Confirm end: ${title}`, detail: 'retry Set ended to reconcile the original transaction', targetId: thingId, tone: 'do' })
+    } else if (inactive && registration === 'live') {
+      attention.push({ title: `End broadcast: ${title}`, detail: 'producer stopped; Set ended records no recording available', targetId: thingId, tone: 'do' })
+    } else if (failed) {
       attention.push({ title: `${title} failed`, detail: 'see the run state and retry', targetId: thingId, tone: 'err' })
     } else if (beforePrepare) {
       attention.push({

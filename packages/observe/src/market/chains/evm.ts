@@ -1,3 +1,5 @@
+import { retainMarketSubmission } from "#market/submission.js";
+import { confirmMarketEnd } from "#market/end.js";
 import { Effect } from "effect";
 import { LiveStreakConfigError, LiveStreakRuntimeError, type LiveStreakError } from "@livestreak/core";
 import {
@@ -6,11 +8,12 @@ import {
   pollUntilUserOperationIncluded as pollUntilUserOperationIncludedShared
 } from "@livestreak/wallet";
 import { evm } from "@livestreak/contracts";
-import { encodeAbiParameters, encodeFunctionData, http, keccak256, createPublicClient } from "viem";
+import { encodeAbiParameters, encodeFunctionData, http, keccak256, custom, createPublicClient } from "viem";
 import type {
   EvmAddress,
   MarketLifecycleInput,
   MarketLifecycleTxResult,
+  MarketStreamState,
   MarketRegisterResult,
   MarketRegistrar,
   ObserveRunMarketConfig,
@@ -43,19 +46,21 @@ export const computeMarketId = (
 
 /** Validate the storage pointer shared by goLive/setEnded (matches the on-chain guards). */
 const validateLifecycleInput = (
-  input: MarketLifecycleInput
+  input: MarketLifecycleInput,
+  ending = false
 ): Effect.Effect<MarketLifecycleInput, LiveStreakConfigError> => {
   if (!/^0x[0-9a-fA-F]{64}$/.test(input.marketId)) {
     return Effect.fail(
       new LiveStreakConfigError({ message: "goLive/setEnded marketId must be a 0x-prefixed bytes32" })
     );
   }
-  if (input.scheme !== 0 && input.scheme !== 1 && input.scheme !== 2 && input.scheme !== 3) {
+  if (input.scheme !== 0 && input.scheme !== 1 && input.scheme !== 2 && input.scheme !== 3 && input.scheme !== 4) {
     return Effect.fail(
-      new LiveStreakConfigError({ message: `Invalid StorageScheme ${String(input.scheme)} (expected 0..3)` })
+      new LiveStreakConfigError({ message: `Invalid StorageScheme ${String(input.scheme)} (expected 0..4)` })
     );
   }
-  if (input.id.length === 0 || input.id.length > 64) {
+  if (new TextEncoder().encode(input.id).length > 64 ||
+      (input.id.length === 0 && (!ending || input.scheme !== 0))) {
     return Effect.fail(
       new LiveStreakConfigError({ message: `Storage id length must be 1..64 bytes, got ${input.id.length}` })
     );
@@ -109,7 +114,7 @@ export const createEvmMarketRegistrar = (
         );
       }
 
-      const validated = yield* validateLifecycleInput(input);
+      const validated = yield* validateLifecycleInput(input, functionName === "setEnded");
 
       const { account, readOnly } = yield* openAccount();
 
@@ -119,19 +124,29 @@ export const createEvmMarketRegistrar = (
         args: [validated.marketId, validated.scheme, validated.id]
       });
 
-      const sendResult = yield* Effect.tryPromise({
-        try: () =>
-          account.sendTransaction({
-            to: marketRegistryAddress,
-            data,
-            value: 0n
-          }),
+      const sendResult = yield* retainMarketSubmission(functionName === "setEnded" ? validated : undefined, Effect.tryPromise({
+        try: () => account.sendTransaction({ to: marketRegistryAddress, data, value: 0n }),
         catch: (error) => classifySendFailure(error)
-      });
-
+      }));
       yield* pollUntilUserOperationIncluded(readOnly, sendResult.hash);
 
       return { userOpHash: sendResult.hash } satisfies MarketLifecycleTxResult;
+    });
+
+  const readStream = (marketId: StreamId): Effect.Effect<MarketStreamState, LiveStreakError> =>
+    Effect.tryPromise({
+      try: async () => {
+        const walletConfig = config.walletInit.config as import("@livestreak/wallet").EvmErc4337WalletConfig;
+        const client = createPublicClient({ transport: typeof walletConfig.provider === "string" ? http(walletConfig.provider) : custom(walletConfig.provider) });
+        const market = await client.readContract({ address: marketRegistryAddress, abi: marketRegistryAbi, functionName: "getMarket", args: [marketId] });
+        const { readOnly } = await (accountPromise ??= deriveAccount());
+        if (market.creator.toLowerCase() !== (await readOnly.getAddress()).toLowerCase()) throw new Error("MarketRegistry: not creator");
+        const [status, scheme, id, , endedAt] = await client.readContract({
+          address: marketRegistryAddress, abi: marketRegistryAbi, functionName: "streamState", args: [marketId]
+        });
+        return { status: status === 2 ? "ended" : status === 1 ? "live" : "none", scheme: scheme as MarketStreamState["scheme"], id, endedAtMs: Number(endedAt) * 1000 };
+      },
+      catch: (error) => toRuntimeError("Failed to read stream state", error)
     });
 
   return {
@@ -209,7 +224,8 @@ export const createEvmMarketRegistrar = (
       } satisfies MarketRegisterResult;
     }),
   goLive: (input) => sendLifecycleCall("goLive", input),
-  setEnded: (input) => sendLifecycleCall("setEnded", input)
+  setEnded: (input) => validateLifecycleInput(input, true).pipe(Effect.flatMap(() =>
+    confirmMarketEnd(input, readStream(input.marketId), sendLifecycleCall("setEnded", input))))
   };
 };
 
@@ -228,7 +244,10 @@ const pollUntilUserOperationIncluded = (
     try: async () => {
       await pollUntilUserOperationIncludedShared(readOnly, userOpHash);
     },
-    catch: (error) => toRuntimeError("UserOperation inclusion failed", error)
+    catch: (error) => new LiveStreakRuntimeError({
+      message: `UserOperation inclusion failed: ${String(error)}`,
+      ...(String(error).includes("UserOperation included but reverted") ? { metadata: { retryable: false } } : {})
+    })
   });
 
 const classifySendFailure = (error: unknown): LiveStreakRuntimeError => {

@@ -1,15 +1,12 @@
 export * from "./catalog.js";
 export * from "./descriptor.js";
 export {
-  WalrusNetwork,
   PointerScheme,
   StorePointer,
   ContentBlobStoreRequest,
   ContentPersistence,
   ContentDescriptorAdvert,
-  WalrusDescriptorAdvert,
-  pointerSchemeForNetwork,
-} from "./walrus.js";
+} from "./content.js";
 export * from "./media/policy.js";
 export * from "./media/session.js";
 export * from "./media/manifest.js";
@@ -22,3 +19,5 @@ export * from "./validation.js";
 
 export * from "./mandates.js";
 export * from "./resolutions.js";
+
+export { createHostRecordingClient, type RecordingScope, type RecordingReceipt } from "./content.js";

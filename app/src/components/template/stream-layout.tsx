@@ -65,7 +65,7 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
   // this market or report a non-'live' status, flipping eligibility false→true.
   const liveEligible =
     hostStream.ready && shouldUseLiveFeed(streamPointer, hostDetail)
-  const streamEnded = streamPointer?.status === 'ended'
+  const streamEnded = streamPointer?.status === 'ended' || hostDetail?.streamStatus === 'ended'
 
   // A transient flip would tear down the live MSE session AND remount the keyed <video>. So LATCH
   // eligibility sticky per streamId (see nextLiveFeedLatch): once live it stays enabled until the pointer
@@ -196,7 +196,7 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
       </div>
 
       {/* Stream bar */}
-      <StreamBar frame={frame} streamTitle={streamTitle} totalPooled={totalPooled} totalPooledRatePerSec={totalPooledRatePerSec} />
+      <StreamBar status={streamEnded ? 'ended' : liveEnabled || fixture ? 'live' : 'offline'} frame={frame} streamTitle={streamTitle} totalPooled={totalPooled} totalPooledRatePerSec={totalPooledRatePerSec} />
 
       {/* Main content: LEFT video + RIGHT predictions */}
       <div className="stream-split" style={{ flex: 1, display: 'flex', position: 'relative', zIndex: 1, overflow: 'hidden' }}>

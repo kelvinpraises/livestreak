@@ -435,7 +435,7 @@ const steward: ConsoleModel = {
               kind: 'select',
               options: [{ label: 'YES' }, { label: 'NO' }],
             },
-            { name: 'evidence', value: 'walrus:0x8c…' },
+            { name: 'evidence', value: 'host:0x8c…' },
           ],
         },
         {
@@ -445,7 +445,7 @@ const steward: ConsoleModel = {
         },
         { name: 'Trigger hot', state: 'ready' },
       ],
-      history: ['evidence · walrus:0x8c…'],
+      history: ['evidence · host:0x8c…'],
     },
   },
   attention: [

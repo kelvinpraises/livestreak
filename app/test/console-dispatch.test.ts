@@ -143,3 +143,11 @@ describe('pendingReducer', () => {
     expect(pendingReducer(fired, { type: 'expired', callRef: 'r1', firedBefore: 100 }).has('r1')).toBe(true)
   })
 })
+
+it('carries the explicit replay choice through schema-based dispatch', () => {
+  const fn: FunctionDescriptor = { id: 'observe.obs.market.setEnded', package: 'observe', name: 'setEnded', label: 'Set ended', scope: 'market:setEnded', target: { kind: 'market', marketId: '0xabc' }, disabled: false, inputSchema: { type: 'object', properties: [{ name: 'publishReplay', value: { type: 'boolean', default: false }, help: '' } ] } }
+  const replay = buildCall(fn, { presetArgs: { publishReplay: 'true' } }, {})
+  expect(replay.ok && replay.envelope?.args).toMatchObject({ publishReplay: true })
+  const end = buildCall(fn, {}, {})
+  expect(end.ok && end.envelope?.args).toMatchObject({ publishReplay: false })
+})

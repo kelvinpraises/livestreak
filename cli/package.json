@@ -28,7 +28,7 @@
     "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.public.json",
     "lint": "eslint src test",
     "test": "vitest run",
-    "dev": "NODE_OPTIONS=--conditions=livestreak-dev tsx src/main.ts"
+    "dev": "NODE_OPTIONS=--conditions=livestreak-dev node --env-file-if-exists=../.env --import tsx src/main.ts"
   },
   "dependencies": {
     "@effect/cli": "0.69.2",

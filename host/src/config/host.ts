@@ -1,16 +1,6 @@
-import type {
-  HostModuleToken,
-  HostProviderDescriptor,
-  WalrusNetwork
-} from "@livestreak/host";
+import type { HostModuleToken, HostProviderDescriptor } from "@livestreak/host";
 import type { OutputMode } from "@livestreak/schema";
-import {
-  bootstrapWalrus,
-  parseWalrusNetwork,
-  profileBlobEndpoints,
-  walrusNetworkProfiles,
-  type ResolvedWalrus
-} from "../infrastructure/walrus/network.js";
+import type { StorageConfig } from "../infrastructure/storage/object-store.js";
 import { readOptionalEnv } from "./env.js";
 
 // --- exports ---
@@ -30,11 +20,9 @@ export interface HostServerConfig {
   readonly cacheReceipts: "none" | "optional" | "required";
   readonly minDurationSeconds: number;
   readonly maxDurationSeconds: number;
-  readonly walrusNetwork: WalrusNetwork | null;
   readonly walletSeed: string | null;
-  readonly walrusContentEphemeralEpochs: number;
-  readonly walrusContentLockedEpochs: number;
-  readonly resolvedWalrus: ResolvedWalrus | null;
+  readonly storage: StorageConfig | null;
+  readonly contentWriteToken: string | null;
   readonly livekitApiKey: string | undefined;
   // --- Remote Bridge Console (P4) ---
   /** App origin the host 302-redirects `/remote/:session` to (UI lives there). */
@@ -47,18 +35,12 @@ export interface HostServerConfig {
   readonly remoteSessionTtlMs: number;
 }
 
-export const isWalrusEnabled = (config: HostServerConfig): boolean =>
-  config.walrusNetwork !== null;
-
-export const isWalrusBootstrapped = (config: HostServerConfig): boolean =>
-  isWalrusEnabled(config) && config.resolvedWalrus !== null;
-
 const allModules: readonly HostModuleToken[] = [
   "aa",
   "media",
   "memory",
   "forum",
-  "walrus_content",
+  "content",
   "discovery",
   "remote"
 ];
@@ -78,11 +60,9 @@ export const defaultHostServerConfig = (): HostServerConfig => ({
   cacheReceipts: "required",
   minDurationSeconds: 0,
   maxDurationSeconds: 6 * 60 * 60,
-  walrusNetwork: parseWalrusNetwork(readOptionalEnv("LIVESTREAK_WALRUS_NETWORK")),
   walletSeed: readOptionalEnv("LIVESTREAK_WALLET_SEED"),
-  walrusContentEphemeralEpochs: readPositiveIntEnv("LIVESTREAK_WALRUS_CONTENT_EPHEMERAL_EPOCHS", 1),
-  walrusContentLockedEpochs: readPositiveIntEnv("LIVESTREAK_WALRUS_CONTENT_LOCKED_EPOCHS", 5),
-  resolvedWalrus: null,
+  storage: readStorageConfig(),
+  contentWriteToken: readOptionalEnv("LIVESTREAK_HOST_API_TOKEN"),
   livekitApiKey: process.env.LIVEKIT_API_KEY,
   remoteAppOrigin: readOptionalEnv("LIVESTREAK_APP_ORIGIN"),
   remoteGatewayToken: readOptionalEnv("LIVESTREAK_REMOTE_GATEWAY_TOKEN"),
@@ -96,7 +76,6 @@ export const toHostProviderDescriptor = (config: HostServerConfig): HostProvider
     (mode) => mode !== "simulcast" || simulcastAvailable
   );
 
-  const blob = profileBlobEndpoints(config);
 
   return {
     version: "0.1.0",
@@ -105,15 +84,13 @@ export const toHostProviderDescriptor = (config: HostServerConfig): HostProvider
     modules: [...config.enabledModules],
     supportedOutputs: [...advertisedOutputs],
     media: { simulcastAvailable },
-    walrus: {
-      network: config.walrusNetwork
-    },
     memory: {
       recordsAvailable: config.enabledModules.includes("memory")
     },
     content: {
-      publisherUrl: blob?.publisherUrl ?? null,
-      aggregatorUrl: blob?.aggregatorUrl ?? null
+      available: config.enabledModules.includes("content") && config.storage !== null,
+      apiUrl: config.baseUrl.replace(/\/$/, "") + "/content",
+      recordingsAvailable: config.enabledModules.includes("content") && config.storage !== null && config.contentWriteToken !== null
     },
     termsVersion: config.termsVersion
   };
@@ -126,7 +103,10 @@ export const isModuleEnabled = (
 
 export const bootstrapHostServerConfig = async (
   config: HostServerConfig = defaultHostServerConfig()
-): Promise<HostServerConfig> => bootstrapWalrus(config);
+): Promise<HostServerConfig> => {
+  if (config.storage !== null && !config.contentWriteToken) throw new Error("LIVESTREAK_HOST_API_TOKEN is required for cloud write access");
+  return config;
+};
 
 // --- helpers ---
 
@@ -140,4 +120,17 @@ const readPositiveIntEnv = (key: string, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
 
-export const walrusProfileFor = (network: WalrusNetwork) => walrusNetworkProfiles[network];
+
+export const readStorageConfig = (): StorageConfig | null => {
+  const values = [readOptionalEnv("LIVESTREAK_STORAGE_ENDPOINT"), readOptionalEnv("LIVESTREAK_STORAGE_BUCKET"), readOptionalEnv("LIVESTREAK_STORAGE_ACCESS_KEY_ID"), readOptionalEnv("LIVESTREAK_STORAGE_SECRET_ACCESS_KEY"), readOptionalEnv("LIVESTREAK_STORAGE_PUBLIC_BASE_URL")];
+  if (values.every(v => v === null)) return null;
+  const provider = readOptionalEnv("LIVESTREAK_STORAGE_PROVIDER") ?? "s3";
+  if (provider !== "s3") throw new Error("Unsupported cloud storage provider");
+  if (values.some(v => v === null)) throw new Error("Incomplete cloud storage configuration");
+  const [endpoint, bucket, accessKeyId, secretAccessKey, publicBaseUrl] = values as string[];
+  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey || !publicBaseUrl) throw new Error("Incomplete storage configuration");
+  if (new URL(endpoint).protocol !== "https:" || new URL(publicBaseUrl).protocol !== "https:") throw new Error("Cloud storage requires HTTPS");
+  const publicUrl = new URL(publicBaseUrl);
+  if(publicUrl.username || publicUrl.password || publicUrl.search || publicUrl.hash) throw new Error("Public storage base URL must not contain credentials, query or fragment");
+  return { endpoint, bucket, accessKeyId, secretAccessKey, publicBaseUrl, region: readOptionalEnv("LIVESTREAK_STORAGE_REGION") ?? "auto" };
+};

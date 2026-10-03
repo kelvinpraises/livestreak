@@ -12,9 +12,9 @@ describe("edges/host", () => {
       if (path === "/content/blobs") {
         return new Response(
           JSON.stringify({
-            scheme: "walrus-testnet",
+            scheme: "host",
             id: "blob_01",
-            url: "https://aggregator.walrus-testnet.walrus.space/v1/blobs/blob_01"
+            url: "https://media.example/content/blob_01"
           }),
           { status: 201, headers: { "content-type": "application/json" } }
         );
@@ -27,9 +27,9 @@ describe("edges/host", () => {
     const pointer = await host.uploadBlob(new Uint8Array([1, 2, 3]), "video/mp4", "locked");
 
     expect(pointer).toEqual({
-      scheme: "walrus-testnet",
+      scheme: "host",
       id: "blob_01",
-      url: "https://aggregator.walrus-testnet.walrus.space/v1/blobs/blob_01"
+      url: "https://media.example/content/blob_01"
     });
 
     expect(calls[0]?.path).toBe("/content/blobs");

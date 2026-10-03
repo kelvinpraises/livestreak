@@ -47,6 +47,7 @@ const wireFunctions: FunctionDescriptor[] = [
   fn(`observe.obs.${OBS}.publish.configure`, 'configure'),
   fn(`observe.obs.${OBS}.run.prepare`, 'prepare'),
   fn(`observe.obs.${OBS}.run.start`, 'start'),
+  fn(`observe.obs.${OBS}.run.stop`, 'stop'),
   fn(`observe.obs.${OBS}.pause.pause`, 'pause'),
   // goLive/setEnded carry NO fields — pointer and scheme are board-derived in the package.
   fn(`observe.obs.${OBS}.market.goLive`, 'goLive'),
@@ -126,6 +127,7 @@ describe('mapObserve (families)', () => {
       'Start',
       'Go live',
       'Pause',
+      'Stop producer',
       'Set ended',
       'Close out',
     ])
@@ -182,17 +184,40 @@ describe('mapObserve (families)', () => {
     expect(card?.history).toEqual([`marketId · ${MARKET}`])
   })
 
-  it('live: Set ended guarded, no do-cards left, tone ok', () => {
+  it('live: stop producer is available and Set ended waits for it', () => {
     const model = mapObserve({ functions: wireFunctions, board: boardAt('running', 'live'), pending: NONE })
     expect(consoleModelViolations(model)).toEqual([])
     const byName = new Map(model.focus[`obs:${OBS}`]?.verbs.map((v) => [v.name, v]))
     expect(byName.get('Go live')?.state).toBe('done')
     // Field-less AND irreversible (freezes endedAt, starts the 24h lock) — hold-to-run, not one click.
-    expect(byName.get('Set ended')?.state).toBe('guarded')
-    expect(byName.get('Set ended')?.consequence).toContain('24 hours')
+    expect(byName.get('Stop producer')?.state).toBe('ready')
+    expect(byName.get('Set ended')?.state).toBe('locked')
     expect(byName.get('Set ended')?.fields ?? []).toEqual([])
     expect(model.attention.filter((a) => a.tone === 'do')).toEqual([])
     expect(model.things.find((t) => t.kind === 'observation')?.note).toBe('live')
+  })
+
+  it('stopped live producer can end, with explicit recording absence', () => {
+    const model = mapObserve({ functions: wireFunctions, board: boardAt('stopped', 'live'), pending: NONE })
+    const verbs = new Map(model.focus[`obs:${OBS}`]?.verbs.map(v => [v.name, v]))
+    expect(verbs.get('Stop producer')?.state).toBe('done')
+    expect(verbs.get('Set ended')).toMatchObject({ state: 'guarded' })
+    expect(verbs.get('Set ended')?.consequence).toContain('no recording available')
+    expect(model.attention[0]?.title).toBe('End broadcast: Friday Cup')
+    expect(consoleModelViolations(model)).toEqual([])
+  })
+
+  it('ended and pending end observations never invite a producer restart', () => {
+    for (const pending of [false, true]) {
+      const board = boardAt('prepared', pending ? 'live' : 'ended')
+      if (pending) Object.assign(board.cells[`obs:${OBS}:market`].readonly!, { endSubmission: { marketId: MARKET, hash: 'original' } })
+      const model = mapObserve({ functions: wireFunctions, board, pending: NONE })
+      const verbs = new Map(model.focus[`obs:${OBS}`]?.verbs.map(v => [v.name, v]))
+      expect(verbs.get('Prepare')?.state).toBe('locked')
+      expect(verbs.get('Start')?.state).toBe('locked')
+      if (!pending) expect(model.focus[`obs:${OBS}`]?.sub).toContain('ended · no recording available')
+      expect(consoleModelViolations(model)).toEqual([])
+    }
   })
 
   it('two observations: independent rows, cards and frontiers', () => {
@@ -238,4 +263,18 @@ describe('mapObserve (families)', () => {
       new Map(model.focus[`obs:${OBS2}`]?.verbs.map((v) => [v.name, v])).get('Prepare')
     ).toMatchObject({ state: 'ready', hot: true, callRef: `observe.obs.${OBS2}.run.prepare` })
   })
+})
+
+it('offers bound recording controls only for the Host-relayed live lane', () => {
+ const functions=[...wireFunctions,fn(`observe.obs.${OBS}.market.recording`,'recording'),fn(`observe.obs.${OBS}.market.retryRecording`,'retryRecording')]
+ const board=boardAt('stopped','ended')
+ board.cells[`obs:${OBS}:market`]=cell('ended',{readonly:{registrationState:'ended',marketId:MARKET,recordingState:'failed',recordingSegments:4,recordingDurationSeconds:12,recordingError:'Public delivery unavailable'}})
+ const live=mapObserve({functions,board,pending:NONE}).focus[`obs:${OBS}`]
+ expect(live?.verbs.map(v=>v.name)).toEqual(expect.arrayContaining(['Check recording','Retry recording','Publish replay']))
+ expect(live?.history).toContain('recording · failed · 4 segments · 12s')
+ for(const kind of ['direct','file-export']) {
+  board.cells[`obs:${OBS}:publish`]=cell('idle',{readonly:{kind}})
+  const verbs=mapObserve({functions,board,pending:NONE}).focus[`obs:${OBS}`]?.verbs.map(v=>v.name)
+  expect(verbs).not.toContain('Publish replay');expect(verbs).not.toContain('Check recording');expect(verbs).not.toContain('Retry recording')
+ }
 })

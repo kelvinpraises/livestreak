@@ -3,8 +3,7 @@ import { Schema } from "effect";
 import { MemoryDescriptorAdvert } from "./memory.js";
 import {
   ContentDescriptorAdvert,
-  WalrusDescriptorAdvert
-} from "./walrus.js";
+} from "./content.js";
 
 // --- exports ---
 
@@ -15,7 +14,7 @@ export const HostModuleToken = Schema.Literal(
   "media",
   "memory",
   "forum",
-  "walrus_content",
+  "content",
   "discovery",
   // Remote Bridge Console relay router (Objective 4, P4). Canonicalized here from
   // the wave-1 local superset; mirrors `remoteModuleToken` in @livestreak/schema.
@@ -27,15 +26,12 @@ export type HostModuleToken = Schema.Schema.Type<typeof HostModuleToken>;
 export { MemoryDescriptorAdvert } from "./memory.js";
 
 export {
-  WalrusNetwork,
   ContentDescriptorAdvert,
-  WalrusDescriptorAdvert,
   PointerScheme,
   StorePointer,
   ContentBlobStoreRequest,
   ContentPersistence,
-  pointerSchemeForNetwork
-} from "./walrus.js";
+} from "./content.js";
 
 export const MediaDescriptorAdvert = Schema.Struct({
   simulcastAvailable: Schema.Boolean
@@ -50,7 +46,6 @@ export const HostProviderDescriptor = Schema.Struct({
   modules: Schema.Array(HostModuleToken),
   supportedOutputs: Schema.Array(OutputMode),
   media: MediaDescriptorAdvert,
-  walrus: WalrusDescriptorAdvert,
   memory: MemoryDescriptorAdvert,
   content: ContentDescriptorAdvert,
   termsVersion: Schema.optional(Schema.NonEmptyString)

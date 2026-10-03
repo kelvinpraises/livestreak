@@ -15,6 +15,7 @@ export const buildPackageInits = (
   const base = {
     chain: caip2,
     hostUrl,
+    ...(process.env.LIVESTREAK_HOST_API_TOKEN ? { hostApiToken: process.env.LIVESTREAK_HOST_API_TOKEN } : {}),
     wallet
   } as const;
 

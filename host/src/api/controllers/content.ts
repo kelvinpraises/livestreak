@@ -4,11 +4,11 @@ import { asyncHandler, param, sendRouteResult } from "../middleware/respond.js";
 import {
   handleContentBlobResolve,
   handleContentBlobStore
-} from "../../services/walrus/content/routes.js";
+} from "../../services/content/routes.js";
 import {
   handleVodMetadataResolve,
   handleVodMetadataStore
-} from "../../services/walrus/content/vod.js";
+} from "../../services/content/vod.js";
 
 // --- exports ---
 
@@ -18,7 +18,7 @@ export const createContentController = (deps: HostRouteDeps) => ({
       res,
       await handleContentBlobStore(req.body, {
         config: deps.config,
-        store: deps.walrus.content.store
+        store: deps.content.store
       }),
       next,
       201
@@ -30,7 +30,7 @@ export const createContentController = (deps: HostRouteDeps) => ({
       res,
       await handleContentBlobResolve(param(req.params.scheme), param(req.params.id), {
         config: deps.config,
-        store: deps.walrus.content.store
+        store: deps.content.store
       }),
       next
     );
@@ -39,7 +39,7 @@ export const createContentController = (deps: HostRouteDeps) => ({
   storeVod: asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
     sendRouteResult(
       res,
-      await handleVodMetadataStore(req.body, { store: deps.walrus.content.store }),
+      await handleVodMetadataStore(req.body, { store: deps.content.store }),
       next,
       201
     );
@@ -49,7 +49,7 @@ export const createContentController = (deps: HostRouteDeps) => ({
     sendRouteResult(
       res,
       await handleVodMetadataResolve(param(req.params.scheme), param(req.params.id), {
-        store: deps.walrus.content.store
+        store: deps.content.store
       }),
       next
     );

@@ -1,6 +1,6 @@
 import type { EndpointDescriptor } from "@livestreak/host";
 import request from "supertest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createApp, createHostRouteDeps } from "#server.js";
 import { handleFindSimilar, handleIndexVault } from "#api/controllers/discovery.js";
 import { handleMemoryRecall, handleMemoryRemember } from "#services/memory/records.js";
@@ -102,14 +102,9 @@ describe("host route handlers", () => {
         atMs: 1
       })
       .expect(201);
-    // Content blobs no longer hard-gate on Walrus: with Walrus unconfigured the host
-    // falls back to a local store, so requests are validated/served on their merits —
-    // an empty payload is a 400 and an unknown pointer is a 404 (not a blanket 503).
-    await request(app)
-      .post("/content/blobs")
-      .send({ bytesBase64: "", persistence: "ephemeral" })
-      .expect(400);
-    await request(app).get("/content/blobs/walrus-testnet/blob_01").expect(404);
+    // No production archive fallback: writes require configured cloud access.
+    await request(app).post("/content/blobs").send({ bytesBase64: "", persistence: "ephemeral" }).expect(503);
+    await request(app).get("/content/blobs/host/blob_01").expect(404);
     await request(app)
       .post("/aa/bundler/local")
       .send({ jsonrpc: "2.0", method: "eth_chainId", params: [], id: 1 })

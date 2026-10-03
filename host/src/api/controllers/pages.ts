@@ -47,6 +47,14 @@ export const createPagesController = (deps: HostRouteDeps) => ({
       );
       return;
     }
-    sendRouteResult(res, { ok: true, result: detail }, next);
+    let result=detail;
+    if(deps.config.storage !== null) {
+      try {
+        const record=await deps.recordings.forMarket(detail.chain,detail.marketId);
+        const current=record?.status === "ready" ? await deps.catalog.buildStream(detail.marketId) : null;
+        if(record) result={...detail,recordingStatus:record.status,...(detail.streamStatus==="ended" && record.status==="ready" && current?.chain===detail.chain && current?.streamStatus==="ended" && record.pointer !== undefined && record.pointer.id===current?.replayPointerId ? { replay:{pointerId:record.pointer.id,url:record.pointer.url,format:"hls" as const,durationSeconds:record.durationSeconds} } : {})};
+      } catch { /* Cloud unavailable: omit replay rather than invent an archive. */ }
+    }
+    sendRouteResult(res, { ok: true, result }, next);
   })
 });

@@ -81,14 +81,14 @@ const formatElapsed = (fromMs: number, nowMs: number): string => {
   return rem > 0 ? `${hours}h ${rem}m` : `${hours}h`;
 };
 
-// Resolve a watchable URL for a market's stream pointer. Local/ipfs pointers resolve
-// back through this host's content endpoint; walrus pointers are served by aggregator.
+// Live ids route media. An ended pointer alone is not proof of a playable archive:
+// Flow07 will add verified recording metadata. Until then never advertise replay.
 const watchUrlFor = (
   snap: OptionsMarketSnapshot,
   baseUrl: string
 ): string | undefined => {
   const stream = snap.streamState;
-  if (stream === undefined || stream.status === "none") return undefined;
+  if (stream?.status !== "live" || !stream.id || stream.id === "livestreak:no-recording") return undefined;
   const base = baseUrl.replace(/\/$/u, "");
   return `${base}/content/blobs/${stream.scheme}/${encodeURIComponent(stream.id)}`;
 };
@@ -107,7 +107,7 @@ export const mapMarket = (
   const marketId = String(snap.market.marketId);
   const title = snap.market.title;
   const category = snap.market.category ?? "Live";
-  const isLive = snap.streamState?.status === "live" || liveSignal === true;
+  const isLive = snap.streamState?.status !== "ended" && (snap.streamState?.status === "live" || liveSignal === true);
 
   const fromMs =
     snap.streamState?.updatedAtMs ?? snap.market.timing?.createdAtMs ?? nowMs;
@@ -179,6 +179,8 @@ export const mapMarket = (
     title,
     category,
     isLive,
+    streamStatus: snap.streamState?.status ?? "none",
+    ...(snap.streamState?.status === "ended" && snap.streamState.scheme === "host" ? { replayPointerId: snap.streamState.id } : {}),
     activeVaults,
     totalPooled,
     chain,
@@ -248,7 +250,7 @@ export const snapshotToRows = (
   const marketId = String(snap.market.marketId);
   const title = snap.market.title;
   const category = snap.market.category ?? "Live";
-  const isLive = snap.streamState?.status === "live" || liveSignal === true;
+  const isLive = snap.streamState?.status !== "ended" && (snap.streamState?.status === "live" || liveSignal === true);
   const fromMs =
     snap.streamState?.updatedAtMs ?? snap.market.timing?.createdAtMs ?? nowMs;
   const watchUrl = watchUrlFor(snap, baseUrl);
@@ -328,7 +330,7 @@ export const marketRowToSummary = (m: Market, nowMs: number): HostStreamSummary 
   marketId: m.id,
   title: m.title,
   category: m.category,
-  isLive: m.is_live === 1,
+  isLive: m.status !== "ended" && m.is_live === 1,
   elapsed: formatElapsed(m.from_ms, nowMs),
   activeVaults: m.active_vaults,
   totalPooled: m.total_pooled,
@@ -340,11 +342,12 @@ export const marketRowToDetail = (m: Market): HostStreamDetail => ({
   marketId: m.id,
   title: m.title,
   category: m.category,
-  isLive: m.is_live === 1,
+  isLive: m.status !== "ended" && m.is_live === 1,
+  streamStatus: m.status === "ended" ? "ended" : m.status === "live" ? "live" : "none",
   activeVaults: m.active_vaults,
   totalPooled: m.total_pooled,
   chain: m.chain,
-  ...(m.watch_url === null ? {} : { watchUrl: m.watch_url })
+  ...(m.status === "ended" || m.watch_url === null ? {} : { watchUrl: m.watch_url })
 });
 
 // A live (open|hot) vault row + its market title -> the homepage live rail item.

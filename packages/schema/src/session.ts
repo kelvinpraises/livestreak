@@ -32,6 +32,8 @@ export interface PackageRuntimeInit {
   readonly contracts: Readonly<Record<string, string>>;
   readonly wallet: SessionWallet;
   readonly hostUrl: string;
+  /** Host-issued write credential; private gateway only, never a browser field. */
+  readonly hostApiToken?: string;
   /** Observe-only session fields. */
   readonly title?: string;
   readonly runId?: string;

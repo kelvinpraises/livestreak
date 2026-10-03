@@ -63,7 +63,7 @@ RUN npm run build:packages:image
 COPY host ./host
 RUN npm run build -w @livestreak/host-server
 
-# Runtime. Config (RPC URLs, executor keys, walrus endpoints, remote-console secrets)
+# Runtime. Config (RPC URLs, executor keys, cloud storage settings, remote-console secrets)
 # comes from `--env-file` at `docker run` time — never baked into the image.
 ENV NODE_ENV=production
 ENV LIVESTREAK_HOST_BIND_HOST=0.0.0.0

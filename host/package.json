@@ -9,18 +9,18 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "dev": "NODE_OPTIONS=--conditions=livestreak-dev tsx watch src/main.ts",
-    "start": "node dist/main.js"
+    "dev": "NODE_OPTIONS=--conditions=livestreak-dev node --env-file-if-exists=../.env --import tsx --watch src/main.ts",
+    "start": "node --env-file-if-exists=../.env dist/main.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1146.0",
+    "@aws-sdk/lib-storage": "^3.1146.0",
     "@livestreak/core": "file:../packages/core",
     "@livestreak/host": "file:../packages/host",
     "@livestreak/options": "file:../packages/options",
     "@livestreak/schema": "file:../packages/schema",
     "@livestreak/wallet": "file:../packages/wallet",
-    "@mysten/seal": "^1.2.1",
     "@mysten/sui": "^2.19.0",
-    "@mysten/walrus": "^1.2.1",
     "@pimlico/alto": "^0.0.20",
     "@solana/spl-token": "^0.4.15",
     "@solana/web3.js": "^1.98.4",

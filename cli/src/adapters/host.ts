@@ -58,7 +58,7 @@ export const createHostClient = (
 
       return requestJson<StorePointer>("/content/blobs", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", ...(process.env.LIVESTREAK_HOST_API_TOKEN ? { authorization: `Bearer ${process.env.LIVESTREAK_HOST_API_TOKEN}` } : {}) },
         body: JSON.stringify(body)
       });
     }

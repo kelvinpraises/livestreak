@@ -24,7 +24,7 @@ const { config, deps, app } = await bootstrapHostServer();
 // first — Node invokes upgrade listeners in registration order).
 const httpServer = createServer(app);
 attachRemoteWss(httpServer, deps);
-attachLiveWss(httpServer, deps.live);
+attachLiveWss(httpServer, deps.live, deps.recordings, config.storage !== null);
 httpServer.on("upgrade", (req, socket) => {
   const path = (req.url ?? "").split("?")[0] ?? "";
   if (path.startsWith("/remote/") || path.startsWith("/live/")) return; // a claimer already handled it

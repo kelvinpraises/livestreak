@@ -1,3 +1,5 @@
+> Historical work log. Flow07 replaced the Walrus runtime with generic Host cloud storage; see `host/docs/storage.md` for current behavior.
+
 # CLI / Gateway — TODO
 
 `cli/` is a **top-level domain**, not a package. It **sequesters** the executor/library packages

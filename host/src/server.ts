@@ -12,6 +12,8 @@ import {
 import { createAaRouter } from "./api/routes/aa.js";
 import { createCatalogRouter } from "./api/routes/catalog.js";
 import { createPagesRouter } from "./api/routes/pages.js";
+import { createUploadsRouter } from "./api/routes/uploads.js";
+import { createRecordingsRouter } from "./api/routes/recordings.js";
 import { createContentRouter } from "./api/routes/content.js";
 import { createDescriptorRouter } from "./api/routes/descriptor.js";
 import { createDiscoveryRouter } from "./api/routes/discovery.js";
@@ -50,6 +52,12 @@ export const createApp = (deps: HostRouteDeps): Express => {
   app.use(securityHeaders);
   app.use(createCorsMiddleware(deps.config));
 
+  const moneyRateLimit = createRateLimit({ capacity: 120, windowMs: 60_000 });
+  app.use("/aa", moneyRateLimit);
+  app.use("/content", moneyRateLimit);
+  app.use("/recordings", moneyRateLimit);
+  app.use("/remote", moneyRateLimit);
+  mountModule(app, deps.config, "content", "/content/uploads", () => createUploadsRouter(deps));
   const defaultJson = express.json();
   const blobJson = express.json({ limit: CONTENT_BLOB_BODY_LIMIT });
   app.use((req, res, next) => {
@@ -68,25 +76,20 @@ export const createApp = (deps: HostRouteDeps): Express => {
   app.use(createCatalogRouter(deps));
   // Direct-stream signaling (reachability echo + announce) — always-on for the same reason.
   app.use(createLiveRouter(deps));
+  mountModule(app, deps.config, "content", "/recordings", () => createRecordingsRouter(deps));
   // Page-shaped discovery endpoints (/homepage, /agents, /stream/:id) served from the DB
   // read-model — always-on, one fetch per page.
   app.use(createPagesRouter(deps));
 
   // Part C: per-IP rate limit on the money / auth surfaces (paymaster, bundler,
   // content uploads) to bound free-gas drain and brute force.
-  const moneyRateLimit = createRateLimit({ capacity: 120, windowMs: 60_000 });
-  app.use("/aa", moneyRateLimit);
-  app.use("/content", moneyRateLimit);
-  // `/remote/:session/join` is a password surface — rate-limit to bound brute force.
-  app.use("/remote", moneyRateLimit);
-
   // Each module either mounts its router (enabled) or a typed `503 module_disabled`
   // stub at its path prefix (disabled) so callers can tell "off" from "missing".
   mountModule(app, deps.config, "aa", "/aa", () => createAaRouter(deps.aa));
   mountModule(app, deps.config, "media", "/media", () => createMediaRouter(deps));
   mountModule(app, deps.config, "memory", "/memory", () => createMemoryRouter(deps));
   mountModule(app, deps.config, "forum", "/forum", () => createForumRouter(deps));
-  mountModule(app, deps.config, "walrus_content", "/content", () => createContentRouter(deps));
+  mountModule(app, deps.config, "content", "/content", () => createContentRouter(deps));
   mountModule(app, deps.config, "discovery", "/discovery", () => createDiscoveryRouter(deps));
   mountModule(app, deps.config, "remote", "/remote", () => createRemoteRouter(deps));
 

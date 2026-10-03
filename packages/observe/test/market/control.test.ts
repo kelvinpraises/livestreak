@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Effect, Exit } from "effect";
+import { LiveStreakRuntimeError } from "@livestreak/core";
 import { buildControlCatalog } from "#run/control/index.js";
 import { createControlBus } from "#run/control/bus/index.js";
 import { createInitialBoard } from "#run/control/board/index.js";
@@ -10,7 +11,7 @@ import {
   marketRegisterScope,
   marketSetEndedScope
 } from "#market/control.js";
-import { RECORDING_POINTER_KEY } from "#market/keys.js";
+import { NO_RECORDING_POINTER_ID, RECORDING_POINTER_KEY } from "#market/keys.js";
 import type { MarketLifecycleInput, MarketStorageScheme } from "#market/types.js";
 import type { Board } from "#run/control/board/index.js";
 import { extendBoardForMarketTests } from "#test/helpers/board.js";
@@ -46,10 +47,12 @@ const marketBoardWith = (runId: string, readonly: Record<string, unknown>): Boar
 
 /** Drive one lifecycle verb over the bus and capture what reached the registrar. */
 const callLifecycle = async (input: {
-  readonly scope: typeof marketGoLiveScope | typeof marketSetEndedScope;
+  readonly scope: typeof marketGoLiveScope | typeof marketSetEndedScope | "market:recording" | "market:retryRecording";
   readonly payload?: unknown;
   readonly marketReadonly?: Record<string, unknown>;
   readonly defaultPointerScheme?: MarketStorageScheme;
+  readonly producerStatus?: string;
+  readonly hostApiToken?: string;
 }) => {
   const runId = "run_lifecycle";
   const seen: MarketLifecycleInput[] = [];
@@ -58,13 +61,15 @@ const callLifecycle = async (input: {
     Effect.gen(function* () {
       const bus = yield* createControlBus({
         runId,
-        board: marketBoardWith(
-          runId,
-          input.marketReadonly ?? { registrationState: "registered", marketId: MARKET }
-        ),
+        board: (() => {
+          const board = marketBoardWith(runId, input.marketReadonly ?? { registrationState: "registered", marketId: MARKET });
+          if (input.producerStatus === undefined) return board;
+          const runCell = board.cells["system:run"]!;
+          return { ...board, cells: { ...board.cells, "system:run": { ...runCell, status: [input.producerStatus, null, 1] as const } } };
+        })(),
         catalog: buildControlCatalog(),
         surfaces: createObserveControlSurfaces({
-          sessionInit: testSessionInit,
+          sessionInit: {...testSessionInit, ...(input.hostApiToken ? {hostApiToken:input.hostApiToken} : {})},
           market: {
             ...(input.defaultPointerScheme === undefined
               ? {}
@@ -72,8 +77,8 @@ const callLifecycle = async (input: {
             resolveRegistrar: () =>
               Effect.succeed(
                 createFakeMarketRegistrar({
-                  onGoLive: (i) => seen.push(i),
-                  onSetEnded: (i) => seen.push(i)
+                  onGoLive: (i) => seen.push({ marketId: i.marketId, scheme: i.scheme, id: i.id }),
+                  onSetEnded: (i) => seen.push({ marketId: i.marketId, scheme: i.scheme, id: i.id })
                 })
               )
           }
@@ -154,7 +159,7 @@ describe("market lifecycle pointer/scheme derivation", () => {
 
     expect(Exit.isSuccess(exit)).toBe(true);
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toEqual({ marketId: MARKET, scheme: 0, id: MARKET.slice(2) });
+    expect(seen[0]).toEqual({ marketId: MARKET, scheme: 4, id: MARKET.slice(2) });
   });
 
   it("the derived pointer is exactly 64 chars — the length every registrar accepts", async () => {
@@ -190,7 +195,37 @@ describe("market lifecycle pointer/scheme derivation", () => {
   // The seam is pinned through the SHARED constant, not a restated literal: if Slice-2's writer
   // and this reader ever disagreed on the key name, this test would go green while the feature
   // silently never wired up. Writing the cell via RECORDING_POINTER_KEY makes that impossible.
-  it("a board-saved recordingPointer wins over the marketId formality", async () => {
+  it("unverified saved recording metadata cannot claim an archive", async () => {
+    const { seen } = await callLifecycle({
+      scope: marketSetEndedScope,
+      marketReadonly: {
+        registrationState: "live",
+        marketId: MARKET,
+        [RECORDING_POINTER_KEY]: { marketId: MARKET, id: "walrusBlobIdForTheRecording" }
+      }
+    });
+
+    expect(seen[0]).toEqual({
+      marketId: MARKET,
+      scheme: 0,
+      id: NO_RECORDING_POINTER_ID
+    });
+  });
+
+  it("a recording bound to another market is ignored — the end stays honest", async () => {
+    const { seen } = await callLifecycle({
+      scope: marketSetEndedScope,
+      marketReadonly: {
+        registrationState: "live",
+        marketId: MARKET,
+        [RECORDING_POINTER_KEY]: { marketId: "0xprevMarket", id: "walrusBlobIdForRunN" }
+      }
+    });
+
+    expect(seen[0]).toEqual({ marketId: MARKET, scheme: 0, id: NO_RECORDING_POINTER_ID });
+  });
+
+  it("a legacy bare-string recording is treated as unbound", async () => {
     const { seen } = await callLifecycle({
       scope: marketSetEndedScope,
       marketReadonly: {
@@ -200,21 +235,27 @@ describe("market lifecycle pointer/scheme derivation", () => {
       }
     });
 
-    expect(seen[0]).toEqual({
-      marketId: MARKET,
-      scheme: 0,
-      id: "walrusBlobIdForTheRecording"
-    });
+    expect(seen[0]).toEqual({ marketId: MARKET, scheme: 0, id: NO_RECORDING_POINTER_ID });
   });
 
-  it("setEnded derives exactly like goLive, and the deps default supplies the scheme", async () => {
-    const { seen } = await callLifecycle({
+  it("a bare setEnded ends with the explicit no-recording marker, never the marketId formality", async () => {
+    const { exit, seen } = await callLifecycle({
       scope: marketSetEndedScope,
       marketReadonly: { registrationState: "live", marketId: MARKET },
       defaultPointerScheme: 1
     });
 
-    expect(seen[0]).toEqual({ marketId: MARKET, scheme: 1, id: MARKET.slice(2) });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(seen[0]).toEqual({ marketId: MARKET, scheme: 0, id: NO_RECORDING_POINTER_ID });
+    expect(seen[0]?.id).not.toBe(MARKET.slice(2));
+  });
+
+  it("a typed recording pointer is rejected until bytes can be verified", async () => {
+    const { exit, seen } = await callLifecycle({ scope: marketSetEndedScope,
+      payload: { scheme: 2, pointerId: "bafyRealRecordingBlob" } });
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(seen).toEqual([]);
+    expect(String(exit)).toContain("unverified");
   });
 
   it("a lifecycle call before register still fails clearly on the missing marketId", async () => {
@@ -230,11 +271,82 @@ describe("market lifecycle pointer/scheme derivation", () => {
     }
   });
 
-  it("goLive and setEnded expose no input fields for the console to render", () => {
+  it("goLive is fieldless and setEnded exposes only the explicit replay choice", () => {
     const catalog = marketCatalogFunctions();
 
     expect(catalog.goLive?.input).toBeUndefined();
-    expect(catalog.setEnded?.input).toBeUndefined();
+    expect(catalog.setEnded?.input).toMatchObject({ type: "object", properties: [{ name: "publishReplay", value: { type: "boolean", default: false } }] });
     expect(catalog.register?.input).toBeDefined();
   });
+});
+
+ describe("end producer gate", () => {
+  it.each(["starting", "running", "paused", "stopping", "draining"])("refuses %s before any chain submission", async producerStatus => {
+    const { exit, seen } = await callLifecycle({ scope: marketSetEndedScope, producerStatus });
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(seen).toEqual([]);
+  });
+  it.each(["stopped", "failed"])("permits a terminal %s producer", async producerStatus => {
+    const { exit, seen } = await callLifecycle({ scope: marketSetEndedScope, producerStatus });
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(seen).toEqual([{ marketId: MARKET, scheme: 0, id: "" }]);
+  });
+  it("rejects the old marketId-derived recording pointer", async () => {
+    const { exit, seen } = await callLifecycle({ scope: marketSetEndedScope, payload: { pointerId: MARKET.slice(2) } });
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(seen).toEqual([]);
+  });
+ });
+
+ describe("end submission checkpoint", () => {
+  it("persists the original hash across a confirmation failure and restored board retry", async () => {
+    let calls = 0;
+    const makeBus = (board: Board) => createControlBus({ runId: "run_lifecycle", board,
+      catalog: buildControlCatalog(), surfaces: createObserveControlSurfaces({ sessionInit: testSessionInit,
+        market: { resolveRegistrar: () => Effect.succeed({ ...createFakeMarketRegistrar(),
+          setEnded: input => Effect.gen(function* () {
+            calls++;
+            if (calls === 1) {
+              yield* input.onSubmitted!("original-end-hash");
+              return yield* Effect.fail(new LiveStreakRuntimeError({ message: "confirmation timed out" }));
+            }
+            expect(input.submittedHash).toBe("original-end-hash");
+            return { userOpHash: input.submittedHash!, endedAtMs: 1234000 };
+          })
+        }) }
+      }) });
+    const first = await Effect.runPromise(makeBus(marketBoardWith("run_lifecycle", { marketId: MARKET, registrationState: "live" })));
+    await expect(Effect.runPromise(first.callFunction({ callId: "first-end", runId: "run_lifecycle", scope: marketSetEndedScope }))).rejects.toThrow("timed out");
+    const firstBoard = await Effect.runPromise(first.readBoard());
+    expect(firstBoard.cells.market?.readonly?.endSubmission).toEqual({ marketId: MARKET, scheme: 0, id: "", hash: "original-end-hash" });
+    expect(firstBoard.cells.market?.readonly?.registrationState).toBe("live");
+    const restored = await Effect.runPromise(makeBus(JSON.parse(JSON.stringify(firstBoard))));
+    await Effect.runPromise(restored.callFunction({ callId: "retry-end", runId: "run_lifecycle", scope: marketSetEndedScope }));
+    const ended = await Effect.runPromise(restored.readBoard());
+    expect(ended.cells.market?.readonly).toMatchObject({ registrationState: "ended", pointerId: "", endedAtMs: 1234000, userOpHash: "original-end-hash" });
+  });
+ });
+
+
+describe("verified replay publishing", () => {
+  it("publishes only a ready receipt bound to this exact market/run", async () => {
+    const pointer={scheme:"host",id:"a".repeat(64),url:"https://media.example/content/replay"};
+    vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({status:"ready",marketId:MARKET,runId:"run_lifecycle",chain:"evm",pointer}))));
+    try {
+      const result=await callLifecycle({scope:marketSetEndedScope,payload:{publishReplay:true},marketReadonly:{registrationState:"ended",marketId:MARKET},hostApiToken:"private"});
+      expect(result.seen).toEqual([{marketId:MARKET,scheme:4,id:pointer.id}]);
+      vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({status:"ready",marketId:MARKET,runId:"another-run",chain:"evm",pointer}))));
+      const wrong=await callLifecycle({scope:marketSetEndedScope,payload:{publishReplay:true},marketReadonly:{registrationState:"ended",marketId:MARKET},hostApiToken:"private"});
+      expect(wrong.seen).toEqual([]);expect(Exit.isFailure(wrong.exit)).toBe(true);
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it("does not erase a previously published replay on a plain repeated end",async()=>{
+    const result=await callLifecycle({scope:marketSetEndedScope,marketReadonly:{registrationState:"ended",marketId:MARKET,scheme:4,pointerId:"a".repeat(64)}});
+    expect(result.seen).toEqual([{marketId:MARKET,scheme:4,id:"a".repeat(64)}]);
+  });
+});
+
+it("recording progress is bound to this market and makes no chain submission", async()=>{
+ vi.stubGlobal("fetch",vi.fn(async()=>new Response(JSON.stringify({id:"a".repeat(64),status:"processing",marketId:MARKET,runId:"run_lifecycle",chain:"evm",segments:3,bytes:12345,durationSeconds:12}))));
+ try{const result=await callLifecycle({scope:"market:recording",marketReadonly:{registrationState:"ended",marketId:MARKET}});expect(result.seen).toEqual([]);expect(Exit.isSuccess(result.exit)).toBe(true);if(Exit.isSuccess(result.exit))expect(result.exit.value.cells.market?.readonly).toMatchObject({recordingState:"processing",recordingSegments:3,recordingDurationSeconds:12});}finally{vi.unstubAllGlobals();}
 });

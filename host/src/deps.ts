@@ -54,8 +54,9 @@ import { createRemoteService, type RemoteService } from "./services/remote/index
 import { createEvidenceStore } from "./services/media/evidence.js";
 import { createManifestStore } from "./services/media/manifest.js";
 import { createSessionStore } from "./services/media/session.js";
-import { createContentStore } from "./services/walrus/content/content.js";
-import { createLocalContentStore } from "./services/walrus/content/local-store.js";
+import { createContentStore, type ContentStore } from "./services/content/content.js";
+import { createS3ObjectStore, type ObjectStore } from "./infrastructure/storage/object-store.js";
+import { createRecordingService, type RecordingService } from "./services/recordings/service.js";
 import {
   createMemoryRepository,
   type MemoryRepository
@@ -64,7 +65,6 @@ import {
   createForumRepository,
   type ForumRepository
 } from "./infrastructure/database/forum-repository.js";
-import type { ResolvedWalrus } from "./infrastructure/walrus/network.js";
 
 // --- exports ---
 
@@ -133,8 +133,10 @@ export const bootstrapHostRouteDeps = async (
   options: CreateHostRouteDepsOptions = {}
 ): Promise<HostRouteDeps> => {
   const aa = await bootstrapAaRouteDeps(config, options);
-  const resolved = options.walrusResolved ?? config.resolvedWalrus;
-  const walrus = buildWalrusDeps(config, resolved);
+  const objects = options.objectStore ?? (config.storage === null ? null : createS3ObjectStore(config.storage));
+  await objects?.check?.();
+  const content = { store: createContentStore(objects), objects };
+  const recordings = createRecordingService(objects, config.contentWriteToken);
   const discoveryStore = createDiscoveryStore();
   // Signaling-plane stores exist before the catalog so isLive can reflect a stream serving
   // bytes right now (host ring ingest or a direct-lane announce), not only on-chain goLive.
@@ -165,7 +167,8 @@ export const bootstrapHostRouteDeps = async (
     discovery: {
       store: discoveryStore
     },
-    walrus,
+    content,
+    recordings,
     memory: { repo: createMemoryRepository(catalogStack.db.db) },
     forum: { repo: createForumRepository(catalogStack.db.db) },
     aa,
@@ -180,7 +183,8 @@ export interface HostRouteDeps {
   readonly config: HostServerConfig;
   readonly media: MediaRouteDeps;
   readonly discovery: DiscoveryRouteDeps;
-  readonly walrus: WalrusRouteDeps;
+  readonly content: { readonly store: ContentStore; readonly objects: ObjectStore | null };
+  readonly recordings: RecordingService;
   readonly memory: MemoryRouteDeps;
   readonly forum: ForumRouteDeps;
   readonly aa: AaRouteDeps;
@@ -216,10 +220,6 @@ export interface DiscoveryRouteDeps {
   readonly store: ReturnType<typeof createDiscoveryStore>;
 }
 
-export interface WalrusRouteDeps {
-  readonly content: ContentRouteDeps;
-}
-
 export interface MemoryRouteDeps {
   readonly repo: MemoryRepository;
 }
@@ -233,7 +233,7 @@ export interface ContentRouteDeps {
 }
 
 export interface CreateHostRouteDepsOptions extends CreateAaRouteDepsOptions {
-  readonly walrusResolved?: ResolvedWalrus;
+  readonly objectStore?: ObjectStore;
   // Inject a reader provider in tests; defaults to the env/deploy-snapshot provider.
   readonly catalogReaders?: CatalogReaderProvider;
   // Inject a DB handle in tests (e.g. createDatabase(":memory:")); defaults to the
@@ -315,8 +315,9 @@ export const createHostRouteDeps = (
   config: HostServerConfig = defaultHostServerConfig(),
   options: CreateHostRouteDepsOptions = {}
 ): HostRouteDeps => {
-  const resolved = options.walrusResolved ?? config.resolvedWalrus;
-  const walrus = buildWalrusDeps(config, resolved);
+  const objects = options.objectStore ?? (config.storage === null ? null : createS3ObjectStore(config.storage));
+  const content = { store: createContentStore(objects), objects };
+  const recordings = createRecordingService(objects, config.contentWriteToken);
   const discoveryStore = createDiscoveryStore();
   const catalogStack = buildCatalogStack(config, discoveryStore, options);
 
@@ -330,7 +331,8 @@ export const createHostRouteDeps = (
     discovery: {
       store: discoveryStore
     },
-    walrus,
+    content,
+    recordings,
     memory: { repo: createMemoryRepository(catalogStack.db.db) },
     forum: { repo: createForumRepository(catalogStack.db.db) },
     aa: createAaRouteDeps(config, options),
@@ -403,36 +405,6 @@ const buildSuiGasStation = async (
     client,
     ...(options.suiInitialCoins === undefined ? {} : { initialCoins: options.suiInitialCoins })
   });
-};
-
-const buildWalrusDeps = (
-  config: HostServerConfig,
-  resolved: ResolvedWalrus | null
-): WalrusRouteDeps => {
-  const disabledWalrus: ResolvedWalrus = {
-    network: "mainnet",
-    blob: {
-      publisherUrl: "http://walrus-disabled.invalid",
-      aggregatorUrl: "http://walrus-disabled.invalid"
-    }
-  };
-
-  const active = resolved ?? disabledWalrus;
-
-  return {
-    content: {
-      // When Walrus is not configured (local EVM dev stack), fall back to an in-process,
-      // content-addressed store served by this host so produce/publish/resolve still work.
-      store:
-        resolved === null
-          ? createLocalContentStore({ baseUrl: config.baseUrl })
-          : createContentStore({
-              resolved: active,
-              ephemeralEpochs: config.walrusContentEphemeralEpochs,
-              lockedEpochs: config.walrusContentLockedEpochs
-            })
-    }
-  };
 };
 
 const readSuiNetwork = (): "mainnet" | "testnet" | "devnet" | "localnet" => {

@@ -8,9 +8,10 @@ interface Props {
   streamTitle: string
   totalPooled: number
   totalPooledRatePerSec?: number
+  status?: 'live' | 'ended' | 'offline'
 }
 
-export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerSec }: Props) {
+export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerSec, status = 'live' }: Props) {
   const preferFixture = usePreferFixture()
   const [minute, setMinute] = useState(frame.min)
   useEffect(() => { setMinute(frame.min) }, [frame.min])
@@ -30,8 +31,8 @@ export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerS
     }}>
       {/* LIVE indicator */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span className="live-dot" style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#ff2d78', boxShadow: '0 0 12px #ff2d78' }} />
-        <span className="display" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', color: '#ff2d78' }}>LIVE</span>
+        <span className={status === 'live' ? 'live-dot' : undefined} style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: status === 'live' ? '#ff2d78' : 'rgba(255,255,255,0.4)', boxShadow: status === 'live' ? '0 0 12px #ff2d78' : undefined }} />
+        <span className="display" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', color: status === 'live' ? '#ff2d78' : 'rgba(255,255,255,0.6)' }}>{status.toUpperCase()}</span>
       </div>
       <div style={{ width: 1, height: 20, background: 'rgba(255,255,255,0.08)' }} />
 

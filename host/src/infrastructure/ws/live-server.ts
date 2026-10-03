@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
+import type { RecordingService, RecordingWriter } from "../../services/recordings/service.js";
 import type { LiveRingStore, ViewerFrame } from "../../services/live/ring.js";
 
 // --- Live fMP4 fan-out transport (P2) ---
@@ -14,10 +15,8 @@ import type { LiveRingStore, ViewerFrame } from "../../services/live/ring.js";
 // fragment flow, and the browser viewer appends each binary frame straight into an MSE SourceBuffer as it
 // arrives — a persistent socket is the natural fit and sidesteps chunked-HTTP flush/backpressure quirks.
 //
-// Auth posture mirrors the existing /webrtc signaling relay: the live media relay is an always-on,
-// stream-key-scoped surface (no module token, no producer token) — the same open posture the WebRTC
-// signaling had, keyed by the market id the viewer already knows. Fine-grained producer auth is a
-// follow-up if this relay ever leaves the trusted dev/host boundary.
+// With cloud recording configured, producer upgrades require a market/run-bound Host capability.
+// Viewer upgrades remain public. The unconfigured development relay retains its live-only posture.
 
 export interface LiveWssHandle {
   readonly wss: WebSocketServer;
@@ -29,25 +28,34 @@ const FRAME_INIT = 0x01;
 const FRAME_FRAGMENT = 0x02;
 const FRAME_END = 0x03;
 
-export const attachLiveWss = (server: HttpServer, ring: LiveRingStore): LiveWssHandle => {
-  const wss = new WebSocketServer({ noServer: true });
+export const attachLiveWss = (server: HttpServer, ring: LiveRingStore, recordings?: RecordingService, requireRecording = false): LiveWssHandle => {
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 + 1 });
 
   const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer): void => {
     const route = parseLivePath(req.url ?? "");
     // Not a /live path → leave the socket for another upgrade listener (e.g. the remote WSS). The shared
     // final rejecter (main.ts) 404s a truly unmatched upgrade; we must NOT destroy a peer's socket here.
     if (route === null) return;
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      if (route.leg === "ingest") {
-        handleIngest(ws, route.streamId);
-      } else {
-        handleWatch(ws, route.streamId);
-      }
-    });
+    void (async () => {
+      let recording: RecordingWriter | undefined;
+      try {
+        if(route.leg === "ingest" && requireRecording) {
+          const query=new URL(req.url??"", "http://host").searchParams;
+          const id=query.get("recording")??"";const token=query.get("capability")??"";
+          const receipt=await recordings?.byId(id);
+          if(!receipt || receipt.marketId !== route.streamId.toLowerCase()) throw new Error("Recording scope mismatch");
+          recording=await recordings!.open(id,token);
+        }
+        wss.handleUpgrade(req,socket,head,ws=>{
+          if(route.leg==="ingest")handleIngest(ws,route.streamId,recording);
+          else handleWatch(ws,route.streamId);
+        });
+      } catch { socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");socket.destroy();if(recording)void recording.close(false).catch(() => undefined); }
+    })();
   };
 
   // Producer: one encode-once stream. Each binary message is a tagged frame; route it into the ring.
-  const handleIngest = (ws: WebSocket, streamId: string): void => {
+  const handleIngest = (ws: WebSocket, streamId: string, recording?: RecordingWriter): void => {
     ws.binaryType = "nodebuffer";
     let ended = false;
     ws.on("message", (data, isBinary) => {
@@ -56,6 +64,8 @@ export const attachLiveWss = (server: HttpServer, ring: LiveRingStore): LiveWssH
       if (buf.length === 0) return;
       const tag = buf[0]!;
       const body = buf.subarray(1);
+      if (ended) return;
+      recording?.push(tag,copyOut(body));
       if (tag === FRAME_INIT) {
         ring.setInit(streamId, copyOut(body));
       } else if (tag === FRAME_FRAGMENT) {
@@ -63,11 +73,12 @@ export const attachLiveWss = (server: HttpServer, ring: LiveRingStore): LiveWssH
       } else if (tag === FRAME_END) {
         ended = true;
         ring.end(streamId, body.length > 0 ? new TextDecoder().decode(body) : undefined);
+        void recording?.close(true).catch(() => undefined);
       }
     });
     // Producer dropped without a clean end → tell viewers the feed closed and drop the stream.
     ws.on("close", () => {
-      if (!ended) ring.clear(streamId);
+      if (!ended) { ring.clear(streamId);void recording?.close(false).catch(() => undefined); }
     });
     ws.on("error", () => ws.close());
   };

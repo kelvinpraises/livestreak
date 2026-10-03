@@ -51,11 +51,13 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
   let ws: WebSocket | undefined;
   let closing = false;
   let backoffMs = 500;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   // Frames queued while the socket is (re)connecting.
   const pending: GatewayFrame[] = [];
   // Last register frame per session — re-sent on every (re)connect. The host's session table is
   // in-memory, so a host restart forgets us; without re-registration every console 404s until the
   // gateway itself restarts.
+  const boards = new Map<string, GatewayFrame>();
   const registrations = new Map<string, RegisterFrame>();
 
   const safeSend = (frame: GatewayFrame): void => {
@@ -63,6 +65,10 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
     if (ws !== undefined && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify(frame));
     } else {
+      // Boards/catalog/registration already have replaceable snapshots. Only results and
+      // revocations need a bounded outbox; an evicted result requires caller readback.
+      if (frame.type === "board_patch" || frame.type === "functions" || frame.type === "register") return;
+      if (pending.length >= 256) pending.shift();
       pending.push(frame);
     }
   };
@@ -129,8 +135,9 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
       backoffMs = 500;
       log("leg-A connected");
       for (const frame of registrations.values()) {
-        safeSend(frame);
+        safeSend({ ...frame, ttlMs: Math.max(1, (frame.expiresAt ?? Date.now()) - Date.now()) });
       }
+      for (const frame of boards.values()) safeSend(frame);
       flush();
     });
     ws.on("message", handleMessage);
@@ -142,7 +149,8 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
       const delay = backoffMs;
       backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
       log(`leg-A closed; reconnecting in ${delay}ms`);
-      setTimeout(open, delay).unref?.();
+      reconnectTimer = setTimeout(open, delay);
+      reconnectTimer.unref?.();
     });
   };
 
@@ -156,7 +164,8 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
         type: "register",
         sessionId: record.sessionId,
         scopes: record.scopes,
-        ttlMs: Math.max(0, record.expiresAt - record.createdAtMs),
+        ttlMs: Math.max(1, record.expiresAt - Date.now()),
+        expiresAt: record.expiresAt,
         passwordVerifier,
         ...(deps.authToken === undefined ? {} : { gatewayToken: deps.authToken }),
         ...(functions === undefined ? {} : { functions })
@@ -171,18 +180,24 @@ export const connectGateway = (deps: WssClientDeps): WssClient => {
     },
     send: safeSend,
     sendBoardPatch: (sessionId, board, target) => {
-      safeSend({
+      const frame: GatewayFrame = {
         type: "board_patch",
         sessionId,
         board,
         ...(target === undefined ? {} : { target })
-      });
+      };
+      boards.set(`${sessionId}:${target ?? ""}`, frame);
+      safeSend(frame);
     },
     sendFunctions: (sessionId, functions) => {
+      const registration = registrations.get(sessionId);
+      if (registration) registrations.set(sessionId, { ...registration, functions });
       safeSend({ type: "functions", sessionId, functions });
     },
     close: () => {
       closing = true;
+      clearTimeout(reconnectTimer);
+      pending.length = 0;
       ws?.close();
     },
     isConnected: () => ws !== undefined && ws.readyState === WebSocket.OPEN

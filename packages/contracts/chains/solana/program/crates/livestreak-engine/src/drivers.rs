@@ -19,8 +19,8 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::drips::{DripsError, DripsRegistry};
-use crate::treasury::TreasuryRegistry;
 use crate::state::{AccountId, StreamConfig, StreamReceiver, AMT_PER_SEC_MULTIPLIER};
+use crate::treasury::TreasuryRegistry;
 use crate::vault::{VaultError, VaultId, VaultRegistry};
 use crate::StreamsRegistry;
 
@@ -44,6 +44,9 @@ pub enum DriverError {
     LengthMismatch,
     SeedExists,
     NoSeed,
+    UnboundVault,
+    FundingClosed,
+    CreationConflict,
     Vault(VaultError),
     Drips(DripsError),
 }
@@ -155,11 +158,20 @@ impl VaultDriverState {
     }
 
     pub fn receiver_account_view(&self, vault_id: &VaultId, side: u8) -> AccountId {
-        let pool_id = self.pool_id_of.get(&(*vault_id, side)).copied().unwrap_or(0);
+        let pool_id = self
+            .pool_id_of
+            .get(&(*vault_id, side))
+            .copied()
+            .unwrap_or(0);
         receiver_from_pool(self.driver_id, pool_id)
     }
 
-    fn receiver_account(&mut self, vault: &VaultRegistry, vault_id: &VaultId, side: u8) -> DriverResult<AccountId> {
+    fn receiver_account(
+        &mut self,
+        vault: &VaultRegistry,
+        vault_id: &VaultId,
+        side: u8,
+    ) -> DriverResult<AccountId> {
         if !vault.vault_exists(vault_id) {
             return Err(DriverError::UnknownMarket);
         }
@@ -181,14 +193,14 @@ fn receiver_from_pool(driver_id: u32, pool_id: u64) -> AccountId {
     (U256::from(driver_id) << DRIVER_ID_SHIFT) | U256::from(pool_id)
 }
 
-fn recv(account: AccountId, rate: U256) -> StreamReceiver {
+fn bound_recv(account: AccountId, rate: U256, close: u64) -> StreamReceiver {
     StreamReceiver {
         account_id: account,
         config: StreamConfig {
             stream_id: 0,
             amt_per_sec: rate * U256::from(AMT_PER_SEC_MULTIPLIER),
-            start: 0,
-            duration: 0,
+            start: 1,
+            duration: close.saturating_sub(1),
         },
     }
 }
@@ -241,7 +253,7 @@ impl Protocol {
     /// create_vault + seed lane in one op (Move vault_driver::create_vault).
     /// `deposit` must equal the payment already moved into the escrow.
     #[allow(clippy::too_many_arguments)]
-    pub fn create_vault_seeded(
+    pub fn create_bound_vault_seeded(
         &mut self,
         market_id: [u8; 32],
         question: Vec<u8>,
@@ -250,7 +262,37 @@ impl Protocol {
         rate: U256,
         deposit: u128,
         now: u64,
+        commitment: [u8; 32],
+        funding_close: u64,
+        operation_id: [u8; 32],
     ) -> DriverResult<VaultId> {
+        if commitment == [0; 32] || operation_id == [0; 32] {
+            return Err(DriverError::UnboundVault);
+        }
+        if let Some(prior) = self
+            .vault
+            .vaults
+            .values()
+            .find(|v| v.creator == creator && v.operation_id == operation_id)
+        {
+            if prior.market_id != market_id
+                || prior.question != question
+                || prior.seed_side != seed_side
+                || prior.seed_rate != rate
+                || prior.seed_deposit != deposit
+                || prior.mandate_commitment != commitment
+                || prior.funding_close != funding_close
+            {
+                return Err(DriverError::CreationConflict);
+            }
+            return Ok(prior.id);
+        }
+        if funding_close <= now || funding_close > u32::MAX as u64 {
+            return Err(DriverError::FundingClosed);
+        }
+        if seed_side > 1 {
+            return Err(DriverError::LengthMismatch);
+        }
         if rate == U256::ZERO {
             return Err(DriverError::ZeroRate);
         }
@@ -258,27 +300,47 @@ impl Protocol {
             return Err(DriverError::BadDeposit);
         }
         let vault_id = self.vault.create_vault(market_id, question, creator, now)?;
+        let v = self.vault.vaults.get_mut(&vault_id).unwrap();
+        v.mandate_commitment = commitment;
+        v.funding_close = funding_close;
+        v.operation_id = operation_id;
+        v.seed_side = seed_side;
+        v.seed_rate = rate;
+        v.seed_deposit = deposit;
 
         if self.vault_driver.seeds.contains_key(&(vault_id, creator)) {
             return Err(DriverError::SeedExists);
         }
         let account = self.vault_driver.seed_account(&creator, &vault_id);
-        let receiver = self.vault_driver.receiver_account(&self.vault, &vault_id, seed_side)?;
+        let receiver = self
+            .vault_driver
+            .receiver_account(&self.vault, &vault_id, seed_side)?;
 
-        let next = [recv(receiver, rate)];
+        let next = [bound_recv(receiver, rate, funding_close)];
         self.set_streams_and_transfer(deposit, account, &[], deposit as i128, &next, now)?;
 
         let (_, _, _, _, max_end) = self.streams.streams_state(account);
-        self.vault.on_fund(account, &vault_id, seed_side, rate, max_end, now)?;
+        self.vault
+            .on_fund(account, &vault_id, seed_side, rate, max_end, now)?;
 
-        self.vault_driver
-            .seeds
-            .insert((vault_id, creator), SeedLane { side: seed_side, rate, active: true });
+        self.vault_driver.seeds.insert(
+            (vault_id, creator),
+            SeedLane {
+                side: seed_side,
+                rate,
+                active: true,
+            },
+        );
         Ok(vault_id)
     }
 
     /// Returns the refunded amount (program layer pays it to the creator).
-    pub fn stop_seed(&mut self, vault_id: &VaultId, creator: [u8; 32], now: u64) -> DriverResult<u128> {
+    pub fn stop_seed(
+        &mut self,
+        vault_id: &VaultId,
+        creator: [u8; 32],
+        now: u64,
+    ) -> DriverResult<u128> {
         let Some(lane) = self.vault_driver.seeds.get(&(*vault_id, creator)).copied() else {
             return Err(DriverError::NoSeed);
         };
@@ -287,12 +349,20 @@ impl Protocol {
         }
         let account = self.vault_driver.seed_account(&creator, vault_id);
         let receiver = self.vault_driver.receiver_account_view(vault_id, lane.side);
-        let curr = [recv(receiver, lane.rate)];
+        let curr = [bound_recv(
+            receiver,
+            lane.rate,
+            self.vault.get_vault(vault_id)?.funding_close,
+        )];
 
         let (_, refunded) =
             self.set_streams_and_transfer(0, account, &curr, WITHDRAW_ALL, &[], now)?;
         self.vault.on_stop(account, vault_id, lane.side, now)?;
-        self.vault_driver.seeds.get_mut(&(*vault_id, creator)).unwrap().active = false;
+        self.vault_driver
+            .seeds
+            .get_mut(&(*vault_id, creator))
+            .unwrap()
+            .active = false;
         Ok(refunded)
     }
 
@@ -302,7 +372,8 @@ impl Protocol {
         if receiver == U256::ZERO {
             return 0;
         }
-        self.drips.receive_streams(&mut self.streams, receiver, 0xFFFF_FFFF, now);
+        self.drips
+            .receive_streams(&mut self.streams, receiver, 0xFFFF_FFFF, now);
         let amt = self.drips.collect(receiver);
         if amt > 0 {
             self.drips.withdraw(amt).expect("collected is withdrawable");
@@ -314,12 +385,29 @@ impl Protocol {
     /// collect + skim drain. Returns the skim amount owed to the treasury (the
     /// program layer transfers it out of the vault escrow).
     pub fn collect_vault(&mut self, vault_id: &VaultId, now: u64) -> DriverResult<u128> {
-        let yes_receiver = self.vault_driver.receiver_account_view(vault_id, crate::vault::SIDE_YES);
-        let no_receiver = self.vault_driver.receiver_account_view(vault_id, crate::vault::SIDE_NO);
+        let yes_receiver = self
+            .vault_driver
+            .receiver_account_view(vault_id, crate::vault::SIDE_YES);
+        let no_receiver = self
+            .vault_driver
+            .receiver_account_view(vault_id, crate::vault::SIDE_NO);
         let skim_bps = self.treasury.skim_bps;
         // Split borrows: vault.collect needs drips+streams mutably alongside itself.
-        let Protocol { vault, drips, streams, .. } = self;
-        vault.collect(drips, streams, vault_id, yes_receiver, no_receiver, skim_bps, now)?;
+        let Protocol {
+            vault,
+            drips,
+            streams,
+            ..
+        } = self;
+        vault.collect(
+            drips,
+            streams,
+            vault_id,
+            yes_receiver,
+            no_receiver,
+            skim_bps,
+            now,
+        )?;
         let skimmed = self.vault.drain_skim(vault_id);
         let skim_amt = livestreak_math::wide::narrow(skimmed, "skim");
         if skim_amt > 0 {
@@ -336,7 +424,12 @@ impl Protocol {
     }
 
     /// Seed creator's winnings+overage payout (program pays it to the creator).
-    pub fn withdraw_seed(&mut self, vault_id: &VaultId, creator: [u8; 32], now: u64) -> DriverResult<u128> {
+    pub fn withdraw_seed(
+        &mut self,
+        vault_id: &VaultId,
+        creator: [u8; 32],
+        now: u64,
+    ) -> DriverResult<u128> {
         let account = self.vault_driver.seed_account(&creator, vault_id);
         Ok(self.vault.withdraw(account, vault_id, now)?)
     }
@@ -352,8 +445,7 @@ impl Protocol {
             return Err(DriverError::UnknownMarket);
         }
         let counter = self.market_driver.minted_tokens;
-        let token_id =
-            u256_from_hash(keccak(&[b"livestreak.pos.seq", &counter.to_le_bytes()]));
+        let token_id = u256_from_hash(keccak(&[b"livestreak.pos.seq", &counter.to_le_bytes()]));
         self.market_driver.minted_tokens += 1;
         self.market_driver.market_id_of.insert(token_id, market_id);
         Ok(token_id)
@@ -390,23 +482,48 @@ impl Protocol {
         Ok(())
     }
 
+    fn require_funding_open(&self, vault_id: &VaultId, now: u64) -> DriverResult<()> {
+        let v = self.vault.get_vault(vault_id)?;
+        if v.mandate_commitment == [0; 32] || v.funding_close == 0 {
+            return Err(DriverError::UnboundVault);
+        }
+        if now >= v.funding_close {
+            return Err(DriverError::FundingClosed);
+        }
+        Ok(())
+    }
+
     fn build_receivers(&mut self, token_id: AccountId) -> DriverResult<Vec<StreamReceiver>> {
         let Some(keys) = self.market_driver.lane_keys.get(&token_id).cloned() else {
             return Ok(Vec::new());
         };
         let mut receivers = Vec::new();
         for vault_id in keys {
-            let lane = self.market_driver.lanes.get(&(token_id, vault_id)).copied().unwrap();
-            let receiver =
-                self.vault_driver.receiver_account(&self.vault, &vault_id, lane.side)?;
-            receivers.push(recv(receiver, lane.rate));
+            let lane = self
+                .market_driver
+                .lanes
+                .get(&(token_id, vault_id))
+                .copied()
+                .unwrap();
+            let receiver = self
+                .vault_driver
+                .receiver_account(&self.vault, &vault_id, lane.side)?;
+            receivers.push(bound_recv(
+                receiver,
+                lane.rate,
+                self.vault.get_vault(&vault_id)?.funding_close,
+            ));
         }
         sort_receivers(&mut receivers);
         Ok(receivers)
     }
 
     pub fn lane_count(&self, token_id: AccountId) -> usize {
-        self.market_driver.lane_keys.get(&token_id).map(|k| k.len()).unwrap_or(0)
+        self.market_driver
+            .lane_keys
+            .get(&token_id)
+            .map(|k| k.len())
+            .unwrap_or(0)
     }
 
     /// Fund one lane. `deposit` = payment already in the escrow.
@@ -427,7 +544,12 @@ impl Protocol {
             return Err(DriverError::BadDeposit);
         }
         self.assert_market_vault(token_id, vault_id)?;
-        if self.market_driver.lanes.contains_key(&(token_id, *vault_id)) {
+        self.require_funding_open(vault_id, now)?;
+        if self
+            .market_driver
+            .lanes
+            .contains_key(&(token_id, *vault_id))
+        {
             return Err(DriverError::VaultHasLane);
         }
         if self.lane_count(token_id) >= MAX_LANES {
@@ -435,16 +557,26 @@ impl Protocol {
         }
 
         let curr = self.build_receivers(token_id)?;
-        self.market_driver.lane_keys.entry(token_id).or_default().push(*vault_id);
         self.market_driver
-            .lanes
-            .insert((token_id, *vault_id), Lane { vault_id: *vault_id, side, rate });
+            .lane_keys
+            .entry(token_id)
+            .or_default()
+            .push(*vault_id);
+        self.market_driver.lanes.insert(
+            (token_id, *vault_id),
+            Lane {
+                vault_id: *vault_id,
+                side,
+                rate,
+            },
+        );
         let next = self.build_receivers(token_id)?;
 
         self.set_streams_and_transfer(deposit, token_id, &curr, deposit as i128, &next, now)?;
 
         let (_, _, _, _, max_end) = self.streams.streams_state(token_id);
-        self.vault.on_fund(token_id, vault_id, side, rate, max_end, now)?;
+        self.vault
+            .on_fund(token_id, vault_id, side, rate, max_end, now)?;
         self.refresh_other_lanes(token_id, vault_id, max_end, now)?;
         Ok(max_end)
     }
@@ -456,7 +588,12 @@ impl Protocol {
         side: u8,
         now: u64,
     ) -> DriverResult<()> {
-        let Some(lane) = self.market_driver.lanes.get(&(token_id, *vault_id)).copied() else {
+        let Some(lane) = self
+            .market_driver
+            .lanes
+            .get(&(token_id, *vault_id))
+            .copied()
+        else {
             return Err(DriverError::NoLane);
         };
         if lane.rate == U256::ZERO || lane.side != side {
@@ -494,12 +631,20 @@ impl Protocol {
             .market_id_of
             .get(&token_id)
             .ok_or(DriverError::UnknownMarket)?;
-        for (i, (vault_id, _, rate)) in desired.iter().enumerate() {
+        for (i, (vault_id, side, rate)) in desired.iter().enumerate() {
             if *rate == U256::ZERO {
                 return Err(DriverError::ZeroRate);
             }
             if self.vault.market_id(vault_id)? != market_id {
                 return Err(DriverError::WrongMarket);
+            }
+            let same = self
+                .market_driver
+                .lanes
+                .get(&(token_id, *vault_id))
+                .is_some_and(|l| l.side == *side && l.rate == *rate);
+            if !same || add_deposit > 0 {
+                self.require_funding_open(vault_id, now)?;
             }
             for (prev, _, _) in desired.iter().take(i) {
                 if prev == vault_id {
@@ -514,14 +659,27 @@ impl Protocol {
 
         self.clear_lanes(token_id);
         for (vault_id, side, rate) in desired {
-            self.market_driver.lane_keys.entry(token_id).or_default().push(*vault_id);
             self.market_driver
-                .lanes
-                .insert((token_id, *vault_id), Lane { vault_id: *vault_id, side: *side, rate: *rate });
+                .lane_keys
+                .entry(token_id)
+                .or_default()
+                .push(*vault_id);
+            self.market_driver.lanes.insert(
+                (token_id, *vault_id),
+                Lane {
+                    vault_id: *vault_id,
+                    side: *side,
+                    rate: *rate,
+                },
+            );
         }
         let next = self.build_receivers(token_id)?;
 
-        let delta = if add_deposit > 0 { add_deposit as i128 } else { 0 };
+        let delta = if add_deposit > 0 {
+            add_deposit as i128
+        } else {
+            0
+        };
         self.set_streams_and_transfer(add_deposit, token_id, &curr, delta, &next, now)?;
 
         let (_, _, _, _, max_end) = self.streams.streams_state(token_id);
@@ -530,12 +688,13 @@ impl Protocol {
             self.vault.on_stop(token_id, vault_id, *side, now)?;
         }
         for (vault_id, side, rate) in &added {
-            self.vault.on_fund(token_id, vault_id, *side, *rate, max_end, now)?;
+            self.vault
+                .on_fund(token_id, vault_id, *side, *rate, max_end, now)?;
         }
         if !desired.is_empty() {
-            let entries: Vec<(VaultId, u8)> =
-                desired.iter().map(|(v, s, _)| (*v, *s)).collect();
-            self.vault.refresh_max_ends(token_id, &entries, max_end, now)?;
+            let entries: Vec<(VaultId, u8)> = desired.iter().map(|(v, s, _)| (*v, *s)).collect();
+            self.vault
+                .refresh_max_ends(token_id, &entries, max_end, now)?;
         }
         Ok(())
     }
@@ -550,7 +709,12 @@ impl Protocol {
     }
 
     /// Winnings + overage for one vault (program pays the returned amount out).
-    pub fn withdraw(&mut self, token_id: AccountId, vault_id: &VaultId, now: u64) -> DriverResult<u128> {
+    pub fn withdraw(
+        &mut self,
+        token_id: AccountId,
+        vault_id: &VaultId,
+        now: u64,
+    ) -> DriverResult<u128> {
         Ok(self.vault.withdraw(token_id, vault_id, now)?)
     }
 
@@ -608,7 +772,11 @@ impl Protocol {
             return removed;
         };
         for vault_id in keys {
-            let lane = self.market_driver.lanes.get(&(token_id, *vault_id)).unwrap();
+            let lane = self
+                .market_driver
+                .lanes
+                .get(&(token_id, *vault_id))
+                .unwrap();
             let exactly_in = desired
                 .iter()
                 .any(|(v, s, r)| v == vault_id && *s == lane.side && *r == lane.rate);
@@ -627,7 +795,11 @@ impl Protocol {
     ) -> Vec<(VaultId, u8, U256)> {
         let mut added = Vec::new();
         for (vault_id, side, rate) in desired {
-            let held = self.market_driver.lanes.get(&(token_id, *vault_id)).copied();
+            let held = self
+                .market_driver
+                .lanes
+                .get(&(token_id, *vault_id))
+                .copied();
             let mut changed = match held {
                 Some(l) => l.rate != *rate || l.side != *side,
                 None => true,
@@ -640,7 +812,13 @@ impl Protocol {
                     self.vault.get_position(vault_id, *side, token_id);
                 changed = depleted || (p_rate > U256::ZERO && p_max_end != 0 && p_max_end <= now);
             }
-            if changed {
+            if changed
+                && self
+                    .vault
+                    .vaults
+                    .get(vault_id)
+                    .is_some_and(|v| now < v.funding_close)
+            {
                 added.push((*vault_id, *side, *rate));
             }
         }
@@ -663,21 +841,38 @@ impl Protocol {
         let entries: Vec<(VaultId, u8)> = keys
             .iter()
             .filter(|v| *v != new_vault_id)
-            .map(|v| (*v, self.market_driver.lanes.get(&(token_id, *v)).unwrap().side))
+            .map(|v| {
+                (
+                    *v,
+                    self.market_driver.lanes.get(&(token_id, *v)).unwrap().side,
+                )
+            })
             .collect();
-        self.vault.refresh_max_ends(token_id, &entries, max_end, now)?;
+        self.vault
+            .refresh_max_ends(token_id, &entries, max_end, now)?;
         Ok(())
     }
 
-    fn refresh_all_lanes(&mut self, token_id: AccountId, max_end: u64, now: u64) -> DriverResult<()> {
+    fn refresh_all_lanes(
+        &mut self,
+        token_id: AccountId,
+        max_end: u64,
+        now: u64,
+    ) -> DriverResult<()> {
         let Some(keys) = self.market_driver.lane_keys.get(&token_id).cloned() else {
             return Ok(());
         };
         let entries: Vec<(VaultId, u8)> = keys
             .iter()
-            .map(|v| (*v, self.market_driver.lanes.get(&(token_id, *v)).unwrap().side))
+            .map(|v| {
+                (
+                    *v,
+                    self.market_driver.lanes.get(&(token_id, *v)).unwrap().side,
+                )
+            })
             .collect();
-        self.vault.refresh_max_ends(token_id, &entries, max_end, now)?;
+        self.vault
+            .refresh_max_ends(token_id, &entries, max_end, now)?;
         Ok(())
     }
 
@@ -686,7 +881,11 @@ impl Protocol {
             return Ok(());
         };
         for vault_id in &keys {
-            let lane = self.market_driver.lanes.remove(&(token_id, *vault_id)).unwrap();
+            let lane = self
+                .market_driver
+                .lanes
+                .remove(&(token_id, *vault_id))
+                .unwrap();
             self.vault.on_stop(token_id, vault_id, lane.side, now)?;
         }
         Ok(())
@@ -696,10 +895,13 @@ impl Protocol {
 impl Protocol {
     /// Program-layer codec (postcard: compact, deterministic, no_std).
     pub fn to_bytes(&self) -> Vec<u8> {
-        postcard::to_allocvec(self).expect("protocol serialize")
+        let mut bytes = b"LVST\x02".to_vec();
+        bytes.extend(postcard::to_allocvec(self).expect("protocol serialize"));
+        bytes
     }
 
     pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-        postcard::from_bytes(bytes).ok()
+        let payload = bytes.strip_prefix(b"LVST\x02")?;
+        postcard::from_bytes(payload).ok()
     }
 }

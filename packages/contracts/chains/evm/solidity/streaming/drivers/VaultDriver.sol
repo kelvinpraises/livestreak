@@ -25,6 +25,10 @@ contract VaultDriver is SharedDriverUtils {
     mapping(bytes32 => mapping(Side => uint64)) public poolIdOf;
     mapping(bytes32 => mapping(address => SeedLane)) public seeds;
 
+    struct Creation { bytes32 vaultId; bytes32 inputDigest; }
+    mapping(address => mapping(bytes32 => Creation)) public creations;
+    event BoundVaultCreated(bytes32 indexed vaultId, address indexed creator, bytes32 indexed operationId, bytes32 commitment, uint32 fundingClose);
+
     struct SeedLane {
         Side side;
         uint256 rate;
@@ -58,18 +62,32 @@ contract VaultDriver is SharedDriverUtils {
     }
 
     /// @notice Permissionless vault creation under an existing market with a mandatory directional seed.
-    function createVault(bytes32 marketId, string calldata question, Side seedSide, uint256 rate, uint256 deposit)
+    function createVault(bytes32, string calldata, Side, uint256, uint256) external pure returns (bytes32) {
+        revert("VaultDriver: mandate required");
+    }
+
+    function createBoundVault(bytes32 marketId, string calldata question, Side seedSide, uint256 rate, uint256 deposit,
+        bytes32 commitment, uint32 closesAt, bytes32 operationId)
         external
         returns (bytes32 vaultId)
     {
-        require(rate > 0, "VaultDriver: zero rate");
+        require(operationId != bytes32(0), "VaultDriver: operation required");
+        address creator = _msgSender();
+        bytes32 inputDigest = keccak256(abi.encode(marketId, question, seedSide, rate, deposit, commitment, closesAt));
+        Creation memory previous = creations[creator][operationId];
+        if (previous.vaultId != bytes32(0)) {
+            require(previous.inputDigest == inputDigest, "VaultDriver: operation conflict");
+            return previous.vaultId;
+        }
+        require(rate > 0 && rate <= type(uint160).max / AMT_MUL, "VaultDriver: zero rate");
         require(deposit > 0 && deposit <= uint256(uint128(type(int128).max)), "VaultDriver: bad deposit");
         require(IMarketRegistry(protocol.marketRegistry()).marketExists(marketId), "VaultDriver: unknown market");
 
-        address creator = _msgSender();
         Vault vault = Vault(protocol.vault());
 
-        vaultId = vault.createVault(marketId, question, creator);
+        vaultId = vault.createVault(marketId, question, creator, commitment, closesAt);
+        creations[creator][operationId] = Creation({vaultId: vaultId, inputDigest: inputDigest});
+        emit BoundVaultCreated(vaultId, creator, operationId, commitment, closesAt);
         IMarketRegistry(protocol.marketRegistry()).addVault(marketId, vaultId);
         emit VaultCreated(marketId, vaultId, creator, question);
 
@@ -80,7 +98,7 @@ contract VaultDriver is SharedDriverUtils {
 
         StreamReceiver[] memory recv = new StreamReceiver[](1);
         recv[0] =
-            StreamReceiver({accountId: receiver, config: StreamConfigImpl.create(0, uint160(rate * AMT_MUL), 0, 0)});
+            StreamReceiver({accountId: receiver, config: StreamConfigImpl.create(0, uint160(rate * AMT_MUL), 1, closesAt - 1)});
 
         _transferFromCaller(USDC, uint128(deposit));
         DRIPS.setStreams(account, USDC, new StreamReceiver[](0), int128(uint128(deposit)), recv, 0, 0);
@@ -101,7 +119,7 @@ contract VaultDriver is SharedDriverUtils {
         uint256 receiver = receiverAccountView(vaultId, lane.side);
         StreamReceiver[] memory curr = new StreamReceiver[](1);
         curr[0] = StreamReceiver({
-            accountId: receiver, config: StreamConfigImpl.create(0, uint160(lane.rate * AMT_MUL), 0, 0)
+            accountId: receiver, config: StreamConfigImpl.create(0, uint160(lane.rate * AMT_MUL), 1, Vault(protocol.vault()).fundingClose(vaultId) - 1)
         });
 
         // Withdraw the entire remaining balance (refund the unstreamed bond) and stop the stream —

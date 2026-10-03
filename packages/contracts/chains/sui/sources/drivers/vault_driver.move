@@ -136,7 +136,7 @@ public(package) fun receiver_account<T>(
     receiver_from_pool(registry.driver_id, pool_id)
 }
 
-public fun create_vault<T>(
+public fun create_bound_vault<T>(
     registry: &mut VaultDriverRegistry,
     vault_registry: &mut VaultRegistry<T>,
     market_registry: &mut MarketRegistry,
@@ -148,16 +148,31 @@ public fun create_vault<T>(
     rate: u256,
     deposit: u128,
     payment: Coin<T>,
+    commitment: vector<u8>,
+    funding_close: u64,
+    operation_id: vector<u8>,
     clock: &Clock,
     ctx: &mut TxContext,
 ): vector<u8> {
+    side::assert_valid(seed_side);
+    assert!(vector::length(&operation_id) == 32 && nonzero32(&operation_id), 90);
+    assert!(vector::length(&commitment) == 32 && nonzero32(&commitment), 90);
+    let creator = ctx.sender();
+    let key = CreationKey { creator, operation_id };
+    if (sui::dynamic_field::exists_(&registry.id, key)) {
+        let prior = sui::dynamic_field::borrow<CreationKey, Creation>(&registry.id, key);
+        assert!(prior.market_id == market_id && prior.question == question && prior.side == seed_side && prior.rate == rate && prior.deposit == deposit && prior.commitment == commitment && prior.funding_close == funding_close, 92);
+        // Concurrent/replayed PTBs may carry a fresh payment; return it intact, never seed twice.
+        transfer::public_transfer(payment, creator);
+        return prior.vault_id
+    };
     assert!(rate > 0, E_ZERO_RATE);
     assert!(deposit > 0, E_BAD_DEPOSIT);
     assert!(market_registry::market_exists(market_registry, &market_id), E_UNKNOWN_MARKET);
 
-    let creator = ctx.sender();
     let emit_question = question;
     let vault_id = vault::create_vault(vault_registry, market_id, question, creator, clock);
+    vault::bind_mandate(vault_registry, vault_id, commitment, funding_close, clock);
     let indexed_market_id = vault::market_id(vault_registry, &vault_id);
     market_registry::add_vault(market_registry, indexed_market_id, vault_id);
 
@@ -176,7 +191,7 @@ public fun create_vault<T>(
 
     let amt_mul = streams::amt_per_sec_multiplier();
     let amt_per_sec = rate * amt_mul;
-    let mut recv = vector[streams::new_stream_receiver(receiver, 0, amt_per_sec, 0, 0)];
+    let mut recv = vector[streams::new_stream_receiver(receiver, 0, amt_per_sec, 1, funding_close - 1)];
     let empty = vector[];
     let balance_delta = i128::from(deposit);
 
@@ -213,7 +228,18 @@ public fun create_vault<T>(
         max_end,
     });
 
+    sui::dynamic_field::add(&mut registry.id, key, Creation { vault_id, market_id, question, side: seed_side, rate, deposit, commitment, funding_close });
     vault_id
+}
+
+public struct CreationKey has copy, drop, store { creator: address, operation_id: vector<u8> }
+public struct Creation has copy, drop, store { vault_id: vector<u8>, market_id: vector<u8>, question: vector<u8>, side: u8, rate: u256, deposit: u128, commitment: vector<u8>, funding_close: u64 }
+
+public fun creation(registry: &VaultDriverRegistry, creator: address, operation_id: vector<u8>): (vector<u8>, vector<u8>, vector<u8>, u8, u256, u128, vector<u8>, u64) {
+    let key = CreationKey { creator, operation_id };
+    if (!sui::dynamic_field::exists_(&registry.id, key)) return (vector[], vector[], vector[], 0, 0, 0, vector[], 0);
+    let p = sui::dynamic_field::borrow<CreationKey, Creation>(&registry.id, key);
+    (p.vault_id, p.market_id, p.question, p.side, p.rate, p.deposit, p.commitment, p.funding_close)
 }
 
 public fun stop_seed<T>(
@@ -234,7 +260,8 @@ public fun stop_seed<T>(
     let account = seed_account(registry, creator, vault_id);
     let receiver = receiver_account_view(registry, vault_id, lane.side);
     let amt_mul = streams::amt_per_sec_multiplier();
-    let mut curr = vector[streams::new_stream_receiver(receiver, 0, lane.rate * amt_mul, 0, 0)];
+    let close = vault::funding_close(vault_registry, vault_id);
+    let mut curr = vector[streams::new_stream_receiver(receiver, 0, lane.rate * amt_mul, if (close > 0) 1 else 0, if (close > 0) close - 1 else 0)];
     let empty = vector[];
     let withdraw_all = i128::neg_from(1_000_000_000_000_000_000_000_000);
 
@@ -359,4 +386,10 @@ fun seed_tag(creator: address, vault_id: &vector<u8>): u128 {
         i = i + 1;
     };
     tag
+}
+
+fun nonzero32(bytes: &vector<u8>): bool {
+    let mut i = 0;
+    while (i < vector::length(bytes)) { if (*vector::borrow(bytes, i) != 0) return true; i = i + 1; };
+    false
 }

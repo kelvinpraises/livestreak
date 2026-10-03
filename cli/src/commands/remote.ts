@@ -2,6 +2,7 @@ import { Command, Options } from "@effect/cli";
 import { Console, Effect, Option } from "effect";
 import { readFile } from "node:fs/promises";
 import type { BridgeCaller, CallActionEnvelope } from "@livestreak/schema";
+import { flushRuntimePersistence } from "../gateway/state/runtime-persistence.js";
 import { createConsoleEdges } from "../gateway/console/edges.js";
 import {
   buildConsoleRoutes,
@@ -9,6 +10,7 @@ import {
   mergeConsoleDescriptors,
   type ConsoleEdge,
 } from "../gateway/console/edge.js";
+import { localOperatorCaller } from "../gateway/auth/caller.js";
 import { resolvePassword } from "../gateway/auth/password.js";
 import { resolveOperator } from "../gateway/auth/identity.js";
 import { defaultKeystorePath, ensureAndUnlock } from "../gateway/auth/keystore.js";
@@ -21,6 +23,7 @@ import {
 import { projectConsoleFunctions } from "../gateway/console/functions.js";
 import { buildSessionWallet } from "../gateway/auth/session-wallet.js";
 import {
+  acquireSessionLock,
   activeSessions,
   defaultSessionStorePath,
   loadSessions,
@@ -28,6 +31,7 @@ import {
   upsertSession,
   type StoredSession,
 } from "../gateway/session/store.js";
+import { restoreSessionRecord, sessionContextDigest } from "../gateway/session/resume.js";
 import { connectGateway } from "../gateway/remote/wss-client.js";
 import { runRemoteDrive as executeRemoteDrive } from "../gateway/remote/driver.js";
 import {
@@ -69,6 +73,8 @@ const serializeRemoteBoard = (board: unknown): unknown =>
   );
 
 export const runRemoteOpen = async (input: {
+  readonly resume?: string;
+  readonly resumable?: boolean;
   readonly settingsPath?: string;
   readonly password?: string;
   readonly scopes: string;
@@ -78,13 +84,15 @@ export const runRemoteOpen = async (input: {
   readonly pairPassword?: string;
   readonly appOrigin?: string;
 }): Promise<string> => {
-  const appOrigin = resolveAppOrigin(input.appOrigin);
+  let appOrigin = resolveAppOrigin(input.appOrigin);
   const scopes = parseScopes(input.scopes);
   const ttlMs = parseTtlMs(input.ttl);
   const spendCapUSDC = input.spendCap === undefined ? undefined : BigInt(input.spendCap);
+  if (!Number.isSafeInteger(Date.now() + ttlMs) || ttlMs <= 0) throw new Error("TTL must be a finite positive duration");
+  if (spendCapUSDC !== undefined && spendCapUSDC < 0n) throw new Error("Spend cap must be nonnegative");
 
   const pairingPassword = input.pairPassword ?? generatePairingPassword();
-  const passwordVerifier = makePasswordVerifier(pairingPassword);
+  let passwordVerifier = makePasswordVerifier(pairingPassword);
 
   const settingsPath = input.settingsPath ?? defaultSettingsPath();
   const settings = await ensureSettings(settingsPath);
@@ -97,190 +105,247 @@ export const runRemoteOpen = async (input: {
 
   const storePath = defaultSessionStorePath();
   const registry = new SessionRegistry();
-  const record = registry.mint({
+  const contextDigest = sessionContextDigest(settings, sessionWallet.operatorAddress);
+  const saved = input.resume === undefined ? undefined : (await loadSessions(storePath)).find(s => s.sessionId === input.resume);
+  if (input.resume !== undefined && typeof saved?.consoleOrigin === "string") appOrigin = saved.consoleOrigin;
+  const record = input.resume === undefined ? registry.mint({
     scopes,
     ttlMs,
     ...(spendCapUSDC === undefined ? {} : { spendCapUSDC }),
-  });
-
-  const persist = async (remoteUrl?: string): Promise<void> => {
-    const stored: StoredSession = {
-      sessionId: record.sessionId,
-      scopes: record.scopes,
-      createdAtMs: record.createdAtMs,
-      expiresAt: record.expiresAt,
-      ...(spendCapUSDC === undefined ? {} : { spendCapUSDC: spendCapUSDC.toString() }),
-      spentUSDC: record.spentUSDC.toString(),
-      revoked: record.revoked,
-      ...(remoteUrl === undefined ? {} : { remoteUrl }),
-    };
-    await upsertSession(storePath, stored);
-  };
-  await persist();
-
-  const runId = `remote-${record.sessionId}`;
-  const consoleEdges: ConsoleEdge[] = await createConsoleEdges({
-    settings,
-    sessionWallet,
-    runId,
-  });
-
-  const log = (line: string): void => {
-    console.error(`[gateway] ${line}`);
-  };
-
-  const routes = await buildConsoleRoutes(consoleEdges);
-  const dispatch = createMergedDispatch(routes, consoleEdges);
-
-  let consoleFunctions: readonly import("@livestreak/schema").FunctionDescriptor[] = [];
+  }) : registry.restore(restoreSessionRecord(saved, contextDigest));
+  if (input.resume !== undefined) passwordVerifier = saved!.passwordVerifier!;
+  const configurations = { ...(saved?.configurations ?? {}) };
+  const resumable = input.resumable === true || input.resume !== undefined;
+  const releaseLock = await acquireSessionLock(storePath, record.sessionId);
   try {
-    const raw = await mergeConsoleDescriptors(consoleEdges);
-    consoleFunctions = projectConsoleFunctions(raw, scopes);
-    log(`function catalog: ${raw.length} total, ${consoleFunctions.length} in scope`);
-  } catch (error) {
-    log(
-      `function projection skipped: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
+    const persist = async (remoteUrl?: string): Promise<void> => {
+      const stored: StoredSession = {
+        sessionId: record.sessionId,
+        holder: record.holder,
+        runId: `remote-${record.sessionId}`,
+        passwordVerifier,
+        contextDigest,
+        consoleOrigin: appOrigin,
+        configurations: { ...configurations },
+        scopes: record.scopes,
+        createdAtMs: record.createdAtMs,
+        expiresAt: record.expiresAt,
+        ...(record.spendCapUSDC === undefined ? {} : { spendCapUSDC: record.spendCapUSDC.toString() }),
+        spentUSDC: record.spentUSDC.toString(),
+        revoked: record.revoked,
+        ...(remoteUrl === undefined ? {} : { remoteUrl }),
+      };
+      await upsertSession(storePath, stored);
+    };
+    await persist();
 
-  const relay = createRelay({
-    registry,
-    dispatch: (caller: BridgeCaller, envelope: CallActionEnvelope, target?: string) =>
-      dispatch(caller, envelope, target),
-  });
-  const hostWss = deriveHostWss(settings.host.url, record.sessionId, input.hostWss);
-  const boardUnsubs: Array<() => void> = [];
-  const pushBoard = (target: string, board: unknown): void => {
-    try {
-      wss.sendBoardPatch(record.sessionId, serializeRemoteBoard(board), target);
-    } catch (error) {
-      log(`board patch skipped: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
-  const wss = connectGateway({
-    hostWssUrl: hostWss,
-    seed: unlocked.seed,
-    relay,
-    registry,
-    ...(process.env["LIVESTREAK_GATEWAY_TOKEN"] === undefined
-      ? {}
-      : { authToken: process.env["LIVESTREAK_GATEWAY_TOKEN"] }),
-    onAck: (sessionId, remoteUrl) => {
-      if (sessionId === record.sessionId && remoteUrl !== undefined) {
-        record.remoteUrl = remoteUrl;
-        void persist(remoteUrl);
-        console.log(`remote console URL: ${appRemoteUrl(appOrigin, record.sessionId)}`);
+    const runId = `remote-${record.sessionId}`;
+    const consoleEdges: ConsoleEdge[] = await createConsoleEdges({
+      settings,
+      sessionWallet,
+      runId,
+    });
+
+    const log = (line: string): void => {
+      console.error(`[gateway] ${line}`);
+    };
+
+    const routes = await buildConsoleRoutes(consoleEdges);
+    const dispatch = createMergedDispatch(routes, consoleEdges);
+
+    // Restore only validated local lens selection, never a transaction or active media process.
+    for (const [target, args] of Object.entries(configurations)) {
+      if (!["options", "bookmaker", "steward"].includes(target) || !args ||
+          Object.entries(args).some(([key, value]) => !["marketId", "vaultId"].includes(key) || typeof value !== "string")) {
+        throw new Error("Invalid saved console configuration; refusing resume");
       }
-    },
-    log,
-  });
-  // Board-first reveal: a board change can newly reveal (or hide) actions, so re-project the catalog
-  // and re-push it. Without this the UI's function panel freezes at the open-time projection and
-  // board-gated actions (observe register, options fund, …) never appear as buttons after configure.
-  const refreshFunctions = async (): Promise<void> => {
+      await dispatch(localOperatorCaller(), { scope: "bridge:action", action: "configure", args }, target);
+    }
+
+    let consoleFunctions: readonly import("@livestreak/schema").FunctionDescriptor[] = [];
     try {
       const raw = await mergeConsoleDescriptors(consoleEdges);
-      wss.sendFunctions(record.sessionId, projectConsoleFunctions(raw, scopes));
+      consoleFunctions = projectConsoleFunctions(raw, record.scopes);
+      log(`function catalog: ${raw.length} total, ${consoleFunctions.length} in scope`);
     } catch (error) {
       log(
-        `functions refresh skipped: ${error instanceof Error ? error.message : String(error)}`,
+        `function projection skipped: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-  };
-  for (const edge of consoleEdges) {
-    if (edge.subscribeBoard === undefined) {
-      continue;
-    }
-    boardUnsubs.push(
-      edge.subscribeBoard((board) => {
-        pushBoard(edge.package, board);
-        void refreshFunctions();
-      }),
-    );
-  }
-  void (async () => {
-    for (const edge of consoleEdges) {
+
+    const relay = createRelay({
+      registry,
+      beforeDispatch: async () => {
+        const latest = (await loadSessions(storePath)).find(s => s.sessionId === record.sessionId);
+        if (!latest || latest.revoked) { registry.revoke(record.sessionId); throw new Error(latest ? "session revoked" : "session metadata unavailable; start a fresh session"); }
+        await persist(record.remoteUrl);
+      },
+      dispatch: async (caller: BridgeCaller, envelope: CallActionEnvelope, target?: string) => {
+        const result = await dispatch(caller, envelope, target);
+        if (target && ["options", "bookmaker", "steward"].includes(target)) {
+          if (envelope.action === "configure") {
+            const args = envelope.args as { marketId?: string; vaultId?: string };
+            configurations[target] = {
+              ...(typeof args.marketId === "string" ? { marketId: args.marketId } : {}),
+              ...(typeof args.vaultId === "string" ? { vaultId: args.vaultId } : {}),
+            };
+            await persist(record.remoteUrl);
+          } else if (envelope.action === "close") {
+            delete configurations[target];
+            await persist(record.remoteUrl);
+          }
+        }
+        return result;
+      },
+    });
+    const hostWss = deriveHostWss(settings.host.url, record.sessionId, input.hostWss);
+    const boardUnsubs: Array<() => void> = [];
+    const pushBoard = (target: string, board: unknown): void => {
       try {
-        await edge.refresh?.();
+        wss.sendBoardPatch(record.sessionId, serializeRemoteBoard(board), target);
+      } catch (error) {
+        log(`board patch skipped: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    const wss = connectGateway({
+      hostWssUrl: hostWss,
+      seed: unlocked.seed,
+      relay,
+      registry,
+      ...(process.env["LIVESTREAK_GATEWAY_TOKEN"] === undefined
+        ? {}
+        : { authToken: process.env["LIVESTREAK_GATEWAY_TOKEN"] }),
+      onAck: (sessionId, remoteUrl) => {
+        if (sessionId === record.sessionId && remoteUrl !== undefined) {
+          record.remoteUrl = remoteUrl;
+          void persist(remoteUrl).catch(error => log(`session persistence failed: ${String(error)}`));
+          console.log(input.resume === undefined ? "New session registered." : "Resumed the same session URL and run ID.");
+          console.log(`remote console URL: ${appRemoteUrl(appOrigin, record.sessionId)}`);
+        }
+      },
+      log,
+    });
+    // Board-first reveal: a board change can newly reveal (or hide) actions, so re-project the catalog
+    // and re-push it. Without this the UI's function panel freezes at the open-time projection and
+    // board-gated actions (observe register, options fund, …) never appear as buttons after configure.
+    const refreshFunctions = async (): Promise<void> => {
+      try {
+        const raw = await mergeConsoleDescriptors(consoleEdges);
+        wss.sendFunctions(record.sessionId, projectConsoleFunctions(raw, record.scopes));
       } catch (error) {
         log(
-          `${edge.package} board refresh skipped: ${error instanceof Error ? error.message : String(error)}`,
+          `functions refresh skipped: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      if (edge.readBoard === undefined) {
+    };
+    for (const edge of consoleEdges) {
+      if (edge.subscribeBoard === undefined) {
         continue;
       }
-      try {
-        pushBoard(edge.package, await edge.readBoard());
-      } catch (error) {
-        log(
-          `${edge.package} board snapshot skipped: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      boardUnsubs.push(
+        edge.subscribeBoard((board) => {
+          pushBoard(edge.package, board);
+          void refreshFunctions();
+        }),
+      );
+    }
+    void (async () => {
+      for (const edge of consoleEdges) {
+        try {
+          await edge.refresh?.();
+        } catch (error) {
+          log(
+            `${edge.package} board refresh skipped: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        if (edge.readBoard === undefined) {
+          continue;
+        }
+        try {
+          pushBoard(edge.package, await edge.readBoard());
+        } catch (error) {
+          log(
+            `${edge.package} board snapshot skipped: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
-    }
-  })();
-  wss.register({
-    record,
-    passwordVerifier,
-    ...(consoleFunctions.length === 0 ? {} : { functions: consoleFunctions }),
-  });
+    })();
+    wss.register({
+      record,
+      passwordVerifier,
+      ...(consoleFunctions.length === 0 ? {} : { functions: consoleFunctions }),
+    });
 
-  const shutdown = (reason: string): void => {
-    for (const unsub of boardUnsubs) {
-      unsub();
-    }
-    registry.revoke(record.sessionId);
-    wss.revoke(record.sessionId);
-    void markRevoked(storePath, record.sessionId);
-    wss.close();
-    unlocked.lock();
-    console.error(`[gateway] session ${record.sessionId} closed (${reason})`);
-  };
-
-  return await new Promise<string>((resolve) => {
-    const timer = setInterval(() => {
-      void (async () => {
-        const sessions = await loadSessions(storePath);
-        const mine = sessions.find((s) => s.sessionId === record.sessionId);
-        if (mine?.revoked === true) {
-          registry.revoke(record.sessionId);
-        }
-        if (record.revoked || Date.now() >= record.expiresAt) {
-          clearInterval(timer);
-          shutdown(record.revoked ? "revoked" : "ttl_expired");
-          resolve(`session ${record.sessionId} ended`);
-        }
-      })();
-    }, 3000);
-    timer.unref?.();
-
-    const onSignal = (sig: string): void => {
-      clearInterval(timer);
-      shutdown(sig);
-      resolve(`session ${record.sessionId} ended (${sig})`);
+    const shutdown = async (reason: string): Promise<void> => {
+      for (const unsub of boardUnsubs) {
+        unsub();
+      }
+      if (!resumable || reason === "revoked" || reason === "ttl_expired") {
+        registry.revoke(record.sessionId);
+        wss.revoke(record.sessionId);
+        wss.close();
+        await markRevoked(storePath, record.sessionId);
+      } else {
+        wss.close();
+        await persist(record.remoteUrl);
+      }
+      await flushRuntimePersistence();
+      unlocked.lock();
+      console.error(`[gateway] session ${record.sessionId} closed (${reason})`);
     };
-    process.once("SIGINT", () => onSignal("SIGINT"));
-    process.once("SIGTERM", () => onSignal("SIGTERM"));
 
-    const ttlSecs = Math.round(ttlMs / 1000);
-    console.log(
-      [
-        "livestreak remote open",
-        "",
-        `pairing code: ${record.sessionId}`,
-        `pairing pass: ${pairingPassword}`,
-        `console URL:  ${appRemoteUrl(appOrigin, record.sessionId)}`,
-        `scopes:       ${record.scopes.join(", ")}`,
-        `expires in:   ${ttlSecs}s`,
-        spendCapUSDC === undefined
-          ? "spend cap:    none"
-          : `spend cap:    ${spendCapUSDC.toString()} (atomic USDC)`,
-        `host (leg A): ${hostWss}`,
-        "",
-        "Share the pairing code AND pairing pass with the remote operator. Ctrl-C to revoke & exit.",
-      ].join("\n"),
-    );
-  });
+    return await new Promise<string>((resolve) => {
+      let ending = false;
+      const finish = async (reason: string): Promise<void> => {
+        if (ending) return;
+        ending = true;
+        clearInterval(timer);
+        process.off("SIGINT", onInt); process.off("SIGTERM", onTerm);
+        try { await shutdown(reason); }
+        catch (error) { wss.close(); unlocked.lock(); log(`shutdown persistence failed: ${String(error)}`); }
+        resolve(`session ${record.sessionId} ended (${reason})`);
+      };
+      const timer = setInterval(() => {
+        void (async () => {
+          const sessions = await loadSessions(storePath);
+          const mine = sessions.find((s) => s.sessionId === record.sessionId);
+          if (mine === undefined || mine.revoked) {
+            registry.revoke(record.sessionId);
+          }
+          if (record.revoked || Date.now() >= record.expiresAt) {
+            clearInterval(timer);
+            await finish(record.revoked ? "revoked" : "ttl_expired");
+          }
+        })().catch(error => { log(`session read failed: ${String(error)}`); void finish("revoked"); });
+      }, 1000);
+      timer.unref?.();
+
+      const onInt = (): void => { void finish("SIGINT"); };
+      const onTerm = (): void => { void finish("SIGTERM"); };
+      process.once("SIGINT", onInt);
+      process.once("SIGTERM", onTerm);
+
+      const ttlSecs = Math.max(0, Math.round((record.expiresAt - Date.now()) / 1000));
+      console.log(
+        [
+          "livestreak remote open",
+          "",
+          `pairing code: ${record.sessionId}`,
+          input.resume === undefined ? `pairing pass: ${pairingPassword}` : "pairing pass: unchanged (use the original pairing password)",
+          `console URL:  ${appRemoteUrl(appOrigin, record.sessionId)}`,
+          `scopes:       ${record.scopes.join(", ")}`,
+          `expires in:   ${ttlSecs}s`,
+          record.spendCapUSDC === undefined
+            ? "spend cap:    none"
+            : `spend cap:    ${record.spentUSDC}/${record.spendCapUSDC} (atomic USDC, reserved usage)`,
+          `host (leg A): ${hostWss}`,
+          "",
+          input.resume === undefined ? "Created a new session; awaiting Host registration." : "Restoring the original session; awaiting Host confirmation.",
+          resumable ? "Ctrl-C disconnects; resume with --resume <session>. Use remote revoke to terminate access." : "Share the pairing code AND pairing pass. Ctrl-C revokes and exits.",
+        ].join("\n"),
+      );
+    });
+  } finally { await releaseLock(); unlocked.lock(); }
 };
 
 export const runRemoteList = async (): Promise<string> => {
@@ -493,8 +558,10 @@ const settingsPathOpt = Options.text("settings").pipe(
 const remoteOpenCommand = Command.make(
   "open",
   {
-    scopes: scopesOpt,
-    ttl: ttlOpt,
+    resume: Options.text("resume").pipe(Options.optional),
+    resumable: Options.boolean("resumable"),
+    scopes: scopesOpt.pipe(Options.withDefault("bridge:board:read")),
+    ttl: ttlOpt.pipe(Options.withDefault("30m")),
     spendCap: spendCapOpt,
     hostWss: hostWssOpt,
     pairPassword: pairPasswordOpt,
@@ -502,10 +569,12 @@ const remoteOpenCommand = Command.make(
     settings: settingsPathOpt,
     password: passwordOpt,
   },
-  ({ scopes, ttl, spendCap, hostWss, pairPassword, appOrigin, settings, password }) =>
+  ({ resume, resumable, scopes, ttl, spendCap, hostWss, pairPassword, appOrigin, settings, password }) =>
     Effect.tryPromise({
       try: () =>
         runRemoteOpen({
+          ...(Option.isSome(resume) ? { resume: resume.value } : {}),
+          resumable,
           scopes,
           ttl,
           ...(Option.isSome(spendCap) ? { spendCap: spendCap.value } : {}),

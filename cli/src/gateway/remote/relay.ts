@@ -25,6 +25,8 @@ export interface RelayDeps {
   readonly registry: SessionRegistry;
   readonly dispatch: DispatchFn;
   readonly now?: () => number;
+  /** Persist cap reservation before any signing/dispatch; persistence failure fails closed. */
+  readonly beforeDispatch?: () => Promise<void>;
   /** Liveness bound per dispatched call — a wedged bridge call must yield an honest error
    *  frame, never silence (chain writes poll up to ~60s; default leaves ample headroom). */
   readonly dispatchTimeoutMs?: number;
@@ -75,11 +77,12 @@ export const createRelay = (deps: RelayDeps): Relay => {
     }
 
     try {
+      deps.registry.commitSpend(frame.sessionId, frame.envelope);
+      await deps.beforeDispatch?.();
       const result = await withTimeout(
         deps.dispatch(deps.registry.callerFor(record), frame.envelope, frame.target),
         deps.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS,
       );
-      deps.registry.commitSpend(frame.sessionId, frame.envelope);
       const payload = {
         ...(result.recordDigest === undefined ? {} : { recordDigest: result.recordDigest }),
         ...(result.confirmationDigest === undefined

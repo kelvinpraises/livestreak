@@ -118,6 +118,13 @@ pub enum LivestreakError {
     #[msg("no seed lane")]
     DriverNoSeed,
 
+    #[msg("vault is not bound to immutable rules")]
+    UnboundVault,
+    #[msg("vault funding closed")]
+    FundingClosed,
+    #[msg("creation operation conflict")]
+    CreationConflict,
+
     // ── drips ──
     #[msg("total streamed balance too high")]
     DripsTotalBalanceTooHigh,
@@ -186,6 +193,9 @@ impl From<DripsError> for LivestreakError {
 impl From<DriverError> for LivestreakError {
     fn from(e: DriverError) -> Self {
         match e {
+            DriverError::UnboundVault => Self::UnboundVault,
+            DriverError::FundingClosed => Self::FundingClosed,
+            DriverError::CreationConflict => Self::CreationConflict,
             DriverError::SaltUsed => Self::DriverSaltUsed,
             DriverError::UnknownMarket => Self::DriverUnknownMarket,
             DriverError::ZeroRate => Self::DriverZeroRate,

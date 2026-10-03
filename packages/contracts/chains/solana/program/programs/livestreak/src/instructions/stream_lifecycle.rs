@@ -28,7 +28,7 @@ fn validate_pointer(scheme: u8, pointer: &[u8]) -> Result<()> {
     require!(
         matches!(
             scheme,
-            SCHEME_WALRUS_TESTNET | SCHEME_WALRUS_MAINNET | SCHEME_IPFS | SCHEME_ARWEAVE
+            SCHEME_WALRUS_TESTNET | SCHEME_WALRUS_MAINNET | SCHEME_IPFS | SCHEME_ARWEAVE | 4
         ),
         LivestreakError::BadScheme
     );
@@ -50,7 +50,12 @@ pub fn handle_go_live(ctx: Context<StreamLifecycle>, scheme: u8, pointer: Vec<u8
 }
 
 pub fn handle_set_ended(ctx: Context<StreamLifecycle>, scheme: u8, pointer: Vec<u8>) -> Result<()> {
-    validate_pointer(scheme, &pointer)?;
+    if pointer.is_empty() {
+        // Canonical absence. Nonempty storage ids retain the existing bounds.
+        require!(scheme == 0, LivestreakError::BadScheme);
+    } else {
+        validate_pointer(scheme, &pointer)?;
+    }
     let market = &mut ctx.accounts.market;
     require!(
         market.stream_status != STREAM_STATUS_NONE,

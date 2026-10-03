@@ -18,7 +18,9 @@ fn hex32(id: &[u8; 32]) -> String {
 }
 
 fn main() {
-    let out = std::env::args().nth(1).expect("usage: gen-fixture <out-dir>");
+    let out = std::env::args()
+        .nth(1)
+        .expect("usage: gen-fixture <out-dir>");
     fs::create_dir_all(&out).unwrap();
 
     let mut p = Protocol::default();
@@ -29,7 +31,7 @@ fn main() {
 
     // Seed NO $500 @ $5/s, bettor YES $700 @ $7/s, resolve YES at t0+100.
     let vault_id = p
-        .create_vault_seeded(
+        .create_bound_vault_seeded(
             market_id,
             b"fixture: does the keeper save?".to_vec(),
             creator,
@@ -37,11 +39,21 @@ fn main() {
             U256::from(5_000_000u64),
             500_000_000,
             t0,
+            [1; 32],
+            0xFFFFFFFE,
+            [1; 32],
         )
         .unwrap();
     let token_id = p.mint_with_salt(market_id, true, bettor, 42).unwrap();
-    p.fund(token_id, &vault_id, SIDE_YES, U256::from(7_000_000u64), 700_000_000, t0)
-        .unwrap();
+    p.fund(
+        token_id,
+        &vault_id,
+        SIDE_YES,
+        U256::from(7_000_000u64),
+        700_000_000,
+        t0,
+    )
+    .unwrap();
     p.vault.resolve(&vault_id, SIDE_YES, t0 + 100).unwrap();
 
     let blob = p.to_bytes();
@@ -58,6 +70,12 @@ fn main() {
         "marketId": hex32(&market_id),
         "tokenId": token_hex,
         "vaultOutcome": p.vault.get_vault(&vault_id).unwrap().outcome,
+        "mandateCommitment": hex32(&p.vault.get_vault(&vault_id).unwrap().mandate_commitment),
+        "fundingClose": p.vault.get_vault(&vault_id).unwrap().funding_close,
+        "operationId": hex32(&p.vault.get_vault(&vault_id).unwrap().operation_id),
+        "seedSide": p.vault.get_vault(&vault_id).unwrap().seed_side,
+        "seedRate": p.vault.get_vault(&vault_id).unwrap().seed_rate.to_string(),
+        "seedDeposit": p.vault.get_vault(&vault_id).unwrap().seed_deposit.to_string(),
         "pot": p.vault.pot(&vault_id).to_string(),
         "boardYes": {
             "pool": board_yes.pool.to_string(),
@@ -80,5 +98,8 @@ fn main() {
         serde_json::to_string_pretty(&expected).unwrap(),
     )
     .unwrap();
-    println!("wrote {out}/protocol-blob.bin ({} bytes) + expected.json", blob.len());
+    println!(
+        "wrote {out}/protocol-blob.bin ({} bytes) + expected.json",
+        blob.len()
+    );
 }

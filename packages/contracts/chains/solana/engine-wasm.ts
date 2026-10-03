@@ -17,7 +17,9 @@ async function loadWasm(): Promise<WasmModule> {
         // Node: feed the bytes ourselves (no fetch for file URLs).
         const { readFile } = await import("node:fs/promises");
         const { fileURLToPath } = await import("node:url");
-        const wasmPath = fileURLToPath(new URL("./wasm/livestreak_wasm_bg.wasm", import.meta.url));
+        const wasmPath = fileURLToPath(
+          new URL("./wasm/livestreak_wasm_bg.wasm", import.meta.url),
+        );
         mod.initSync({ module: await readFile(wasmPath) });
       } else {
         await mod.default(new URL("./wasm/livestreak_wasm_bg.wasm", import.meta.url));
@@ -45,6 +47,12 @@ export interface EngineVault {
   outcome: number;
   resolvedAt: number;
   exists: boolean;
+  commitment: `0x${string}`;
+  fundingClose: number;
+  operationId: `0x${string}`;
+  seedSide: number;
+  seedRate: string;
+  seedDeposit: string;
 }
 
 export interface EnginePosition {
@@ -98,7 +106,12 @@ export class EngineView {
     };
   }
 
-  vaultPools(vaultId: string): { yesPool: bigint; noPool: bigint; yesShares: bigint; noShares: bigint } {
+  vaultPools(vaultId: string): {
+    yesPool: bigint;
+    noPool: bigint;
+    yesShares: bigint;
+    noShares: bigint;
+  } {
     const raw = JSON.parse(this.view.vault_pools(vaultId));
     return {
       yesPool: BigInt(raw.yesPool),
@@ -121,7 +134,9 @@ export class EngineView {
   }
 
   boundaries(vaultId: string, side: number): EngineBoundary[] {
-    const raw: { maxEnd: number; rate: string }[] = JSON.parse(this.view.boundaries(vaultId, side));
+    const raw: { maxEnd: number; rate: string }[] = JSON.parse(
+      this.view.boundaries(vaultId, side),
+    );
     return raw.map((b) => ({ maxEnd: b.maxEnd, rate: BigInt(b.rate) }));
   }
 

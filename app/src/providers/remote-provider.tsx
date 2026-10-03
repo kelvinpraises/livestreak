@@ -19,7 +19,7 @@ import type { CallResult, RemoteBoard, RemoteStatus, RemoteTransport } from '#/u
 import { HostWssTransport } from '#/utils/host-wss-transport'
 import { env } from '#/utils/env'
 
-function defaultTransport(_sessionId: string): RemoteTransport {
+function defaultTransport(): RemoteTransport {
   return new HostWssTransport({ hostBaseUrl: env.hostBaseUrl })
 }
 
@@ -50,7 +50,9 @@ interface Props {
 }
 
 export function RemoteProvider({ session, transport, children }: Props) {
-  const transportRef = useRef<RemoteTransport>(transport ?? defaultTransport(session))
+  const transportRef = useRef<RemoteTransport>(transport ?? defaultTransport())
+
+  const mountedRef = useRef(false)
 
   const [status, setStatus] = useState<RemoteStatus>(transportRef.current.status)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -59,11 +61,13 @@ export function RemoteProvider({ session, transport, children }: Props) {
   const [board, setBoard] = useState<RemoteBoard>({})
 
   useEffect(() => {
+    mountedRef.current = true
     const t = transportRef.current
     const offStatus = t.onStatus(setStatus)
     const offFns = t.onFunctions(setFunctions)
     const offPatch = t.onPatch(setBoard)
     return () => {
+      mountedRef.current = false
       offStatus()
       offFns()
       offPatch()
@@ -77,6 +81,7 @@ export function RemoteProvider({ session, transport, children }: Props) {
       const t = transportRef.current
       try {
         const redeemed = await t.redeem(session, password)
+        if (!mountedRef.current) return
         setGrant(redeemed.grant)
         await t.connect(redeemed)
       } catch (err) {

@@ -36,7 +36,7 @@ export interface RemoteRelayConfig {
 export interface RemoteRelay {
   readonly registerGateway: (sessionId: string, conn: RelayConn, raw: unknown) => boolean;
   readonly onGatewayMessage: (sessionId: string, raw: unknown) => void;
-  readonly onGatewayClose: (sessionId: string) => void;
+  readonly onGatewayClose: (sessionId: string, conn?: RelayConn) => void;
   readonly onUiHello: (sessionId: string, connId: string, conn: RelayConn, raw: unknown) => boolean;
   readonly onUiMessage: (sessionId: string, connId: string, conn: RelayConn, raw: unknown) => void;
   readonly onUiClose: (sessionId: string, connId: string) => void;
@@ -55,6 +55,7 @@ export const createRemoteRelay = (
 ): RemoteRelay => {
   // relayCallId -> originating UI + the UI's own callId (so results route back).
   const pending = new Map<string, PendingCall>();
+  const owners = new Map<string, RelayConn>();
   // (sessionId,connId) -> grant bound at ui.hello.
   const boundGrants = new Map<string, CapabilityGrant>();
   const grantKey = (sessionId: string, connId: string): string => `${sessionId}::${connId}`;
@@ -73,7 +74,7 @@ export const createRemoteRelay = (
       return;
     }
     for (const sink of session.uiSinks.values()) {
-      sink({ type: "revoked" });
+      sink({ type: "revoked", reason: reason === "ttl_expired" ? "ttl_expired" : "revoked" });
     }
     if (session.gateway !== null && reason !== "gateway_down") {
       session.gateway({ type: "session_closed", sessionId, reason });
@@ -102,20 +103,29 @@ export const createRemoteRelay = (
       !Array.isArray(register.scopes) ||
       typeof register.passwordVerifier !== "string" ||
       typeof register.ttlMs !== "number" ||
-      register.ttlMs <= 0
+      !Number.isFinite(register.ttlMs) || register.ttlMs <= 0 ||
+      (register.expiresAt !== undefined && (!Number.isFinite(register.expiresAt) || register.expiresAt <= Date.now()))
     ) {
       conn.close(4400, "invalid register");
       return false;
     }
 
-    store.register({
-      sessionId,
-      scopes: register.scopes,
-      passwordVerifier: register.passwordVerifier,
-      ttlMs: register.ttlMs,
-      gateway: (frame) => conn.send(frame),
-      ...(Array.isArray(register.functions) ? { functions: register.functions } : {})
-    });
+    try {
+      store.register({
+        sessionId,
+        scopes: register.scopes,
+        passwordVerifier: register.passwordVerifier,
+        ttlMs: register.ttlMs,
+        ...(register.expiresAt === undefined ? {} : { expiresAt: register.expiresAt }),
+        gateway: (frame) => conn.send(frame),
+        ...(Array.isArray(register.functions) ? { functions: register.functions } : {})
+      });
+    } catch (error) {
+      conn.send({ type: "session_closed", sessionId, reason: "revoked" });
+      conn.close(4409, error instanceof Error ? error.message : "registration rejected");
+      return false;
+    }
+    owners.set(sessionId, conn);
     conn.send({ type: "ack", sessionId, remoteUrl: `${config.remoteBaseUrl}/remote/${sessionId}` });
     return true;
   };
@@ -179,7 +189,9 @@ export const createRemoteRelay = (
     }
   };
 
-  const onGatewayClose = (sessionId: string): void => {
+  const onGatewayClose = (sessionId: string, conn?: RelayConn): void => {
+    if (conn !== undefined && owners.get(sessionId) !== conn) return;
+    owners.delete(sessionId);
     const session = store.get(sessionId);
     if (session === undefined) {
       return;
@@ -205,8 +217,14 @@ export const createRemoteRelay = (
     const hello = msg as unknown as UiHelloMsg;
     const session = store.getLive(sessionId);
     if (session === undefined) {
-      conn.send({ type: "error", code: -32004, message: "session not available" });
+      const ended = store.get(sessionId);
+      conn.send(ended ? { type: "revoked", reason: ended.expiresAt <= Date.now() ? "ttl_expired" : "revoked" } : { type: "error", code: -32004, message: "session not available" });
       conn.close(4404, "no session");
+      return false;
+    }
+    if (session.gateway === null) {
+      conn.send({ type: "error", code: -32010, message: "gateway disconnected" });
+      conn.close(4410, "gateway disconnected");
       return false;
     }
     const grant = hello.grant;
@@ -216,7 +234,7 @@ export const createRemoteRelay = (
       grant === null ||
       grant.sessionId !== sessionId ||
       !signer.verifyGrant(grant) ||
-      grant.revoked
+      grant.revoked || grant.expiresAt === undefined || grant.expiresAt <= Date.now()
     ) {
       conn.send({ type: "error", code: -32403, message: "invalid grant" });
       conn.close(4403, "invalid grant");
@@ -227,7 +245,7 @@ export const createRemoteRelay = (
     // Filter the gateway-projected catalog by THIS grant's scopes server-side, so
     // the UI only ever learns about functions it is actually authorized to call.
     const functions = filterFunctionsByGrant(session.functions, grant);
-    conn.send({ type: "ready", sessionId, functions });
+    conn.send({ type: "ready", sessionId, functions, boards: session.lastBoards });
     // Replay EVERY package's latest board (keyed by target) so a late-joining UI sees all boards, not
     // just whichever package pushed last.
     for (const [target, board] of Object.entries(session.lastBoards)) {
@@ -250,7 +268,8 @@ export const createRemoteRelay = (
     const call = msg as unknown as UiCallMsg;
     const session = store.getLive(sessionId);
     if (session === undefined) {
-      conn.send({ type: "error", code: -32004, message: "session not available" });
+      const ended = store.get(sessionId);
+      conn.send(ended ? { type: "revoked", reason: ended.expiresAt <= Date.now() ? "ttl_expired" : "revoked" } : { type: "error", code: -32004, message: "session not available" });
       conn.close(4404, "no session");
       return;
     }
@@ -319,6 +338,9 @@ export const createRemoteRelay = (
   };
 
   const onUiClose = (sessionId: string, connId: string): void => {
+    for (const [id, call] of pending) {
+      if (call.sessionId === sessionId && call.connId === connId) pending.delete(id);
+    }
     store.unbindUi(sessionId, connId);
     boundGrants.delete(grantKey(sessionId, connId));
   };

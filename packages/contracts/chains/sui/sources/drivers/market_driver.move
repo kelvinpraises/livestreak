@@ -241,6 +241,7 @@ public fun fund<T>(
     assert!(rate > 0, E_ZERO_RATE);
     assert!(deposit > 0, E_BAD_DEPOSIT);
     assert_market_vault(registry, vault_registry, token_id, &vault_id);
+    vault::require_funding_open(vault_registry, vault_id, clock);
 
     let lane_key = LaneKey { token_id, vault_id };
     assert!(!table::contains(&registry.lanes, lane_key), E_VAULT_HAS_LANE);
@@ -360,6 +361,13 @@ public fun set_lanes<T>(
         assert!(*vector::borrow(&desired_rates, i) > 0, E_ZERO_RATE);
         let vault_id = *vector::borrow(&desired_vault_ids, i);
         assert!(vault::market_id(vault_registry, &vault_id) == market_id, E_WRONG_MARKET);
+        let key = LaneKey { token_id, vault_id };
+        let same = table::contains(&registry.lanes, key) && {
+            let lane = table::borrow(&registry.lanes, key);
+            lane.side == *vector::borrow(&desired_sides, i) && lane.rate == *vector::borrow(&desired_rates, i)
+        };
+        if (!same || add_deposit > 0) vault::require_funding_open(vault_registry, vault_id, clock);
+
         let mut j = 0;
         while (j < i) {
             assert!(*vector::borrow(&desired_vault_ids, j) != vault_id, E_DUPLICATE_VAULT);
@@ -634,7 +642,8 @@ fun diff_added<T>(
             let now = sui::clock::timestamp_ms(clock) / 1000;
             changed = depleted || (p_rate > 0 && p_max_end != 0 && p_max_end <= now);
         };
-        if (changed) {
+        let close = vault::funding_close(vault_registry, vault_id);
+        if (changed && sui::clock::timestamp_ms(clock) / 1000 < close) {
             vector::push_back(&mut added_vaults, vault_id);
             vector::push_back(&mut added_sides, side);
             vector::push_back(&mut added_rates, rate);
@@ -743,9 +752,10 @@ fun build_receivers_impl<T>(
         let lane_key = LaneKey { token_id, vault_id };
         let lane = table::borrow(&registry.lanes, lane_key);
         let recv = vault_driver::receiver_account(vault_driver, vault_registry, vault_id, lane.side);
+        let close = vault::funding_close(vault_registry, vault_id);
         vector::push_back(
             &mut receivers,
-            streams::new_stream_receiver(recv, 0, lane.rate * amt_mul, 0, 0),
+            streams::new_stream_receiver(recv, 0, lane.rate * amt_mul, if (close > 0) 1 else 0, if (close > 0) close - 1 else 0),
         );
         i = i + 1;
     };

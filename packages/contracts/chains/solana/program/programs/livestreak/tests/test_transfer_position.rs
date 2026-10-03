@@ -102,6 +102,9 @@ fn transfer_moves_the_owner_gate() {
             seed_side: SIDE_YES,
             rate: 5 * USD,
             deposit: 500 * USD,
+            commitment: [1; 32],
+            funding_close: 0xFFFFFFFE,
+            operation_id: solana_keccak_hasher::hash(&(b"goal scored?".to_vec())).to_bytes(),
         }
         .data(),
         livestreak::accounts::UserEngineOp {
@@ -164,26 +167,44 @@ fn transfer_moves_the_owner_gate() {
         Instruction::new_with_bytes(
             program_id,
             &livestreak::instruction::TransferPosition { new_owner }.data(),
-            livestreak::accounts::TransferPosition { owner: signer, position }
-                .to_account_metas(None),
+            livestreak::accounts::TransferPosition {
+                owner: signer,
+                position,
+            }
+            .to_account_metas(None),
         )
     };
 
     // (c) a NON-OWNER cannot transfer — the owner gate is checked at account validation.
     let err = h
-        .send(transfer_ix(user_b.pubkey(), user_b.pubkey()), &[&h.payer.insecure_clone(), &user_b])
+        .send(
+            transfer_ix(user_b.pubkey(), user_b.pubkey()),
+            &[&h.payer.insecure_clone(), &user_b],
+        )
         .expect_err("a non-owner transfer must fail");
-    assert!(err.contains("NotCreator"), "non-owner transfer must be typed NotCreator, got: {err}");
+    assert!(
+        err.contains("NotCreator"),
+        "non-owner transfer must be typed NotCreator, got: {err}"
+    );
 
     // (d) the true owner cannot transfer to the zero pubkey.
     let err = h
-        .send(transfer_ix(user_a.pubkey(), Pubkey::default()), &[&h.payer.insecure_clone(), &user_a])
+        .send(
+            transfer_ix(user_a.pubkey(), Pubkey::default()),
+            &[&h.payer.insecure_clone(), &user_a],
+        )
         .expect_err("a zero-owner transfer must fail");
-    assert!(err.contains("ZeroNewOwner"), "zero-owner transfer must be typed ZeroNewOwner, got: {err}");
+    assert!(
+        err.contains("ZeroNewOwner"),
+        "zero-owner transfer must be typed ZeroNewOwner, got: {err}"
+    );
 
     // ── A transfers the position to B ──────────────────────────────────────────
-    h.send(transfer_ix(user_a.pubkey(), user_b.pubkey()), &[&h.payer.insecure_clone(), &user_a])
-        .expect("owner A must be able to transfer to B");
+    h.send(
+        transfer_ix(user_a.pubkey(), user_b.pubkey()),
+        &[&h.payer.insecure_clone(), &user_a],
+    )
+    .expect("owner A must be able to transfer to B");
 
     // ── stop_all, parameterized by (signer, their own usdc ata) ────────────────
     let stop_ix = |signer: Pubkey, usdc: Pubkey| {
@@ -204,14 +225,23 @@ fn transfer_moves_the_owner_gate() {
 
     // (b) A can no longer act — the owner gate now rejects the former owner.
     let err = h
-        .send(stop_ix(user_a.pubkey(), a_ata), &[&h.payer.insecure_clone(), &user_a])
+        .send(
+            stop_ix(user_a.pubkey(), a_ata),
+            &[&h.payer.insecure_clone(), &user_a],
+        )
         .expect_err("the former owner A must no longer be able to act");
-    assert!(err.contains("NotCreator"), "former owner op must be typed NotCreator, got: {err}");
+    assert!(
+        err.contains("NotCreator"),
+        "former owner op must be typed NotCreator, got: {err}"
+    );
 
     // (a) B can now drive the position-gated op and the refund lands in B's OWN usdc.
     let b_before = h.token_balance(&b_ata);
-    h.send(stop_ix(user_b.pubkey(), b_ata), &[&h.payer.insecure_clone(), &user_b])
-        .expect("new owner B must be able to stop_all");
+    h.send(
+        stop_ix(user_b.pubkey(), b_ata),
+        &[&h.payer.insecure_clone(), &user_b],
+    )
+    .expect("new owner B must be able to stop_all");
     let b_after = h.token_balance(&b_ata);
     assert!(
         b_after > b_before,

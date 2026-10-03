@@ -5,11 +5,11 @@
 //! across real token balances.
 
 use {
+    anchor_lang::solana_program::instruction::Instruction,
     anchor_lang::{
         prelude::Pubkey, solana_program::system_program, AccountDeserialize, InstructionData,
         ToAccountMetas,
     },
-    anchor_lang::solana_program::instruction::Instruction,
     litesvm::LiteSVM,
     litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo},
     solana_keypair::Keypair,
@@ -34,7 +34,10 @@ impl Harness {
         let program_id = livestreak::id();
         let payer = Keypair::new();
         let mut svm = LiteSVM::new();
-        let bytes = include_bytes!(concat!(env!("CARGO_TARGET_TMPDIR"), "/../deploy/livestreak.so"));
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_TARGET_TMPDIR"),
+            "/../deploy/livestreak.so"
+        ));
         svm.add_program(program_id, bytes).unwrap();
         svm.airdrop(&payer.pubkey(), 100_000_000_000).unwrap();
         // litesvm's clock starts at 0; the engine (like the Move source) uses
@@ -42,8 +45,16 @@ impl Harness {
         let mut clock = svm.get_sysvar::<anchor_lang::prelude::Clock>();
         clock.unix_timestamp = 1_752_700_000;
         svm.set_sysvar(&clock);
-        let usdc = CreateMint::new(&mut svm, &payer).decimals(6).send().unwrap();
-        Self { svm, payer, program_id, usdc }
+        let usdc = CreateMint::new(&mut svm, &payer)
+            .decimals(6)
+            .send()
+            .unwrap();
+        Self {
+            svm,
+            payer,
+            program_id,
+            usdc,
+        }
     }
 
     fn send(&mut self, ix: Instruction, signers: &[&Keypair]) -> Result<(), String> {
@@ -52,7 +63,9 @@ impl Harness {
         // Engine ops are CU-heavy (U256 software math; hot-path narrowing is a
         // later, test-gated optimization). Request the max budget like real clients.
         let compute_budget = Instruction::new_with_bytes(
-            "ComputeBudget111111111111111111111111111111".parse().unwrap(),
+            "ComputeBudget111111111111111111111111111111"
+                .parse()
+                .unwrap(),
             &{
                 let mut data = vec![2u8];
                 data.extend_from_slice(&1_400_000u32.to_le_bytes());
@@ -60,10 +73,17 @@ impl Harness {
             },
             vec![],
         );
-        let msg = Message::new_with_blockhash(&[compute_budget, ix], Some(&self.payer.pubkey()), &blockhash);
+        let msg = Message::new_with_blockhash(
+            &[compute_budget, ix],
+            Some(&self.payer.pubkey()),
+            &blockhash,
+        );
         let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(msg), signers)
             .map_err(|e| e.to_string())?;
-        self.svm.send_transaction(tx).map(|_| ()).map_err(|e| format!("{:?}\nlogs: {:#?}", e.err, e.meta.logs))
+        self.svm
+            .send_transaction(tx)
+            .map(|_| ())
+            .map_err(|e| format!("{:?}\nlogs: {:#?}", e.err, e.meta.logs))
     }
 
     fn pda(&self, seeds: &[&[u8]]) -> Pubkey {
@@ -89,7 +109,9 @@ impl Harness {
             .send()
             .unwrap();
         if fund > 0 {
-            MintTo::new(&mut self.svm, &payer, &usdc, &ata, fund).send().unwrap();
+            MintTo::new(&mut self.svm, &payer, &usdc, &ata, fund)
+                .send()
+                .unwrap();
         }
         ata
     }
@@ -97,9 +119,8 @@ impl Harness {
     fn protocol(&self, market_id: &[u8; 32]) -> livestreak_engine::Protocol {
         let state_pda = self.pda(&[b"protocol", market_id]);
         let account = self.svm.get_account(&state_pda).unwrap();
-        let state =
-            livestreak::state::ProtocolState::try_deserialize(&mut account.data.as_slice())
-                .unwrap();
+        let state = livestreak::state::ProtocolState::try_deserialize(&mut account.data.as_slice())
+            .unwrap();
         livestreak_engine::Protocol::from_bytes(&state.data).unwrap()
     }
 }
@@ -190,6 +211,9 @@ fn onchain_keynote_loop_with_real_tokens() {
             seed_side: SIDE_NO,
             rate: 5 * USD,
             deposit: seed_deposit,
+            commitment: [1; 32],
+            funding_close: 0xFFFFFFFE,
+            operation_id: solana_keccak_hasher::hash(&(b"goal scored?".to_vec())).to_bytes(),
         }
         .data(),
         user_op(creator.pubkey(), creator_ata).to_account_metas(None),
@@ -251,7 +275,11 @@ fn onchain_keynote_loop_with_real_tokens() {
     let resolve_ix = move |signer: Pubkey| {
         Instruction::new_with_bytes(
             program_id,
-            &livestreak::instruction::Resolve { vault_id, winning_side: SIDE_YES }.data(),
+            &livestreak::instruction::Resolve {
+                vault_id,
+                winning_side: SIDE_YES,
+            }
+            .data(),
             livestreak::accounts::Resolve {
                 steward: signer,
                 protocol_state,
@@ -261,7 +289,12 @@ fn onchain_keynote_loop_with_real_tokens() {
             .to_account_metas(None),
         )
     };
-    assert!(h.send(resolve_ix(stranger.pubkey()), &[&h.payer.insecure_clone(), &stranger]).is_err());
+    assert!(h
+        .send(
+            resolve_ix(stranger.pubkey()),
+            &[&h.payer.insecure_clone(), &stranger]
+        )
+        .is_err());
     h.send(resolve_ix(creator.pubkey()), &[&creator]).unwrap();
 
     // ── Stop both legs 20s later: refunds land in real wallets ────────────────
@@ -291,7 +324,11 @@ fn onchain_keynote_loop_with_real_tokens() {
     let ix = Instruction::new_with_bytes(
         h.program_id,
         &livestreak::instruction::Collect { vault_id }.data(),
-        livestreak::accounts::EngineOp { protocol_state, escrow }.to_account_metas(None),
+        livestreak::accounts::EngineOp {
+            protocol_state,
+            escrow,
+        }
+        .to_account_metas(None),
     );
     h.send(ix, &[&h.payer.insecure_clone()]).unwrap();
 

@@ -112,10 +112,14 @@ impl Harness {
         go_live: bool,
         pointer: &[u8],
     ) -> Result<(), String> {
+        self.lifecycle_scheme(market_id, creator, go_live, pointer, if pointer.is_empty() { 0 } else { SCHEME_IPFS })
+    }
+
+    fn lifecycle_scheme(&mut self, market_id: &[u8;32], creator: &Keypair, go_live: bool, pointer: &[u8], scheme: u8) -> Result<(),String> {
         let data = if go_live {
-            livestreak::instruction::GoLive { scheme: SCHEME_IPFS, pointer: pointer.to_vec() }.data()
+            livestreak::instruction::GoLive { scheme, pointer: pointer.to_vec() }.data()
         } else {
-            livestreak::instruction::SetEnded { scheme: SCHEME_IPFS, pointer: pointer.to_vec() }
+            livestreak::instruction::SetEnded { scheme, pointer: pointer.to_vec() }
                 .data()
         };
         let ix = Instruction::new_with_bytes(
@@ -272,4 +276,32 @@ fn default_steward_handover() {
     h.svm.airdrop(&steward_role.pubkey(), 1_000_000_000).unwrap();
     set_default(&mut h, &steward_role, payer.pubkey()).unwrap();
     assert_eq!(default_steward(&h), payer.pubkey());
+}
+
+#[test]
+fn live_only_end_stores_absence_and_keeps_end_time_on_revision() {
+    let mut h = Harness::new();
+    h.initialize(h.payer.pubkey());
+    let id = h.register(b"Live only", b"stream-live-only", 0).unwrap();
+    let creator = h.payer.insecure_clone();
+    assert!(h.lifecycle(&id, &creator, false, b"").is_err());
+    assert!(h.lifecycle(&id, &creator, true, b"").is_err());
+    h.lifecycle(&id, &creator, true, b"live").unwrap();
+    let stranger = Keypair::new();
+    h.svm.airdrop(&stranger.pubkey(), 1_000_000_000).unwrap();
+    assert!(h.lifecycle(&id, &stranger, false, b"").is_err());
+    h.lifecycle(&id, &creator, false, b"").unwrap();
+    let first = h.market(&id);
+    assert_eq!(first.stream_status, 2);
+    assert!(first.stream_pointer.is_empty());
+    assert_eq!(first.stream_scheme, 0);
+    let mut clock = h.svm.get_sysvar::<anchor_lang::prelude::Clock>();
+    clock.unix_timestamp += 10;
+    h.svm.set_sysvar(&clock);
+    h.lifecycle_scheme(&id, &creator, false, b"612b96a4412dc3de68a5adcbcf0a3f90aa1cf0b7d7b1ef6801d59236bc2a40b1", 4).unwrap();
+    assert_eq!(h.market(&id).stream_scheme, 4);
+    assert_eq!(h.market(&id).stream_ended_at, first.stream_ended_at);
+    clock.unix_timestamp += 100_000;
+    h.svm.set_sysvar(&clock);
+    assert!(h.lifecycle(&id, &creator, false, b"").is_err());
 }

@@ -88,14 +88,14 @@ contract VaultDriverTest is Test {
         vm.startPrank(creator);
         usdc.approve(address(vaultDriver), SEED_DEPOSIT);
         vm.expectRevert("VaultDriver: zero rate");
-        vaultDriver.createVault(marketId, "Q?", Side.Yes, 0, SEED_DEPOSIT);
+        vaultDriver.createBoundVault(marketId, "Q?", Side.Yes, 0, SEED_DEPOSIT, bytes32(uint256(1)), uint32(block.timestamp + 365 days), bytes32(uint256(1)));
         vm.stopPrank();
     }
 
     function test_zeroDeposit_reverts() public {
         vm.prank(creator);
         vm.expectRevert("VaultDriver: bad deposit");
-        vaultDriver.createVault(marketId, "Q?", Side.Yes, RATE, 0);
+        vaultDriver.createBoundVault(marketId, "Q?", Side.Yes, RATE, 0, bytes32(uint256(1)), uint32(block.timestamp + 365 days), bytes32(uint256(1)));
     }
 
     function test_unknownMarket_reverts() public {
@@ -103,7 +103,7 @@ contract VaultDriverTest is Test {
         vm.startPrank(creator);
         usdc.approve(address(vaultDriver), SEED_DEPOSIT);
         vm.expectRevert("VaultDriver: unknown market");
-        vaultDriver.createVault(bytes32(uint256(99)), "Q?", Side.Yes, RATE, SEED_DEPOSIT);
+        vaultDriver.createBoundVault(bytes32(uint256(99)), "Q?", Side.Yes, RATE, SEED_DEPOSIT, bytes32(uint256(1)), uint32(block.timestamp + 365 days), bytes32(uint256(1)));
         vm.stopPrank();
     }
 
@@ -112,7 +112,7 @@ contract VaultDriverTest is Test {
         vm.startPrank(creator);
         usdc.approve(address(vaultDriver), SEED_DEPOSIT);
         vm.expectRevert("Vault: empty question");
-        vaultDriver.createVault(marketId, "", Side.Yes, RATE, SEED_DEPOSIT);
+        vaultDriver.createBoundVault(marketId, "", Side.Yes, RATE, SEED_DEPOSIT, bytes32(uint256(1)), uint32(block.timestamp + 365 days), bytes32(uint256(1)));
         vm.stopPrank();
     }
 
@@ -152,5 +152,67 @@ contract VaultDriverTest is Test {
         assertGt(refunded, 0, "unspent seed bond refunded");
         assertEq(usdc.balanceOf(creator) - before, refunded, "refund paid to the creator");
         assertApproxEqAbs(refunded, 5 * RATE, RATE, "roughly the unstreamed half of the bond");
+    }
+
+    function _bound(uint32 close, bytes32 op) internal returns (bytes32) {
+        usdc.mint(creator, 50 * RATE);
+        vm.startPrank(creator);
+        usdc.approve(address(vaultDriver), 50 * RATE);
+        bytes32 id = vaultDriver.createBoundVault(marketId, "Bound question", Side.Yes, RATE, 50 * RATE, bytes32(uint256(42)), close, op);
+        vm.stopPrank();
+        return id;
+    }
+
+    function test_boundCommitment_replayDoesNotSeedTwice_evenAfterClose() public {
+        bytes32 op = bytes32(uint256(7));
+        uint32 close = uint32(START + 10);
+        bytes32 id = _bound(close, op);
+        assertEq(vault.mandateCommitment(id), bytes32(uint256(42)));
+        assertEq(vault.fundingClose(id), close);
+        uint256 before = usdc.balanceOf(address(drips));
+        vm.warp(close + 1);
+        vm.prank(creator);
+        bytes32 again = vaultDriver.createBoundVault(marketId,"Bound question",Side.Yes,RATE,50*RATE,bytes32(uint256(42)),close,op);
+        assertEq(again,id);assertEq(usdc.balanceOf(address(drips)),before);
+        vm.prank(creator);vm.expectRevert("VaultDriver: operation conflict");
+        vaultDriver.createBoundVault(marketId,"Changed question",Side.Yes,RATE,50*RATE,bytes32(uint256(42)),close,op);
+    }
+
+    function test_boundClose_capsRealTokensAndShares_andRefundsUnspent() public {
+        uint32 close=uint32(START+10);bytes32 id=_bound(close,bytes32(uint256(8)));
+        uint256 nft=MarketDriverHarness.mint(marketDriver,stranger,marketId);
+        MarketDriverHarness.fund(marketDriver,usdc,stranger,nft,id,Side.Yes,RATE,50*RATE);
+        vm.warp(close);vault.advance(id,Side.Yes,type(uint256).max);
+        (uint256 pool,,,)=vault.getBoard(id,Side.Yes);assertEq(pool,20*RATE);
+        uint256 shares=vault.pendingShares(id,Side.Yes,nft);
+        vm.warp(close+20);vault.advance(id,Side.Yes,type(uint256).max);
+        assertEq(vault.pendingShares(id,Side.Yes,nft),shares);
+        assertEq(vaultDriver.harvest(id,Side.Yes),20*RATE,"actual delivery matches Board cutoff");
+        vm.prank(creator);assertEq(vaultDriver.stopSeed(id),40*RATE);
+        vm.prank(stranger);vm.expectRevert("MarketDriver: funding closed");marketDriver.fund(nft,id,Side.No,RATE,RATE);
+    }
+
+    function test_noHashlessOrLateBoundCreation() public {
+        vm.prank(creator);vm.expectRevert("VaultDriver: mandate required");vaultDriver.createVault(marketId,"legacy",Side.Yes,RATE,RATE);
+        vm.prank(creator);vm.expectRevert("Vault: mandate required");vaultDriver.createBoundVault(marketId,"bad",Side.Yes,RATE,RATE,bytes32(0),uint32(START+10),bytes32(uint256(9)));
+        vm.prank(creator);vm.expectRevert("Vault: funding closed");vaultDriver.createBoundVault(marketId,"late",Side.Yes,RATE,RATE,bytes32(uint256(1)),uint32(START),bytes32(uint256(10)));
+    }
+
+    function test_mixedDeadlines_preserveClosedLaneDuringSafeRemoval() public {
+        bytes32 shortId=_bound(uint32(START+10),bytes32(uint256(11)));
+        bytes32 longId=_bound(uint32(START+30),bytes32(uint256(12)));
+        uint256 nft=MarketDriverHarness.mint(marketDriver,stranger,marketId);
+        MarketDriverHarness.fund(marketDriver,usdc,stranger,nft,shortId,Side.Yes,RATE,50*RATE);
+        MarketDriverHarness.fund(marketDriver,usdc,stranger,nft,longId,Side.No,RATE,50*RATE);
+        (,,,uint32 shortEnd,)=vault.getPosition(shortId,Side.Yes,nft);assertEq(shortEnd,START+10);
+        vm.warp(START+15);
+        MarketDriver.Lane[] memory desired=new MarketDriver.Lane[](1);
+        desired[0]=MarketDriver.Lane({vaultId:shortId,side:Side.Yes,rate:RATE});
+        vm.prank(stranger);marketDriver.setLanes(nft,desired,0);
+        vault.advance(shortId,Side.Yes,type(uint256).max);
+        (uint256 pool,,,)=vault.getBoard(shortId,Side.Yes);assertEq(pool,20*RATE);
+        vm.prank(stranger);vm.expectRevert("MarketDriver: funding closed");marketDriver.setLanes(nft,desired,RATE);
+        vm.prank(stranger);marketDriver.stop(nft,shortId,Side.Yes);
+        vm.warp(START+40);assertEq(vaultDriver.harvest(shortId,Side.Yes),20*RATE);
     }
 }

@@ -45,6 +45,8 @@ export interface RegisterFrame {
   readonly sessionId: string;
   readonly scopes: readonly CapabilityScope[];
   readonly ttlMs: number;
+  /** Absolute gateway expiry; reconnect must never extend session lifetime. */
+  readonly expiresAt?: number;
   // scrypt verifier `scrypt$<saltHex>$<hashHex>` — the host verifies `/join` against it and NEVER
   // sees the pairing password plaintext.
   readonly passwordVerifier: string;
@@ -129,6 +131,8 @@ export type UiClientFrame = UiHelloFrame | UiCallFrame;
 
 // ── leg B: host → UI ─────────────────────────────────────────────────────────
 export interface UiReadyFrame {
+  /** Full snapshot, replacing any cached board after reconnect. */
+  readonly boards?: Readonly<Record<string, unknown>>;
   readonly type: "ready";
   readonly sessionId: string;
   readonly functions?: readonly FunctionDescriptor[];
@@ -151,6 +155,7 @@ export interface UiBoardPatchFrame {
 }
 export interface UiRevokedFrame {
   readonly type: "revoked";
+  readonly reason?: "revoked" | "ttl_expired";
 }
 export interface UiServerErrorFrame {
   readonly type: "error";

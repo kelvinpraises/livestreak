@@ -36,6 +36,7 @@ export interface RegisterSessionInput {
   readonly scopes: readonly CapabilityScope[];
   readonly passwordVerifier: string;
   readonly ttlMs: number;
+  readonly expiresAt?: number;
   readonly gateway: GatewaySink;
   readonly functions?: readonly FunctionDescriptor[];
 }
@@ -89,14 +90,19 @@ export const createRemoteSessionStore = (): RemoteSessionStore => {
   const register = (input: RegisterSessionInput): RemoteSession => {
     const existing = sessions.get(input.sessionId);
     if (existing !== undefined) {
+      if (existing.revoked || existing.expiresAt <= Date.now()) throw new Error("session ended");
+      if (existing.gateway !== null) throw new Error("gateway already connected");
+      if (existing.passwordVerifier !== input.passwordVerifier || JSON.stringify(existing.scopes) !== JSON.stringify(input.scopes)) throw new Error("session authority mismatch");
       existing.gateway = input.gateway;
+      existing.functions = input.functions ?? [];
+      existing.lastBoards = {};
     }
     const session: RemoteSession = existing ?? {
       sessionId: input.sessionId,
       scopes: input.scopes,
       passwordVerifier: input.passwordVerifier,
       functions: input.functions ?? [],
-      expiresAt: Date.now() + input.ttlMs,
+      expiresAt: Math.min(Date.now() + input.ttlMs, input.expiresAt ?? Infinity),
       revoked: false,
       gateway: input.gateway,
       uiSinks: new Map(),

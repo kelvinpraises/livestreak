@@ -6,8 +6,10 @@
 mod common;
 
 use {
-    anchor_lang::{prelude::Pubkey, solana_program::system_program, InstructionData, ToAccountMetas},
     anchor_lang::solana_program::instruction::Instruction,
+    anchor_lang::{
+        prelude::Pubkey, solana_program::system_program, InstructionData, ToAccountMetas,
+    },
     common::{Harness, SIDE_YES, USD},
     solana_keypair::Keypair,
     solana_signer::Signer,
@@ -98,6 +100,9 @@ fn instant_same_side_resolve_pays_out() {
             seed_side: SIDE_YES,
             rate: 1_000,
             deposit: seed_deposit,
+            commitment: [1; 32],
+            funding_close: 0xFFFFFFFE,
+            operation_id: solana_keccak_hasher::hash(&(b"same side?".to_vec())).to_bytes(),
         }
         .data(),
         user_op(creator.pubkey(), creator_ata).to_account_metas(None),
@@ -138,8 +143,13 @@ fn instant_same_side_resolve_pays_out() {
     };
     let ix = Instruction::new_with_bytes(
         h.program_id,
-        &livestreak::instruction::Fund { vault_id, side: SIDE_YES, rate: 1_000, deposit: bet_deposit }
-            .data(),
+        &livestreak::instruction::Fund {
+            vault_id,
+            side: SIDE_YES,
+            rate: 1_000,
+            deposit: bet_deposit,
+        }
+        .data(),
         position_op(bettor.pubkey(), bettor_ata).to_account_metas(None),
     );
     h.send(ix, &[&h.payer.insecure_clone(), &bettor]).unwrap();
@@ -149,7 +159,11 @@ fn instant_same_side_resolve_pays_out() {
     h.warp(1);
     let ix = Instruction::new_with_bytes(
         h.program_id,
-        &livestreak::instruction::Resolve { vault_id, winning_side: SIDE_YES }.data(),
+        &livestreak::instruction::Resolve {
+            vault_id,
+            winning_side: SIDE_YES,
+        }
+        .data(),
         livestreak::accounts::Resolve {
             steward: creator.pubkey(),
             protocol_state,
@@ -198,7 +212,11 @@ fn instant_same_side_resolve_pays_out() {
     let ix = Instruction::new_with_bytes(
         h.program_id,
         &livestreak::instruction::Collect { vault_id }.data(),
-        livestreak::accounts::EngineOp { protocol_state, escrow }.to_account_metas(None),
+        livestreak::accounts::EngineOp {
+            protocol_state,
+            escrow,
+        }
+        .to_account_metas(None),
     );
     h.send(ix, &[&h.payer.insecure_clone()]).unwrap();
 
@@ -229,6 +247,12 @@ fn instant_same_side_resolve_pays_out() {
         p.drips.held + p.vault.usdc_held + p.treasury.usdc_held,
         "conservation after same-side instant resolve"
     );
-    assert!(paid_bettor > 0, "winner payout must be nonzero (got {paid_bettor})");
-    assert!(paid_creator > 0, "seed payout must be nonzero (got {paid_creator})");
+    assert!(
+        paid_bettor > 0,
+        "winner payout must be nonzero (got {paid_bettor})"
+    );
+    assert!(
+        paid_creator > 0,
+        "seed payout must be nonzero (got {paid_creator})"
+    );
 }

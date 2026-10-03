@@ -217,3 +217,29 @@ The legacy full `remote drive` no longer invents YES. Its settlement leg require
 before withdrawal unless guarded resolution reports `confirmed`. For evidence
 that becomes available later, use separate public role calls at the declared
 window. Media-only and observe-only drives retain their media scope.
+
+## Recovering an operator console (Flow 08)
+
+Create a session that should survive an intentional gateway exit:
+
+```sh
+livestreak remote open --resumable --scopes bridge:board:read,bridge:action:configure --ttl 2h
+```
+
+Keep the printed pairing password. Ctrl-C disconnects this gateway without revoking the Host session. Restart with the original settings, wallet password, session store and state directory:
+
+```sh
+livestreak remote open --resume <session-id>
+```
+
+Resume retains the original URL/session ID, run ID, scopes, absolute expiry, pairing verifier and reserved spend usage. New scope/TTL/spend/password flags do not replace saved authority. A changed wallet/settings context, missing/corrupt metadata, expiry or revocation refuses resume with an explanation; create a fresh session explicitly if appropriate. Resume never silently mints a replacement URL. A second local owner is rejected; the Host also rejects another connected gateway instead of replacing the first. A killed local process leaves a PID lock that is reclaimed only when its process no longer exists.
+
+Session metadata is validated and written via a private (0600), synced temporary file and atomic rename. Corrupt metadata is preserved in a `.corrupt-*` backup and is never used as authority. Updates and `remote revoke` serialize using a store lock so background persistence cannot undo revocation. The scrypt pairing verifier is stored, never the pairing password or signing seed. Signing material remains in the encrypted keystore.
+
+Observe boards, Options paused lanes and Bookmaker recovery state are stored per run. Options/Bookmaker market selection and Steward market/vault selection are restored as local configuration, then refreshed through their normal reads. A stopped media producer is not restarted automatically. Existing pending creation/resolution records retain their own chain-readback recovery; no arbitrary saved action is replayed. Normal `remote open` (without `--resumable`) still revokes on Ctrl-C. `remote revoke --session <session-id>` terminates a resumable session.
+
+The browser keeps the console in place during socket loss, pauses actions and retries with capped delays (0.5, 1, 2, 4, 8, 8, 8 seconds; each handshake is bounded to 5 seconds). On recovery it replaces the entire board and function catalog and starts a new socket replay window. Two tabs have separate sequence/nonce windows. Leave cancels retry. Revoked, expired and exhausted-connection states remain visible with a Leave action; they do not redirect away before the operator can read the reason. A page reload still requires pairing; no browser password or grant is saved to local storage.
+
+**Interrupted writes:** a dropped response means outcome unknown. The action is never automatically resent. Check the refreshed board and the chain receipt/position before a deliberate retry. A configured spend cap reserves and persists the requested amount before dispatch; timeout or ambiguous failure retains the reservation so restart/concurrent calls cannot exceed the lifetime cap. This is conservative reserved usage, not a claim that every failed request spent tokens. There is no automatic cap reset or refund.
+
+`dev.sh` preserves role/session directories. It may reset its development chain and open new consoles; it does not automatically resume old sessions against a freshly reset ledger. A Host process restart with an ephemeral grant key requires pairing again after gateway registration; transparent recovery here is guaranteed for transport loss and gateway restart while the Host retains the session. Public durable Host failover is outside Flow 08.

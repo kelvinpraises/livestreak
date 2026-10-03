@@ -38,7 +38,8 @@ contract MarketRegistry is Ownable {
         WalrusTestnet,
         WalrusMainnet,
         Ipfs,
-        Arweave
+        Arweave,
+        Host
     }
 
     struct StreamState {
@@ -138,7 +139,9 @@ contract MarketRegistry is Ownable {
 
     /// @notice Creator ends the stream (first call freezes endedAt) or revises the VOD id until lock.
     function setEnded(bytes32 marketId, StorageScheme scheme, string calldata id) external onlyMarketCreator(marketId) {
-        require(bytes(id).length != 0 && bytes(id).length <= 64, "MarketRegistry: bad id length");
+        // Canonical absence: no recording, no claimed storage object. goLive stays nonempty.
+        require(bytes(id).length <= 64, "MarketRegistry: bad id length");
+        require(bytes(id).length != 0 || scheme == StorageScheme.WalrusTestnet, "MarketRegistry: noncanonical absence");
         StreamState storage s = streamState[marketId];
         require(s.status != StreamStatus.None, "MarketRegistry: not live");
         require(!_isLocked(s), "MarketRegistry: stream locked");

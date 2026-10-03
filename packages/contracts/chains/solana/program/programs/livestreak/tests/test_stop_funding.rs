@@ -109,6 +109,9 @@ fn stop_funding_drops_one_lane_and_moves_no_cash() {
                 seed_side: SIDE_YES,
                 rate: 5 * USD,
                 deposit: 500 * USD,
+                commitment: [1; 32],
+                funding_close: 0xFFFFFFFE,
+                operation_id: solana_keccak_hasher::hash(&(question.to_vec())).to_bytes(),
             }
             .data(),
             livestreak::accounts::UserEngineOp {
@@ -158,7 +161,13 @@ fn stop_funding_drops_one_lane_and_moves_no_cash() {
     let fund = |vault_id: [u8; 32], rate: u64, deposit: u64| {
         Instruction::new_with_bytes(
             program_id,
-            &livestreak::instruction::Fund { vault_id, side: SIDE_NO, rate, deposit }.data(),
+            &livestreak::instruction::Fund {
+                vault_id,
+                side: SIDE_NO,
+                rate,
+                deposit,
+            }
+            .data(),
             livestreak::accounts::PositionEngineOp {
                 user: user_a.pubkey(),
                 protocol_state,
@@ -170,14 +179,32 @@ fn stop_funding_drops_one_lane_and_moves_no_cash() {
             .to_account_metas(None),
         )
     };
-    h.send(fund(vault1, rate1, 700 * USD), &[&h.payer.insecure_clone(), &user_a]).unwrap();
-    h.send(fund(vault2, rate2, 300 * USD), &[&h.payer.insecure_clone(), &user_a]).unwrap();
+    h.send(
+        fund(vault1, rate1, 700 * USD),
+        &[&h.payer.insecure_clone(), &user_a],
+    )
+    .unwrap();
+    h.send(
+        fund(vault2, rate2, 300 * USD),
+        &[&h.payer.insecure_clone(), &user_a],
+    )
+    .unwrap();
 
     // ── pre-stop: two lanes live, both NO boards accrue at the funded rates ─────
     let p = h.protocol(&market_id);
-    assert_eq!(p.lane_count(token_u256), 2, "position must hold both funded lanes");
-    assert!(p.market_driver.lanes.contains_key(&(token_u256, vault1)), "vault1 lane must exist");
-    assert!(p.market_driver.lanes.contains_key(&(token_u256, vault2)), "vault2 lane must exist");
+    assert_eq!(
+        p.lane_count(token_u256),
+        2,
+        "position must hold both funded lanes"
+    );
+    assert!(
+        p.market_driver.lanes.contains_key(&(token_u256, vault1)),
+        "vault1 lane must exist"
+    );
+    assert!(
+        p.market_driver.lanes.contains_key(&(token_u256, vault2)),
+        "vault2 lane must exist"
+    );
     assert_eq!(
         p.vault.boards.get(&(vault1, SIDE_NO)).unwrap().side_rate,
         U256::from(rate1),
@@ -194,22 +221,36 @@ fn stop_funding_drops_one_lane_and_moves_no_cash() {
         Instruction::new_with_bytes(
             program_id,
             &livestreak::instruction::StopFunding { vault_id, side }.data(),
-            livestreak::accounts::PositionStateOp { user: signer, protocol_state, position }
-                .to_account_metas(None),
+            livestreak::accounts::PositionStateOp {
+                user: signer,
+                protocol_state,
+                position,
+            }
+            .to_account_metas(None),
         )
     };
 
     let a_before = h.token_balance(&a_ata);
-    h.send(stop_ix(user_a.pubkey(), vault1, SIDE_NO), &[&h.payer.insecure_clone(), &user_a])
-        .expect("owner A must be able to stop the vault1 lane");
+    h.send(
+        stop_ix(user_a.pubkey(), vault1, SIDE_NO),
+        &[&h.payer.insecure_clone(), &user_a],
+    )
+    .expect("owner A must be able to stop the vault1 lane");
     let a_after = h.token_balance(&a_ata);
 
     // (c) NO cash moved — a single-lane stop reshuffles the shared budget, refunds nothing.
-    assert_eq!(a_before, a_after, "a single-lane stop must not refund USDC to the owner");
+    assert_eq!(
+        a_before, a_after,
+        "a single-lane stop must not refund USDC to the owner"
+    );
 
     // (a) exactly one lane dropped; (b) the stopped board stops accruing, the other keeps going.
     let p = h.protocol(&market_id);
-    assert_eq!(p.lane_count(token_u256), 1, "the stop must drop the position's lane_count by 1");
+    assert_eq!(
+        p.lane_count(token_u256),
+        1,
+        "the stop must drop the position's lane_count by 1"
+    );
     assert!(
         !p.market_driver.lanes.contains_key(&(token_u256, vault1)),
         "the stopped vault1 lane must be gone",
@@ -231,19 +272,37 @@ fn stop_funding_drops_one_lane_and_moves_no_cash() {
 
     // (d) stopping the SAME lane again is typed NoLane.
     let err = h
-        .send(stop_ix(user_a.pubkey(), vault1, SIDE_NO), &[&h.payer.insecure_clone(), &user_a])
+        .send(
+            stop_ix(user_a.pubkey(), vault1, SIDE_NO),
+            &[&h.payer.insecure_clone(), &user_a],
+        )
         .expect_err("re-stopping a gone lane must fail");
-    assert!(err.contains("DriverNoLane"), "re-stop must be typed DriverNoLane, got: {err}");
+    assert!(
+        err.contains("DriverNoLane"),
+        "re-stop must be typed DriverNoLane, got: {err}"
+    );
 
     // (e) stopping the live vault2 lane with the WRONG side is typed NoLane.
     let err = h
-        .send(stop_ix(user_a.pubkey(), vault2, SIDE_YES), &[&h.payer.insecure_clone(), &user_a])
+        .send(
+            stop_ix(user_a.pubkey(), vault2, SIDE_YES),
+            &[&h.payer.insecure_clone(), &user_a],
+        )
         .expect_err("stopping with the wrong side must fail");
-    assert!(err.contains("DriverNoLane"), "wrong-side stop must be typed DriverNoLane, got: {err}");
+    assert!(
+        err.contains("DriverNoLane"),
+        "wrong-side stop must be typed DriverNoLane, got: {err}"
+    );
 
     // (f) a non-owner signer is refused typed NotCreator at the owner gate.
     let err = h
-        .send(stop_ix(user_b.pubkey(), vault2, SIDE_NO), &[&h.payer.insecure_clone(), &user_b])
+        .send(
+            stop_ix(user_b.pubkey(), vault2, SIDE_NO),
+            &[&h.payer.insecure_clone(), &user_b],
+        )
         .expect_err("a non-owner stop must fail");
-    assert!(err.contains("NotCreator"), "non-owner stop must be typed NotCreator, got: {err}");
+    assert!(
+        err.contains("NotCreator"),
+        "non-owner stop must be typed NotCreator, got: {err}"
+    );
 }

@@ -119,8 +119,20 @@ pub mod livestreak {
         seed_side: u8,
         rate: u64,
         deposit: u64,
+        commitment: [u8; 32],
+        funding_close: u64,
+        operation_id: [u8; 32],
     ) -> Result<Vec<u8>> {
-        instructions::protocol::handle_create_vault_seeded(ctx, question, seed_side, rate, deposit)
+        instructions::protocol::handle_create_vault_seeded(
+            ctx,
+            question,
+            seed_side,
+            rate,
+            deposit,
+            commitment,
+            funding_close,
+            operation_id,
+        )
     }
 
     pub fn mint_position(ctx: Context<MintPosition>, salt: u64) -> Result<()> {
@@ -169,7 +181,12 @@ pub mod livestreak {
         instructions::protocol::handle_withdraw_seed(ctx, vault_id)
     }
 
-    pub fn advance(ctx: Context<EngineOp>, vault_id: [u8; 32], side: u8, max_steps: u64) -> Result<()> {
+    pub fn advance(
+        ctx: Context<EngineOp>,
+        vault_id: [u8; 32],
+        side: u8,
+        max_steps: u64,
+    ) -> Result<()> {
         instructions::protocol::handle_advance(ctx, vault_id, side, max_steps)
     }
 
@@ -181,7 +198,11 @@ pub mod livestreak {
         instructions::protocol::handle_resolve(ctx, vault_id, winning_side)
     }
 
-    pub fn claim_loss_lvst(ctx: Context<ClaimLossLvst>, vault_id: [u8; 32], side: u8) -> Result<()> {
+    pub fn claim_loss_lvst(
+        ctx: Context<ClaimLossLvst>,
+        vault_id: [u8; 32],
+        side: u8,
+    ) -> Result<()> {
         instructions::protocol::handle_claim_loss_lvst(ctx, vault_id, side)
     }
 

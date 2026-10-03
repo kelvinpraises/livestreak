@@ -241,3 +241,22 @@ describe("remote — grant key is independent of the paymaster signer", () => {
     expect(a.signer.publicKeyHex).not.toBe(b.signer.publicKeyHex);
   });
 });
+
+
+describe("Flow08 session authority on reconnect", () => {
+  it("retains absolute expiry and rejects changed scopes, revoked re-registration and expired grants", () => {
+    const service = newService(); const gw = fakeConn(); const expiresAt = Date.now() + 5000;
+    const frame = { type: "register", sessionId: "resume-authority", scopes: ["bridge:action:fund"] as const, passwordVerifier: makePasswordVerifier("pw"), ttlMs: 60000, expiresAt };
+    expect(service.relay.registerGateway(frame.sessionId, gw.conn, frame)).toBe(true);
+    expect(service.store.get(frame.sessionId)?.expiresAt).toBe(expiresAt);
+    service.relay.onGatewayClose(frame.sessionId, gw.conn);
+    const changed = fakeConn();
+    expect(service.relay.registerGateway(frame.sessionId, changed.conn, { ...frame, scopes: ["bridge:action:withdraw"] })).toBe(false);
+    const again = fakeConn(); expect(service.relay.registerGateway(frame.sessionId, again.conn, frame)).toBe(true);
+    expect(service.store.get(frame.sessionId)?.expiresAt).toBe(expiresAt);
+    const expiredGrant = service.signer.issueGrant({ sessionId: frame.sessionId, holder: 'expired-ui', scopes: frame.scopes, expiresAt: Date.now() - 1 });
+    const ui = fakeConn(); expect(service.relay.onUiHello(frame.sessionId, 'expired', ui.conn, { type: 'ui.hello', grant: expiredGrant, seq: 0 })).toBe(false);
+    service.store.revoke(frame.sessionId); service.relay.onGatewayClose(frame.sessionId, again.conn);
+    expect(service.relay.registerGateway(frame.sessionId, fakeConn().conn, frame)).toBe(false);
+  });
+});

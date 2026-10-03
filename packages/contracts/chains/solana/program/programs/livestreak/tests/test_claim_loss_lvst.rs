@@ -7,8 +7,8 @@
 mod common;
 
 use {
-    anchor_lang::{solana_program::system_program, InstructionData, ToAccountMetas},
     anchor_lang::solana_program::instruction::Instruction,
+    anchor_lang::{solana_program::system_program, InstructionData, ToAccountMetas},
     common::{Harness, SIDE_NO, SIDE_YES, USD},
     litesvm_token::{CreateAssociatedTokenAccount, CreateMint},
     ruint::aliases::U256,
@@ -112,6 +112,9 @@ fn loser_mints_lvst_and_guards_hold() {
             seed_side: SIDE_YES,
             rate: 5 * USD,
             deposit: 500 * USD,
+            commitment: [1; 32],
+            funding_close: 0xFFFFFFFE,
+            operation_id: solana_keccak_hasher::hash(&(b"goal scored?".to_vec())).to_bytes(),
         }
         .data(),
         livestreak::accounts::UserEngineOp {
@@ -172,7 +175,11 @@ fn loser_mints_lvst_and_guards_hold() {
     h.warp(60);
     let ix = Instruction::new_with_bytes(
         h.program_id,
-        &livestreak::instruction::Resolve { vault_id, winning_side: SIDE_YES }.data(),
+        &livestreak::instruction::Resolve {
+            vault_id,
+            winning_side: SIDE_YES,
+        }
+        .data(),
         livestreak::accounts::Resolve {
             steward: creator.pubkey(),
             protocol_state,
@@ -190,11 +197,18 @@ fn loser_mints_lvst_and_guards_hold() {
     // The engine's own expectation, read BEFORE the claim mutates loss_claimed.
     let p = h.protocol(&market_id);
     let lost = p.vault.loss_claimable(token_u256, &vault_id, SIDE_NO);
-    assert!(lost > U256::ZERO, "the losing NO side must have a non-zero loss basis");
-    let expected =
-        livestreak_math::wide::narrow(lost * p.treasury.mint_rate() / U256::from(USDC_ONE), "expected")
-            as u64;
-    assert!(expected > 0, "a non-zero basis must mint a non-zero LVST amount");
+    assert!(
+        lost > U256::ZERO,
+        "the losing NO side must have a non-zero loss basis"
+    );
+    let expected = livestreak_math::wide::narrow(
+        lost * p.treasury.mint_rate() / U256::from(USDC_ONE),
+        "expected",
+    ) as u64;
+    assert!(
+        expected > 0,
+        "a non-zero basis must mint a non-zero LVST amount"
+    );
 
     // ── the losing bettor mints LVST ──────────────────────────────────────────
     let program_id = h.program_id;
@@ -216,7 +230,8 @@ fn loser_mints_lvst_and_guards_hold() {
     };
 
     assert_eq!(h.token_balance(&bettor_lvst), 0);
-    h.send(claim_ix(SIDE_NO), &[&h.payer.insecure_clone(), &bettor]).unwrap();
+    h.send(claim_ix(SIDE_NO), &[&h.payer.insecure_clone(), &bettor])
+        .unwrap();
     assert_eq!(
         h.token_balance(&bettor_lvst),
         expected,
@@ -225,15 +240,25 @@ fn loser_mints_lvst_and_guards_hold() {
 
     // ── double-claim guard: a SECOND NO claim is refused (AlreadyClaimed) ──────
     assert!(
-        h.send(claim_ix(SIDE_NO), &[&h.payer.insecure_clone(), &bettor]).is_err(),
+        h.send(claim_ix(SIDE_NO), &[&h.payer.insecure_clone(), &bettor])
+            .is_err(),
         "a second claim on the same (position, vault, side) must fail",
     );
-    assert_eq!(h.token_balance(&bettor_lvst), expected, "the refused re-claim must mint nothing");
+    assert_eq!(
+        h.token_balance(&bettor_lvst),
+        expected,
+        "the refused re-claim must mint nothing"
+    );
 
     // ── winning-side claim is refused (zero loss basis → NothingLost) ──────────
     assert!(
-        h.send(claim_ix(SIDE_YES), &[&h.payer.insecure_clone(), &bettor]).is_err(),
+        h.send(claim_ix(SIDE_YES), &[&h.payer.insecure_clone(), &bettor])
+            .is_err(),
         "a claim on the winning side has zero loss basis and must fail",
     );
-    assert_eq!(h.token_balance(&bettor_lvst), expected, "the refused winning-side claim must mint nothing");
+    assert_eq!(
+        h.token_balance(&bettor_lvst),
+        expected,
+        "the refused winning-side claim must mint nothing"
+    );
 }

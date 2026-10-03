@@ -181,7 +181,14 @@ public fun setup_steward(scenario: &mut Scenario, owner: address, steward_addr: 
     };
 }
 
-public fun create_vault(
+public fun create_vault(scenario: &mut Scenario, who: address, market_id: vector<u8>, question: vector<u8>, seed_side: u8, rate: u256, deposit: u64, clock: &Clock): vector<u8> {
+    let mut identity = market_id;
+    identity.append(question);
+    identity.append(std::bcs::to_bytes(&who));
+    create_bound_vault(scenario, who, market_id, question, seed_side, rate, deposit, clock, sui::hash::keccak256(&question), 0xFFFFFFFE, sui::hash::keccak256(&identity))
+}
+
+public fun create_bound_vault(
     scenario: &mut Scenario,
     who: address,
     market_id: vector<u8>,
@@ -190,6 +197,9 @@ public fun create_vault(
     rate: u256,
     deposit: u64,
     clock: &Clock,
+    commitment: vector<u8>,
+    funding_close: u64,
+    operation_id: vector<u8>,
 ): vector<u8> {
     ts::next_tx(scenario, who);
     let mut vault_driver = ts::take_shared<VaultDriverRegistry>(scenario);
@@ -199,7 +209,7 @@ public fun create_vault(
     let mut streams = ts::take_shared<StreamsRegistry<TEST_USDC>>(scenario);
     let payment = mint_usdc(scenario, deposit);
     let ctx = ts::ctx(scenario);
-    let vault_id = vault_driver::create_vault(
+    let vault_id = vault_driver::create_bound_vault(
         &mut vault_driver,
         &mut vault_registry,
         &mut market_registry,
@@ -211,6 +221,7 @@ public fun create_vault(
         rate,
         (deposit as u128),
         payment,
+        commitment, funding_close, operation_id,
         clock,
         ctx,
     );

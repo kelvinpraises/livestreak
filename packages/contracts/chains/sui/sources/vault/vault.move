@@ -248,6 +248,11 @@ public fun pot<T>(registry: &VaultRegistry<T>, vault_id: &vector<u8>): u256 {
     }
 }
 
+public fun is_collected<T>(registry: &VaultRegistry<T>, vault_id: &vector<u8>): bool {
+    table::contains(&registry.collected, *vault_id)
+        && *table::borrow(&registry.collected, *vault_id)
+}
+
 public fun usdc_balance<T>(registry: &VaultRegistry<T>): u128 {
     balance::value(&registry.usdc) as u128
 }
@@ -558,6 +563,44 @@ public fun drain_skim<T>(
     (payment, owed)
 }
 
+// Metadata is an immutable dynamic field: existing registry/tuple layouts stay intact.
+public struct MandateKey has copy, drop, store { vault_id: vector<u8> }
+public struct BoundTerms has copy, drop, store { commitment: vector<u8>, funding_close: u64 }
+const E_UNBOUND: u64 = 90;
+const E_FUNDING_CLOSED: u64 = 91;
+
+public fun bound_terms<T>(registry: &VaultRegistry<T>, vault_id: vector<u8>): (vector<u8>, u64) {
+    let key = MandateKey { vault_id };
+    assert!(sui::dynamic_field::exists_(&registry.id, key), E_UNBOUND);
+    let terms = sui::dynamic_field::borrow<MandateKey, BoundTerms>(&registry.id, key);
+    (terms.commitment, terms.funding_close)
+}
+
+public(package) fun bind_mandate<T>(registry: &mut VaultRegistry<T>, vault_id: vector<u8>, commitment: vector<u8>, funding_close: u64, clock: &Clock) {
+    assert!(vector::length(&commitment) == 32 && nonzero32(&commitment), E_UNBOUND);
+    assert!(funding_close > timestamp_secs(clock) && funding_close <= 0xFFFFFFFF, E_FUNDING_CLOSED);
+    sui::dynamic_field::add(&mut registry.id, MandateKey { vault_id }, BoundTerms { commitment, funding_close });
+}
+
+public fun funding_close<T>(registry: &VaultRegistry<T>, vault_id: vector<u8>): u64 {
+    let key = MandateKey { vault_id };
+    if (!sui::dynamic_field::exists_(&registry.id, key)) return 0;
+    sui::dynamic_field::borrow<MandateKey, BoundTerms>(&registry.id, key).funding_close
+}
+
+public(package) fun require_funding_open<T>(registry: &VaultRegistry<T>, vault_id: vector<u8>, clock: &Clock) {
+    let (_, close) = bound_terms(registry, vault_id);
+    assert!(timestamp_secs(clock) < close, E_FUNDING_CLOSED);
+}
+
+// Legacy package-internal fixtures can remain unbound; public drivers forbid funding them.
+fun cap_end<T>(registry: &VaultRegistry<T>, vault_id: vector<u8>, end: u64): u64 {
+    let key = MandateKey { vault_id };
+    if (!sui::dynamic_field::exists_(&registry.id, key)) return end;
+    let close = sui::dynamic_field::borrow<MandateKey, BoundTerms>(&registry.id, key).funding_close;
+    if (end == 0 || end > close) close else end
+}
+
 public(package) fun create_vault<T>(
     registry: &mut VaultRegistry<T>,
     market_id: vector<u8>,
@@ -635,6 +678,7 @@ public(package) fun on_fund<T>(
     assert!(vault.status == STATUS_OPEN, E_NOT_OPEN);
     assert!(rate > 0, E_ZERO_RATE);
 
+    let max_end = cap_end(registry, vault_id, max_end);
     track_account_vault(registry, account, vault_id, ctx);
     advance_to_now(registry, vault_id, side, clock);
 
@@ -750,6 +794,7 @@ public(package) fun refresh_max_ends<T>(
     while (i < len) {
         let vault_id = *vector::borrow(&vault_ids, i);
         let side_val = *vector::borrow(&sides, i);
+        let new_max_end = cap_end(registry, vault_id, new_max_end);
         side::assert_valid(side_val);
         advance_to_now(registry, vault_id, side_val, clock);
         settle_internal(registry, vault_id, side_val, account);
@@ -1386,4 +1431,10 @@ fun harvest_receiver<T>(
 fun full_mul_div(x: u256, y: u256, d: u256): u256 {
     assert!(d > 0, E_DIV_ZERO);
     (x * y) / d
+}
+
+fun nonzero32(bytes: &vector<u8>): bool {
+    let mut i = 0;
+    while (i < vector::length(bytes)) { if (*vector::borrow(bytes, i) != 0) return true; i = i + 1; };
+    false
 }

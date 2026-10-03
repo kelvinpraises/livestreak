@@ -3,7 +3,13 @@ import { SuiJsonRpcClient, type SuiTransactionBlockResponse } from "@mysten/sui/
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { Transaction } from "@mysten/sui/transactions";
 import { MODULES, target } from "./package.js";
-import { SIDE_NO, SIDE_YES, SUI_CLOCK_OBJECT_ID, USDC_ONE, type SuiDeployment } from "./types.js";
+import {
+  SIDE_NO,
+  SIDE_YES,
+  SUI_CLOCK_OBJECT_ID,
+  USDC_ONE,
+  type SuiDeployment,
+} from "./types.js";
 import { bytesArg, u64Arg } from "./deploy/utils.js";
 
 export type BoardView = {
@@ -73,7 +79,11 @@ export class LiveStreakSuiClient {
     const tx = new Transaction();
     tx.moveCall({
       target: target(this.packageId, MODULES.mockUsdc, "mint_to"),
-      arguments: [tx.object(this.objects.usdcMintCap), u64Arg(tx, amount), tx.pure.address(recipient)],
+      arguments: [
+        tx.object(this.objects.usdcMintCap),
+        u64Arg(tx, amount),
+        tx.pure.address(recipient),
+      ],
     });
     await this.execute(tx);
   }
@@ -104,6 +114,7 @@ export class LiveStreakSuiClient {
     seedSide: number,
     rate: bigint,
     deposit: bigint,
+    terms: { commitment: Uint8Array; fundingClose: bigint; operationId: Uint8Array },
   ): Promise<Uint8Array> {
     const tx = new Transaction();
     const [payment] = tx.moveCall({
@@ -111,7 +122,7 @@ export class LiveStreakSuiClient {
       arguments: [tx.object(this.objects.usdcMintCap), u64Arg(tx, deposit)],
     });
     tx.moveCall({
-      target: target(this.packageId, MODULES.vaultDriver, "create_vault"),
+      target: target(this.packageId, MODULES.vaultDriver, "create_bound_vault"),
       typeArguments: [this.coinType],
       arguments: [
         tx.object(this.objects.vaultDriverRegistry),
@@ -125,6 +136,9 @@ export class LiveStreakSuiClient {
         tx.pure.u256(rate),
         tx.pure.u128(deposit),
         payment,
+        bytesArg(tx, terms.commitment),
+        tx.pure.u64(terms.fundingClose),
+        bytesArg(tx, terms.operationId),
         tx.object(SUI_CLOCK_OBJECT_ID),
       ],
     });
@@ -136,7 +150,10 @@ export class LiveStreakSuiClient {
     return Uint8Array.from((ev.parsedJson as { vault_id: number[] }).vault_id);
   }
 
-  async mintNft(marketId: Uint8Array, to: string): Promise<{ tokenId: bigint; objectId: string }> {
+  async mintNft(
+    marketId: Uint8Array,
+    to: string,
+  ): Promise<{ tokenId: bigint; objectId: string }> {
     const tx = new Transaction();
     const metadataType = `${this.packageId}::driver_utils::AccountMetadata` as const;
     tx.moveCall({
@@ -242,14 +259,19 @@ export class LiveStreakSuiClient {
     tx.moveCall({
       target: target(this.packageId, MODULES.vault, "get_board"),
       typeArguments: [this.coinType],
-      arguments: [tx.object(this.objects.vaultRegistry), bytesArg(tx, vaultId), tx.pure.u8(side)],
+      arguments: [
+        tx.object(this.objects.vaultRegistry),
+        bytesArg(tx, vaultId),
+        tx.pure.u8(side),
+      ],
     });
     const result = await this.inspect(tx);
     const values = result.results?.[0]?.returnValues;
     if (!values || values.length < 4) {
       return { pool: 0n, sideRate: 0n, g: 0n, lastAdvance: 0n };
     }
-    const readU256 = (i: number) => BigInt(bcs.u256().parse(Uint8Array.from(values[i]![0])));
+    const readU256 = (i: number) =>
+      BigInt(bcs.u256().parse(Uint8Array.from(values[i]![0])));
     const readU64 = (i: number) => BigInt(bcs.u64().parse(Uint8Array.from(values[i]![0])));
     return {
       pool: readU256(0),
@@ -259,12 +281,18 @@ export class LiveStreakSuiClient {
     };
   }
 
-  async advanceUntilCaughtUp(vaultId: Uint8Array, side: number, chunk = 64, guard = 40): Promise<number> {
+  async advanceUntilCaughtUp(
+    vaultId: Uint8Array,
+    side: number,
+    chunk = 64,
+    guard = 40,
+  ): Promise<number> {
     let calls = 0;
     while (!(await this.caughtUp(vaultId, side))) {
       await this.advance(vaultId, side, chunk);
       calls++;
-      if (calls > guard) throw new Error(`advanceUntilCaughtUp exceeded guard (side=${side})`);
+      if (calls > guard)
+        throw new Error(`advanceUntilCaughtUp exceeded guard (side=${side})`);
     }
     return calls;
   }

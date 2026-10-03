@@ -3,8 +3,8 @@
 //! treasury + dividends) -> withdraw winners -> loss-mint LVST for the loser ->
 //! global conservation across every escrow.
 
-use ruint::aliases::U256;
 use livestreak_engine::*;
+use ruint::aliases::U256;
 
 const USD: u128 = 1_000_000;
 const CREATOR: [u8; 32] = [1u8; 32];
@@ -20,7 +20,7 @@ fn full_protocol_loop_conserves_and_pays_the_right_people() {
     // ── Bookmaker seeds the vault on NO at $5/s with $500 ─────────────────────
     let seed_deposit = 500 * USD;
     let vault_id = p
-        .create_vault_seeded(
+        .create_bound_vault_seeded(
             market_id,
             b"goal scored?".to_vec(),
             CREATOR,
@@ -28,6 +28,9 @@ fn full_protocol_loop_conserves_and_pays_the_right_people() {
             U256::from(5 * USD),
             seed_deposit,
             t0,
+            [1; 32],
+            0xFFFFFFFE,
+            [1; 32],
         )
         .unwrap();
 
@@ -35,8 +38,15 @@ fn full_protocol_loop_conserves_and_pays_the_right_people() {
     let token_id = p.mint_with_salt(market_id, true, BETTOR, 42).unwrap();
     assert_eq!(token_id, p.calc_token_id_with_salt(&BETTOR, 42)); // client precompute parity
     let bet_deposit = 700 * USD;
-    p.fund(token_id, &vault_id, SIDE_YES, U256::from(7 * USD), bet_deposit, t0)
-        .unwrap();
+    p.fund(
+        token_id,
+        &vault_id,
+        SIDE_YES,
+        U256::from(7 * USD),
+        bet_deposit,
+        t0,
+    )
+    .unwrap();
 
     // Live pool caps: boundaries expose each active stream (seed + bettor).
     let (yes_ends, yes_rates) = p.vault.get_boundaries(&vault_id, SIDE_YES);
@@ -68,8 +78,11 @@ fn full_protocol_loop_conserves_and_pays_the_right_people() {
     assert_eq!(p.treasury.usdc_held, skimmed);
     p.treasury.stake_lvst(STAKER, 1_000).unwrap();
     p.treasury.notify_skim(U256::ZERO); // no-op distribution check
-    // (skim was notified pre-stake -> parked as undistributed, released next notify)
-    assert_eq!(p.treasury.undistributed as u128 + p.treasury.pending_dividends(&STAKER), skimmed);
+                                        // (skim was notified pre-stake -> parked as undistributed, released next notify)
+    assert_eq!(
+        p.treasury.undistributed as u128 + p.treasury.pending_dividends(&STAKER),
+        skimmed
+    );
 
     // ── Winner withdraws: sole YES funder takes the whole pot + overage ───────
     let paid_bettor = p.withdraw(token_id, &vault_id, t_collect).unwrap();
@@ -87,7 +100,10 @@ fn full_protocol_loop_conserves_and_pays_the_right_people() {
     let seed_account = p.vault_driver.seed_account(&CREATOR, &vault_id);
     let minted = p.claim_loss_lvst(seed_account, &vault_id, SIDE_NO).unwrap();
     let expected_rate = p.treasury.mint_rate(); // knee dented by $6 skim
-    assert_eq!(minted, U256::from(no_pool) * expected_rate / U256::from(USD));
+    assert_eq!(
+        minted,
+        U256::from(no_pool) * expected_rate / U256::from(USD)
+    );
     // Anti-dupe: second claim refuses.
     assert!(p.claim_loss_lvst(seed_account, &vault_id, SIDE_NO).is_err());
 
@@ -98,7 +114,11 @@ fn full_protocol_loop_conserves_and_pays_the_right_people() {
     assert_eq!(total_in, total_out + escrows);
     // The vault escrow retains exactly the unclaimed winning-side rounding dust
     // plus nothing else once the sole winner has withdrawn.
-    assert!(p.vault.usdc_held < USD, "vault residue is dust, got {}", p.vault.usdc_held);
+    assert!(
+        p.vault.usdc_held < USD,
+        "vault residue is dust, got {}",
+        p.vault.usdc_held
+    );
 }
 
 #[test]
@@ -108,14 +128,37 @@ fn set_lanes_reshape_and_hedge_flow() {
     let t0 = 500;
 
     let v1 = p
-        .create_vault_seeded(market_id, b"q1".to_vec(), CREATOR, SIDE_NO, U256::from(USD), 100 * USD, t0)
+        .create_bound_vault_seeded(
+            market_id,
+            b"q1".to_vec(),
+            CREATOR,
+            SIDE_NO,
+            U256::from(USD),
+            100 * USD,
+            t0,
+            [1; 32],
+            0xFFFFFFFE,
+            [2; 32],
+        )
         .unwrap();
     let v2 = p
-        .create_vault_seeded(market_id, b"q2".to_vec(), CREATOR, SIDE_NO, U256::from(USD), 100 * USD, t0)
+        .create_bound_vault_seeded(
+            market_id,
+            b"q2".to_vec(),
+            CREATOR,
+            SIDE_NO,
+            U256::from(USD),
+            100 * USD,
+            t0,
+            [1; 32],
+            0xFFFFFFFE,
+            [3; 32],
+        )
         .unwrap();
 
     let token = p.mint(market_id, true).unwrap();
-    p.fund(token, &v1, SIDE_YES, U256::from(2 * USD), 200 * USD, t0).unwrap();
+    p.fund(token, &v1, SIDE_YES, U256::from(2 * USD), 200 * USD, t0)
+        .unwrap();
 
     // Declarative reshape: keep v1, add v2, one call (sequential side-switch = hedge).
     let desired = [
@@ -126,13 +169,30 @@ fn set_lanes_reshape_and_hedge_flow() {
     assert_eq!(p.lane_count(token), 2);
 
     // Duplicate vault in desired set refuses.
-    let dup = [(v1, SIDE_YES, U256::from(USD)), (v1, SIDE_NO, U256::from(USD))];
-    assert_eq!(p.set_lanes(token, &dup, 0, t0 + 11).unwrap_err(), DriverError::DuplicateVault);
+    let dup = [
+        (v1, SIDE_YES, U256::from(USD)),
+        (v1, SIDE_NO, U256::from(USD)),
+    ];
+    assert_eq!(
+        p.set_lanes(token, &dup, 0, t0 + 11).unwrap_err(),
+        DriverError::DuplicateVault
+    );
 
     // Cross-market vault refuses.
     let mut q = Protocol::default();
     let foreign = q
-        .create_vault_seeded([9u8; 32], b"x".to_vec(), CREATOR, SIDE_NO, U256::from(USD), USD, t0)
+        .create_bound_vault_seeded(
+            [9u8; 32],
+            b"x".to_vec(),
+            CREATOR,
+            SIDE_NO,
+            U256::from(USD),
+            USD,
+            t0,
+            [1; 32],
+            0xFFFFFFFE,
+            [4; 32],
+        )
         .unwrap();
     assert!(matches!(
         p.fund(token, &foreign, SIDE_YES, U256::from(USD), USD, t0 + 12),
@@ -152,16 +212,31 @@ fn protocol_state_round_trips_through_postcard() {
     let mut p = Protocol::default();
     let market_id = [3u8; 32];
     let vault_id = p
-        .create_vault_seeded(market_id, b"rt".to_vec(), CREATOR, SIDE_NO, U256::from(USD), 50 * USD, 100)
+        .create_bound_vault_seeded(
+            market_id,
+            b"rt".to_vec(),
+            CREATOR,
+            SIDE_NO,
+            U256::from(USD),
+            50 * USD,
+            100,
+            [1; 32],
+            0xFFFFFFFE,
+            [5; 32],
+        )
         .unwrap();
     let token = p.mint_with_salt(market_id, true, BETTOR, 1).unwrap();
-    p.fund(token, &vault_id, SIDE_YES, U256::from(USD), 25 * USD, 100).unwrap();
+    p.fund(token, &vault_id, SIDE_YES, U256::from(USD), 25 * USD, 100)
+        .unwrap();
     p.treasury.stake_lvst(STAKER, 42).unwrap();
 
     let bytes = p.to_bytes();
     let q = Protocol::from_bytes(&bytes).unwrap();
     assert_eq!(q.to_bytes(), bytes);
     assert_eq!(q.lane_count(token), 1);
-    assert_eq!(q.vault.get_board(&vault_id, SIDE_YES), p.vault.get_board(&vault_id, SIDE_YES));
+    assert_eq!(
+        q.vault.get_board(&vault_id, SIDE_YES),
+        p.vault.get_board(&vault_id, SIDE_YES)
+    );
     assert_eq!(q.drips.held, p.drips.held);
 }

@@ -5,43 +5,31 @@
 version = 4
 
 [pinned.testnet.MoveStdlib]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "1f6e1e6dd72dc75ac4037b3d4e38e73b133c5ef6" }
-use_environment = "testnet"
-manifest_digest = "C4FE4C91DE74CBF223B2E380AE40F592177D21870DC2D7EB6227D2D694E05363"
-deps = {}
-
-[pinned.testnet.MoveStdlib_1]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "563c15820b27dec9cbe75f826a3b6243ef44da1a" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/move-stdlib", rev = "718ae563a42fb4ba0d055588f81c704dcef58c25" }
 use_environment = "testnet"
 manifest_digest = "C4FE4C91DE74CBF223B2E380AE40F592177D21870DC2D7EB6227D2D694E05363"
 deps = {}
 
 [pinned.testnet.Sui]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "1f6e1e6dd72dc75ac4037b3d4e38e73b133c5ef6" }
+source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "718ae563a42fb4ba0d055588f81c704dcef58c25" }
 use_environment = "testnet"
 manifest_digest = "7AFB66695545775FBFBB2D3078ADFD084244D5002392E837FDE21D9EA1C6D01C"
 deps = { MoveStdlib = "MoveStdlib" }
 
-[pinned.testnet.Sui_1]
-source = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-framework/packages/sui-framework", rev = "563c15820b27dec9cbe75f826a3b6243ef44da1a" }
-use_environment = "testnet"
-manifest_digest = "7AFB66695545775FBFBB2D3078ADFD084244D5002392E837FDE21D9EA1C6D01C"
-deps = { MoveStdlib = "MoveStdlib_1" }
-
 [pinned.testnet.livestreak]
 source = { root = true }
 use_environment = "testnet"
-manifest_digest = "BB3C50B73B81DE4AA80CC2CDBDC4B16027E2B1C72AFF48E12135FB3E8C530622"
-deps = { MoveStdlib = "MoveStdlib", Sui = "Sui", openzeppelin_fp_math = "openzeppelin_fp_math" }
+manifest_digest = "FA94440BCF0BBC95063475F6AF2A77A83AC0DF6803B2D1DE22810A26F86AD199"
+deps = { MoveStdlib = "MoveStdlib", Sui = "Sui", openzeppelin_fp_math = "openzeppelin_fp_math", std = "MoveStdlib", sui = "Sui" }
 
 [pinned.testnet.openzeppelin_fp_math]
 source = { git = "https://github.com/OpenZeppelin/contracts-sui.git", subdir = "math/fixed_point", rev = "398ba1c59dc5a8a9214c9b323ddcec33a38761fe" }
 use_environment = "testnet"
 manifest_digest = "EBBF3891F1226FE83CE09DB6310A89A7037E942865CB38AB3F4997C5B7E3FB95"
-deps = { openzeppelin_math = "openzeppelin_math", std = "MoveStdlib_1", sui = "Sui_1" }
+deps = { openzeppelin_math = "openzeppelin_math", std = "MoveStdlib", sui = "Sui" }
 
 [pinned.testnet.openzeppelin_math]
 source = { git = "https://github.com/OpenZeppelin/contracts-sui.git", subdir = "math/core", rev = "398ba1c59dc5a8a9214c9b323ddcec33a38761fe" }
 use_environment = "testnet"
 manifest_digest = "5745706258F61D6CE210904B3E6AE87A73CE9D31A6F93BE4718C442529332A87"
-deps = { std = "MoveStdlib_1", sui = "Sui_1" }
+deps = { std = "MoveStdlib", sui = "Sui" }

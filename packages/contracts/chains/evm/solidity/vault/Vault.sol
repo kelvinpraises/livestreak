@@ -104,6 +104,9 @@ contract Vault {
     uint256 private _nonce;
 
     mapping(bytes32 => VaultData) public vaults;
+    mapping(bytes32 => bytes32) public mandateCommitment;
+    mapping(bytes32 => uint32) public fundingClose;
+
     mapping(bytes32 => mapping(Side => Board)) internal _boards;
     mapping(bytes32 => mapping(Side => mapping(uint256 => Position))) internal _positions;
     mapping(bytes32 => mapping(Side => Boundary[])) internal _boundaries;
@@ -195,12 +198,14 @@ contract Vault {
     //                          VAULT LIFECYCLE
     // ═══════════════════════════════════════════════════════════════════════
 
-    function createVault(bytes32 marketId, string calldata question, address creator)
+    function createVault(bytes32 marketId, string calldata question, address creator, bytes32 commitment, uint32 closesAt)
         external
         onlyVaultDriver
         returns (bytes32 vaultId)
     {
         require(bytes(question).length > 0, "Vault: empty question");
+        require(commitment != bytes32(0), "Vault: mandate required");
+        require(closesAt > block.timestamp, "Vault: funding closed");
         require(creator != address(0), "Vault: zero creator");
 
         vaultId = keccak256(abi.encodePacked(marketId, question, _nonce++, block.timestamp));
@@ -216,6 +221,8 @@ contract Vault {
             exists: true
         });
 
+        mandateCommitment[vaultId] = commitment;
+        fundingClose[vaultId] = closesAt;
         emit VaultOpened(vaultId, marketId, creator, question);
     }
 
@@ -251,7 +258,10 @@ contract Vault {
         external
         onlyFundingDriver
     {
+        require(vaults[vaultId].exists && mandateCommitment[vaultId] != bytes32(0), "Vault: mandate required");
+        require(block.timestamp < fundingClose[vaultId], "Vault: funding closed");
         require(vaults[vaultId].status == Status.Open, "Vault: not open");
+        if (maxEnd > fundingClose[vaultId]) maxEnd = fundingClose[vaultId];
         require(rate > 0, "Vault: zero rate");
 
         if (!_accountInVault[account][vaultId]) {
@@ -322,9 +332,10 @@ contract Vault {
             _advanceToNow(vaultId, side);
             _settle(vaultId, side, account);
             Position storage p = _positions[vaultId][side][account];
-            if (p.rate > 0 && !p.depleted && newMaxEnd != p.maxEnd) {
-                p.maxEnd = newMaxEnd;
-                _scheduleBoundary(vaultId, side, newMaxEnd, account);
+            uint32 cappedEnd = newMaxEnd < fundingClose[vaultId] ? newMaxEnd : fundingClose[vaultId];
+            if (p.rate > 0 && !p.depleted && cappedEnd != p.maxEnd) {
+                p.maxEnd = cappedEnd;
+                _scheduleBoundary(vaultId, side, cappedEnd, account);
             }
         }
     }
@@ -347,7 +358,7 @@ contract Vault {
     /// @notice Shares `funder` would be credited if settled now (same math as settle; view-parity).
     function pendingShares(bytes32 vaultId, Side side, uint256 account) external view returns (uint256) {
         Position storage p = _positions[vaultId][side][account];
-        uint256 capTs = block.timestamp;
+        uint256 capTs = block.timestamp < fundingClose[vaultId] ? block.timestamp : fundingClose[vaultId];
         uint32 resolvedAt = vaults[vaultId].resolvedAt;
         if (resolvedAt != 0 && uint256(resolvedAt) < capTs) capTs = resolvedAt; // freeze at resolution
         if (!p.depleted && p.maxEnd != 0 && uint256(p.maxEnd) < capTs) {
@@ -497,6 +508,7 @@ contract Vault {
         uint32 last = _boards[vaultId][side].lastAdvance;
         if (last == 0) return true;
         uint256 target = block.timestamp;
+        if (fundingClose[vaultId] < target) target = fundingClose[vaultId];
         uint32 resolvedAt = vaults[vaultId].resolvedAt;
         if (resolvedAt != 0 && uint256(resolvedAt) < target) target = resolvedAt;
         return uint256(last) == target;
@@ -516,12 +528,13 @@ contract Vault {
     function _advance(bytes32 vaultId, Side side, uint256 maxSteps) internal {
         Board storage b = _boards[vaultId][side];
         if (b.lastAdvance == 0) {
-            b.lastAdvance = uint32(block.timestamp);
+            b.lastAdvance = block.timestamp < fundingClose[vaultId] ? uint32(block.timestamp) : fundingClose[vaultId];
             return;
         }
         uint256 t = b.lastAdvance;
         uint256 nowTs = block.timestamp;
         uint32 resolvedAt = vaults[vaultId].resolvedAt;
+        if (fundingClose[vaultId] < nowTs) nowTs = fundingClose[vaultId];
         if (resolvedAt != 0 && uint256(resolvedAt) < nowTs) nowTs = resolvedAt; // freeze accrual at resolution
         Boundary[] storage arr = _boundaries[vaultId][side];
         uint256 head = _boundaryHead[vaultId][side];

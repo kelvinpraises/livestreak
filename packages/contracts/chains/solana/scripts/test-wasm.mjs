@@ -11,7 +11,10 @@ const solanaRoot = join(here, "..");
 const fixtures = join(solanaRoot, "test-fixtures");
 
 const { decodeProtocolBlob } = await import(
-  new URL(join("..", "..", "..", "dist", "chains", "solana", "engine-wasm.js"), import.meta.url).href
+  new URL(
+    join("..", "..", "..", "dist", "chains", "solana", "engine-wasm.js"),
+    import.meta.url,
+  ).href
 );
 
 const blob = readFileSync(join(fixtures, "protocol-blob.bin"));
@@ -22,7 +25,14 @@ const { vaultId, tokenId, now } = expected;
 
 assert.deepEqual(view.listVaultIds(), [vaultId], "listVaultIds");
 assert.deepEqual(view.marketVaults(expected.marketId), [vaultId], "marketVaults");
-assert.equal(view.vault(vaultId).outcome, expected.vaultOutcome, "vault outcome");
+const vault = view.vault(vaultId);
+assert.equal(vault.outcome, expected.vaultOutcome, "vault outcome");
+assert.equal(vault.commitment, expected.mandateCommitment, "mandate commitment");
+assert.equal(vault.fundingClose, expected.fundingClose, "funding deadline");
+assert.equal(vault.operationId, expected.operationId, "creation operation");
+assert.equal(vault.seedSide, expected.seedSide, "seed side");
+assert.equal(vault.seedRate, expected.seedRate, "seed rate");
+assert.equal(vault.seedDeposit, expected.seedDeposit, "seed deposit");
 assert.equal(view.pot(vaultId), BigInt(expected.pot), "pot");
 
 const board = view.board(vaultId, 0);
@@ -36,7 +46,11 @@ const bounds = view.boundaries(vaultId, 0);
 assert.equal(bounds.length, expected.boundariesYes.length, "boundaries length");
 for (let i = 0; i < bounds.length; i++) {
   assert.equal(bounds[i].maxEnd, expected.boundariesYes[i].maxEnd, `boundary[${i}].maxEnd`);
-  assert.equal(bounds[i].rate, BigInt(expected.boundariesYes[i].rate), `boundary[${i}].rate`);
+  assert.equal(
+    bounds[i].rate,
+    BigInt(expected.boundariesYes[i].rate),
+    `boundary[${i}].rate`,
+  );
 }
 
 assert.equal(
@@ -44,10 +58,18 @@ assert.equal(
   BigInt(expected.pendingSharesYes),
   "pendingShares",
 );
-assert.equal(view.claimable(tokenId, vaultId, 0), BigInt(expected.claimableYes), "claimable");
+assert.equal(
+  view.claimable(tokenId, vaultId, 0),
+  BigInt(expected.claimableYes),
+  "claimable",
+);
 assert.deepEqual(view.accountVaultIds(tokenId), expected.accountVaults, "accountVaultIds");
 assert.equal(view.laneCount(tokenId), expected.laneCount, "laneCount");
-assert.equal(view.summary().escrowExpected, BigInt(expected.escrowExpected), "escrowExpected");
+assert.equal(
+  view.summary().escrowExpected,
+  BigInt(expected.escrowExpected),
+  "escrowExpected",
+);
 
 view.free();
 console.log("wasm round-trip: all views exact vs host-side engine ✓");

@@ -273,6 +273,28 @@ export type Livestreak = {
         {
           "name": "deposit",
           "type": "u64"
+        },
+        {
+          "name": "commitment",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "fundingClose",
+          "type": "u64"
+        },
+        {
+          "name": "operationId",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
         }
       ],
       "returns": "bytes"
@@ -1617,36 +1639,51 @@ export type Livestreak = {
     },
     {
       "code": 6051,
+      "name": "unboundVault",
+      "msg": "vault is not bound to immutable rules"
+    },
+    {
+      "code": 6052,
+      "name": "fundingClosed",
+      "msg": "vault funding closed"
+    },
+    {
+      "code": 6053,
+      "name": "creationConflict",
+      "msg": "creation operation conflict"
+    },
+    {
+      "code": 6054,
       "name": "dripsTotalBalanceTooHigh",
       "msg": "total streamed balance too high"
     },
     {
-      "code": 6052,
+      "code": 6055,
       "name": "dripsTokenBalanceTooLow",
       "msg": "token balance too low"
     },
     {
-      "code": 6053,
+      "code": 6056,
       "name": "dripsWithdrawalAmountTooHigh",
       "msg": "withdrawal amount too high"
     },
     {
-      "code": 6054,
+      "code": 6057,
       "name": "treasuryAlreadyClaimed",
       "msg": "loss already claimed"
     },
     {
-      "code": 6055,
+      "code": 6058,
       "name": "treasuryNothingLost",
       "msg": "nothing lost to claim"
     },
     {
-      "code": 6056,
+      "code": 6059,
       "name": "treasuryZeroStake",
       "msg": "stake must be non-zero"
     },
     {
-      "code": 6057,
+      "code": 6060,
       "name": "treasuryInvalidUnstake",
       "msg": "invalid unstake amount"
     }

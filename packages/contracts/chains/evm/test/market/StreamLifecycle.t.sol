@@ -226,4 +226,43 @@ contract StreamLifecycleTest is Test {
         vm.expectRevert("MarketRegistry: stream locked");
         marketRegistry.setEnded(marketId, MarketRegistry.StorageScheme.Ipfs, "late-vod-id");
     }
+    function test_liveOnlyEnd_absentThenVerifiedPointer_preservesOriginalTime() public {
+        vm.warp(1_700_000_000);
+        vm.startPrank(creator);
+        marketRegistry.goLive(marketId, SCHEME_LIVE, liveId);
+        marketRegistry.setEnded(marketId, SCHEME_LIVE, "");
+        MarketRegistry.StreamState memory s = _stream(marketId);
+        assertEq(uint8(s.status), 2);
+        assertEq(s.id, "");
+        assertEq(uint8(s.scheme), 0);
+        vm.warp(1_700_000_010);
+        marketRegistry.setEnded(marketId, MarketRegistry.StorageScheme.Ipfs, vodId);
+        assertEq(_stream(marketId).endedAt, s.endedAt);
+        vm.stopPrank();
+    }
+
+    function test_absence_onlySchemeZero_noCreatorBypass() public {
+        vm.prank(creator);
+        marketRegistry.goLive(marketId, SCHEME_LIVE, liveId);
+        vm.prank(creator);
+        vm.expectRevert("MarketRegistry: noncanonical absence");
+        marketRegistry.setEnded(marketId, MarketRegistry.StorageScheme.Ipfs, "");
+        vm.prank(stranger);
+        vm.expectRevert("MarketRegistry: not creator");
+        marketRegistry.setEnded(marketId, SCHEME_LIVE, "");
+    }
+
+    function test_hostReplay_revisionKeepsOriginalEndTime() public {
+        vm.startPrank(creator);
+        marketRegistry.goLive(marketId, SCHEME_LIVE, liveId);
+        marketRegistry.setEnded(marketId, SCHEME_LIVE, "");
+        uint64 endedAt = _stream(marketId).endedAt;
+        vm.warp(block.timestamp + 10);
+        string memory archiveId = "612b96a4412dc3de68a5adcbcf0a3f90aa1cf0b7d7b1ef6801d59236bc2a40b1";
+        marketRegistry.setEnded(marketId, MarketRegistry.StorageScheme.Host, archiveId);
+        assertEq(uint8(_stream(marketId).scheme), 4);
+        assertEq(_stream(marketId).id, archiveId);
+        assertEq(_stream(marketId).endedAt, endedAt);
+        vm.stopPrank();
+    }
 }

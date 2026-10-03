@@ -117,20 +117,30 @@ fun test_loss_mints_flow_on_curve() {
     fund_both(&mut scenario, v1, &clock);
     wire::warp(&mut clock, 200);
     wire::resolve_vault(&mut scenario, wire::steward(), v1, true, &clock);
+    ts::next_tx(&mut scenario, wire::admin());
+    let before_collect = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+    assert!(!vault::is_collected(&before_collect, &v1), 92);
+    ts::return_shared(before_collect);
     wire::collect_vault(&mut scenario, v1, &clock);
 
     ts::next_tx(&mut scenario, wire::admin());
     {
         let vault_registry = ts::take_shared<VaultRegistry<TEST_USDC>>(&scenario);
+        assert!(vault::is_collected(&vault_registry, &v1), 93);
         assert!(vault::loss_claimable(&vault_registry, bob_token, &v1, side::no()) == 50 * wire::rate(), 0);
         assert!(vault::loss_claimable(&vault_registry, alice_token, &v1, side::yes()) == 0, 1);
         ts::return_shared(vault_registry);
         let treasury = ts::take_shared<TreasuryRegistry<TEST_USDC>>(&scenario);
+        assert!(!treasury::is_loss_claimed(&treasury, bob_token, &v1, side::no()), 90);
         let rate = treasury::mint_rate(&treasury);
         let expected = (50 * wire::rate() * rate) / 1_000_000;
         ts::return_shared(treasury);
         let minted = wire::claim_loss_lvst(&mut scenario, wire::bob(), v1, side::no());
         assert!(minted == expected, 2);
+        ts::next_tx(&mut scenario, wire::admin());
+        let treasury_after = ts::take_shared<TreasuryRegistry<TEST_USDC>>(&scenario);
+        assert!(treasury::is_loss_claimed(&treasury_after, bob_token, &v1, side::no()), 91);
+        ts::return_shared(treasury_after);
         assert!(wire::lvst_balance_of(&mut scenario, wire::bob()) == (minted as u64), 3);
     };
 

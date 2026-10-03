@@ -4,8 +4,8 @@
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use livestreak_engine::{Protocol, SIDE_NO, SIDE_YES, STATUS_RESOLVED};
 use ruint::aliases::U256;
-use livestreak_engine::{Protocol, STATUS_RESOLVED, SIDE_NO, SIDE_YES};
 
 use crate::constants::{
     LVST_AUTHORITY_SEED, LVST_ESCROW_SEED, MARKET_SEED, MARKET_STEWARD_SEED, MAX_PROTOCOL_BYTES,
@@ -34,7 +34,10 @@ fn now_secs() -> Result<u64> {
 }
 
 fn valid_side(side: u8) -> Result<()> {
-    require!(side == SIDE_YES || side == SIDE_NO, LivestreakError::BadScheme);
+    require!(
+        side == SIDE_YES || side == SIDE_NO,
+        LivestreakError::BadScheme
+    );
     Ok(())
 }
 
@@ -262,12 +265,18 @@ pub fn handle_create_vault_seeded(
     seed_side: u8,
     rate: u64,
     deposit: u64,
+    commitment: [u8; 32],
+    funding_close: u64,
+    operation_id: [u8; 32],
 ) -> Result<Vec<u8>> {
     valid_side(seed_side)?;
     let mut p = load(&ctx.accounts.protocol_state)?;
-    ctx.accounts.pull(deposit as u128)?;
+    let existed =
+        p.vault.vaults.values().any(|v| {
+            v.creator == ctx.accounts.user.key().to_bytes() && v.operation_id == operation_id
+        });
     let vault_id = p
-        .create_vault_seeded(
+        .create_bound_vault_seeded(
             ctx.accounts.protocol_state.market_id,
             question,
             ctx.accounts.user.key().to_bytes(),
@@ -275,8 +284,14 @@ pub fn handle_create_vault_seeded(
             U256::from(rate),
             deposit as u128,
             now_secs()?,
+            commitment,
+            funding_close,
+            operation_id,
         )
         .map_err(engine_err)?;
+    if !existed {
+        ctx.accounts.pull(deposit as u128)?;
+    }
     let len = ctx.accounts.protocol_state.to_account_info().data_len();
     store(&mut ctx.accounts.protocol_state, &p, len)?;
     assert_conserved(&mut ctx.accounts.escrow, &p)?;
@@ -363,7 +378,10 @@ pub struct TransferPosition<'info> {
 }
 
 pub fn handle_transfer_position(ctx: Context<TransferPosition>, new_owner: Pubkey) -> Result<()> {
-    require!(new_owner != Pubkey::default(), LivestreakError::ZeroNewOwner);
+    require!(
+        new_owner != Pubkey::default(),
+        LivestreakError::ZeroNewOwner
+    );
     ctx.accounts.position.owner = new_owner;
     Ok(())
 }
@@ -497,7 +515,11 @@ pub fn handle_withdraw(ctx: Context<PositionEngineOp>, vault_id: [u8; 32]) -> Re
     let now = now_secs()?;
     require_settled(&p, &vault_id, now)?;
     let paid = p
-        .withdraw(token_id_from(&ctx.accounts.position.token_id), &vault_id, now)
+        .withdraw(
+            token_id_from(&ctx.accounts.position.token_id),
+            &vault_id,
+            now,
+        )
         .map_err(engine_err)?;
     ctx.accounts.as_user_op().pay(paid)?;
     let len = ctx.accounts.protocol_state.to_account_info().data_len();
@@ -856,7 +878,9 @@ pub fn handle_claim_dividends(ctx: Context<ClaimDividends>) -> Result<()> {
     let mut p = load(&ctx.accounts.protocol_state)?;
     // The treasury settles + zeroes the accrued ledger and decrements usdc_held itself,
     // returning the exact USDC amount to pay. Zero accrued => nothing to claim (typed).
-    let amount = p.treasury.claim_dividends(ctx.accounts.staker.key().to_bytes());
+    let amount = p
+        .treasury
+        .claim_dividends(ctx.accounts.staker.key().to_bytes());
     require!(amount > 0, LivestreakError::NoDividends);
     ctx.accounts.as_user_op().pay(amount)?;
     let len = ctx.accounts.protocol_state.to_account_info().data_len();
@@ -916,7 +940,9 @@ pub fn handle_advance(
 ) -> Result<()> {
     valid_side(side)?;
     let mut p = load(&ctx.accounts.protocol_state)?;
-    p.vault.advance(&vault_id, side, max_steps, now_secs()?).map_err(engine_err)?;
+    p.vault
+        .advance(&vault_id, side, max_steps, now_secs()?)
+        .map_err(engine_err)?;
     let len = ctx.accounts.protocol_state.to_account_info().data_len();
     store(&mut ctx.accounts.protocol_state, &p, len)?;
     assert_conserved(&mut ctx.accounts.escrow, &p)?;
@@ -926,7 +952,8 @@ pub fn handle_advance(
 pub fn handle_collect(ctx: Context<EngineOp>, vault_id: [u8; 32]) -> Result<()> {
     let mut p = load(&ctx.accounts.protocol_state)?;
     // Skim stays inside the shared escrow; the treasury ledger partitions it.
-    p.collect_vault(&vault_id, now_secs()?).map_err(engine_err)?;
+    p.collect_vault(&vault_id, now_secs()?)
+        .map_err(engine_err)?;
     let len = ctx.accounts.protocol_state.to_account_info().data_len();
     store(&mut ctx.accounts.protocol_state, &p, len)?;
     assert_conserved(&mut ctx.accounts.escrow, &p)?;
@@ -960,10 +987,15 @@ pub fn handle_resolve(ctx: Context<Resolve>, vault_id: [u8; 32], winning_side: u
         .as_ref()
         .map(|m| m.steward)
         .unwrap_or(ctx.accounts.registry.default_steward);
-    require!(ctx.accounts.steward.key() == effective, LivestreakError::NotSteward);
+    require!(
+        ctx.accounts.steward.key() == effective,
+        LivestreakError::NotSteward
+    );
 
     let mut p = load(&ctx.accounts.protocol_state)?;
-    p.vault.resolve(&vault_id, winning_side, now_secs()?).map_err(engine_err)?;
+    p.vault
+        .resolve(&vault_id, winning_side, now_secs()?)
+        .map_err(engine_err)?;
     let len = ctx.accounts.protocol_state.to_account_info().data_len();
     store(&mut ctx.accounts.protocol_state, &p, len)?;
     Ok(())

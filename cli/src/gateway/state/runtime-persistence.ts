@@ -7,11 +7,19 @@ import type { IdempotencyPersistedState, IdempotencyPersistencePort } from "@liv
 import type { Board, ObserveBoardPersistencePort } from "@livestreak/observe";
 import type { OptionsPausedLane, PausedLanesPort } from "@livestreak/options";
 
+import { createHash } from "node:crypto";
 import { readStateFile, stateFilePath, writeStateFile } from "./file-store.js";
+
+const scopedFile = (file: string, runId?: string): string => runId === undefined ? file : `${createHash("sha256").update(runId).digest("hex")}-${file}`;
 
 const IDEMPOTENCY_FILE = "bookmaker-idempotency.json";
 const PAUSED_LANES_FILE = "options-paused-lanes.json";
 const OBSERVE_BOARDS_FILE = "observe-boards.json";
+
+const pendingWrites = new Set<Promise<void>>();
+export const flushRuntimePersistence = async (): Promise<void> => {
+  while (pendingWrites.size) await Promise.all([...pendingWrites]);
+};
 
 const warnPersistFailure = (file: string, error: unknown): void => {
   console.error(
@@ -26,11 +34,14 @@ const makeChainedWriter = (path: string, file: string): ((value: unknown) => voi
     chain = chain
       .then(() => writeStateFile(path, value))
       .catch((error) => warnPersistFailure(file, error));
+    const pending = chain;
+    pendingWrites.add(pending);
+    void pending.finally(() => pendingWrites.delete(pending));
   };
 };
 
-export const loadIdempotencyPersistencePort = async (): Promise<IdempotencyPersistencePort> => {
-  const path = stateFilePath(IDEMPOTENCY_FILE);
+export const loadIdempotencyPersistencePort = async (runId?: string): Promise<IdempotencyPersistencePort> => {
+  const path = stateFilePath(scopedFile(IDEMPOTENCY_FILE, runId));
   const initial = await readStateFile<IdempotencyPersistedState>(path);
   let writes: Promise<void> = Promise.resolve();
   const write = (state: IdempotencyPersistedState): Promise<void> => {
@@ -46,8 +57,8 @@ export const loadIdempotencyPersistencePort = async (): Promise<IdempotencyPersi
   };
 };
 
-export const loadPausedLanesPort = async (): Promise<PausedLanesPort> => {
-  const path = stateFilePath(PAUSED_LANES_FILE);
+export const loadPausedLanesPort = async (runId?: string): Promise<PausedLanesPort> => {
+  const path = stateFilePath(scopedFile(PAUSED_LANES_FILE, runId));
   const initial = await readStateFile<readonly OptionsPausedLane[]>(path);
   const write = makeChainedWriter(path, PAUSED_LANES_FILE);
   return {
@@ -61,9 +72,10 @@ export const loadPausedLanesPort = async (): Promise<PausedLanesPort> => {
 // reads initial[runId] anyway), and if the stored file carried any other runId we rewrite it once now,
 // so prior boots' orphan boards can't accumulate (one per boot, forever, otherwise).
 export const loadObserveBoardsPort = async (
-  activeRunId: string
+  activeRunId: string,
+  scoped = false
 ): Promise<ObserveBoardPersistencePort> => {
-  const path = stateFilePath(OBSERVE_BOARDS_FILE);
+  const path = stateFilePath(scopedFile(OBSERVE_BOARDS_FILE, scoped ? activeRunId : undefined));
   const stored = await readStateFile<Record<string, Board>>(path);
   const write = makeChainedWriter(path, OBSERVE_BOARDS_FILE);
   const savedBoard = stored?.[activeRunId];

@@ -367,3 +367,43 @@ fun test_golden_lifecycle() {
     clock::destroy_for_testing(clock);
     ts::end(scenario);
 }
+
+#[test]
+fun test_live_only_end_has_no_storage_id_and_preserves_time() {
+    let mut scenario = ts::begin(CREATOR);
+    let mut clock = wire::new_clock(&mut scenario, CREATOR, 100);
+    let market_id = setup_market(&mut scenario, &clock);
+    ts::next_tx(&mut scenario, CREATOR);
+    {
+        let mut reg = ts::take_shared<MarketRegistry>(&scenario);
+        let ctx = ts::ctx(&mut scenario);
+        market_registry::go_live(&mut reg, market_id, SCHEME_LIVE, live_id(), &clock, ctx);
+        market_registry::set_ended(&mut reg, market_id, SCHEME_LIVE, vector[], &clock, ctx);
+        let s = market_registry::stream_state(&reg, &market_id);
+        assert!(market_registry::stream_status(&s) == market_registry::status_ended(), 0);
+        assert!(vector::length(market_registry::stream_content_id(&s)) == 0, 1);
+        assert!(market_registry::stream_scheme(&s) == 0, 2);
+        let first = market_registry::stream_ended_at(&s);
+        clock::increment_for_testing(&mut clock, 1000);
+        market_registry::set_ended(&mut reg, market_id, 4, b"612b96a4412dc3de68a5adcbcf0a3f90aa1cf0b7d7b1ef6801d59236bc2a40b1", &clock, ctx);
+        assert!(market_registry::stream_scheme(&market_registry::stream_state(&reg, &market_id)) == 4, 4);
+        assert!(market_registry::stream_ended_at(&market_registry::stream_state(&reg, &market_id)) == first, 3);
+        ts::return_shared(reg);
+    };
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}
+
+#[test, expected_failure(abort_code = 6)]
+fun test_no_recording_rejects_noncanonical_scheme() {
+    let mut scenario = ts::begin(CREATOR);
+    let clock = wire::new_clock(&mut scenario, CREATOR, 100);
+    let market_id = setup_market(&mut scenario, &clock);
+    ts::next_tx(&mut scenario, CREATOR);
+    let mut reg = ts::take_shared<MarketRegistry>(&scenario);
+    market_registry::go_live(&mut reg, market_id, SCHEME_LIVE, live_id(), &clock, ts::ctx(&mut scenario));
+    market_registry::set_ended(&mut reg, market_id, SCHEME_IPFS, vector[], &clock, ts::ctx(&mut scenario));
+    ts::return_shared(reg);
+    clock::destroy_for_testing(clock);
+    ts::end(scenario);
+}

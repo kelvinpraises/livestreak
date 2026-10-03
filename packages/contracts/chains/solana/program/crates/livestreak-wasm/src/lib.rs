@@ -51,8 +51,11 @@ pub struct ProtocolView {
 impl ProtocolView {
     /// Decode a ProtocolState `data` payload (the postcard blob, header already stripped).
     pub fn decode(bytes: &[u8]) -> Result<ProtocolView, JsError> {
-        let p = Protocol::from_bytes(bytes)
-            .ok_or_else(|| JsError::new("protocol state failed to decode"))?;
+        let p = Protocol::from_bytes(bytes).ok_or_else(|| {
+            JsError::new(
+                "unsupported or corrupt Solana state: bound-vault program/reader v2 required",
+            )
+        })?;
         Ok(ProtocolView { p })
     }
 
@@ -92,6 +95,9 @@ impl ProtocolView {
             "outcome": v.outcome,
             "resolvedAt": v.resolved_at,
             "exists": v.exists,
+            "commitment": id_hex(&v.mandate_commitment), "fundingClose": v.funding_close,
+            "operationId": id_hex(&v.operation_id), "seedSide": v.seed_side,
+            "seedRate": s(v.seed_rate), "seedDeposit": s(v.seed_deposit),
         })
         .to_string())
     }
@@ -185,7 +191,11 @@ impl ProtocolView {
 
     pub fn claimable(&self, token_id: &str, vault_id: &str, side: u8) -> Result<String, JsError> {
         let vid = parse_id(vault_id)?;
-        Ok(self.p.vault.claimable(account(token_id)?, &vid, side).to_string())
+        Ok(self
+            .p
+            .vault
+            .claimable(account(token_id)?, &vid, side)
+            .to_string())
     }
 
     pub fn loss_claimable(
@@ -264,7 +274,11 @@ impl ProtocolView {
     }
 
     pub fn pending_dividends(&self, user: &str) -> Result<String, JsError> {
-        Ok(self.p.treasury.pending_dividends(&parse_id(user)?).to_string())
+        Ok(self
+            .p
+            .treasury
+            .pending_dividends(&parse_id(user)?)
+            .to_string())
     }
 
     pub fn mint_rate(&self) -> String {

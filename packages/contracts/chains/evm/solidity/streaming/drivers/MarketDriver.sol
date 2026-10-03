@@ -131,6 +131,8 @@ contract MarketDriver is SharedDriverUtils, ERC721Enumerable, ERC721URIStorage, 
         onlyHolder(tokenId)
         whenNotPaused
     {
+        require(VAULT.mandateCommitment(vaultId) != bytes32(0), "MarketDriver: mandate required");
+        require(block.timestamp < VAULT.fundingClose(vaultId), "MarketDriver: funding closed");
         require(rate > 0, "MarketDriver: zero rate");
         require(deposit > 0 && deposit <= uint256(uint128(type(int128).max)), "MarketDriver: bad deposit");
         require(VAULT.marketId(vaultId) == marketIdOf[tokenId], "MarketDriver: wrong market");
@@ -190,6 +192,11 @@ contract MarketDriver is SharedDriverUtils, ERC721Enumerable, ERC721URIStorage, 
         bytes32 market = marketIdOf[tokenId];
 
         for (uint256 i = 0; i < desired.length; i++) {
+            require(VAULT.mandateCommitment(desired[i].vaultId) != bytes32(0), "MarketDriver: mandate required");
+            if (block.timestamp >= VAULT.fundingClose(desired[i].vaultId)) {
+                Lane memory old = _lanes[tokenId][desired[i].vaultId];
+                require(addDeposit == 0 && old.rate == desired[i].rate && old.side == desired[i].side, "MarketDriver: funding closed");
+            }
             require(desired[i].rate > 0, "MarketDriver: zero rate");
             require(VAULT.marketId(desired[i].vaultId) == market, "MarketDriver: wrong market");
             for (uint256 j = 0; j < i; j++) {
@@ -234,7 +241,8 @@ contract MarketDriver is SharedDriverUtils, ERC721Enumerable, ERC721URIStorage, 
             if (!changed) {
                 (uint256 pRate,,, uint32 pMaxEnd, bool depleted) =
                     VAULT.getPosition(desired[k].vaultId, desired[k].side, tokenId);
-                changed = depleted || (pRate > 0 && pMaxEnd != 0 && uint256(pMaxEnd) <= block.timestamp);
+                changed = block.timestamp < VAULT.fundingClose(desired[k].vaultId)
+                    && (depleted || (pRate > 0 && pMaxEnd != 0 && uint256(pMaxEnd) <= block.timestamp));
             }
             if (changed) {
                 addedVaults[addedN] = desired[k].vaultId;
@@ -400,7 +408,7 @@ contract MarketDriver is SharedDriverUtils, ERC721Enumerable, ERC721URIStorage, 
             Lane storage lane = _lanes[tokenId][keys[i]];
             uint256 recv = VAULT_DRIVER.receiverAccount(lane.vaultId, lane.side);
             receivers[i] = StreamReceiver({
-                accountId: recv, config: StreamConfigImpl.create(0, uint160(lane.rate * AMT_MUL), 0, 0)
+                accountId: recv, config: StreamConfigImpl.create(0, uint160(lane.rate * AMT_MUL), 1, VAULT.fundingClose(lane.vaultId) - 1)
             });
         }
         _sortReceivers(receivers);

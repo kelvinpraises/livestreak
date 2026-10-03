@@ -36,9 +36,9 @@ export const attachRemoteWss = (server: HttpServer, deps: HostRouteDeps): Remote
     // shared final rejecter (main.ts) 404s a truly unmatched upgrade; destroying it here would kill a
     // valid peer of the other transport.
     if (route === null) return;
-    // Leg B is rejected early if no live session exists; leg A is authed at register.
-    if (route.leg === "ui" && store.getLive(route.sessionId) === undefined) {
-      rejectUpgrade(socket, 404, "no live session");
+    // Known ended sessions reach hello for an explicit terminal reason.
+    if (route.leg === "ui" && store.get(route.sessionId) === undefined) {
+      rejectUpgrade(socket, 404, "unknown session");
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -60,7 +60,7 @@ export const attachRemoteWss = (server: HttpServer, deps: HostRouteDeps): Remote
       }
       relay.onGatewayMessage(sessionId, data);
     });
-    ws.on("close", () => relay.onGatewayClose(sessionId));
+    ws.on("close", () => { if (registered) relay.onGatewayClose(sessionId, conn); });
     ws.on("error", () => ws.close());
   };
 
@@ -89,7 +89,7 @@ export const attachRemoteWss = (server: HttpServer, deps: HostRouteDeps): Remote
         continue;
       }
       for (const sink of session.uiSinks.values()) {
-        sink({ type: "revoked" });
+        sink({ type: "revoked", reason: "ttl_expired" });
       }
       session.gateway?.({ type: "session_closed", sessionId, reason: "ttl_expired" });
     }

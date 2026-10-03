@@ -10,7 +10,7 @@ import type {
   RemoteCallOutcome,
 } from '@livestreak/schema'
 
-export type RemoteStatus = 'idle' | 'redeeming' | 'connecting' | 'open' | 'closed' | 'error'
+export type RemoteStatus = 'idle' | 'redeeming' | 'connecting' | 'open' | 'reconnecting' | 'closed' | 'revoked' | 'expired' | 'unavailable' | 'error'
 
 // Per-package board snapshots keyed by ConsolePackage name (`options`, `observe`, …).
 // Host `board_patch` frames carry a `target` package id; the transport merges into here.

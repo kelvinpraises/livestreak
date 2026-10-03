@@ -34,6 +34,8 @@ export type WebSocketFactory = (url: string) => WebSocketLike
 
 export interface HostWssTransportOptions {
   // Host HTTP origin, e.g. http://127.0.0.1:8787 (ws URL is derived by swapping the scheme).
+  readonly retryDelaysMs?: readonly number[]
+  readonly readyTimeoutMs?: number
   readonly hostBaseUrl: string
   readonly fetchImpl?: typeof fetch
   readonly webSocketFactory?: WebSocketFactory
@@ -62,8 +64,19 @@ export class HostWssTransport implements RemoteTransport {
   private board: RemoteBoard = {}
   private readonly pending = new Map<string, (r: CallResult) => void>()
   private onReady?: () => void
+  private rejectReady?: (error: Error) => void
+  private readyTimer?: ReturnType<typeof setTimeout>
+  private retryTimer?: ReturnType<typeof setTimeout>
+  private expiryTimer?: ReturnType<typeof setTimeout>
+  private stopped = false
+  private hadReady = false
+  private attempt = 0
+  private readonly retryDelays: readonly number[]
+  private readonly readyTimeout: number
 
   constructor(opts: HostWssTransportOptions) {
+    this.retryDelays = opts.retryDelaysMs ?? [500, 1000, 2000, 4000, 8000, 8000, 8000]
+    this.readyTimeout = opts.readyTimeoutMs ?? 5000
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis)
     this.wsBase = toWsBase(opts.hostBaseUrl)
     this.makeSocket =
@@ -100,28 +113,95 @@ export class HostWssTransport implements RemoteTransport {
   }
 
   async connect(session: RemoteSession): Promise<void> {
+    clearTimeout(this.retryTimer)
+    clearTimeout(this.readyTimer)
+    const oldSocket = this.ws
+    this.ws = undefined
+    oldSocket?.close()
+    this.stopped = false
+    this.hadReady = false
+    this.attempt = 0
     this.grant = session.grant
     this.sessionId = session.grant.sessionId
+    clearTimeout(this.expiryTimer)
+    if (this.grant.expiresAt !== undefined && this.grant.expiresAt <= Date.now()) {
+      this.terminate('expired'); throw new Error('Session expired')
+    }
+    this.armExpiry()
     this.setStatus('connecting')
-    const ws = this.makeSocket(`${this.wsBase}/remote/${encodeURIComponent(this.sessionId)}/ui`)
-    this.ws = ws
+    await this.openSocket()
+  }
 
-    await new Promise<void>((resolve, reject) => {
-      const readyTimer = setTimeout(() => reject(new Error('timed out waiting for host ready')), 10_000)
-      this.onReady = () => {
-        clearTimeout(readyTimer)
-        resolve()
-      }
+  private armExpiry(): void {
+    if (this.grant?.expiresAt === undefined || this.stopped) return
+    const remaining = this.grant.expiresAt - Date.now()
+    if (remaining <= 0) { this.terminate('expired'); return }
+    this.expiryTimer = setTimeout(() => this.armExpiry(), Math.min(remaining, 2_147_483_647))
+  }
+
+  private openSocket(): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      let ws: WebSocketLike
+      try { ws = this.makeSocket(`${this.wsBase}/remote/${encodeURIComponent(this.sessionId)}/ui`) }
+      catch (error) { this.terminate('unavailable'); reject(error); return }
+      this.ws = ws
+      this.rejectReady = reject
+      this.onReady = () => { clearTimeout(this.readyTimer); this.rejectReady = undefined; resolve() }
+      this.readyTimer = setTimeout(() => {
+        if (this.ws !== ws || this.stopped) return
+        reject(new Error('timed out waiting for host ready'))
+        this.lostSocket(ws)
+      }, this.readyTimeout)
       ws.addEventListener('open', () => {
+        if (this.ws !== ws || this.stopped) return
         ws.send(JSON.stringify({ type: 'ui.hello', sessionId: this.sessionId, grant: this.grant, seq: 0 }))
       })
-      ws.addEventListener('message', (ev: { data: unknown }) => this.onMessage(ev.data))
-      ws.addEventListener('close', () => this.onClose())
-      ws.addEventListener('error', () => {
-        clearTimeout(readyTimer)
-        reject(new Error('leg-B socket error'))
+      ws.addEventListener('message', (ev: { data: unknown }) => {
+        if (this.ws === ws && !this.stopped) this.onMessage(ev.data)
       })
+      ws.addEventListener('close', () => this.lostSocket(ws))
+      ws.addEventListener('error', () => this.lostSocket(ws))
     })
+  }
+
+  private terminate(status: RemoteStatus): void {
+    this.stopped = true
+    clearTimeout(this.retryTimer)
+    clearTimeout(this.readyTimer)
+    clearTimeout(this.expiryTimer)
+    this.rejectReady?.(new Error(`Session ${status}`))
+    this.rejectReady = undefined
+    this.failPending()
+    const ws = this.ws
+    this.ws = undefined
+    this.setStatus(status)
+    ws?.close()
+  }
+
+  private failPending(): void {
+    for (const resolve of this.pending.values()) resolve({
+      ok: false, error: 'Connection interrupted. Outcome unknown: refresh and check the board or chain receipt before retrying. This action was not resent.',
+    })
+    this.pending.clear()
+  }
+
+  private lostSocket(ws: WebSocketLike): void {
+    if (this.ws !== ws || this.stopped) return
+    this.ws = undefined
+    ws.close()
+    clearTimeout(this.readyTimer)
+    this.rejectReady?.(new Error('Connection interrupted'))
+    this.rejectReady = undefined
+    this.failPending()
+    if (!this.hadReady) { this.setStatus('error'); return }
+    if (this.grant?.expiresAt !== undefined && this.grant.expiresAt <= Date.now()) { this.terminate('expired'); return }
+    const delay = this.retryDelays[this.attempt++]
+    if (delay === undefined) { this.terminate('unavailable'); return }
+    this.setStatus('reconnecting')
+    this.retryTimer = setTimeout(() => {
+      if (this.stopped) return
+      void this.openSocket().catch(() => { /* lostSocket schedules the bounded next attempt */ })
+    }, delay)
   }
 
   private onMessage(data: unknown): void {
@@ -136,6 +216,11 @@ export class HostWssTransport implements RemoteTransport {
     switch (f.type) {
       case 'ready':
         this.functions = f.functions ?? []
+        this.board = { ...(f.boards ?? {}) }
+        for (const cb of this.patchSubs) cb({ ...this.board })
+        this.seq = 0
+        this.hadReady = true
+        this.attempt = 0
         this.setStatus('open')
         for (const cb of this.fnSubs) cb(this.functions)
         this.onReady?.()
@@ -162,24 +247,18 @@ export class HostWssTransport implements RemoteTransport {
         return
       }
       case 'revoked':
-        this.setStatus('closed')
-        this.ws?.close(4403, 'revoked')
+        this.terminate(f.reason === 'ttl_expired' ? 'expired' : 'revoked')
         return
       case 'error':
         if (f.code === -32010 || f.message?.includes('gateway disconnected')) {
-          this.setStatus('closed')
-          this.ws?.close(4410, 'gateway disconnected')
+          if (this.ws) this.lostSocket(this.ws)
           return
         }
-        if (this.status !== 'open') this.setStatus('error')
+        if (f.code === -32004) { this.terminate('unavailable'); return }
+        if (f.code === -32403) { this.terminate('revoked'); return }
+        if (this.status !== 'open') this.terminate('error')
         return
     }
-  }
-
-  private onClose(): void {
-    if (this.status !== 'closed') this.setStatus('closed')
-    for (const [, resolve] of this.pending) resolve({ ok: false, error: 'connection closed' })
-    this.pending.clear()
   }
 
   onFunctions(cb: (functions: readonly FunctionDescriptor[]) => void): () => void {
@@ -253,15 +332,20 @@ export class HostWssTransport implements RemoteTransport {
   }
 
   disconnect(): void {
+    const wasActive = this.hadReady
+    this.stopped = true
+    clearTimeout(this.retryTimer)
+    clearTimeout(this.readyTimer)
+    clearTimeout(this.expiryTimer)
+    this.rejectReady?.(new Error('Disconnected'))
+    this.rejectReady = undefined
+    this.failPending()
+    const ws = this.ws
+    this.ws = undefined
+    ws?.close(1000, 'client disconnect')
+    if (wasActive) this.setStatus('closed')
     this.fnSubs.clear()
     this.patchSubs.clear()
-    this.ws?.close(1000, 'client disconnect')
-    // Only signal a real close if the socket actually opened. A teardown before connect (e.g. a React
-    // dev double-mount, which reuses this transport instance) must NOT broadcast "closed": that status
-    // would be replayed to the re-mounted provider via onStatus and trip the gate's redirect-home.
-    if (this.status === 'open') {
-      this.setStatus('closed')
-    }
     this.statusSubs.clear()
   }
 

@@ -230,7 +230,9 @@ public fun set_ended(
     ctx: &TxContext,
 ) {
     assert_market_creator(registry, &market_id, ctx);
-    assert!(vector::length(&id) > 0 && vector::length(&id) <= 64, E_BAD_ID_LENGTH);
+    // Empty id has exactly one representation: scheme 0, no recording.
+    assert!(vector::length(&id) <= 64, E_BAD_ID_LENGTH);
+    assert!(vector::length(&id) > 0 || scheme == 0, E_BAD_ID_LENGTH);
     assert_valid_scheme(scheme);
     let s = borrow_stream_state(registry, &market_id);
     assert!(s.status != STREAM_STATUS_NONE, E_NOT_LIVE);
@@ -342,7 +344,8 @@ fun assert_valid_scheme(scheme: u8) {
         scheme == SCHEME_WALRUS_TESTNET
             || scheme == SCHEME_WALRUS_MAINNET
             || scheme == SCHEME_IPFS
-            || scheme == SCHEME_ARWEAVE,
+            || scheme == SCHEME_ARWEAVE
+            || scheme == 4,
         E_BAD_SCHEME,
     );
 }

@@ -559,7 +559,8 @@ evm_wire() {
 clean_slate() {
   log "Killing stale processes..."
   kill_servers
-  rm -rf "$ROLES_DIR" && mkdir -p "$ROLES_DIR"
+  # Runtime/session state is durable; restart must not delete resume metadata.
+  mkdir -p "$ROLES_DIR"
   sleep 1
   if [ "${FRESH_BUILD:-0}" = "1" ] || [ ! -f "$ROOT/packages/options/dist/index.js" ]; then
     log "Building workspace dist (app resolves dist; node side resolves src)..."

@@ -109,6 +109,9 @@ fn set_lanes_reshape_strand_and_guards() {
                 seed_side: SIDE_YES,
                 rate: 5 * USD,
                 deposit: 500 * USD,
+                commitment: [1; 32],
+                funding_close: 0xFFFFFFFE,
+                operation_id: solana_keccak_hasher::hash(&(question.to_vec())).to_bytes(),
             }
             .data(),
             livestreak::accounts::UserEngineOp {
@@ -172,10 +175,15 @@ fn set_lanes_reshape_strand_and_guards() {
         }
         .to_account_metas(None),
     );
-    h.send(fund_ix, &[&h.payer.insecure_clone(), &user_a]).unwrap();
+    h.send(fund_ix, &[&h.payer.insecure_clone(), &user_a])
+        .unwrap();
 
     let p = h.protocol(&market_id);
-    assert_eq!(p.lane_count(token_u256), 1, "position starts with one funded lane");
+    assert_eq!(
+        p.lane_count(token_u256),
+        1,
+        "position starts with one funded lane"
+    );
 
     // helper: build a set_lanes instruction for a given signer + desired set + top-up.
     let set_lanes_ix = |signer: Pubkey, lanes: Vec<LaneArg>, add_deposit: u64| {
@@ -203,8 +211,16 @@ fn set_lanes_reshape_strand_and_guards() {
         set_lanes_ix(
             user_a.pubkey(),
             vec![
-                LaneArg { vault_id: vault1, side: SIDE_NO, rate: v1_new_rate },
-                LaneArg { vault_id: vault2, side: SIDE_NO, rate: v2_rate },
+                LaneArg {
+                    vault_id: vault1,
+                    side: SIDE_NO,
+                    rate: v1_new_rate,
+                },
+                LaneArg {
+                    vault_id: vault2,
+                    side: SIDE_NO,
+                    rate: v2_rate,
+                },
             ],
             add_a,
         ),
@@ -214,9 +230,19 @@ fn set_lanes_reshape_strand_and_guards() {
     let escrow_after = h.token_balance(&escrow);
 
     let p = h.protocol(&market_id);
-    assert_eq!(p.lane_count(token_u256), 2, "reshape grows the position to two lanes");
-    assert!(p.market_driver.lanes.contains_key(&(token_u256, vault1)), "vault1 lane present");
-    assert!(p.market_driver.lanes.contains_key(&(token_u256, vault2)), "vault2 lane present");
+    assert_eq!(
+        p.lane_count(token_u256),
+        2,
+        "reshape grows the position to two lanes"
+    );
+    assert!(
+        p.market_driver.lanes.contains_key(&(token_u256, vault1)),
+        "vault1 lane present"
+    );
+    assert!(
+        p.market_driver.lanes.contains_key(&(token_u256, vault2)),
+        "vault2 lane present"
+    );
     assert_eq!(
         p.vault.boards.get(&(vault1, SIDE_NO)).unwrap().side_rate,
         U256::from(v1_new_rate),
@@ -236,9 +262,17 @@ fn set_lanes_reshape_strand_and_guards() {
     // ── (b) STRAND FIX: stop vault1 (side_rate -> 0), then re-declare it with a top-up ──
     let stop_ix = Instruction::new_with_bytes(
         program_id,
-        &livestreak::instruction::StopFunding { vault_id: vault1, side: SIDE_NO }.data(),
-        livestreak::accounts::PositionStateOp { user: user_a.pubkey(), protocol_state, position }
-            .to_account_metas(None),
+        &livestreak::instruction::StopFunding {
+            vault_id: vault1,
+            side: SIDE_NO,
+        }
+        .data(),
+        livestreak::accounts::PositionStateOp {
+            user: user_a.pubkey(),
+            protocol_state,
+            position,
+        }
+        .to_account_metas(None),
     );
     h.send(stop_ix, &[&h.payer.insecure_clone(), &user_a])
         .expect("owner A stops the vault1 lane");
@@ -249,7 +283,11 @@ fn set_lanes_reshape_strand_and_guards() {
         U256::ZERO,
         "the stopped vault1 lane is dead — side_rate is 0 before the re-fund",
     );
-    assert_eq!(p.lane_count(token_u256), 1, "only the vault2 lane remains after the stop");
+    assert_eq!(
+        p.lane_count(token_u256),
+        1,
+        "only the vault2 lane remains after the stop"
+    );
 
     // Re-declare BOTH lanes (vault2 unchanged, vault1 re-added) with a top-up: the engine's
     // diff_added sees vault1 as freshly added and re-funds it — the strand fix.
@@ -258,8 +296,16 @@ fn set_lanes_reshape_strand_and_guards() {
         set_lanes_ix(
             user_a.pubkey(),
             vec![
-                LaneArg { vault_id: vault1, side: SIDE_NO, rate: v1_new_rate },
-                LaneArg { vault_id: vault2, side: SIDE_NO, rate: v2_rate },
+                LaneArg {
+                    vault_id: vault1,
+                    side: SIDE_NO,
+                    rate: v1_new_rate,
+                },
+                LaneArg {
+                    vault_id: vault2,
+                    side: SIDE_NO,
+                    rate: v2_rate,
+                },
             ],
             add_b,
         ),
@@ -268,7 +314,11 @@ fn set_lanes_reshape_strand_and_guards() {
     .expect("re-declaring the dead vault1 lane with a top-up must re-fund it");
 
     let p = h.protocol(&market_id);
-    assert_eq!(p.lane_count(token_u256), 2, "the re-fund restores the vault1 lane (2 lanes)");
+    assert_eq!(
+        p.lane_count(token_u256),
+        2,
+        "the re-fund restores the vault1 lane (2 lanes)"
+    );
     assert_eq!(
         p.vault.boards.get(&(vault1, SIDE_NO)).unwrap().side_rate,
         U256::from(v1_new_rate),
@@ -282,32 +332,54 @@ fn set_lanes_reshape_strand_and_guards() {
             set_lanes_ix(
                 user_a.pubkey(),
                 vec![
-                    LaneArg { vault_id: vault1, side: SIDE_NO, rate: v1_new_rate },
-                    LaneArg { vault_id: vault1, side: SIDE_NO, rate: v2_rate },
+                    LaneArg {
+                        vault_id: vault1,
+                        side: SIDE_NO,
+                        rate: v1_new_rate,
+                    },
+                    LaneArg {
+                        vault_id: vault1,
+                        side: SIDE_NO,
+                        rate: v2_rate,
+                    },
                 ],
                 0,
             ),
             &[&h.payer.insecure_clone(), &user_a],
         )
         .expect_err("a duplicate vault must fail");
-    assert!(err.contains("DriverDuplicateVault"), "expected DriverDuplicateVault, got: {err}");
+    assert!(
+        err.contains("DriverDuplicateVault"),
+        "expected DriverDuplicateVault, got: {err}"
+    );
 
     // zero rate.
     let err = h
         .send(
             set_lanes_ix(
                 user_a.pubkey(),
-                vec![LaneArg { vault_id: vault1, side: SIDE_NO, rate: 0 }],
+                vec![LaneArg {
+                    vault_id: vault1,
+                    side: SIDE_NO,
+                    rate: 0,
+                }],
                 0,
             ),
             &[&h.payer.insecure_clone(), &user_a],
         )
         .expect_err("a zero rate must fail");
-    assert!(err.contains("DriverZeroRate"), "expected DriverZeroRate, got: {err}");
+    assert!(
+        err.contains("DriverZeroRate"),
+        "expected DriverZeroRate, got: {err}"
+    );
 
     // more than MAX_LANES entries.
     let too_many: Vec<LaneArg> = (0..=livestreak_engine::MAX_LANES)
-        .map(|_| LaneArg { vault_id: vault1, side: SIDE_NO, rate: v1_new_rate })
+        .map(|_| LaneArg {
+            vault_id: vault1,
+            side: SIDE_NO,
+            rate: v1_new_rate,
+        })
         .collect();
     assert!(too_many.len() > livestreak_engine::MAX_LANES);
     let err = h
@@ -316,18 +388,28 @@ fn set_lanes_reshape_strand_and_guards() {
             &[&h.payer.insecure_clone(), &user_a],
         )
         .expect_err("more than MAX_LANES entries must fail");
-    assert!(err.contains("DriverTooManyLanes"), "expected DriverTooManyLanes, got: {err}");
+    assert!(
+        err.contains("DriverTooManyLanes"),
+        "expected DriverTooManyLanes, got: {err}"
+    );
 
     // non-owner signer.
     let err = h
         .send(
             set_lanes_ix(
                 user_b.pubkey(),
-                vec![LaneArg { vault_id: vault1, side: SIDE_NO, rate: v1_new_rate }],
+                vec![LaneArg {
+                    vault_id: vault1,
+                    side: SIDE_NO,
+                    rate: v1_new_rate,
+                }],
                 0,
             ),
             &[&h.payer.insecure_clone(), &user_b],
         )
         .expect_err("a non-owner set_lanes must fail");
-    assert!(err.contains("NotCreator"), "expected NotCreator, got: {err}");
+    assert!(
+        err.contains("NotCreator"),
+        "expected NotCreator, got: {err}"
+    );
 }

@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { RemoteProvider, useRemote } from '#/providers/remote-provider'
 import { RemoteConsoleShell } from '#/components/template/remote-console-shell'
 
@@ -19,7 +19,7 @@ function RemoteConsolePage() {
   )
 }
 
-/** When the gateway drops, leave the console — the session is no longer usable. */
+/** Keep the console in place during transport recovery; show terminal reasons explicitly. */
 function RemoteSessionGate({ session }: { readonly session: string }) {
   const { status } = useRemote()
   const navigate = useNavigate()
@@ -29,13 +29,7 @@ function RemoteSessionGate({ session }: { readonly session: string }) {
   if (status === 'open') {
     hadConnected.current = true
   }
-  const ended = status === 'closed' && hadConnected.current
-
-  useEffect(() => {
-    if (ended) {
-      void navigate({ to: '/', replace: true })
-    }
-  }, [ended, navigate])
+  const ended = ['closed', 'revoked', 'expired', 'unavailable', 'error'].includes(status) && hadConnected.current
 
   if (ended) {
     return (
@@ -44,8 +38,9 @@ function RemoteSessionGate({ session }: { readonly session: string }) {
           Session ended
         </h1>
         <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', fontFamily: 'var(--font-mono)' }}>
-          {session} — gateway disconnected
+          {session} — {status === 'revoked' ? 'access revoked' : status === 'expired' ? 'session expired' : status === 'unavailable' ? 'connection could not be restored' : 'connection ended'}
         </p>
+        <button type="button" onClick={() => { void navigate({ to: '/' }) }}>Leave console</button>
       </div>
     )
   }
@@ -54,6 +49,12 @@ function RemoteSessionGate({ session }: { readonly session: string }) {
   // Without this the console clips everything below the fold (board, revealed functions) with no scroll.
   return (
     <div style={{ height: '100vh', overflowY: 'auto' }}>
+      {status === 'reconnecting' ? (
+        <div role="status" aria-live="polite" style={{ padding: '12px 24px', background: '#211c10', color: '#ffd48a' }}>
+          Reconnecting… Your console will refresh when the connection returns. Actions are paused.
+          <button type="button" style={{ marginLeft: 16 }} onClick={() => { void navigate({ to: '/' }) }}>Leave</button>
+        </div>
+      ) : null}
       <RemoteConsoleShell />
     </div>
   )

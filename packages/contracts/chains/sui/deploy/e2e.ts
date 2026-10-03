@@ -13,10 +13,31 @@ import { createHash, randomBytes } from "node:crypto";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { loadDeployment } from "../addresses.js";
 import { LiveStreakSuiClient, SIDE_NO, SIDE_YES, USDC_ONE } from "../client.js";
-import { CYCLE_SECS, OUTCOME_YES, RATE, SUI_CLOCK_OBJECT_ID, type SuiDeploymentName } from "../types.js";
+import {
+  CYCLE_SECS,
+  OUTCOME_YES,
+  RATE,
+  SUI_CLOCK_OBJECT_ID,
+  type SuiDeploymentName,
+} from "../types.js";
 import { DEFAULT_RPC, getKeypair, makeClient, requestGas } from "./utils.js";
 
-const c = { green: "\x1b[32m", red: "\x1b[31m", cyan: "\x1b[36m", dim: "\x1b[2m", bold: "\x1b[1m", reset: "\x1b[0m" };
+const c = {
+  green: "\x1b[32m",
+  red: "\x1b[31m",
+  cyan: "\x1b[36m",
+  dim: "\x1b[2m",
+  bold: "\x1b[1m",
+  reset: "\x1b[0m",
+};
+
+// Raw-contract accounting fixtures use explicit synthetic commitments.
+// Full mandate publication/verification is exercised through the role SDK tests.
+const boundTerms = () => ({
+  commitment: randomBytes(32),
+  fundingClose: BigInt(Math.floor(Date.now() / 1000) + 86400),
+  operationId: randomBytes(32),
+});
 
 const SEED_DEPOSIT = 10n * RATE;
 const SEED_RATE = 1n;
@@ -37,7 +58,8 @@ const assert = (cond: boolean, msg: string) => {
   }
 };
 
-const act = (t: string) => console.log(`\n${"═".repeat(72)}\n  ${c.bold}${t}${c.reset}\n${"═".repeat(72)}`);
+const act = (t: string) =>
+  console.log(`\n${"═".repeat(72)}\n  ${c.bold}${t}${c.reset}\n${"═".repeat(72)}`);
 const info = (m: string) => console.log(`    ${c.dim}→ ${m}${c.reset}`);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -85,8 +107,22 @@ async function main(): Promise<void> {
   act("ACT 1 — market + vault bootstrap");
   const mainStream = streamId(salt, "stream-main");
   const marketId = await owner.registerMarket("AI Labs Live Demo Day", mainStream);
-  const v1 = await labA.createVault(marketId, `Will the demo ship? ${salt.slice(0, 8)}`, SIDE_YES, SEED_RATE, SEED_DEPOSIT);
-  const v2 = await labA.createVault(marketId, `Secondary vault ${salt.slice(0, 8)}`, SIDE_NO, SEED_RATE, SEED_DEPOSIT);
+  const v1 = await labA.createVault(
+    marketId,
+    `Will the demo ship? ${salt.slice(0, 8)}`,
+    SIDE_YES,
+    SEED_RATE,
+    SEED_DEPOSIT,
+    boundTerms(),
+  );
+  const v2 = await labA.createVault(
+    marketId,
+    `Secondary vault ${salt.slice(0, 8)}`,
+    SIDE_NO,
+    SEED_RATE,
+    SEED_DEPOSIT,
+    boundTerms(),
+  );
   assert(marketId.length === 32, "market id is 32 bytes");
   assert(v1.length > 0 && v2.length > 0, "vault ids created");
 
@@ -103,7 +139,10 @@ async function main(): Promise<void> {
   await warpPast(owner, 55, 12);
   const boardYes = await owner.getBoard(v1, SIDE_YES);
   const boardNo = await owner.getBoard(v1, SIDE_NO);
-  assert(boardYes.lastAdvance > 0n || boardNo.lastAdvance > 0n, "boards initialized after fund");
+  assert(
+    boardYes.lastAdvance > 0n || boardNo.lastAdvance > 0n,
+    "boards initialized after fund",
+  );
 
   act("ACT 4 — resolution reads + steward resolve");
   const viewBefore = await owner.viewVault(marketId, v1);
@@ -126,10 +165,22 @@ async function main(): Promise<void> {
   assert(supplyHint >= 0n, "USDC balances readable");
 
   act(`EDGE — n=${N130} bounded advance via SDK (not Move harness)`);
-  info(`Funding ${N130} yes/no pairs = ${N130 * 2} fund transactions through real localnet PTBs`);
+  info(
+    `Funding ${N130} yes/no pairs = ${N130 * 2} fund transactions through real localnet PTBs`,
+  );
 
-  const boardMarket = await owner.registerMarket(`Board stress ${salt.slice(0, 8)}`, streamId(salt, "board"));
-  const boardVault = await labA.createVault(boardMarket, "Bounded advance vault", SIDE_YES, SEED_RATE, SEED_DEPOSIT);
+  const boardMarket = await owner.registerMarket(
+    `Board stress ${salt.slice(0, 8)}`,
+    streamId(salt, "board"),
+  );
+  const boardVault = await labA.createVault(
+    boardMarket,
+    "Bounded advance vault",
+    SIDE_YES,
+    SEED_RATE,
+    SEED_DEPOSIT,
+    boundTerms(),
+  );
   const rateU64 = Number(RATE);
 
   let fundTxCount = 0;
@@ -142,7 +193,13 @@ async function main(): Promise<void> {
     await owner.mintUsdc(whoN.address, BigInt(rateU64 * 10 * i));
 
     const nftY = await whoY.mintNft(boardMarket, whoY.address);
-    await whoY.fundLane(nftY.objectId, boardVault, SIDE_YES, RATE, BigInt(rateU64 * 10 * i));
+    await whoY.fundLane(
+      nftY.objectId,
+      boardVault,
+      SIDE_YES,
+      RATE,
+      BigInt(rateU64 * 10 * i),
+    );
     fundTxCount++;
 
     const nftN = await whoN.mintNft(boardMarket, whoN.address);
@@ -151,7 +208,10 @@ async function main(): Promise<void> {
 
     if (i % 25 === 0) info(`  funded ${i}/${N130} pairs (${fundTxCount} fund txs)`);
   }
-  assert(fundTxCount === N130 * 2, `${N130 * 2} fund txs completed without harness timeout`);
+  assert(
+    fundTxCount === N130 * 2,
+    `${N130 * 2} fund txs completed without harness timeout`,
+  );
 
   const warpSecs = CYCLE_SECS * (N130 + 5);
   const edgeMinReal = N130 >= 50 ? 180 : 90;
@@ -180,15 +240,31 @@ async function main(): Promise<void> {
   const noBoard = await owner.getBoard(boardVault, SIDE_NO);
 
   const maxYesCalls = Math.ceil((N130 + 2) / 64) + 5;
-  assert(yesCalls <= maxYesCalls, `yes advance O(boundaries): ${yesCalls} calls ≤ ${maxYesCalls} (not ${N130})`);
-  assert(yesCalls < N130 / 2, `yes advance sublinear vs funder count: ${yesCalls} ≪ ${N130}`);
-  assert(yesBoard.g === noBoard.g || yesBoard.g > 0n, `global accumulators aligned or accruing (gY=${yesBoard.g} gN=${noBoard.g})`);
-  assert(yesBoard.pool === noBoard.pool || yesBoard.pool > 0n, `pools aligned or funded (pool=${yesBoard.pool})`);
+  assert(
+    yesCalls <= maxYesCalls,
+    `yes advance O(boundaries): ${yesCalls} calls ≤ ${maxYesCalls} (not ${N130})`,
+  );
+  assert(
+    yesCalls < N130 / 2,
+    `yes advance sublinear vs funder count: ${yesCalls} ≪ ${N130}`,
+  );
+  assert(
+    yesBoard.g === noBoard.g || yesBoard.g > 0n,
+    `global accumulators aligned or accruing (gY=${yesBoard.g} gN=${noBoard.g})`,
+  );
+  assert(
+    yesBoard.pool === noBoard.pool || yesBoard.pool > 0n,
+    `pools aligned or funded (pool=${yesBoard.pool})`,
+  );
 
-  info(`n=${N130} fact-check: Move harness times out from ~${N130 * 2} fund txs in test_scenario; SDK completed ${fundTxCount} fund txs + ${yesCalls} yes-advance rounds`);
+  info(
+    `n=${N130} fact-check: Move harness times out from ~${N130 * 2} fund txs in test_scenario; SDK completed ${fundTxCount} fund txs + ${yesCalls} yes-advance rounds`,
+  );
 
   act("RESULTS");
-  console.log(`  ${c.green}Passed: ${passed}${c.reset}   ${c.red}Failed: ${failed}${c.reset}\n`);
+  console.log(
+    `  ${c.green}Passed: ${passed}${c.reset}   ${c.red}Failed: ${failed}${c.reset}\n`,
+  );
   process.exit(failed === 0 ? 0 : 1);
 }
 

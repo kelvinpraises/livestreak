@@ -38,7 +38,7 @@ library VaultDriverHarness {
         usdc.mint(who, deposit);
         vm.startPrank(who);
         usdc.approve(address(driver), deposit);
-        vaultId = driver.createVault(marketId, question, seedSide, rate, deposit);
+        vaultId = driver.createBoundVault(marketId, question, seedSide, rate, deposit, keccak256(bytes(question)), uint32(block.timestamp + 365 days), keccak256(abi.encode(question, driver.nextPoolId(), who)));
         vm.stopPrank();
     }
 }

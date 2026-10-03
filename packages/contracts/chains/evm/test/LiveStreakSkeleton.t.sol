@@ -122,7 +122,7 @@ contract LiveStreakSkeletonTest is Test {
 
         vm.prank(stranger);
         vm.expectRevert("VaultDriver: bad deposit");
-        vaultDriver.createVault(marketId, "No bond", Side.Yes, RATE, 0);
+        vaultDriver.createBoundVault(marketId, "No bond", Side.Yes, RATE, 0, bytes32(uint256(1)), uint32(block.timestamp + 365 days), bytes32(uint256(1)));
     }
 
     function test_createVaultUnderMissingMarket_reverts() public {
@@ -130,7 +130,7 @@ contract LiveStreakSkeletonTest is Test {
         vm.startPrank(creator);
         usdc.approve(address(vaultDriver), SEED);
         vm.expectRevert("VaultDriver: unknown market");
-        vaultDriver.createVault(bytes32(uint256(99)), "Ghost vault", Side.Yes, RATE, SEED);
+        vaultDriver.createBoundVault(bytes32(uint256(99)), "Ghost vault", Side.Yes, RATE, SEED, bytes32(uint256(1)), uint32(block.timestamp + 365 days), bytes32(uint256(1)));
         vm.stopPrank();
     }
 

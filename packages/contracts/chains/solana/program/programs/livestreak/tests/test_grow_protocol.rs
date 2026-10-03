@@ -120,10 +120,13 @@ fn grow_protocol_ladder_retry_and_cap() {
         Instruction::new_with_bytes(
             program_id,
             &livestreak::instruction::CreateVaultSeeded {
-                question,
+                question: question.clone(),
                 seed_side: SIDE_NO,
                 rate: 5 * USD,
                 deposit: 500 * USD,
+                commitment: [1; 32],
+                funding_close: 0xFFFFFFFE,
+                operation_id: solana_keccak_hasher::hash(&(question.clone())).to_bytes(),
             }
             .data(),
             livestreak::accounts::UserEngineOp {
@@ -145,14 +148,20 @@ fn grow_protocol_ladder_retry_and_cap() {
         match h.send(seed(q.clone()), &[&creator]) {
             Ok(()) => created += 1,
             Err(e) => {
-                assert!(e.contains("StateFull"), "wall must be typed StateFull, got: {e}");
+                assert!(
+                    e.contains("StateFull"),
+                    "wall must be typed StateFull, got: {e}"
+                );
                 failed_question = q;
                 hit_wall = true;
                 break;
             }
         }
     }
-    assert!(hit_wall, "a 2_000-byte account must overflow within 64 vaults");
+    assert!(
+        hit_wall,
+        "a 2_000-byte account must overflow within 64 vaults"
+    );
     assert!(created >= 1, "at least one vault must fit before the wall");
     assert_eq!(
         h.protocol(&market_id).vault.vaults.len() as u32,
@@ -175,7 +184,8 @@ fn grow_protocol_ladder_retry_and_cap() {
     };
 
     let len_before = account_len(&h, &protocol_state);
-    h.send(grow_ix(), &[&creator]).expect("first grow must succeed");
+    h.send(grow_ix(), &[&creator])
+        .expect("first grow must succeed");
     let len_after = account_len(&h, &protocol_state);
     assert_eq!(
         len_after,
@@ -207,7 +217,8 @@ fn grow_protocol_ladder_retry_and_cap() {
             );
             break;
         }
-        h.send(grow_ix(), &[&creator]).expect("grow below the ceiling must succeed");
+        h.send(grow_ix(), &[&creator])
+            .expect("grow below the ceiling must succeed");
         let after = account_len(&h, &protocol_state);
         let expected = core::cmp::min(before + MAX_PERMITTED_DATA_INCREASE, cap_len);
         assert_eq!(after, expected, "each rung grows by min(10_240, remaining)");

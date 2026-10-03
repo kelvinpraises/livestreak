@@ -82,6 +82,12 @@ pub struct VaultData {
     pub outcome: u8,
     pub resolved_at: u64,
     pub exists: bool,
+    pub mandate_commitment: [u8; 32],
+    pub funding_close: u64,
+    pub operation_id: [u8; 32],
+    pub seed_side: u8,
+    pub seed_rate: U256,
+    pub seed_deposit: u128,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,7 +175,10 @@ impl VaultRegistry {
 
     /// Append-only share ledger: every vault the account ever funded.
     pub fn get_account_vault_ids(&self, account: AccountId) -> Vec<VaultId> {
-        self.account_vaults.get(&account).cloned().unwrap_or_default()
+        self.account_vaults
+            .get(&account)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn pot(&self, vault_id: &VaultId) -> U256 {
@@ -185,7 +194,12 @@ impl VaultRegistry {
         match self.positions.get(&(*vault_id, side, account)) {
             None => (U256::ZERO, U256::ZERO, U256::ZERO, 0, false, 0, U256::ZERO),
             Some(p) => (
-                p.rate, p.g_paid, p.shares_accrued, p.max_end, p.depleted, p.fund_start,
+                p.rate,
+                p.g_paid,
+                p.shares_accrued,
+                p.max_end,
+                p.depleted,
+                p.fund_start,
                 p.lost_usdc,
             ),
         }
@@ -235,8 +249,18 @@ impl VaultRegistry {
         let wad = U256::from(livestreak_math::bonding::WAD);
         let (yes_pool, ..) = self.get_board(vault_id, SIDE_YES);
         let (no_pool, ..) = self.get_board(vault_id, SIDE_NO);
-        let yes_shares = self.boards.get(&(*vault_id, SIDE_YES)).map(|b| b.side_shares).unwrap_or_default() / wad;
-        let no_shares = self.boards.get(&(*vault_id, SIDE_NO)).map(|b| b.side_shares).unwrap_or_default() / wad;
+        let yes_shares = self
+            .boards
+            .get(&(*vault_id, SIDE_YES))
+            .map(|b| b.side_shares)
+            .unwrap_or_default()
+            / wad;
+        let no_shares = self
+            .boards
+            .get(&(*vault_id, SIDE_NO))
+            .map(|b| b.side_shares)
+            .unwrap_or_default()
+            / wad;
         Ok((yes_pool, no_pool, yes_shares, no_shares))
     }
 
@@ -248,7 +272,11 @@ impl VaultRegistry {
         if data.status != STATUS_RESOLVED {
             return U256::ZERO;
         }
-        let winning = if data.outcome == OUTCOME_YES { SIDE_YES } else { SIDE_NO };
+        let winning = if data.outcome == OUTCOME_YES {
+            SIDE_YES
+        } else {
+            SIDE_NO
+        };
         if side == winning {
             return U256::ZERO;
         }
@@ -271,7 +299,11 @@ impl VaultRegistry {
         if !self.collected.get(vault_id).copied().unwrap_or(false) {
             return U256::ZERO;
         }
-        let winning = if data.outcome == OUTCOME_YES { SIDE_YES } else { SIDE_NO };
+        let winning = if data.outcome == OUTCOME_YES {
+            SIDE_YES
+        } else {
+            SIDE_NO
+        };
         if side != winning {
             return U256::ZERO;
         }
@@ -412,6 +444,12 @@ impl VaultRegistry {
                 outcome: OUTCOME_PENDING,
                 resolved_at: 0,
                 exists: true,
+                mandate_commitment: [0; 32],
+                funding_close: 0,
+                operation_id: [0; 32],
+                seed_side: 0,
+                seed_rate: U256::ZERO,
+                seed_deposit: 0,
             },
         );
         Ok(vault_id)
@@ -427,7 +465,11 @@ impl VaultRegistry {
             return Err(VaultError::NotResolvable);
         }
         data.status = STATUS_RESOLVED;
-        data.outcome = if winning_side == SIDE_YES { OUTCOME_YES } else { OUTCOME_NO };
+        data.outcome = if winning_side == SIDE_YES {
+            OUTCOME_YES
+        } else {
+            OUTCOME_NO
+        };
         data.resolved_at = now;
         Ok(())
     }
@@ -452,6 +494,12 @@ impl VaultRegistry {
             return Err(VaultError::ZeroRate);
         }
 
+        let close = self.vaults.get(vault_id).unwrap().funding_close;
+        let max_end = if close > 0 && (max_end == 0 || max_end > close) {
+            close
+        } else {
+            max_end
+        };
         self.track_account_vault(account, vault_id);
         self.advance_to_now(vault_id, side, now)?;
         self.ensure_board(vault_id, side, now);
@@ -494,7 +542,11 @@ impl VaultRegistry {
         }
         self.settle_internal(vault_id, side, account);
 
-        let resolved_at = self.vaults.get(vault_id).map(|v| v.resolved_at).unwrap_or(0);
+        let resolved_at = self
+            .vaults
+            .get(vault_id)
+            .map(|v| v.resolved_at)
+            .unwrap_or(0);
         let p = *self.positions.get(&key).unwrap();
 
         let mut over_amount = U256::ZERO;
@@ -535,6 +587,16 @@ impl VaultRegistry {
         now: u64,
     ) -> VaultResult<()> {
         for (vault_id, side) in entries {
+            let close = self
+                .vaults
+                .get(vault_id)
+                .ok_or(VaultError::UnknownVault)?
+                .funding_close;
+            let new_max_end = if close > 0 && (new_max_end == 0 || new_max_end > close) {
+                close
+            } else {
+                new_max_end
+            };
             assert_valid_side(*side)?;
             self.advance_to_now(vault_id, *side, now)?;
             self.settle_internal(vault_id, *side, account);
@@ -641,7 +703,11 @@ impl VaultRegistry {
         if !self.collected.get(vault_id).copied().unwrap_or(false) {
             return Ok(0);
         }
-        let winning = if data.outcome == OUTCOME_YES { SIDE_YES } else { SIDE_NO };
+        let winning = if data.outcome == OUTCOME_YES {
+            SIDE_YES
+        } else {
+            SIDE_NO
+        };
         let resolved_at = data.resolved_at;
 
         self.catch_up_side(vault_id, SIDE_YES, now)?;
@@ -700,7 +766,12 @@ impl VaultRegistry {
             .iter()
             .filter(|(_, v)| **v == U256::ZERO)
             .map(|(k, _)| *k)
-            .filter(|k| self.positions.get(k).map(|p| p.rate == U256::ZERO).unwrap_or(true))
+            .filter(|k| {
+                self.positions
+                    .get(k)
+                    .map(|p| p.rate == U256::ZERO)
+                    .unwrap_or(true)
+            })
             .collect();
         for key in dead {
             self.overage_owed.remove(&key);
@@ -736,7 +807,10 @@ impl VaultRegistry {
             return;
         }
         self.account_in_vault.insert((account, *vault_id), true);
-        self.account_vaults.entry(account).or_default().push(*vault_id);
+        self.account_vaults
+            .entry(account)
+            .or_default()
+            .push(*vault_id);
     }
 
     fn ensure_board(&mut self, vault_id: &VaultId, side: u8, now: u64) {
@@ -744,7 +818,13 @@ impl VaultRegistry {
         if !self.boards.contains_key(&key) {
             self.boards.insert(
                 key,
-                Board { pool: U256::ZERO, side_rate: U256::ZERO, g: U256::ZERO, last_advance: now, side_shares: U256::ZERO },
+                Board {
+                    pool: U256::ZERO,
+                    side_rate: U256::ZERO,
+                    g: U256::ZERO,
+                    last_advance: now,
+                    side_shares: U256::ZERO,
+                },
             );
             self.boundaries.insert(key, Vec::new());
             self.boundary_heads.insert(key, 0);
@@ -759,7 +839,11 @@ impl VaultRegistry {
             return true;
         }
         let mut target = now;
-        let resolved_at = self.vaults.get(vault_id).map(|v| v.resolved_at).unwrap_or(0);
+        let resolved_at = self
+            .vaults
+            .get(vault_id)
+            .map(|v| v.resolved_at)
+            .unwrap_or(0);
         if resolved_at != 0 && resolved_at < target {
             target = resolved_at;
         }
@@ -785,7 +869,11 @@ impl VaultRegistry {
         if board.last_advance == 0 {
             return 0;
         }
-        let resolved_at = self.vaults.get(vault_id).map(|v| v.resolved_at).unwrap_or(0);
+        let resolved_at = self
+            .vaults
+            .get(vault_id)
+            .map(|v| v.resolved_at)
+            .unwrap_or(0);
         let mut now_cap = now;
         if resolved_at != 0 && resolved_at < now_cap {
             now_cap = resolved_at;
@@ -839,7 +927,11 @@ impl VaultRegistry {
             return;
         }
 
-        let resolved_at = self.vaults.get(vault_id).map(|v| v.resolved_at).unwrap_or(0);
+        let resolved_at = self
+            .vaults
+            .get(vault_id)
+            .map(|v| v.resolved_at)
+            .unwrap_or(0);
         let mut now_cap = now;
         if resolved_at != 0 && resolved_at < now_cap {
             now_cap = resolved_at;
@@ -853,7 +945,11 @@ impl VaultRegistry {
 
         let mut t = last_advance;
         let mut head = self.boundary_heads.get(&board_key).copied().unwrap_or(0) as usize;
-        let len = self.boundaries.get(&board_key).map(|b| b.len()).unwrap_or(0);
+        let len = self
+            .boundaries
+            .get(&board_key)
+            .map(|b| b.len())
+            .unwrap_or(0);
         let mut steps = 0u64;
 
         while steps < max_steps && head < len {
@@ -891,8 +987,8 @@ impl VaultRegistry {
         }
         self.boundary_heads.insert(board_key, head as u64);
 
-        let more_due = head < len
-            && self.boundaries.get(&board_key).unwrap()[head].max_end <= now_cap;
+        let more_due =
+            head < len && self.boundaries.get(&board_key).unwrap()[head].max_end <= now_cap;
         if !more_due && t < now_cap {
             let board = self.boards.get_mut(&board_key).unwrap();
             segment(board, t, now_cap);
@@ -912,7 +1008,13 @@ impl VaultRegistry {
     }
 
     /// Sorted insert past the drained head (stable for equal max_ends).
-    fn schedule_boundary(&mut self, vault_id: &VaultId, side: u8, max_end: u64, account: AccountId) {
+    fn schedule_boundary(
+        &mut self,
+        vault_id: &VaultId,
+        side: u8,
+        max_end: u64,
+        account: AccountId,
+    ) {
         let key = (*vault_id, side);
         self.boundaries.entry(key).or_default();
         self.boundary_heads.entry(key).or_insert(0);
@@ -931,13 +1033,32 @@ impl VaultRegistry {
 
     fn finalize_pot(&mut self, vault_id: &VaultId, skim_bps: u128) {
         let data = self.vaults.get(vault_id).unwrap();
-        let winning = if data.outcome == OUTCOME_YES { SIDE_YES } else { SIDE_NO };
-        let losing = if winning == SIDE_YES { SIDE_NO } else { SIDE_YES };
+        let winning = if data.outcome == OUTCOME_YES {
+            SIDE_YES
+        } else {
+            SIDE_NO
+        };
+        let losing = if winning == SIDE_YES {
+            SIDE_NO
+        } else {
+            SIDE_YES
+        };
 
-        let win_pool = self.boards.get(&(*vault_id, winning)).map(|b| b.pool).unwrap_or_default();
-        let lose_pool = self.boards.get(&(*vault_id, losing)).map(|b| b.pool).unwrap_or_default();
-        let win_shares =
-            self.boards.get(&(*vault_id, winning)).map(|b| b.side_shares).unwrap_or_default();
+        let win_pool = self
+            .boards
+            .get(&(*vault_id, winning))
+            .map(|b| b.pool)
+            .unwrap_or_default();
+        let lose_pool = self
+            .boards
+            .get(&(*vault_id, losing))
+            .map(|b| b.pool)
+            .unwrap_or_default();
+        let win_shares = self
+            .boards
+            .get(&(*vault_id, winning))
+            .map(|b| b.side_shares)
+            .unwrap_or_default();
 
         let (pot_amt, skim_amt) = if win_shares == U256::ZERO && self.treasury_set {
             (U256::ZERO, win_pool + lose_pool)
@@ -968,7 +1089,9 @@ impl VaultRegistry {
         let amt = drips.collect(receiver);
         if amt > 0 {
             // withdraw_coin from drips escrow, join into the vault registry escrow.
-            drips.withdraw(amt).expect("collected amount is always withdrawable");
+            drips
+                .withdraw(amt)
+                .expect("collected amount is always withdrawable");
             self.usdc_held += amt;
         }
     }
@@ -990,12 +1113,19 @@ impl VaultRegistry {
 
         self.settle_internal(vault_id, side, account);
 
-        let shares = self.positions.get(&key).map(|p| p.shares_accrued).unwrap_or_default();
+        let shares = self
+            .positions
+            .get(&key)
+            .map(|p| p.shares_accrued)
+            .unwrap_or_default();
         if shares == U256::ZERO {
             return Ok(0);
         }
-        let side_total =
-            self.boards.get(&(*vault_id, side)).map(|b| b.side_shares).unwrap_or_default();
+        let side_total = self
+            .boards
+            .get(&(*vault_id, side))
+            .map(|b| b.side_shares)
+            .unwrap_or_default();
         if side_total == U256::ZERO {
             return Ok(0);
         }

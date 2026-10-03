@@ -58,6 +58,8 @@ export function RemoteConsoleShell() {
     }
     return { models, fixtureTabs: raw.fixtureTabs }
   }, [functions, board, grant, pending, localPicks])
+  const statusRef = useRef(status)
+  statusRef.current = status
   const builtRef = useRef(built)
   builtRef.current = built
 
@@ -66,6 +68,7 @@ export function RemoteConsoleShell() {
   // so the memoized shell never re-renders for a new closure.
   const onRun = useCallback(
     (tab: string, thingId: string, verbName: string, values: ConsoleFormValues) => {
+      if (statusRef.current !== 'open') return
       const verb = builtRef.current.models[tab]?.focus[thingId]?.verbs.find((v) => v.name === verbName)
       if (verb === undefined) return
       if (verb.localRef === ADD_OPTIONS_LOCAL_REF) {
@@ -80,7 +83,7 @@ export function RemoteConsoleShell() {
   )
   const onOpenSettings = useCallback(() => setBoardsOpen((o) => !o), [])
 
-  if (status !== 'open') return <RemotePasswordGate />
+  if (status !== 'open' && status !== 'reconnecting') return <RemotePasswordGate />
 
   if (Object.keys(built.models).length === 0) {
     return (
@@ -92,12 +95,14 @@ export function RemoteConsoleShell() {
 
   return (
     <>
+      <fieldset disabled={status !== 'open'} style={{ border: 0, padding: 0, margin: 0, minWidth: 0, opacity: status === 'reconnecting' ? 0.65 : 1 }}>
       <ConsoleShell
         models={built.models}
         onRun={onRun}
         storageKey={`livestreak-console-location:${session}`}
         onOpenSettings={onOpenSettings}
       />
+      </fieldset>
       {built.fixtureTabs.size > 0 ? (
         <p
           data-testid="fixture-tabs-badge"

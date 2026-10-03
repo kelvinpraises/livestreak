@@ -46,6 +46,13 @@ public struct LossClaimKey has copy, drop, store {
     side: u8,
 }
 
+public fun is_loss_claimed<T>(
+    registry: &TreasuryRegistry<T>, account: u256, vault_id: &vector<u8>, side: u8,
+): bool {
+    side::assert_valid(side);
+    table::contains(&registry.loss_claimed, LossClaimKey { account, vault_id: *vault_id, side })
+}
+
 public struct Skimmed has copy, drop {
     amount: u256,
     total_skimmed: u256,

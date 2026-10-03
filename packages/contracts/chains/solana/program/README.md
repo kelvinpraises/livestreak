@@ -62,3 +62,16 @@ The program layer additionally enforces conservation live — every money-moving
 instruction ends by requiring `escrow.amount == drips.held + vault.usdc_held +
 treasury.usdc_held`, so a logic/codec/width bug aborts the transaction instead of
 corrupting a market.
+
+## Bound-vault state v2
+
+`create_vault_seeded` requires an immutable nonzero mandate commitment, a future
+funding deadline (Unix seconds, within uint32 range), and a nonzero creator-scoped
+operation ID. Exact retries return the original vault without transferring the seed
+again; changed terms reject. New funding/top-ups close at the deadline, and receiver
+configuration clips real delivery and Board accounting at that same boundary.
+
+Protocol serialization begins with `LVST` plus version byte `2`. Old unversioned
+alpha blobs are explicitly rejected; there is no funded-state migration in this
+change. Use a fresh alpha deployment/state and ship the matching program, IDL and
+WASM reader together. Do not reuse old deployment snapshots as proof of compatibility.

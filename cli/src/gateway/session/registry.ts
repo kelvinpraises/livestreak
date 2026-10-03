@@ -6,7 +6,7 @@
 // checks the coarse `bridge:action` scope with a loose matcher, so the gateway is the real granular
 // gate — defense in depth) BEFORE the unlocked seed touches anything.
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import {
   bridgeActionScope,
   bridgeBoardReadScope,
@@ -147,6 +147,12 @@ export class SessionRegistry {
       spentUSDC: 0n,
       revoked: false
     };
+    this.sessions.set(record.sessionId, record);
+    return record;
+  }
+
+  restore(record: SessionRecord): SessionRecord {
+    if (record.revoked || record.expiresAt <= Date.now()) throw new Error("cannot resume revoked or expired session");
     this.sessions.set(record.sessionId, record);
     return record;
   }

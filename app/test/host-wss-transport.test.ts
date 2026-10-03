@@ -30,8 +30,10 @@ describe('HostWssTransport (leg B) against an in-process canonical host', () => 
   let server: Server
   let wss: WebSocketServer
   let baseUrl: string
+  let available = true
 
   beforeEach(async () => {
+    available = true
     server = createServer((req, res) => {
       const match = /^\/remote\/([^/]+)\/join$/.exec(req.url ?? '')
       if (req.method === 'POST' && match) {
@@ -61,6 +63,7 @@ describe('HostWssTransport (leg B) against an in-process canonical host', () => 
       wss.handleUpgrade(req, socket, head, (ws) => {
         ws.on('message', (data) => {
           const frame = JSON.parse(data.toString()) as { type: string; callId?: string; sessionId?: string }
+          if (!available) return
           if (frame.type === 'ui.hello') {
             ws.send(JSON.stringify({ type: 'ready', sessionId: frame.sessionId, functions: FUNCTIONS }))
           } else if (frame.type === 'call') {
@@ -75,6 +78,7 @@ describe('HostWssTransport (leg B) against an in-process canonical host', () => 
             ws.send(JSON.stringify({ type: 'board_patch', board: { calls: 1 } }))
           }
         })
+        wss.emit('connection', ws, req)
       })
     })
 
@@ -83,6 +87,7 @@ describe('HostWssTransport (leg B) against an in-process canonical host', () => 
   })
 
   afterEach(async () => {
+    for (const ws of wss.clients) ws.terminate()
     wss.close()
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
@@ -121,4 +126,60 @@ describe('HostWssTransport (leg B) against an in-process canonical host', () => 
     const t = newTransport()
     await expect(t.redeem('demo', 'wrong')).rejects.toThrow(/Invalid password/)
   })
+  it('reconnects with a full snapshot and never resends an ambiguous call', async () => {
+    let connections = 0
+    let calls = 0
+    wss.on('connection', ws => {
+      connections++
+      ws.on('message', data => {
+        const f = JSON.parse(data.toString()) as { type: string }
+        if (f.type === 'ui.hello') ws.send(JSON.stringify({ type: 'ready', sessionId: 'demo', functions: FUNCTIONS, boards: { observe: { revision: connections } } }))
+        if (f.type === 'call') calls++
+      })
+    })
+    const t = new HostWssTransport({ hostBaseUrl: baseUrl, retryDelaysMs: [10, 20], readyTimeoutMs: 100, webSocketFactory: url => new NodeWS(url) as unknown as WebSocketLike })
+    const statuses: string[] = []
+    let board: unknown
+    t.onStatus(s => statuses.push(s)); t.onPatch(b => { board = b })
+    await t.connect(await t.redeem('demo', PASSWORD))
+    await new Promise(r => setTimeout(r, 20))
+    for (const ws of wss.clients) ws.terminate()
+    await new Promise(r => setTimeout(r, 80))
+    expect(statuses).toContain('reconnecting')
+    expect(t.status).toBe('open'); expect(board).toEqual({ observe: { revision: 2 } })
+    expect(calls).toBe(0)
+    t.disconnect()
+  })
+
+  it('reports explicit revocation and expiry and cancels reconnect after Leave', async () => {
+    const t = newTransport()
+    await t.connect(await t.redeem('demo', PASSWORD))
+    for (const ws of wss.clients) ws.send(JSON.stringify({ type: 'revoked', reason: 'ttl_expired' }))
+    await new Promise(r => setTimeout(r, 20)); expect(t.status).toBe('expired')
+    t.disconnect()
+    const r = newTransport(); await r.connect(await r.redeem('demo', PASSWORD))
+    for (const ws of wss.clients) ws.send(JSON.stringify({ type: 'revoked', reason: 'revoked' }))
+    await new Promise(resolve => setTimeout(resolve, 20)); expect(r.status).toBe('revoked')
+    r.disconnect()
+  })
+
+  it('exhausts bounded retries and Leave prevents a delayed reconnect', async () => {
+    let dials = 0
+    const t = new HostWssTransport({ hostBaseUrl: baseUrl, retryDelaysMs: [5, 10], readyTimeoutMs: 20, webSocketFactory: url => { dials++; return new NodeWS(url) as unknown as WebSocketLike } })
+    await t.connect(await t.redeem('demo', PASSWORD))
+    available = false
+    for (const ws of wss.clients) ws.terminate()
+    const deadline = Date.now() + 1000
+    while (t.status !== 'unavailable' && Date.now() < deadline) await new Promise(r => setTimeout(r, 5))
+    expect(t.status).toBe('unavailable'); expect(dials).toBe(3)
+    t.disconnect()
+    available = true
+    const r = new HostWssTransport({ hostBaseUrl: baseUrl, retryDelaysMs: [100], webSocketFactory: url => { dials++; return new NodeWS(url) as unknown as WebSocketLike } })
+    await r.connect(await r.redeem('demo', PASSWORD))
+    for (const ws of wss.clients) ws.terminate()
+    await new Promise(resolve => setTimeout(resolve, 10)); expect(r.status).toBe('reconnecting')
+    const before = dials; r.disconnect()
+    await new Promise(resolve => setTimeout(resolve, 150)); expect(dials).toBe(before)
+  })
+
 })

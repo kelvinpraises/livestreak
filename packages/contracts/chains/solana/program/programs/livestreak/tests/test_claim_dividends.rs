@@ -15,8 +15,8 @@
 mod common;
 
 use {
-    anchor_lang::{solana_program::system_program, InstructionData, ToAccountMetas},
     anchor_lang::solana_program::instruction::Instruction,
+    anchor_lang::{solana_program::system_program, InstructionData, ToAccountMetas},
     common::{Harness, SIDE_NO, SIDE_YES, USD},
     litesvm_token::{CreateAssociatedTokenAccount, CreateMint, MintTo},
     solana_keypair::Keypair,
@@ -57,8 +57,11 @@ fn staker_claims_usdc_dividends_and_guards_hold() {
     let registry = h.pda(&[b"registry"]);
     let ix = Instruction::new_with_bytes(
         h.program_id,
-        &livestreak::instruction::Initialize { default_steward: creator.pubkey(), lvst_mint }
-            .data(),
+        &livestreak::instruction::Initialize {
+            default_steward: creator.pubkey(),
+            lvst_mint,
+        }
+        .data(),
         livestreak::accounts::Initialize {
             payer: creator.pubkey(),
             registry,
@@ -129,7 +132,10 @@ fn staker_claims_usdc_dividends_and_guards_hold() {
         .to_account_metas(None),
     );
     h.send(ix, &[&payer, &staker]).unwrap();
-    assert_eq!(h.protocol(&market_id).treasury.lvst_staked(&staker_key), (100 * LVST) as u128);
+    assert_eq!(
+        h.protocol(&market_id).treasury.lvst_staked(&staker_key),
+        (100 * LVST) as u128
+    );
 
     // ── produce skim: creator seeds NO $5/s $500, bettor funds YES $7/s $700 ────
     let seed_deposit = 500 * USD;
@@ -147,6 +153,9 @@ fn staker_claims_usdc_dividends_and_guards_hold() {
             seed_side: SIDE_NO,
             rate: 5 * USD,
             deposit: seed_deposit,
+            commitment: [1; 32],
+            funding_close: 0xFFFFFFFE,
+            operation_id: solana_keccak_hasher::hash(&(b"goal scored?".to_vec())).to_bytes(),
         }
         .data(),
         user_op(creator.pubkey(), creator_ata).to_account_metas(None),
@@ -201,7 +210,11 @@ fn staker_claims_usdc_dividends_and_guards_hold() {
     h.warp(60);
     let ix = Instruction::new_with_bytes(
         h.program_id,
-        &livestreak::instruction::Resolve { vault_id, winning_side: SIDE_YES }.data(),
+        &livestreak::instruction::Resolve {
+            vault_id,
+            winning_side: SIDE_YES,
+        }
+        .data(),
         livestreak::accounts::Resolve {
             steward: creator.pubkey(),
             protocol_state,
@@ -233,14 +246,21 @@ fn staker_claims_usdc_dividends_and_guards_hold() {
     let ix = Instruction::new_with_bytes(
         h.program_id,
         &livestreak::instruction::Collect { vault_id }.data(),
-        livestreak::accounts::EngineOp { protocol_state, escrow }.to_account_metas(None),
+        livestreak::accounts::EngineOp {
+            protocol_state,
+            escrow,
+        }
+        .to_account_metas(None),
     );
     h.send(ix, &[&payer]).unwrap();
 
     // ── the skim is now owed to the sole staker as USDC dividends ──────────────
     let p = h.protocol(&market_id);
     let pending = p.treasury.pending_dividends(&staker_key);
-    assert!(pending > 0, "collected skim must accrue as dividends to the sole staker");
+    assert!(
+        pending > 0,
+        "collected skim must accrue as dividends to the sole staker"
+    );
     // Single staker who staked before any skim ⇒ they own the entire held skim.
     assert_eq!(
         p.treasury.usdc_held, pending,
@@ -273,24 +293,45 @@ fn staker_claims_usdc_dividends_and_guards_hold() {
     );
 
     let p = h.protocol(&market_id);
-    assert_eq!(p.treasury.usdc_held, 0, "treasury dividend ledger drains to zero");
-    assert_eq!(p.treasury.pending_dividends(&staker_key), 0, "nothing left pending after the claim");
+    assert_eq!(
+        p.treasury.usdc_held, 0,
+        "treasury dividend ledger drains to zero"
+    );
+    assert_eq!(
+        p.treasury.pending_dividends(&staker_key),
+        0,
+        "nothing left pending after the claim"
+    );
 
     // Real-token conservation still closes: escrow == the three engine ledgers.
     let ledger_sum = p.drips.held + p.vault.usdc_held + p.treasury.usdc_held;
-    assert_eq!(h.token_balance(&escrow) as u128, ledger_sum, "escrow == engine ledgers post-claim");
+    assert_eq!(
+        h.token_balance(&escrow) as u128,
+        ledger_sum,
+        "escrow == engine ledgers post-claim"
+    );
 
     // ── a SECOND claim yields nothing → typed NoDividends ──────────────────────
     let err = h.send(claim_ix(), &[&payer, &staker]).unwrap_err();
-    assert!(err.contains("NoDividends"), "a re-claim with zero accrued must be typed NoDividends, got: {err}");
-    assert_eq!(h.token_balance(&staker_usdc) as u128, staker_usdc_before as u128 + pending, "the refused re-claim paid nothing");
+    assert!(
+        err.contains("NoDividends"),
+        "a re-claim with zero accrued must be typed NoDividends, got: {err}"
+    );
+    assert_eq!(
+        h.token_balance(&staker_usdc) as u128,
+        staker_usdc_before as u128 + pending,
+        "the refused re-claim paid nothing"
+    );
 
     // ── fake-mint guard: staking a NON-registry mint on a fresh market fails typed ─
     let fake_mint = CreateMint::new(&mut h.svm, &payer)
         .decimals(9)
         .send()
         .expect("create a non-canonical LVST mint");
-    assert_ne!(fake_mint, lvst_mint, "the fake mint must be a different key");
+    assert_ne!(
+        fake_mint, lvst_mint,
+        "the fake mint must be a different key"
+    );
     let fake_lvst = CreateAssociatedTokenAccount::new(&mut h.svm, &payer, &fake_mint)
         .owner(&staker.pubkey())
         .send()
@@ -359,7 +400,14 @@ fn staker_claims_usdc_dividends_and_guards_hold() {
         .to_account_metas(None),
     );
     let err = h.send(ix, &[&payer, &staker]).unwrap_err();
-    assert!(err.contains("WrongLvstMint"), "staking a non-registry mint must be typed WrongLvstMint, got: {err}");
+    assert!(
+        err.contains("WrongLvstMint"),
+        "staking a non-registry mint must be typed WrongLvstMint, got: {err}"
+    );
     // The fake tokens never moved.
-    assert_eq!(h.token_balance(&fake_lvst), 100 * LVST, "the rejected stake moved no fake LVST");
+    assert_eq!(
+        h.token_balance(&fake_lvst),
+        100 * LVST,
+        "the rejected stake moved no fake LVST"
+    );
 }

@@ -37,9 +37,9 @@ export const createConsoleEdges = async (input: {
   // File-backed runtime state (survives a gateway restart): pending-userOp recovery, paused lanes,
   // and the observe console board (configured cells restore; active run status resets honestly).
   const [pausedLanes, idempotencyPersistence, observeBoards] = await Promise.all([
-    loadPausedLanesPort(),
-    loadIdempotencyPersistencePort(),
-    loadObserveBoardsPort(input.runId)
+    loadPausedLanesPort(input.runId),
+    loadIdempotencyPersistencePort(input.runId),
+    loadObserveBoardsPort(input.runId, true)
   ]);
 
   const observeRuntime = (

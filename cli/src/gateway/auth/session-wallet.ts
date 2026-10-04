@@ -16,7 +16,7 @@ export const buildWalletInitFromSettings = (
 ): WalletInit => {
   const chain = chainSettingsFor(doc, caip2);
   const adapter = resolveChainAdapter(caip2);
-  const contracts = adapter.deriveContracts(chain.contractOverrides);
+  const contracts = adapter.deriveContracts(chain.contractOverrides, chain.deployment, caip2);
   return adapter.buildWalletInit({
     caip2,
     rpc: chain.rpc,

@@ -1,3 +1,4 @@
+import { DEFAULT_DEPLOYMENT } from "./contract.js";
 import { flattenDeploymentScopes } from "./flatten-deployment.js";
 import type {
   DeploymentName,
@@ -22,7 +23,7 @@ const deploymentsDir = join(
   "deployments",
 );
 
-const KNOWN_DEPLOYMENTS = ["localhost"] as const satisfies readonly DeploymentName[];
+const KNOWN_DEPLOYMENTS = ["localhost", "arbitrum-sepolia"] as const satisfies readonly DeploymentName[];
 
 // Parse a snapshot JSON from an explicit path. THE single EVM snapshot parser: both the name-based
 // loader and any host/path override read through this so no consumer hand-rolls its own JSON.parse.
@@ -66,7 +67,7 @@ export const localhostDeploymentPath = (): string => join(deploymentsDir, "local
  * un-flattened AA/protocol scopes or rpc read this at runtime so stale compiled .ts can never serve
  * dead addresses (the generated .ts stays browser-only). */
 export const loadDeploymentOutput = (
-  name: DeploymentName = "localhost",
+  name: DeploymentName = DEFAULT_DEPLOYMENT,
 ): EvmDeployOutput => readDeploymentFile(name);
 
 // Directory-listing stays lenient: an absent deployments dir (or none of the known snapshots on
@@ -106,3 +107,6 @@ const buildAddresses = (): EvmAddresses => {
 
 /** Typed contract addresses per committed deployment snapshot (loaded lazily, throws on access if absent). */
 export const addresses: EvmAddresses = buildAddresses();
+
+/** Explicit source snapshot path for the selected deployment. */
+export const deploymentPath = (name: DeploymentName = DEFAULT_DEPLOYMENT): string => join(deploymentsDir, `${name}.json`);

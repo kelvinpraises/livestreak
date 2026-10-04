@@ -154,7 +154,9 @@ const runObserveLeg = async (
 
   const marketId = readMarketIdFromBoard(client.boards().observe, obsId);
   if (marketId === undefined) {
-    throw new Error("marketId not found on observe board after register");
+    const cell = boardCells(client.boards().observe)[`obs:${obsId}:market`];
+    const reason = cellReadonly(cell).reason;
+    throw new Error(typeof reason === "string" ? reason : "marketId not found on observe board after register");
   }
   return { marketId, obsId };
 };

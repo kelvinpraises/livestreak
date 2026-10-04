@@ -30,6 +30,7 @@ const { values } = parseArgs({
     rpc: { type: "string" },
     scope: { type: "string" },
     force: { type: "boolean", default: false },
+    "skip-paymaster": { type: "boolean", default: false },
     all: { type: "boolean", default: false },
     help: { type: "boolean", default: false }
   }
@@ -43,6 +44,7 @@ Options:
   --name <chain>     Chain name (e.g. localhost, flow-testnet)
   --rpc <url>        Custom RPC URL
   --scope <name>     Deploy only this scope (aa, streaming, protocol, wire, paymaster)
+  --skip-paymaster   Use an external sponsor; omit the legacy paymaster and deposit
   --force            Force redeploy even if scope is completed
   --all              Deploy to all default chains
   --help             Show this help
@@ -61,6 +63,7 @@ async function deployToChain(chainName: string, rpc: string): Promise<boolean> {
   const { publicClient, walletClient, account } = createClients(rpc, deployerKey);
   const chainId = await publicClient.getChainId();
   const deployer = account.address;
+  if (chainId !== 31337 && !process.env.DEPLOYER_PRIVATE_KEY) throw new Error("Public deployment requires DEPLOYER_PRIVATE_KEY; the Anvil default is local-only.");
 
   console.log(`Chain ID: ${chainId}`);
   console.log(`Deployer: ${deployer}\n`);
@@ -90,7 +93,9 @@ async function deployToChain(chainName: string, rpc: string): Promise<boolean> {
 
   await ensureNickFactory(publicClient, walletClient);
 
-  const scopesToRun = values.scope ? SCOPES.filter((scope) => scope.key === values.scope) : SCOPES;
+  const enabledScopes = values["skip-paymaster"] ? SCOPES.filter(scope => scope.key !== "paymaster") : SCOPES;
+  const scopesToRun = values.scope ? enabledScopes.filter((scope) => scope.key === values.scope) : enabledScopes;
+  if (scopesToRun.length === 0) throw new Error("No matching deployment scope");
 
   for (const { key, fn } of scopesToRun) {
     const existing = state.scopes[key];
@@ -133,7 +138,7 @@ async function deployToChain(chainName: string, rpc: string): Promise<boolean> {
     return false;
   }
 
-  const allCompleted = SCOPES.every(({ key }) => state.scopes[key]?.status === "completed");
+  const allCompleted = enabledScopes.every(({ key }) => state.scopes[key]?.status === "completed");
   if (allCompleted) {
     // Promotion writes deployments/<name>.json + .ts — what cli/app/host actually read. A deploy
     // whose promotion failed leaves consumers on STALE addresses, so it is fatal, not a warning.

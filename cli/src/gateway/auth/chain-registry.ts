@@ -10,6 +10,7 @@
 // @livestreak/schema + a createWalletManager case in @livestreak/wallet. Zero edits to call sites.
 
 import type { ChainAaSettings, EvmWalletInitConfig, WalletChain, WalletInit } from "@livestreak/schema";
+import { DEFAULT_DEPLOYMENT, type DeploymentName } from "@livestreak/contracts/evm";
 import { loadDeploymentOutput } from "@livestreak/contracts/evm/node";
 import { loadDeployment as loadSuiDeployment } from "@livestreak/contracts/sui/node";
 import { loadDeploymentFromDisk as loadSolanaDeployment } from "@livestreak/contracts/solana/node";
@@ -32,7 +33,7 @@ export interface ChainAdapter {
   /** Does this adapter own the given CAIP-2 id? (e.g. eip155:* -> evm, sui:* -> sui). */
   matches(caip2: string): boolean;
   /** Flatten the chain's deployment artifact into the canonical Record<string,string> contracts bag. */
-  deriveContracts(overrides?: Readonly<Record<string, string>>): Record<string, string>;
+  deriveContracts(overrides?: Readonly<Record<string, string>>, deployment?: string, caip2?: string): Record<string, string>;
   /** Build the floating WalletInit the exported wallet manager consumes. */
   buildWalletInit(ctx: ChainBuildContext): WalletInit;
 }
@@ -41,15 +42,21 @@ const namespaceOf = (caip2: string): string => caip2.split(":")[0] ?? "";
 
 // --- EVM adapter (eip155:*) — Safe 4337 AA over the deployed ERC-4337 stack ---
 
-const flattenEvmDeployment = (): Record<string, string> => {
+const flattenEvmDeployment = (deployment?: string, caip2?: string): Record<string, string> => {
+  const prefix = "@livestreak/contracts/evm/deployments/";
+  if (deployment && !deployment.startsWith(prefix)) throw new Error(`Unsupported EVM deployment reference: ${deployment}`);
+  const name = deployment?.slice(prefix.length) ?? DEFAULT_DEPLOYMENT;
+  if (name !== "localhost" && name !== "arbitrum-sepolia") throw new Error(`Unknown EVM deployment: ${name}`);
+  const snapshot = loadDeploymentOutput(name as DeploymentName);
+  if (caip2 && caip2 !== `eip155:${snapshot.chainId}`) throw new Error(`Deployment ${name} belongs to eip155:${snapshot.chainId}, not ${caip2}`);
   // Read fresh from the promoted JSON at call time so a redeploy is picked up without a rebuild.
-  const s = loadDeploymentOutput("localhost").scopes;
+  const s = snapshot.scopes;
   const aa = s.aa.contracts;
   const protocol = s.protocol.contracts;
   const streaming = s.streaming.contracts;
   const wire = s.wire.contracts;
   if (aa === undefined || protocol === undefined || streaming === undefined || wire === undefined) {
-    throw new Error("localhost EVM deployment is missing contract scopes");
+    throw new Error(`EVM deployment ${name} is missing contract scopes`);
   }
   return {
     entryPoint: aa.entryPoint,
@@ -69,7 +76,7 @@ const flattenEvmDeployment = (): Record<string, string> => {
     lvstToken: protocol.lvstToken,
     treasury: protocol.treasury,
     stewardRegistry: protocol.stewardRegistry,
-    dripsStreaming: streaming.dripsStreaming,
+    dripsStreaming: streaming.dripsProxy,
     vaultDriver: wire.vaultDriver,
     marketDriver: wire.marketDriverProxy
   };
@@ -78,9 +85,9 @@ const flattenEvmDeployment = (): Record<string, string> => {
 const evmChainAdapter: ChainAdapter = {
   kind: "evm",
   matches: (caip2) => namespaceOf(caip2) === "eip155",
-  deriveContracts: (overrides) => ({ ...flattenEvmDeployment(), ...(overrides ?? {}) }),
+  deriveContracts: (overrides, deployment, caip2) => ({ ...flattenEvmDeployment(deployment, caip2), ...(overrides ?? {}) }),
   buildWalletInit: (ctx) => {
-    const chainId = Number(ctx.caip2.split(":")[1] ?? "31337");
+    const chainId = Number(ctx.caip2.split(":")[1]);
     const hostBase = ctx.hostUrl.replace(/\/$/, "");
     const isSponsored = ctx.aa?.isSponsored ?? true;
     const bundlerUrl = `${hostBase}${ctx.aa?.bundlerPath ?? "/aa/bundler/local"}`;
@@ -91,8 +98,8 @@ const evmChainAdapter: ChainAdapter = {
       provider: ctx.rpc,
       bundlerUrl,
       ...(isSponsored ? { paymasterUrl } : {}),
-      isSponsored: true,
-      useNativeCoins: false,
+      isSponsored,
+      useNativeCoins: !isSponsored,
       entryPointAddress: c.entryPoint as `0x${string}`,
       safe4337ModuleAddress: c.safe4337Module as `0x${string}`,
       safeModulesSetupAddress: c.safeModuleSetup as `0x${string}`,

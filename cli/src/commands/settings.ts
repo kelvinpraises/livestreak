@@ -21,7 +21,7 @@ export const runSettingsInit = async (input: {
   try {
     const host = createHostClient(hostUrl);
     const aaDescriptor = await host.getAaDescriptor();
-    const chainId = Number(doc.defaultChain.split(":")[1] ?? "31337");
+    const chainId = Number(doc.defaultChain.split(":")[1]);
     const aaChain = aaDescriptor.chains.find((c) => c.chainId === chainId);
     if (aaChain !== undefined) {
       const chain = doc.chains[doc.defaultChain];

@@ -166,9 +166,10 @@ export function BalanceBar({ flow, wallet }: Props) {
             {accountVerified ? <ScoreUSD value={wallet.usdcBalance} className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }} /> : <span className="mono">—</span>}
             {walletActions.canTopUp && (
               <button
-                onClick={() => { void walletActions.topUp().catch(() => {}) }}
+                onClick={() => { setActionError(null); setExpanded(true); void walletActions.topUp().catch(err => setActionError(err instanceof Error ? err.message : 'Test USDC mint failed.')) }}
                 disabled={walletActions.isToppingUp}
-                title="Dev faucet — get test USDC (local stack only)"
+                title="Mint 100 test USDC on Arbitrum Sepolia"
+                aria-label="Mint test USDC"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   width: 18, height: 18, marginLeft: 2, borderRadius: 5,

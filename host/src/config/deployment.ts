@@ -1,4 +1,5 @@
 import {
+  deploymentPath,
   readDeploymentOutputFromPath
 } from "@livestreak/contracts/evm/node";
 
@@ -18,10 +19,10 @@ export interface DeploySnapshotConfig {
 // the operator can still supply AA env manually) when the snapshot is absent/unparseable — mirrors
 // the previous main.ts try/catch, but without mutating process.env. Honors LIVESTREAK_AA_FROM_DEPLOY=0.
 export const loadDefaultDeploySnapshotConfig = (): DeploySnapshotConfig => {
-  if (process.env.LIVESTREAK_AA_FROM_DEPLOY === "0" || !process.env.LIVESTREAK_DEPLOY_SNAPSHOT) {
+  if (process.env.LIVESTREAK_AA_FROM_DEPLOY === "0") {
     return {};
   }
-  const snapshotPath = process.env.LIVESTREAK_DEPLOY_SNAPSHOT;
+  const snapshotPath = process.env.LIVESTREAK_DEPLOY_SNAPSHOT ?? deploymentPath();
   try {
     const loaded = loadDeploySnapshotConfig(snapshotPath);
     console.log(`[host]: AA config from deploy snapshot ${snapshotPath}`);

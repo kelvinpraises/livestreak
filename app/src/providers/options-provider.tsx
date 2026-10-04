@@ -1,3 +1,5 @@
+import { testUsdcMintTransaction, TEST_USDC_MINT_ABI } from "#/utils/test-usdc";
+import { EVM_NETWORK } from "#/utils/chain";
 import {
   ClaimSession,
   loadClaim,
@@ -15,6 +17,8 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  createPublicClient,
+  http,
   sha256,
   toBytes,
   hexToBytes,
@@ -28,6 +32,8 @@ import {
   createWalletManager,
   createSuiReadClient,
   readUserOperationSuccess,
+  pollUntilUserOperationIncluded,
+  assertUserOperationSucceeded,
   type WalletConfigByChain,
 } from '@livestreak/wallet'
 import type { VerifiedVaultMandate } from '@livestreak/schema'
@@ -77,6 +83,7 @@ import {
   testOptionsSeed,
 } from '#/utils/env'
 import {
+  EVM_TEST_USDC,
   buildOptionsContractAddresses,
   initialChain,
   isChainDeployed,
@@ -188,6 +195,7 @@ interface OptionsContextValue {
   disconnect: () => void
   /** Re-read the connected user's board/balance now (e.g. after an out-of-band wallet top-up). */
   refresh: () => Promise<void>
+  mintTestUsdc: (amountUsd?: number) => Promise<void>
   setActiveMarketId: (marketId: string | undefined) => void
   findFunction: (
     name: string,
@@ -873,6 +881,47 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
     [address, requireBridge, afterWrite],
   )
 
+  const mintTestUsdc = useCallback(async (amountUsd = 100): Promise<void> => {
+    if (!isConnected || !address || chainRef.current !== 'evm') throw new Error('Connect your Arbitrum Sepolia wallet first.');
+    if (writeBusyRef.current) throw new Error('Wait for the current wallet action to finish.');
+    const user = address;
+    const secret = sessionStorage.getItem(SESSION_SECRET_KEY);
+    if (!secret || !walletInitRef.current) throw new Error('Reconnect your wallet before minting test USDC.');
+    const cfg = buildChainConfig('evm', hexToBytes(secret as `0x${string}`), walletInitRef.current);
+    const manager = createWalletManager('evm', cfg.seed, cfg.walletInit.config as WalletConfigByChain['evm']);
+    writeBusyRef.current = true;
+    setClaiming(true);
+    const client = createPublicClient({ transport: http(EVM_RPC_URL, { timeout: 15000 }) });
+    const pendingKey = `livestreak.test-usdc-mint:${EVM_NETWORK.chainId}:${user.toLowerCase()}`;
+    try {
+      if (!navigator.locks) throw new Error('This browser does not support safe wallet actions across tabs.');
+      await navigator.locks.request(`livestreak.fund:evm:${user}`, { ifAvailable: true }, async lock => {
+        if (!lock) throw new Error('A wallet action is running in another tab.');
+        const account = await manager.getAccount();
+        if ((await account.getAddress()).toLowerCase() !== user.toLowerCase()) throw new Error('Wallet changed. Reconnect before minting.');
+        const tx = testUsdcMintTransaction(await client.getChainId(), EVM_TEST_USDC, user, amountUsd);
+        const reader = await account.toReadOnlyAccount();
+        let hash = localStorage.getItem(pendingKey);
+        if (!hash) {
+          // Simulate the exact contract call before requesting a sponsored transaction.
+          await client.simulateContract({ address: tx.to, abi: TEST_USDC_MINT_ABI, functionName: 'mint', args: [user, parseUnits(String(amountUsd), 6)], account: user });
+          if (chainRef.current !== 'evm' || sessionStorage.getItem(SESSION_SECRET_KEY) !== secret) throw new Error('Wallet changed before submission.');
+          hash = (await account.sendTransaction(tx)).hash;
+          localStorage.setItem(pendingKey, hash);
+        }
+        const result = await pollUntilUserOperationIncluded(reader, hash);
+        if (readUserOperationSuccess(result) === false) localStorage.removeItem(pendingKey);
+        assertUserOperationSucceeded(result);
+        localStorage.removeItem(pendingKey);
+        if (chainRef.current === 'evm' && sessionStorage.getItem(SESSION_SECRET_KEY) === secret) await refreshConnected(user as UserAddress, activeMarketIdRef.current);
+      });
+    } finally {
+      manager.dispose();
+      writeBusyRef.current = false;
+      setClaiming(false);
+    }
+  }, [address, isConnected, refreshConnected]);
+
   const findFunction = useCallback(
     (name: string, match?: (fn: OptionsFunctionView) => boolean) =>
       findOptionsFunction(controls, name, match),
@@ -1495,6 +1544,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       connect,
       disconnect,
       refresh: afterWrite,
+      mintTestUsdc,
       setActiveMarketId,
       findFunction,
       findFundFunction: findFundFunctionForVault,
@@ -1542,6 +1592,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       connect,
       disconnect,
       afterWrite,
+      mintTestUsdc,
       setActiveMarketId,
       findFunction,
       findFundFunctionForVault,

@@ -1,22 +1,21 @@
 import { isAddress } from 'viem'
-import type { EvmDeployOutput } from '@livestreak/contracts/evm'
+import { arbitrumSepoliaDeployment } from '@livestreak/contracts/evm'
 import { localnetDeployment as suiLocalnetDeployment } from '@livestreak/contracts/sui'
 import { localnetDeployment as solanaLocalnetDeployment } from '@livestreak/contracts/solana/deployments/localnet'
 import type { OptionsContractAddresses } from '@livestreak/options'
 
 import { EVM_NETWORK, SUPPORTED_CHAINS, readStoredChain, type OptionsChainKind } from './chain'
 
-// Public deployment input. Never reuse Anvil addresses on a public network.
-const configuredDeployment = (() => {
-  const raw = import.meta.env.VITE_EVM_DEPLOYMENT_JSON as string | undefined
-  if (!raw?.trim()) return undefined
-  const deployment = JSON.parse(raw) as EvmDeployOutput
-  if (Number(deployment.chainId) !== EVM_NETWORK.chainId) throw new Error('Expected Arbitrum Sepolia deployment (421614)')
-  return deployment
-})()
+// Deployment addresses and ABIs come from the same contracts package.
+const configuredDeployment = arbitrumSepoliaDeployment
+if (configuredDeployment.chainId !== EVM_NETWORK.chainId) throw new Error('Expected Arbitrum Sepolia deployment (421614)')
 
 export const EVM_RPC_URL = EVM_NETWORK.rpcUrl
 export const EVM_AA_CONTRACTS = configuredDeployment?.scopes.aa?.contracts ?? {}
+
+// Our permissionless test USDC, from the same verified-network protocol deployment.
+const configuredTestUsdc = (configuredDeployment?.scopes.protocol?.contracts as Record<string,string> | undefined)?.mockUsdc;
+export const EVM_TEST_USDC = configuredTestUsdc && isAddress(configuredTestUsdc) && !/^0x0+$/i.test(configuredTestUsdc) ? configuredTestUsdc as `0x${string}` : undefined;
 
 export function buildOptionsContractAddresses(): OptionsContractAddresses {
   if (!configuredDeployment) throw new Error("Arbitrum Sepolia deployment is not configured")

@@ -9,9 +9,8 @@ export const EVM_NETWORK = {
   name: 'Arbitrum Sepolia',
   rpcUrl: 'https://sepolia-rollup.arbitrum.io/rpc',
   token: {
-    symbol: 'USDG',
-    address: '0xFFC95faa3d63Cde504a05B567C600B78C0b41892',
-    supplyControl: '0xDDF7d873F5738c2A191624b1ba1Aba7042621E43',
+    symbol: 'USDC',
+    decimals: 6,
   },
 } as const
 

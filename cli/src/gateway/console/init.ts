@@ -9,7 +9,7 @@ export const buildPackageInits = (
 ): Record<PackageRuntimeInit["package"], PackageRuntimeInit> => {
   const caip2 = settings.defaultChain;
   const chain = chainSettingsFor(settings, caip2);
-  const contracts = resolveChainAdapter(caip2).deriveContracts(chain.contractOverrides);
+  const contracts = resolveChainAdapter(caip2).deriveContracts(chain.contractOverrides, chain.deployment, caip2);
   const hostUrl = settings.host.url;
 
   const base = {

@@ -17,6 +17,7 @@ export { evmAbis as abis } from "./abis.js";
 export type { EvmContractAbi } from "./abis.js";
 
 export { addresses } from "./addresses-static.js";
+export { arbitrum_sepoliaDeployment as arbitrumSepoliaDeployment } from "./deployments/arbitrum-sepolia.js";
 export { localhostDeployment } from "./deployments/localhost.js";
 
 export { contract, DEFAULT_DEPLOYMENT } from "./contract.js";

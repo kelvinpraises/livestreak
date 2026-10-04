@@ -88,16 +88,18 @@ Arbitrum Sepolia is chain **421614**, RPC `https://sepolia-rollup.arbitrum.io/rp
 The ZeroDev example uses `ZERODEV_ARBITRUM_SEPOLIA_RPC_URL` for bundling and sponsorship.
 The supplied project returned `eth_chainId = 0x66eee`; sponsored execution is not yet proven.
 
-[Paxos USDG testnet addresses](https://docs.paxos.com/guides/stablecoin/usdg/testnet):
-USDG `0xFFC95faa3d63Cde504a05B567C600B78C0b41892`, supply control
-`0xDDF7d873F5738c2A191624b1ba1Aba7042621E43`.
-Obtain test USDG through the [Paxos faucet](https://docs.paxos.com/guides/developer/fund-sandbox-with-test-crypto).
-Host's local mint endpoint and the app's mock-token top-ups are retired; no mint ABI is assumed.
+The demo uses our own permissionless six-decimal MockUSDC again. Its token address comes
+from the protocol deployment snapshot for this network; no Paxos token or supply-control
+address is used. Browser mint requests use the connected wallet and confirmed transactions.
 
-The app takes its public EVM snapshot through `VITE_EVM_DEPLOYMENT_JSON`, which must carry
-chain ID 421614 and real deployed protocol addresses. Host takes that same deployment through
-`LIVESTREAK_DEPLOY_SNAPSHOT`; an absent snapshot disables its EVM reader. No Arbitrum protocol
-contracts have been deployed by this cleanup. Do not reuse the bundled localhost addresses.
+The app imports `arbitrumSepoliaDeployment` from `@livestreak/contracts/evm`. Host and CLI
+load its JSON through the package Node loader; Host can override the snapshot path with
+`LIVESTREAK_DEPLOY_SNAPSHOT`. CLI checks deployment/CAIP-2 agreement before using addresses.
+The Arbitrum deployment is recorded in
+`packages/contracts/chains/evm/deployments/arbitrum-sepolia.json`. Our test USDC is
+`0x76bb00aa1936dd7cda6df2fa403f1439e3db456a`. All four scopes (AA, streaming, protocol,
+wire) completed; the retired paymaster is omitted. Do not reuse the bundled localhost addresses.
+This deployment does not establish hosted sponsorship or the complete browser funding journey.
 Sui is paused in the app picker, saved-selection restoration and direct chain selection, while its
 implementation and tests remain. Solana's existing integration is unchanged.
 

@@ -47,12 +47,12 @@ it.each(['missing', 'closed'])('blocks %s rules before submission', reason => {
   render(<Form />); choose(); expect(submit().disabled).toBe(true)
   fireEvent.click(submit()); expect(mocks.options.fundStream).not.toHaveBeenCalled()
 })
-it('offers a clearly labelled development faucet before the first position exists', async () => {
+it('offers a clearly labelled testnet mint before the first position exists', async () => {
   mocks.wallet.usdcBalance = 0
   render(<Form />); choose(); expect(submit().disabled).toBe(true)
-  fireEvent.click(screen.getByText('Add 100 test USDC'))
+  fireEvent.click(screen.getByText('Mint 100 test USDC'))
   await waitFor(() => expect(mocks.wallet.topUp).toHaveBeenCalledWith(100))
-  expect(screen.getByText('Local development faucet · test funds only')).toBeTruthy()
+  expect(screen.getByText('Arbitrum Sepolia · test funds only')).toBeTruthy()
 })
 it('opens the canonical wallet dialog instead of pretending a disconnected bet worked', () => {
   mocks.options.isConnected = false

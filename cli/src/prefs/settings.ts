@@ -8,6 +8,7 @@ import {
   type ChainSettings,
   type SettingsDoc as SettingsDocType
 } from "@livestreak/schema";
+import { DEFAULT_DEPLOYMENT } from "@livestreak/contracts/evm";
 import { loadDeploymentOutput } from "@livestreak/contracts/evm/node";
 
 export const defaultSettingsPath = (): string => resolve(process.cwd(), "settings.json");
@@ -53,9 +54,9 @@ export const saveSettings = async (
 export const buildDefaultSettings = (hostUrl: string = DEFAULT_HOST_URL): SettingsDocType => {
   const caip2 = DEFAULT_EVM_CAIP2;
   const chainSettings: ChainSettings = {
-    deployment: "@livestreak/contracts/evm/deployments/localhost",
-    rpc: loadDeploymentOutput("localhost").rpc,
-    wallet: { keystoreSlot: "evm-localhost" }
+    deployment: `@livestreak/contracts/evm/deployments/${DEFAULT_DEPLOYMENT}`,
+    rpc: loadDeploymentOutput(DEFAULT_DEPLOYMENT).rpc,
+    wallet: { keystoreSlot: `evm-${DEFAULT_DEPLOYMENT}` }
   };
 
   return {

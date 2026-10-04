@@ -256,7 +256,7 @@ function writeDeploymentTs(
     scopes: Record<string, unknown>;
   },
 ): void {
-  const varName = `${name}Deployment`;
+  const varName = `${name.replace(/[^a-zA-Z0-9_$]/g, "_")}Deployment`;
   const scopesJson = JSON.stringify(snapshot.scopes, null, 2)
     .split("\n")
     .map((line) => `  ${line}`)

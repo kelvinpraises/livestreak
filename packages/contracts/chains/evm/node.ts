@@ -4,4 +4,5 @@ export {
   loadDeploymentOutput,
   readDeploymentOutputFromPath,
   localhostDeploymentPath,
+  deploymentPath,
 } from "./addresses.js";

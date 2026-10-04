@@ -4,7 +4,7 @@ import { evmAbis, type EvmContractAbi } from "./abis.js";
 import { addresses } from "./addresses-static.js";
 import type { DeploymentName, EvmContract } from "./types.js";
 
-export const DEFAULT_DEPLOYMENT: DeploymentName = "localhost";
+export const DEFAULT_DEPLOYMENT: DeploymentName = "arbitrum-sepolia";
 
 export type EvmContractDescriptor<N extends EvmContract> = {
   readonly abi: EvmContractAbi<N>;

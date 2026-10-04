@@ -111,9 +111,11 @@ const projectLivePoolWithBoundaries = (
         sideRate,
         dtSeconds: boundarySec - tSec
       }).newPool;
-      sideRate = sideRate > boundary.rate ? sideRate - boundary.rate : 0n;
       tMs = boundary.maxEndMs;
     }
+    // Multiple funders can end in the same second. Each boundary removes its
+    // rate even when the first boundary already advanced the clock to that time.
+    sideRate = sideRate > boundary.rate ? sideRate - boundary.rate : 0n;
   }
 
   const tSec = Math.floor(tMs / 1000);

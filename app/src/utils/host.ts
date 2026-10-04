@@ -10,7 +10,7 @@ import type { HomepageData } from '#/types/homepage'
 import type { OptionsChainKind } from '#/utils/chain'
 
 async function fetchPage<A, I>(url: string, schema: Schema.Schema<A, I, never>): Promise<A> {
-  const response = await fetch(url, { signal: AbortSignal.timeout(20000) })
+  const response = await fetch(url, { signal: AbortSignal.timeout(45000) })
   if (!response.ok) throw new Error(`Host HTTP ${response.status}`)
   return Schema.decodeUnknownSync(schema)(await response.json())
 }

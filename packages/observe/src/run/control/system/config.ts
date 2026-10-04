@@ -281,7 +281,7 @@ const configureCall = (
             title: payload.title,
             chain: payload.chain
           },
-          functions: ["register", "goLive", "setEnded", "close"]
+          functions: ["register", "goLive", "setEnded", "recording", "retryRecording", "close"]
         }
       },
       [observationCellId(obsId, "capture")]: {

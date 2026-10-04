@@ -91,3 +91,18 @@ describe("projectVaultLivePools", () => {
     expect(capped).toBe(30_000_000n); // 30s × 1_000_000/s, then frozen — not negative
   });
 });
+
+describe("simultaneous funding cutoff", () => {
+  it("removes every lane ending in the same second", () => {
+    const lastAdvanceMs = 1_700_000_000_000;
+    const board = { pool: 0n, sideRate: 9_333n, g: 0n, lastAdvanceMs };
+    const funderBoundaries = [
+      { maxEndMs: lastAdvanceMs + 30_000, rate: 8_333n },
+      { maxEndMs: lastAdvanceMs + 30_000, rate: 1_000n }
+    ];
+    const input = { board, funderBoundaries };
+    expect(projectLivePoolSide({ ...input, atMs: lastAdvanceMs + 30_000 })).toBe(279_990n);
+    expect(projectLivePoolSide({ ...input, atMs: lastAdvanceMs + 3_600_000 })).toBe(279_990n);
+    expect(projectLivePoolSide({ ...input, funderBoundaries: [...funderBoundaries].reverse(), atMs: lastAdvanceMs + 3_600_000 })).toBe(279_990n);
+  });
+});

@@ -1,5 +1,5 @@
 import type { EvmDeployOutput } from "@livestreak/contracts/evm";
-import { readDeploymentOutputFromPath } from "@livestreak/contracts/evm/node";
+import { deploymentPath, readDeploymentOutputFromPath } from "@livestreak/contracts/evm/node";
 import type { CatalogChain } from "@livestreak/host";
 import {
   asMarketId,
@@ -103,15 +103,14 @@ const evmAddressesFromSnapshot = (
 };
 
 const buildEvmReader = (): OptionsReader | null => {
-  const snapshotPath = process.env.LIVESTREAK_DEPLOY_SNAPSHOT;
-  if (!snapshotPath) return null;
+  const snapshotPath = process.env.LIVESTREAK_DEPLOY_SNAPSHOT ?? deploymentPath();
   const snap = readEvmSnapshot(snapshotPath);
   if (snap === null) return null;
   const addresses = evmAddressesFromSnapshot(snap);
   if (addresses === null) return null;
   const rpcUrl = process.env.LIVESTREAK_AA_RPC_URL ?? snap.rpc;
   if (rpcUrl === undefined || rpcUrl.length === 0) return null;
-  const chainId = Number.parseInt(String(snap.chainId ?? 31337), 10);
+  const chainId = Number.parseInt(String(snap.chainId), 10);
   const walletInit = {
     chain: "evm",
     seedSource: "raw",
@@ -241,9 +240,9 @@ export const readMarketGraph = async (
   const id = asMarketId(marketId);
   // A replacing DB projection must be complete. One swallowed RPC error would delete
   // valid rows and write fabricated zero aggregates.
-  const market = await reader.readMarket(id);
-  const vaultIds = await reader.listMarketVaults(id);
-  const streamState = await reader.readStreamState(id);
+  const [market, vaultIds, streamState] = await Promise.all([
+    reader.readMarket(id), reader.listMarketVaults(id), reader.readStreamState(id)
+  ]);
   const vaults = await Promise.all(vaultIds.map(vaultId => reader.readVault(vaultId)));
   if (!market || String(market.marketId) !== marketId || vaults.some((vault, index) => !vault || String(vault.vaultId) !== String(vaultIds[index]) || String(vault.marketId) !== marketId)) {
     throw new Error('Incomplete or mismatched market graph');

@@ -2014,7 +2014,7 @@ const expectedFamilyFunctions = (cellId: string): readonly string[] => {
     return ["pause", "resume", "setPresentation"];
   }
   if (cellId.endsWith(":market")) {
-    return ["register", "goLive", "setEnded", "close"];
+    return ["register", "goLive", "setEnded", "recording", "retryRecording", "close"];
   }
   return ["configure", "close"];
 };

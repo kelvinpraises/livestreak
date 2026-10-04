@@ -48,7 +48,7 @@ export interface CatalogIndexer {
 export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndexer => {
   const now = config.now ?? (() => Date.now());
   const stalenessMs = config.stalenessMs ?? 15_000;
-  const readTimeoutMs = config.readTimeoutMs ?? 8000;
+  const readTimeoutMs = config.readTimeoutMs ?? 30000;
 
   const inFlight = new Map<string, Promise<boolean>>();
   const failed = new Set<string>();

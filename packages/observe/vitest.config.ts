@@ -7,6 +7,7 @@ const sourceDirectory = path.resolve(packageDirectory, "src");
 
 export default defineConfig({
   test: {
+    setupFiles: [path.join(packageDirectory, "test/setup.ts")],
     testTimeout: 30_000
   },
   resolve: {

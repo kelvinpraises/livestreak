@@ -110,7 +110,7 @@ export const bootstrapLegacyObserveBoard = (board: Board, config: ObserveRunConf
         catalog: "market",
         status: ["none", null, nowMs],
         readonly: { registrationState: "none" },
-        functions: ["register", "goLive", "setEnded", "close"]
+        functions: ["register", "goLive", "setEnded", "recording", "retryRecording", "close"]
       }
     }
   });

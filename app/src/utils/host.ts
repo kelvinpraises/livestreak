@@ -73,6 +73,8 @@ export function hostHomepageToCards(d: HostHomepageData): HomepageData {
       elapsed: stream.elapsed ?? '',
       isLive: stream.isLive,
       streamStatus: stream.streamStatus,
+      recordingStatus: stream.recordingStatus,
+      replay: stream.replay,
       indexedAtMs: stream.indexedAtMs,
       stale: stream.stale,
       ...(stream.chain ? { chain: stream.chain } : {}),

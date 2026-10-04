@@ -142,13 +142,7 @@ export const createPagesHandlers = (deps: Pick<HostRouteDeps, "catalogIndexer" |
       );
       return;
     }
-    let result=detail;
-    if(deps.config.storage !== null) {
-      try {
-        const record=await deps.recordings.forMarket(detail.chain,detail.marketId);
-        if(record) result={...detail,recordingStatus:record.status,...(!detail.stale && detail.streamStatus==="ended" && record.status==="ready" && record.pointer !== undefined && record.pointer.id===detail.replayPointerId ? { replay:{pointerId:record.pointer.id,url:record.pointer.url,format:"hls" as const,durationSeconds:record.durationSeconds} } : {})};
-      } catch { /* Cloud unavailable: omit replay rather than invent an archive. */ }
-    }
+    const result = detail;
     sendRouteResult(res, { ok: true, result }, next);
   })
 });

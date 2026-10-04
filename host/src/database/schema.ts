@@ -91,6 +91,7 @@ export interface ForumMessagesTable {
 }
 
 export interface DB {
+  recordings: { id: string; chain: string; market_id: string; run_id: string; body: string; lease_claimed: number };
   vault_mandates: { digest: string; body: Uint8Array | ArrayBuffer };
   resolution_records: { digest: string; chain_id: string; vault_id: string; body: Uint8Array | ArrayBuffer };
   markets: MarketsTable;

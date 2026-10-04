@@ -258,12 +258,12 @@ export const createHostRouteDeps = (
       ? (config.storage === null ? null : createS3ObjectStore(config.storage))
       : options.objectStore;
   const content = { store: createContentStore(objects), objects };
-  const recordings = createRecordingService(objects, config.contentWriteToken);
   const discoveryStore = createDiscoveryStore();
   const live = createLiveRingStore();
   const direct = createDirectAnnounceStore();
   const catalogStack = buildCatalogStack(config, discoveryStore, options,
     (marketId) => live.isLive(marketId) || direct.lookup(marketId) !== undefined);
+  const recordings = createRecordingService(objects, config.contentWriteToken, catalogStack.catalogDb.db);
 
   return {
     config,

@@ -55,3 +55,15 @@ it('labels ended-stream vault counts as active rather than claiming there were n
   expect(screen.getByText('ENDED')).toBeTruthy()
   expect(screen.getByText('$1.71')).toBeTruthy()
 })
+
+it('shows replay availability only for ended, fresh streams with a verified replay', () => {
+  const stream = { id:'m', marketId:'m', title:'Replay show', category:'Tech', activeVaults:0, totalPooled:0, elapsed:'', isLive:false, streamStatus:'ended' as const, chain:'evm' as const };
+  const {rerender}=render(<StreamCard stream={{...stream,recordingStatus:'ready',replay:{pointerId:'r',url:'https://media.example/r',format:'hls',durationSeconds:2}}} index={0}/>);
+  expect(screen.getByText('Watch replay')).toBeTruthy();
+  rerender(<StreamCard stream={{...stream,recordingStatus:'processing'}} index={0}/>);
+  expect(screen.getByText('Replay processing…')).toBeTruthy();
+  rerender(<StreamCard stream={stream} index={0}/>);
+  expect(screen.getByText('No recording available')).toBeTruthy();
+  rerender(<StreamCard stream={{...stream,stale:true,recordingStatus:'ready',replay:{pointerId:'r',url:'https://media.example/r',format:'hls',durationSeconds:2}}} index={0}/>);
+  expect(screen.queryByText('Watch replay')).toBeNull();
+});

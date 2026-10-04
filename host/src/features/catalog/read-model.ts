@@ -53,6 +53,19 @@ const detail = (row: Market, at: number, health?: IndexHealth): HostStreamDetail
   };
 };
 
+/** Replay requires a completed verified recording matching the chain's committed pointer. */
+function recordingDetail(detail: HostStreamDetail, body?: string): HostStreamDetail {
+  if (!body) return detail;
+  try {
+    const record = JSON.parse(body) as { chain: string; marketId: string; status: HostStreamDetail["recordingStatus"]; pointer?: { id: string; url: string }; durationSeconds: number };
+    if (record.chain !== detail.chain || record.marketId !== detail.marketId || !["recording", "processing", "ready", "failed"].includes(record.status ?? "")) throw new Error("Invalid recording metadata");
+    return { ...detail, recordingStatus: record.status,
+      ...(!detail.stale && detail.streamStatus === "ended" && record.status === "ready" && record.pointer?.id === detail.replayPointerId && /^https?:\/\//.test(record.pointer?.url ?? "") && Number.isFinite(record.durationSeconds) && record.durationSeconds > 0
+        ? { replay: { pointerId: record.pointer!.id, url: record.pointer!.url, format: "hls" as const, durationSeconds: record.durationSeconds } } : {}),
+    };
+  } catch { return { ...detail, recordingStatus: "failed" }; }
+}
+
 export const createCatalogReadModel = (
   config: CatalogReadModelConfig,
 ): CatalogReadModel => {
@@ -74,6 +87,7 @@ export const createCatalogReadModel = (
         markets: await mq.orderBy("updated_at", "desc").execute(),
         vaults: await vq.execute(),
         resolutions: await rq.execute(),
+        recordings: await tx.selectFrom("recordings").selectAll().execute(),
       };
     });
     const health = config.health?.();
@@ -142,9 +156,11 @@ export const createCatalogReadModel = (
         ? { oldestIndexedAtMs: Math.min(...markets.map((m) => m.updated_at)) }
         : {}),
     };
+    const recordings = new Map(snapshot.recordings.map(row => [`${row.chain}:${row.market_id}`, row.body]));
+    const withRecording = (m: Market) => recordingDetail(detail(m, nowMs, health), recordings.get(key(m.chain, m.id)));
     const streams = markets.map((m) => ({
       ...marketRowToSummary(m, nowMs),
-      ...detail(m, nowMs, health),
+      ...withRecording(m),
     }));
     const totals = new Map<string, { pooled: number; active: number }>();
     for (const vault of vaults) {
@@ -221,7 +237,7 @@ export const createCatalogReadModel = (
       homepage,
       catalog: { streams, indexing },
       streams: Object.fromEntries(
-        markets.map((m) => [key(m.chain, m.route_id), detail(m, nowMs, health)]),
+        markets.map((m) => [key(m.chain, m.route_id), withRecording(m)]),
       ),
     };
   };
@@ -242,7 +258,10 @@ export const createCatalogReadModel = (
           (!health || health.availableChains.includes(row.chain)),
       );
       if (matches.length > 1) throw new Error("ambiguous_stream_chain");
-      return matches[0] ? detail(matches[0], now(), health) : null;
+      if (!matches[0]) return null;
+      const m = matches[0];
+      const recording = await config.db.selectFrom("recordings").select("body").where("chain", "=", m.chain).where("market_id", "=", m.id).executeTakeFirst();
+      return recordingDetail(detail(m, now(), health), recording?.body);
     },
   };
 };

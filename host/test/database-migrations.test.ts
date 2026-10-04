@@ -46,3 +46,14 @@ it('refuses unknown history without erasing existing migration records', async (
   await expect(migrateToLatest(handle.db)).rejects.toThrow('unrecognized migration history');
   expect(history(handle)).toEqual(before);
 });
+
+it('adds recording metadata to an already-applied baseline without losing existing documents', async () => {
+  const handle = database();
+  await migrateToLatest(handle.db);
+  await handle.db.insertInto('vault_mandates').values({digest:'keep',body:Buffer.from('keep')}).execute();
+  handle.sqlite.exec('DROP TABLE recordings');
+  await migrateToLatest(handle.db);
+  expect((await handle.db.introspection.getTables()).map(table=>table.name)).toContain('recordings');
+  expect(await handle.db.selectFrom('vault_mandates').selectAll().execute()).toHaveLength(1);
+  expect(history(handle)).toEqual([{name:BASELINE_NAME}]);
+});

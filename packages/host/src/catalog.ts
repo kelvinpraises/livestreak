@@ -28,6 +28,8 @@ export const HostStreamSummary = Schema.Struct({
   totalPooled: Schema.optional(Schema.Number),
   // Settled on-chain aggregate; present only when it diverges from the effective totalPooled.
   settledPooled: Schema.optional(Schema.Number),
+  recordingStatus: Schema.optional(Schema.Literal("recording", "processing", "ready", "failed")),
+  replay: Schema.optional(Schema.Struct({ pointerId: Schema.String, url: Schema.String, format: Schema.Literal("hls"), durationSeconds: Schema.Number })),
   chain: CatalogChain
 });
 export type HostStreamSummary = Schema.Schema.Type<typeof HostStreamSummary>;

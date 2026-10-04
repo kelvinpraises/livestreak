@@ -1,3 +1,5 @@
+import type { Kysely } from "kysely";
+import type { DB } from "../../database/schema.js";
 import type { RecordingReceipt, RecordingScope } from "@livestreak/host";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
@@ -45,16 +47,9 @@ const scopeId = (s: RecordingScope): string => {
     encoder.encode(JSON.stringify([s.chain, s.marketId.toLowerCase(), s.runId])),
   );
 };
-const key = (id: string): string => {
+const validateId = (id: string): void => {
   if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Invalid recording id");
-  return `recordings/${id}.json`;
 };
-const missing = (e: unknown): boolean =>
-  !!e &&
-  typeof e === "object" &&
-  (("name" in e && (e.name === "NoSuchKey" || e.name === "NotFound")) ||
-    ("$metadata" in e &&
-      (e.$metadata as { httpStatusCode?: number })?.httpStatusCode === 404));
 const receipt = (s: State): RecordingReceipt => ({
   chain: s.chain,
   marketId: s.marketId,
@@ -96,6 +91,7 @@ const readPublic = async (url: string, maxBytes: number): Promise<Uint8Array> =>
 export const createRecordingService = (
   objects: ObjectStore | null,
   accessToken: string | null,
+  db: Kysely<DB>,
 ): RecordingService => {
   const active = new Set<string>();
   const store = (): ObjectStore => {
@@ -103,10 +99,10 @@ export const createRecordingService = (
     return objects;
   };
   const load = async (id: string): Promise<State | null> => {
-    try {
-      const state = JSON.parse(
-        new TextDecoder().decode(await store().get(key(id), 8 * 1024 * 1024)),
-      ) as State;
+    validateId(id);
+    const row = await db.selectFrom("recordings").selectAll().where("id", "=", id).executeTakeFirst();
+    if (!row) return null;
+    const state = JSON.parse(row.body) as State;
       if (
         scopeId(state) !== id ||
         state.id !== id ||
@@ -127,14 +123,11 @@ export const createRecordingService = (
         await save(state);
       }
       return state;
-    } catch (e) {
-      if (missing(e)) return null;
-      throw e;
-    }
   };
   const save = async (s: State): Promise<void> => {
     s.updatedAtMs = Date.now();
-    await store().put(key(s.id), encoder.encode(JSON.stringify(s)), "application/json");
+    const result = await db.updateTable("recordings").set({ body: JSON.stringify(s) }).where("id", "=", s.id).executeTakeFirst();
+    if (result.numUpdatedRows !== 1n) throw new Error("Recording metadata unavailable");
   };
   const token = (id: string): string =>
     createHmac("sha256", accessToken ?? "")
@@ -207,31 +200,13 @@ export const createRecordingService = (
         parts: [],
         updatedAtMs: Date.now(),
       };
-      const marketKey = `recording-markets/${scope.chain}/${scope.marketId.toLowerCase()}.json`;
-      const bound = await store().create(
-        marketKey,
-        encoder.encode(JSON.stringify({ id })),
-        "application/json",
-      );
-      if (!bound) {
-        const binding = JSON.parse(
-          new TextDecoder().decode(await store().get(marketKey)),
-        ) as { id: string };
-        if (binding.id !== id)
-          throw new Error("This market already belongs to another recording run");
-      }
-      if (
-        !(await store().create(
-          key(id),
-          encoder.encode(JSON.stringify(state)),
-          "application/json",
-        ))
-      ) {
-        const present = await load(id);
-        if (!present) throw new Error("Recording state unavailable");
-        return { ...receipt(present), ingestToken: token(id) };
-      }
-      return { ...receipt(state), ingestToken: token(id) };
+      await db.insertInto("recordings").values({ id, chain: state.chain, market_id: state.marketId, run_id: state.runId, body: JSON.stringify(state), lease_claimed: 0 }).onConflict(oc => oc.doNothing()).execute();
+      const bound = await db.selectFrom("recordings").selectAll().where("chain", "=", scope.chain).where("market_id", "=", state.marketId).executeTakeFirstOrThrow();
+      if (bound.id !== id) throw new Error("This market already belongs to another recording run");
+      const present = await load(id);
+      if (!present) throw new Error("Recording state unavailable");
+      return { ...receipt(present), ingestToken: token(id) };
+
     },
     async read(scope) {
       const state = await load(scopeId(scope));
@@ -240,20 +215,9 @@ export const createRecordingService = (
     async forMarket(chain, marketId) {
       if (!["evm", "solana", "sui"].includes(chain) || !/^0x[a-f0-9]{64}$/i.test(marketId))
         throw new Error("Invalid recording market");
-      try {
-        const binding = JSON.parse(
-          new TextDecoder().decode(
-            await store().get(`recording-markets/${chain}/${marketId.toLowerCase()}.json`),
-          ),
-        ) as { id: string };
-        const s = await load(binding.id);
-        if (s && (s.chain !== chain || s.marketId !== marketId.toLowerCase()))
-          throw new Error("Recording market binding mismatch");
-        return s ? receipt(s) : null;
-      } catch (e) {
-        if (missing(e)) return null;
-        throw e;
-      }
+      const binding = await db.selectFrom("recordings").select("id").where("chain", "=", chain).where("market_id", "=", marketId.toLowerCase()).executeTakeFirst();
+      const state = binding ? await load(binding.id) : null;
+      return state ? receipt(state) : null;
     },
     async byId(id) {
       const state = await load(id);
@@ -279,16 +243,8 @@ export const createRecordingService = (
         const s = await load(id);
         if (!s || s.status !== "recording" || s.parts.length || s.init)
           throw new Error("Recording cannot be restarted; use a new observation");
-        if (
-          !(await store().create(
-            `recordings/${id}.lease`,
-            encoder.encode("claimed"),
-            "text/plain",
-          ))
-        )
-          throw new Error(
-            "Recording producer lease already claimed; interrupted streams cannot restart silently",
-          );
+        const claimed = await db.updateTable("recordings").set({ lease_claimed: 1 }).where("id", "=", id).where("lease_claimed", "=", 0).executeTakeFirst();
+        if (claimed.numUpdatedRows !== 1n) throw new Error("Recording producer lease already claimed; interrupted streams cannot restart silently");
         let clock: VideoClock | undefined;
         let queue = Promise.resolve();
         let buffered = 0;

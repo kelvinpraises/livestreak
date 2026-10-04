@@ -1,3 +1,5 @@
+import { createDatabase } from "../src/database/connection.js";
+import { migrateToLatest } from "../src/database/migrations/index.js";
 /** Opt-in cloud proof. Run from repo root with Node --env-file=.env --conditions=livestreak-dev --import tsx host/scripts/prove-cloud-replay.ts. */
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -20,7 +22,9 @@ if (!config || !accessToken)
   throw new Error("Cloud storage and private Host credential required");
 const store = createS3ObjectStore(config);
 await store.check();
-const recordings = createRecordingService(store, accessToken);
+const database = createDatabase();
+await migrateToLatest(database.db);
+const recordings = createRecordingService(store, accessToken, database.db);
 const app = express();
 app.use(express.json());
 app.use(
@@ -128,7 +132,7 @@ try {
   if (transportError) throw transportError;
   if (receipt?.status !== "ready")
     throw new Error(`Recording did not finalize: ${receipt?.error ?? receipt?.status}`);
-  const recovered = await createRecordingService(store, accessToken).read(scope);
+  const recovered = await createRecordingService(store, accessToken, database.db).read(scope);
   const proof = {
     receipt: recovered,
     startRss,
@@ -140,6 +144,7 @@ try {
   console.log(JSON.stringify(proof));
 } finally {
   clearInterval(sample);
+  await database.close();
   producer.kill();
   for (const client of wss.wss.clients) client.terminate();
   wss.close();

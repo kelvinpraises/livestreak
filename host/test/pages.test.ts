@@ -360,3 +360,25 @@ describe("discovery read-model: in-flight drip effective pool (pass-4)", () => {
     expect(home.body.protocolStats.totalVolume).toBe(cardPool);
   });
 });
+
+it('serves the same verified replay on homepage, full catalog and stream detail; hides mismatched or stale pointers', async () => {
+  const handle=createDatabase(':memory:'); migrateSync(handle.sqlite);
+  try {
+    const snap=snapshot('m1');
+    const indexer=createCatalogIndexer({db:handle.db,readers:providerFor(snap),baseUrl:'http://host',knownMarkets:()=>[{chain:'evm',marketId:'m1'}],now:()=>NOW});
+    await indexer.syncAll();
+    await handle.db.updateTable('markets').set({status:'ended',stream_scheme:'host',stream_id:'r',is_live:0}).where('id','=','m1').execute();
+    const record={chain:'evm',marketId:'m1',status:'ready',pointer:{id:'r',url:'https://media.example/r'},durationSeconds:2};
+    await handle.db.insertInto('recordings').values({id:'rec',chain:'evm',market_id:'m1',run_id:'run',body:JSON.stringify(record),lease_claimed:1}).execute();
+    const model=createCatalogReadModel({db:handle.db,now:()=>NOW});
+    const full=await model.full();
+    expect(full.homepage.streams[0].replay?.url).toBe(record.pointer.url);
+    expect(full.catalog.streams[0].replay).toEqual(full.homepage.streams[0].replay);
+    expect(full.streams['evm:m1'].replay).toEqual(full.homepage.streams[0].replay);
+    expect((await model.stream('m1','evm'))?.replay).toEqual(full.homepage.streams[0].replay);
+    await handle.db.updateTable('markets').set({stream_id:'other'}).where('id','=','m1').execute();
+    expect((await model.homepage()).streams[0].replay).toBeUndefined();
+    await handle.db.updateTable('markets').set({stream_id:'r',updated_at:NOW-60000}).where('id','=','m1').execute();
+    expect((await model.homepage()).streams[0].replay).toBeUndefined();
+  } finally {await handle.close();}
+});

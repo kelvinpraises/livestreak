@@ -233,6 +233,7 @@ export function StreamCard({ stream, index, entranceDelay = 1.15 }: { stream: Ho
               {!stream.stale && <SettledPoolSubline effective={stream.totalPooled} settled={stream.settledPooled} />}
             </div>
           </div>
+          {state === 'ended' && <p style={{ marginTop: 10, fontSize: 12, color: stream.replay ? '#00ff87' : 'rgba(255,255,255,0.45)' }}>{stream.replay ? 'Watch replay' : stream.recordingStatus === 'processing' ? 'Replay processing…' : stream.recordingStatus === 'recording' ? 'Recording finishing…' : 'No recording available'}</p>}
           {state === 'live' && stream.elapsed && (
             <div style={{ marginTop: 8 }}><span className="mono" style={{ fontSize: 10, color: 'rgba(255,255,255,0.22)' }}>{stream.elapsed}</span></div>
           )}

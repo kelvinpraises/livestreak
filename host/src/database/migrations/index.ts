@@ -33,6 +33,8 @@ export async function migrateToLatest(db: Kysely<DB>): Promise<void> {
   const migrator = new Migrator({ db, provider: { getMigrations: async () => ({ [BASELINE_NAME]: baseline }) } });
   const { error } = await migrator.migrateToLatest();
   if (error !== undefined) throw error instanceof Error ? error : new Error(String(error));
+  // Alpha baseline adds recording metadata to databases that already adopted the squash.
+  await sql.raw(baseline.RECORDINGS_DDL).execute(db);
 }
 
 /** Explicit test-only synchronous setup uses exactly the same schema and upgrade rules. */

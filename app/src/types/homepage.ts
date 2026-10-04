@@ -18,6 +18,8 @@ export interface HomepageStreamCard {
   stale?: boolean
   streamStatus?: 'none' | 'live' | 'ended'
   isLive: boolean
+  recordingStatus?: 'recording' | 'processing' | 'ready' | 'failed'
+  replay?: { pointerId: string; url: string; format: 'hls'; durationSeconds: number }
   chain?: HomepageChain
 }
 

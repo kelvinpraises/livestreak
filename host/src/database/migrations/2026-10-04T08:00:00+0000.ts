@@ -1,6 +1,18 @@
 import { sql, type Kysely } from "kysely";
 
 /** Complete Host schema, shared by production migration and isolated test fixtures. */
+export const RECORDINGS_DDL = `
+CREATE TABLE IF NOT EXISTS recordings (
+  id TEXT PRIMARY KEY,
+  chain TEXT NOT NULL,
+  market_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  body TEXT NOT NULL,
+  lease_claimed INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (chain, market_id)
+);
+`;
+
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS markets (
   id            TEXT NOT NULL,
@@ -82,6 +94,7 @@ CREATE TABLE IF NOT EXISTS forum_messages (
 
 CREATE INDEX IF NOT EXISTS idx_forum_messages_subject ON forum_messages (subject_kind, subject_id);
 
+${RECORDINGS_DDL}
 CREATE TABLE IF NOT EXISTS vault_mandates (digest TEXT PRIMARY KEY, body BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS resolution_records (digest TEXT PRIMARY KEY, chain_id TEXT NOT NULL, vault_id TEXT NOT NULL, body BLOB NOT NULL);
 CREATE INDEX IF NOT EXISTS resolution_scope ON resolution_records(chain_id, vault_id);

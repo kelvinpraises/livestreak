@@ -10,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   wallet: { usdcBalance: 100, canTopUp: true, isToppingUp: false, topUp: vi.fn(async () => {}) }, fixture: false,
 }))
 vi.mock('../src/providers/options-provider', () => ({ useOptionsContext: () => mocks.options }))
-vi.mock('../src/hooks/use-fixture-mode', () => ({ usePreferFixture: () => mocks.fixture }))
 vi.mock('../src/hooks/use-funding-rules', () => ({ useFundingRules: () => mocks.rules }))
 vi.mock('../src/hooks/use-wallet-actions', () => ({ useWalletActions: () => mocks.wallet }))
 vi.mock('../src/hooks/use-vault-views', () => ({ useVaultView: () => ({}) }))

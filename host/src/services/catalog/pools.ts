@@ -7,7 +7,11 @@ import {
 // USDC base unit scale (6 decimals) — vault pools are bigint USDC base units on all chains.
 const USDC_SCALE = 1_000_000;
 
-export const usdcFromBase = (value: bigint): number => Number(value) / USDC_SCALE;
+export const usdcFromBase = (value: bigint): number => {
+  const amount = Number(value) / USDC_SCALE;
+  if (value < 0n || !Number.isFinite(amount)) throw new Error("Invalid indexed pool amount");
+  return amount;
+};
 
 /** Cent-rounded USDC float from a vault pool total in base units. */
 export const vaultPoolUsdc = (yes: bigint, no: bigint): number =>

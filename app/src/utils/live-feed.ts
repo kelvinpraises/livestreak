@@ -16,7 +16,8 @@ export function shouldUseLiveFeed(
   host: StreamFeedDetail | null | undefined,
 ): boolean {
   if (pointer?.status === 'ended' || host?.streamStatus === 'ended') return false
-  return pointer?.status === 'live' || host?.isLive === true
+  if (host) return !host.stale && host.isLive
+  return false
 }
 
 /** Sticky-latched live eligibility, scoped to one streamId. */

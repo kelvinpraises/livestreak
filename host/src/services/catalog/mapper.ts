@@ -36,13 +36,13 @@ const usdc = usdcFromBase;
 // Routing every effective pool read through one cent-rounded formula means the homepage vault
 // card and the per-stream pool can never drift. (pass-4 pool UX.)
 
-// Parse a base-unit USDC string (DB row column) back to bigint; malformed text -> 0n so one
-// bad row never NaNs the whole rail.
+// Corrupt/negative unsigned amounts are data errors, never a valid zero pool.
 const toBaseUnits = (text: string): bigint => {
   try {
+    if (!/^\d+$/u.test(text)) throw new Error("Invalid unsigned amount");
     return BigInt(text);
   } catch {
-    return 0n;
+    throw new Error("Invalid indexed pool amount");
   }
 };
 
@@ -106,8 +106,8 @@ export const mapMarket = (
 ): MappedMarket => {
   const marketId = String(snap.market.marketId);
   const title = snap.market.title;
-  const category = snap.market.category ?? "Live";
-  const isLive = snap.streamState?.status !== "ended" && (snap.streamState?.status === "live" || liveSignal === true);
+  const category = !snap.market.category || snap.market.category.toLowerCase() === "live" ? "Uncategorized" : snap.market.category;
+  const isLive = snap.streamState?.status !== "ended" && (liveSignal ?? snap.streamState?.status === "live");
 
   const fromMs =
     snap.streamState?.updatedAtMs ?? snap.market.timing?.createdAtMs ?? nowMs;
@@ -118,6 +118,7 @@ export const mapMarket = (
   const lifetimeVaults: HomepageLifetimeVaultRaw[] = [];
 
   for (const vault of snap.vaults) {
+    if (vault.status === "resolved" && vault.outcome !== "yes" && vault.outcome !== "no") throw new Error("Resolved vault has no valid outcome");
     const snapshot = vaultSnapshots?.get(String(vault.vaultId));
     const pools = projectVaultPools(vault, snapshot, nowMs);
     const effectivePool = vaultPoolUsdc(pools.liveYes, pools.liveNo);
@@ -144,14 +145,16 @@ export const mapMarket = (
     }
 
     if (vault.status === "resolved" && (vault.outcome === "yes" || vault.outcome === "no")) {
-      const resolvedAtMs = vault.timing.resolvedAtMs ?? vault.timing.expiresAtMs;
+      const resolvedAtMs = vault.timing.resolvedAtMs ?? 0;
       lifetimeVaults.push({
         id: String(vault.vaultId),
+        streamId: marketId,
         option: vault.question,
         streamTitle: title,
         outcome: vault.outcome,
         totalPool: settledPool,
-        resolvedAgoMs: Math.max(0, nowMs - resolvedAtMs),
+        resolutionTimeKnown: resolvedAtMs > 0,
+        resolvedAgoMs: resolvedAtMs > 0 ? Math.max(0, nowMs - resolvedAtMs) : 0,
         yesTotal: usdc(pools.settledYes),
         noTotal: usdc(pools.settledNo),
         chain
@@ -167,7 +170,8 @@ export const mapMarket = (
     title,
     category,
     isLive,
-    elapsed: formatElapsed(fromMs, nowMs),
+    streamStatus: snap.streamState?.status ?? "none",
+    elapsed: snap.streamState?.status === "ended" ? "" : formatElapsed(fromMs, nowMs),
     activeVaults,
     totalPooled,
     chain
@@ -217,9 +221,9 @@ import type {
 
 const poolUsdc = (text: string): number => {
   try {
-    return usdcFromBase(BigInt(text));
+    return usdcFromBase(toBaseUnits(text));
   } catch {
-    return 0;
+    throw new Error("Invalid indexed pool amount");
   }
 };
 
@@ -249,8 +253,8 @@ export const snapshotToRows = (
 ): MarketRows => {
   const marketId = String(snap.market.marketId);
   const title = snap.market.title;
-  const category = snap.market.category ?? "Live";
-  const isLive = snap.streamState?.status !== "ended" && (snap.streamState?.status === "live" || liveSignal === true);
+  const category = !snap.market.category || snap.market.category.toLowerCase() === "live" ? "Uncategorized" : snap.market.category;
+  const isLive = snap.streamState?.status !== "ended" && (liveSignal ?? snap.streamState?.status === "live");
   const fromMs =
     snap.streamState?.updatedAtMs ?? snap.market.timing?.createdAtMs ?? nowMs;
   const watchUrl = watchUrlFor(snap, baseUrl);
@@ -261,6 +265,7 @@ export const snapshotToRows = (
   const resolutions: NewResolution[] = [];
 
   for (const vault of snap.vaults) {
+    if (vault.status === "resolved" && vault.outcome !== "yes" && vault.outcome !== "no") throw new Error("Resolved vault has no valid outcome");
     const snapshot = vaultSnapshots?.get(String(vault.vaultId));
     const pools = projectVaultPools(vault, snapshot, nowMs);
     const effectivePool = vaultPoolUsdc(pools.liveYes, pools.liveNo);
@@ -299,7 +304,7 @@ export const snapshotToRows = (
         outcome: vault.outcome as string,
         yes_total: pools.settledYes.toString(),
         no_total: pools.settledNo.toString(),
-        resolved_at: vault.timing.resolvedAtMs ?? vault.timing.expiresAtMs
+        resolved_at: vault.timing.resolvedAtMs ?? 0
       });
     }
   }
@@ -311,6 +316,8 @@ export const snapshotToRows = (
     title,
     category,
     stream_id: snap.streamState?.id ?? "",
+    stream_scheme: snap.streamState?.scheme ?? "",
+    ended_at_ms: snap.streamState?.status === "ended" ? snap.streamState.endedAtMs || null : null,
     status: snap.streamState?.status ?? "none",
     is_live: isLive ? 1 : 0,
     watch_url: watchUrl ?? null,
@@ -331,7 +338,9 @@ export const marketRowToSummary = (m: Market, nowMs: number): HostStreamSummary 
   title: m.title,
   category: m.category,
   isLive: m.status !== "ended" && m.is_live === 1,
-  elapsed: formatElapsed(m.from_ms, nowMs),
+  streamStatus: m.status === "ended" ? "ended" : m.status === "live" ? "live" : "none",
+  elapsed: m.status === "ended" ? "" : formatElapsed(m.from_ms, nowMs),
+  indexedAtMs: m.updated_at,
   activeVaults: m.active_vaults,
   totalPooled: m.total_pooled,
   chain: m.chain
@@ -344,6 +353,8 @@ export const marketRowToDetail = (m: Market): HostStreamDetail => ({
   category: m.category,
   isLive: m.status !== "ended" && m.is_live === 1,
   streamStatus: m.status === "ended" ? "ended" : m.status === "live" ? "live" : "none",
+  indexedAtMs: m.updated_at,
+  ...(m.status === "ended" && m.stream_scheme === "host" ? { replayPointerId: m.stream_id } : {}),
   activeVaults: m.active_vaults,
   totalPooled: m.total_pooled,
   chain: m.chain,
@@ -360,9 +371,8 @@ export const vaultRowToLiveRaw = (
   const liveNo = toBaseUnits(v.live_no_pool);
   const settledYes = toBaseUnits(v.yes_pool);
   const settledNo = toBaseUnits(v.no_pool);
-  const useLive = liveYes + liveNo > 0n;
-  const effectiveYes = useLive ? liveYes : settledYes;
-  const effectiveNo = useLive ? liveNo : settledNo;
+  const effectiveYes = liveYes;
+  const effectiveNo = liveNo;
   const effectivePool = vaultPoolUsdc(effectiveYes, effectiveNo);
   const settledPool = vaultPoolUsdc(settledYes, settledNo);
   return {
@@ -386,15 +396,18 @@ export const resolutionRowToLifetime = (
   streamTitle: string,
   nowMs: number
 ): HomepageLifetimeVaultRaw => {
+  if (r.outcome !== "yes" && r.outcome !== "no") throw new Error("Invalid indexed outcome");
   const yes = poolUsdc(r.yes_total);
   const no = poolUsdc(r.no_total);
   return {
     id: r.vault_id,
+    streamId: r.market_id,
     option: question,
     streamTitle,
-    outcome: r.outcome === "no" ? "no" : "yes",
+    outcome: r.outcome,
     totalPool: vaultPoolUsdc(toBaseUnits(r.yes_total), toBaseUnits(r.no_total)),
-    resolvedAgoMs: Math.max(0, nowMs - r.resolved_at),
+    resolutionTimeKnown: r.resolved_at > 0,
+    resolvedAgoMs: r.resolved_at > 0 ? Math.max(0, nowMs - r.resolved_at) : 0,
     yesTotal: yes,
     noTotal: no,
     chain: r.chain

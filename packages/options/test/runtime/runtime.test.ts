@@ -115,6 +115,23 @@ describe("options runtime config", () => {
 });
 
 describe("options runtime store and refresh", () => {
+  it("preserves the last complete board and exposes failed refreshes until recovery", async () => {
+    const reader = createFakeOptionsReader(fixtureSeed());
+    const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));
+    await runtime.refreshUser(fixtureUser(), asMarketId("market_01"));
+    const before = runtime.readBoard().snapshot;
+    const observed: Array<string | undefined> = [];
+    runtime.subscribeBoard(board => observed.push(board.dataError));
+    const failure = vi.spyOn(reader, "readStreamState").mockRejectedValue(new Error("RPC offline"));
+    await expect(runtime.refreshUser(fixtureUser(), asMarketId("market_01"))).rejects.toThrow("Failed to read stream state");
+    expect(runtime.readBoard().snapshot).toEqual(before);
+    expect(runtime.readBoard().dataError).toContain("stream state");
+    expect(observed.at(-1)).toContain("stream state");
+    failure.mockRestore();
+    await runtime.refreshUser(fixtureUser(), asMarketId("market_01"));
+    expect(runtime.readBoard().dataError).toBeUndefined();
+    expect(observed.at(-1)).toBeUndefined();
+  });
   it("refreshMarket stores market snapshot", async () => {
     const reader = createFakeOptionsReader(fixtureSeed());
     const runtime = createOptionsRuntime(baseInput({ reader, writer: createFakeChainWriter() }));

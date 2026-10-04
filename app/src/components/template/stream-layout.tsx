@@ -8,15 +8,13 @@ import { VideoPlayer } from '#/components/organisms/video-player.tsx'
 import { NikoNikoCard } from '#/components/molecules/niko-niko-card.tsx'
 import { VaultList } from '#/components/organisms/vault-list.tsx'
 import { WalletControls } from '#/components/molecules/wallet-controls.tsx'
-import { DemoEdgeToggle } from '#/components/molecules/demo-edge-toggle'
-import { usePreferFixture } from '#/hooks/use-fixture-mode'
 import { useVaults } from '#/hooks/use-vaults.ts'
 import { usePositions } from '#/hooks/use-positions.ts'
 import { useWebSocket } from '#/hooks/use-websocket.ts'
 import { useFlow } from '#/hooks/use-flow.ts'
 import { useWalletContext } from '#/providers/wallet-provider.tsx'
 import { useOptionsContext } from '#/providers/options-provider.tsx'
-import { useHostStream } from '#/hooks/use-host-stream.ts'
+import type { useHostStream } from '#/hooks/use-host-stream.ts'
 import { env, isOptionsModeEnabled } from '#/utils/env.ts'
 import { panelToStream } from '#/utils/options'
 import { resolveStreamFeed } from '#/utils/stream'
@@ -33,33 +31,33 @@ interface StreamLayoutProps {
   totalPooled: number
   totalPooledRatePerSec?: number
   streamId: string
+  hostStream: ReturnType<typeof useHostStream>
+  requestedVaultId?: string
 }
 
-export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRatePerSec, streamId }: StreamLayoutProps) {
+export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRatePerSec, streamId, requestedVaultId, hostStream }: StreamLayoutProps) {
   const vaults = useVaults(streamId)
   const positions = usePositions(streamId)
-  const { frame, events } = useWebSocket()
+  const { events } = useWebSocket()
   const { legacyWallet } = useWalletContext()
-  const { flow, stake, unstake, claimDividends, claiming } = useFlow()
+  const { flow } = useFlow()
   const { board, fundStream, isConnected: optionsConnected, setActiveMarketId, chain, setChain, claiming: walletBusy } = useOptionsContext()
   const optionsEnabled = isOptionsModeEnabled()
 
-  const fixture = usePreferFixture()
   const { notifications, push, dismiss } = useWinNotifications()
   const [selectedVaultId, setSelectedVaultId] = useState<string | null>(null)
 
-  // A4 + C: each stream resolves ITS OWN feed — the on-chain stream pointer (status + scheme/id) in
-  // live mode, falling back to this route's host/fixture stream detail (its own watch URL). No global
-  // hardcoded video: demo streams play their per-route fixture feed, live streams their market feed.
-  const hostStream = useHostStream(streamId)
-  const streamPointer = optionsEnabled && board
+  useEffect(() => { setSelectedVaultId(requestedVaultId ?? null) }, [streamId, requestedVaultId])
+
+  // Resolve this broadcast's chain pointer and Host playback source.
+  const hostDetail = hostStream.stream
+  const wrongChain = !!hostDetail?.chain && hostDetail.chain !== chain
+  const streamPointer = optionsEnabled && board && hostDetail && !wrongChain && !board.dataError
     ? panelToStream(board.panel, streamId)
     : undefined
-  const hostDetail = hostStream.stream
-  const wrongChain = !fixture && !!hostDetail?.chain && hostDetail.chain !== chain
   useEffect(() => {
-    if (optionsEnabled) setActiveMarketId(wrongChain ? undefined : hostDetail?.marketId ?? streamId)
-  }, [optionsEnabled, streamId, hostDetail?.marketId, wrongChain, setActiveMarketId])
+    if (optionsEnabled) setActiveMarketId(wrongChain || !hostDetail ? undefined : hostDetail.marketId)
+  }, [optionsEnabled, hostDetail?.marketId, wrongChain, setActiveMarketId])
 
   // Recomputed every ~3s board poll, so it FLICKERS — between polls the board can momentarily drop
   // this market or report a non-'live' status, flipping eligibility false→true.
@@ -99,16 +97,17 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
   ) => {
     const vault = vaults.find(v => v.vaultId === vaultId)
 
-    if (optionsEnabled && !fixture) {
+    if (optionsEnabled) {
       if (wrongChain) throw new Error('Switch to the market’s network before funding.')
+      if (!hostDetail || hostDetail.stale || board?.dataError) throw new Error('Refresh market data before funding.')
       if (!optionsConnected) throw new Error('Connect your wallet before funding.')
       const txId = await fundStream(vaultId, side, rate)
       push({ type: 'stream', rate, side, option: vault?.question ?? vaultId, txId })
     } else {
-      push({ type: 'stream', rate, side, option: vault?.question ?? vaultId, mock: true })
+      throw new Error('Funding is unavailable: options runtime is disabled.')
     }
     // Keep the question and player mounted so confirmation stays beside the stream.
-  }, [vaults, push, optionsEnabled, optionsConnected, fundStream, fixture, wrongChain])
+  }, [vaults, push, optionsEnabled, optionsConnected, fundStream, wrongChain, hostDetail, board?.dataError])
 
   // S3/A2 — a thin, programmatic commit seam so accessibility tooling and headless E2E can fund a
   // vault WITHOUT synthesizing a sub-pixel OS mouse drag on the slider. Takes a total USDC amount
@@ -190,19 +189,20 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
           }}>{category}</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <DemoEdgeToggle />
           <WalletControls />
         </div>
       </div>
 
       {/* Stream bar */}
-      <StreamBar status={streamEnded ? 'ended' : liveEnabled || fixture ? 'live' : 'offline'} frame={frame} streamTitle={streamTitle} totalPooled={totalPooled} totalPooledRatePerSec={totalPooledRatePerSec} />
+      <StreamBar verified={!!hostDetail && !hostDetail.stale} status={hostDetail?.stale ? 'stale' : !hostStream.ready ? 'loading' : !hostDetail ? 'unavailable' : streamEnded ? 'ended' : hostDetail.isLive ? 'live' : 'offline'} streamTitle={streamTitle} totalPooled={totalPooled} totalPooledRatePerSec={totalPooledRatePerSec} />
 
       {/* Main content: LEFT video + RIGHT predictions */}
       <div className="stream-split" style={{ flex: 1, display: 'flex', position: 'relative', zIndex: 1, overflow: 'hidden' }}>
         {/* LEFT — Video (60%) */}
         <div className="stream-video-pane" style={{ flex: '3 1 60%', minWidth: 0, position: 'relative', borderRight: '1px solid rgba(255,255,255,0.06)' }}>
-          <VideoPlayer streamTitle={streamTitle} media={streamMedia} ready={hostStream.ready} />
+          {hostDetail?.stale && <p role="status" style={{ position: 'absolute', bottom: 12, left: 12, zIndex: 20, color: '#ffd553' }}>Last observed stream state · index refresh failed or is stale.</p>}
+          {hostStream.error && <p role="alert" style={{ position: 'absolute', top: 12, left: 12, zIndex: 20, color: '#ffd553' }}>Stream details unavailable. Retrying…</p>}
+          <VideoPlayer media={streamMedia} ready={hostStream.ready} />
 
           {/* NikoNiko floating cards */}
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden', zIndex: 10 }}>
@@ -224,7 +224,7 @@ export function StreamLayout({ streamTitle, category, totalPooled, totalPooledRa
       </div>
 
       {/* Balance bar */}
-      <BalanceBar flow={flow} wallet={legacyWallet} onStake={stake} onUnstake={unstake} onClaim={claimDividends} claiming={claiming} />
+      <BalanceBar flow={flow} wallet={legacyWallet} />
 
       {/* Overlays */}
       <WinNotification notifications={notifications} onDismiss={dismiss} />

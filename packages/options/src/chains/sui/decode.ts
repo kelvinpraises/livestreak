@@ -307,6 +307,7 @@ export const mapSuiLvstAccount = (
 });
 
 export type SuiContractsReadEntity =
+  | "hot state"
   | "market"
   | "market ids"
   | "protocol summary"

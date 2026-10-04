@@ -93,7 +93,7 @@ err()  { echo -e "${R}✗${N} $1"; }
 # otherwise, once the lsof sweep frees port 8787, the surviving watcher respawns the server onto it.
 # The plain "tsx src/main.ts" pattern does NOT match a `tsx watch` argv, so "tsx watch src/main.ts" is a
 # distinct entry. assert_kill_patterns() guards this coupling statically at boot.
-KILL_PATTERNS=("remote open" "tsx watch src/main.ts" "tsx src/main.ts" "vite dev --port 3000" "alto --entrypoints" "anvil")
+KILL_PATTERNS=("remote open" "tsx watch src/main.ts" "tsx src/main.ts" "node --env-file-if-exists=../.env --import tsx --watch src/main.ts" "node --env-file-if-exists=../.env --import tsx src/main.ts" "vite dev --port 3000" "alto --entrypoints" "anvil")
 kill_servers() {
   local pat p
   for pat in "${KILL_PATTERNS[@]}"; do
@@ -615,7 +615,10 @@ role_address() {
 # vaults from a previous boot that no longer exist.
 host_up() {
   log "Starting host server..."
-  ( cd "$ROOT/host" && LIVESTREAK_AA_ALLOW_DEV_KEY=1 LIVESTREAK_RESET_CATALOG=1 npm run dev ) > /tmp/livestreak-host.log 2>&1 &
+  local catalog_chains="evm"
+  [ "$WITH_SUI" = "1" ] && catalog_chains="$catalog_chains,sui"
+  [ "$WITH_SOLANA" = "1" ] && catalog_chains="$catalog_chains,solana"
+  ( cd "$ROOT/host" && LIVESTREAK_CATALOG_CHAINS="$catalog_chains" LIVESTREAK_AA_ALLOW_DEV_KEY=1 LIVESTREAK_RESET_CATALOG=1 npm run dev ) > /tmp/livestreak-host.log 2>&1 &
   HOST_PID=$!
   local host_ready=0
   for _ in $(seq 1 40); do

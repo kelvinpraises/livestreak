@@ -20,6 +20,9 @@ export const HostStreamSummary = Schema.Struct({
   title: Schema.String,
   category: Schema.String,
   isLive: Schema.Boolean,
+  indexedAtMs: Schema.optional(Schema.Number),
+  stale: Schema.optional(Schema.Boolean),
+  streamStatus: Schema.optional(Schema.Literal("none", "live", "ended")),
   elapsed: Schema.optional(Schema.String),
   activeVaults: Schema.optional(Schema.Number),
   totalPooled: Schema.optional(Schema.Number),
@@ -38,6 +41,8 @@ export const HostStreamDetail = Schema.Struct({
   category: Schema.String,
   watchUrl: Schema.optional(Schema.String),
   isLive: Schema.Boolean,
+  indexedAtMs: Schema.optional(Schema.Number),
+  stale: Schema.optional(Schema.Boolean),
   streamStatus: Schema.optional(Schema.Literal("none", "live", "ended")),
   replayPointerId: Schema.optional(Schema.String),
   recordingStatus: Schema.optional(Schema.Literal("recording", "processing", "ready", "failed")),
@@ -48,14 +53,10 @@ export const HostStreamDetail = Schema.Struct({
 });
 export type HostStreamDetail = Schema.Schema.Type<typeof HostStreamDetail>;
 
-// app/src/types/host-edge.ts -> HostCatalog.
-export const HostCatalog = Schema.Struct({
-  streams: Schema.Array(HostStreamSummary)
-});
-export type HostCatalog = Schema.Schema.Type<typeof HostCatalog>;
-
 // app/src/types/demo.ts -> HomepageLiveVaultRaw (+ chain tag).
 export const HomepageLiveVaultRaw = Schema.Struct({
+  indexedAtMs: Schema.optional(Schema.Number),
+  stale: Schema.optional(Schema.Boolean),
   id: Schema.String,
   streamId: Schema.String,
   streamTitle: Schema.String,
@@ -72,7 +73,11 @@ export type HomepageLiveVaultRaw = Schema.Schema.Type<typeof HomepageLiveVaultRa
 
 // app/src/types/demo.ts -> HomepageLifetimeVaultRaw (+ chain tag).
 export const HomepageLifetimeVaultRaw = Schema.Struct({
+  indexedAtMs: Schema.optional(Schema.Number),
+  stale: Schema.optional(Schema.Boolean),
+  resolutionTimeKnown: Schema.optional(Schema.Boolean),
   id: Schema.String,
+  streamId: Schema.optional(Schema.String),
   option: Schema.String,
   streamTitle: Schema.String,
   outcome: Schema.Literal("yes", "no"),
@@ -94,7 +99,35 @@ export type HomepageProtocolStatsRaw = Schema.Schema.Type<typeof HomepageProtoco
 
 // GET /homepage -> the homepage's whole payload in ONE fetch. `streams` is the catalog
 // rail; the vault rails + protocol stats are the homepage aggregate.
+export const CatalogIndexing = Schema.Struct({
+  status: Schema.Literal("fresh", "partial", "unavailable"),
+  generatedAtMs: Schema.Number,
+  staleMarkets: Schema.Number,
+  failedMarkets: Schema.Number,
+  failedChains: Schema.Array(CatalogChain),
+  availableChains: Schema.Array(CatalogChain),
+  verifiedChains: Schema.optional(Schema.Array(CatalogChain)),
+  statsScope: Schema.optional(Schema.Literal("complete", "verified-subset", "unavailable")),
+  chains: Schema.optional(Schema.Array(Schema.Struct({
+    chain: CatalogChain,
+    status: Schema.Literal("fresh", "partial", "unavailable"),
+    verifiedMarkets: Schema.Number,
+    staleMarkets: Schema.Number
+  }))),
+  oldestIndexedAtMs: Schema.optional(Schema.Number)
+});
+export type CatalogIndexing = Schema.Schema.Type<typeof CatalogIndexing>;
+
+// app/src/types/host-edge.ts -> HostCatalog.
+export const HostCatalog = Schema.Struct({
+  indexing: Schema.optional(CatalogIndexing),
+  streams: Schema.Array(HostStreamSummary)
+});
+export type HostCatalog = Schema.Schema.Type<typeof HostCatalog>;
+
+
 export const HomepageData = Schema.Struct({
+  indexing: Schema.optional(CatalogIndexing),
   streams: Schema.Array(HostStreamSummary),
   liveVaults: Schema.Array(HomepageLiveVaultRaw),
   lifetimeVaults: Schema.Array(HomepageLifetimeVaultRaw),
@@ -128,6 +161,7 @@ export type Agent = Schema.Schema.Type<typeof Agent>;
 
 // GET /agents -> the agents directory in ONE fetch.
 export const AgentsData = Schema.Struct({
+  source: Schema.optional(Schema.Literal("configured", "unavailable")),
   agents: Schema.Array(Agent)
 });
 export type AgentsData = Schema.Schema.Type<typeof AgentsData>;

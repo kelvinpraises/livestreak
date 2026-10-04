@@ -231,7 +231,8 @@ export class FakeReaderInMemory implements OptionsReader {
   async readStreamState(marketId: MarketId): Promise<OptionsStreamState> {
     const state = this.streamStates.get(marketId);
     if (state === undefined) {
-      throw notFound("stream state", marketId);
+      await this.readMarket(marketId);
+      return { status: "none", scheme: "host", id: "", updatedAtMs: 0, endedAtMs: 0 };
     }
 
     return state;

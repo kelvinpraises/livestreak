@@ -31,7 +31,6 @@ import {
 } from "./services/catalog/readers.js";
 import {
   createCatalogReadModel,
-  parseAgentsSeed,
   type CatalogReadModel
 } from "./services/catalog/read-model.js";
 import {
@@ -241,7 +240,7 @@ export interface CreateHostRouteDepsOptions extends CreateAaRouteDepsOptions {
   readonly catalogDb?: DatabaseHandle;
   // Force-enable/disable the cron loop; defaults to env-guarded (off in tests/CI).
   readonly cronEnabled?: boolean;
-  // Seed agents for /agents; defaults to LIVESTREAK_AGENTS_JSON.
+  // Explicit directory entries for embedding/tests. Production has no measured agent index.
   readonly agents?: readonly import("./services/catalog/types.js").Agent[];
 }
 
@@ -259,12 +258,10 @@ const buildCatalogStack = (
   const readers = options.catalogReaders ?? createEnvReaderProvider();
   const service = createCatalogService({
     readers,
-    baseUrl: config.baseUrl,
     defaultChain:
       (process.env.LIVESTREAK_CATALOG_DEFAULT_CHAIN as "evm" | "sui" | "solana" | undefined) ?? "evm",
     listDiscoveryMarketIds: () => store.listMarketIds(),
-    seedMarkets: parseSeedMarkets(process.env.LIVESTREAK_CATALOG_MARKETS),
-    ...(isStreamLive === undefined ? {} : { isStreamLive })
+    seedMarkets: parseSeedMarkets(process.env.LIVESTREAK_CATALOG_MARKETS)
   });
 
   // Under vitest/CI default to an isolated in-memory db (no file artifacts, no cross-test
@@ -284,7 +281,8 @@ const buildCatalogStack = (
   });
   const readModel = createCatalogReadModel({
     repo,
-    agents: options.agents ?? parseAgentsSeed(process.env.LIVESTREAK_AGENTS_JSON)
+    agents: options.agents,
+    health: indexer.health
   });
   const cron = registerCronJobs({
     indexer,

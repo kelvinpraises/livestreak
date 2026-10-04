@@ -172,7 +172,7 @@ class OptionsRuntimeFacade implements OptionsRuntime {
   readBoard(): OptionsBoard {
     const state = this.store.readState();
     const snapshot = this.userSnapshotOrEmpty();
-    return assembleBoard(state.revision, snapshot, this.projectPanel(snapshot));
+    return assembleBoard(state.revision, snapshot, this.projectPanel(snapshot), state.lastError?.message);
   }
 
   private projectPanel(snapshot: OptionsUserOptionsSnapshot): OptionsPanel {
@@ -676,7 +676,7 @@ class OptionsRuntimeFacade implements OptionsRuntime {
     if (state.userSnapshot !== undefined || this.config.user !== undefined) {
       const snapshot = this.userSnapshotOrEmpty();
       this.boardSubscriptions.notify(
-        assembleBoard(state.revision, snapshot, this.projectPanel(snapshot))
+        assembleBoard(state.revision, snapshot, this.projectPanel(snapshot), state.lastError?.message)
       );
     }
 

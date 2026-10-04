@@ -14,7 +14,7 @@ import type {
 } from '#/types/homepage'
 import { asMarketId, asVaultId } from '@livestreak/options'
 
-import type { FlowState, Position, VaultView } from '#/types/demo'
+import type { FlowState, Position, VaultView } from '#/types/ui'
 import type { StreamPointer } from '#/utils/stream'
 
 // The SDK board ships every amount (lanes, account, LVST, pnl, vault pools, accrual) already normalized

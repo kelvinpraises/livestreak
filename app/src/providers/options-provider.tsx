@@ -428,6 +428,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
 
   const applyBoard = useCallback((next: OptionsBoard) => {
     setBoard(next)
+    setError(next.dataError ?? null)
     const usdc = next.panel.user.usdcBalanceUSDC
     if (usdc !== undefined) {
       setUsdcBalance(usdc)
@@ -532,6 +533,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
       await bootRuntime(new Uint8Array(32), ANON_VIEWER[chainRef.current] as UserAddress)
     } catch (err) {
       console.error('[options] anonymous board boot failed', err)
+      setError(err instanceof Error ? err.message : String(err))
     }
   }, [bootRuntime])
 

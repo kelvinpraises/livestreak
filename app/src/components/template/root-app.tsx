@@ -1,10 +1,10 @@
 import { Link, Outlet, useRouterState } from '@tanstack/react-router'
 import { WalletControls } from '#/components/molecules/wallet-controls.tsx'
-import { DemoEdgeToggle } from '#/components/molecules/demo-edge-toggle'
 import { AppProviders } from '#/providers'
 
 const navLinks = [
   { to: '/' as const, label: 'Home' },
+  { to: '/streams' as const, label: 'Streams' },
   { to: '/agents' as const, label: 'Agents' },
 ]
 
@@ -96,7 +96,6 @@ export default function RootApp() {
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <DemoEdgeToggle />
               <WalletControls />
             </div>
           </nav>

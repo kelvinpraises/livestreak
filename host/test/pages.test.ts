@@ -66,6 +66,7 @@ const snapshot = (marketId: string): OptionsMarketSnapshot =>
 
 const fakeReader = (snap: OptionsMarketSnapshot): OptionsReader =>
   ({
+    listMarketIds: async () => [snap.market.marketId],
     readMarket: async () => snap.market,
     listMarketVaults: async () => snap.market.vaultIds,
     readVault: async (id: string) =>
@@ -89,6 +90,7 @@ const fakeReader = (snap: OptionsMarketSnapshot): OptionsReader =>
 
 const fakeReaderWithAccrual = (snap: OptionsMarketSnapshot): OptionsReader =>
   ({
+    listMarketIds: async () => [snap.market.marketId],
     readMarket: async () => snap.market,
     listMarketVaults: async () => snap.market.vaultIds,
     readVault: async (id: string) =>

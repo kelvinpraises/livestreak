@@ -10,7 +10,7 @@ import {
   formatRunway,
   formatShares,
 } from '#/utils/format'
-import type { Position } from '#/utils/mock'
+import type { Position } from '#/types/ui'
 import type { OptionsVault } from '@livestreak/options'
 import { isOptionsModeEnabled } from '#/utils/env'
 import { useOptionsContext } from '#/providers/options-provider'

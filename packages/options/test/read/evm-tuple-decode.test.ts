@@ -115,14 +115,9 @@ describe("evm positional-array tuple decode", () => {
     expect(panel.user.usdcBalanceUSDC).toBe(997);
   });
 
-  it("drops an unreadable vault instead of zeroing the whole market (resilience permutation)", async () => {
+  it("rejects an incomplete graph rather than reporting missing vaults as an empty board", async () => {
     const reader = createEvmOptionsReaderFromCall(ADDRESSES, makeCall([VAULT_OK, VAULT_BAD]));
-    const snapshot = await readMarketSnapshot(reader, asMarketId(MARKET));
-
-    // 2 indexed, 1 readable → board still surfaces the good one
-    expect(snapshot.market.vaultIds).toHaveLength(2);
-    expect(snapshot.vaults).toHaveLength(1);
-    expect(snapshot.vaults[0]?.pools.yes).toBe(5_000_000n);
+    await expect(readMarketSnapshot(reader, asMarketId(MARKET))).rejects.toThrow();
   });
 });
 

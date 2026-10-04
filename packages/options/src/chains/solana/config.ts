@@ -91,14 +91,14 @@ export const fetchAccountBytes = async (
 export const listMarketIds = async (ctx: SolanaOptionsContext): Promise<Hex32[]> => {
   const [registryPda] = await findRegistryPda(ctx.programId);
   const registryBytes = await fetchAccountBytes(ctx.rpc, registryPda);
-  if (registryBytes === undefined) return [];
+  if (registryBytes === undefined) throw new LiveStreakConfigError({ message: "Solana market registry not found" });
   const registry = decodeRegistryAccount(registryBytes);
   const count = Number(registry.marketCount);
   const ids: Hex32[] = [];
   for (let index = 0; index < count; index += 1) {
     const [indexPda] = await findMarketIndexPda(ctx.programId, BigInt(index));
     const bytes = await fetchAccountBytes(ctx.rpc, indexPda);
-    if (bytes === undefined) continue;
+    if (bytes === undefined) throw new LiveStreakRuntimeError({ message: "Solana market index is incomplete" });
     ids.push(decodeMarketIndexAccount(bytes).marketId);
   }
   return ids;
@@ -107,6 +107,14 @@ export const listMarketIds = async (ctx: SolanaOptionsContext): Promise<Hex32[]>
 // Fetch + decode the per-market engine blob, run `fn` against the view, and ALWAYS free() the wasm
 // memory. Throws when the market's ProtocolState PDA is absent (market registered but init_protocol
 // not yet run) — callers that tolerate that (e.g. readMarket's vault list) catch it.
+// Distinguish an unallocated shard from RPC/decode failures. Only the former can
+// legitimately mean an empty market or zero engine balance.
+export class ProtocolStateMissingError extends LiveStreakConfigError {
+  constructor(marketId: Hex32) {
+    super({ message: "Solana ProtocolState not found for market", metadata: { details: marketId } });
+  }
+}
+
 export const withProtocolView = async <T>(
   ctx: SolanaOptionsContext,
   marketId: Hex32,
@@ -115,10 +123,7 @@ export const withProtocolView = async <T>(
   const [protocolPda] = await findProtocolStatePda(ctx.programId, marketId);
   const bytes = await fetchAccountBytes(ctx.rpc, protocolPda);
   if (bytes === undefined) {
-    throw new LiveStreakConfigError({
-      message: "Solana ProtocolState not found for market",
-      metadata: { details: marketId }
-    });
+    throw new ProtocolStateMissingError(marketId);
   }
   const view = await decodeProtocolState(bytes);
   try {
@@ -141,7 +146,8 @@ export const resolveMarketForVault = async (
         view.listVaultIds().some((id) => id.toLowerCase() === target)
       );
       if (found) return marketId;
-    } catch {
+    } catch (error) {
+      if (!(error instanceof ProtocolStateMissingError)) throw error;
       // ProtocolState missing for this market — skip; another market may own the vault.
     }
   }
@@ -163,7 +169,8 @@ export const resolveMarketForToken = async (
         (view) => view.accountVaultIds(tokenHex).length > 0 || view.laneCount(tokenHex) > 0
       );
       if (owned) return marketId;
-    } catch {
+    } catch (error) {
+      if (!(error instanceof ProtocolStateMissingError)) throw error;
       // ProtocolState missing — skip.
     }
   }
@@ -185,4 +192,3 @@ export const resolveMarketForTokenOrOwner = async (
   if (bytes === undefined) return undefined;
   return decodePositionOwnerAccount(bytes).marketId;
 };
-

@@ -9,12 +9,18 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as StreamsRouteImport } from './routes/streams'
 import { Route as RemoteTestRouteImport } from './routes/remote-test'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as StreamIdRouteImport } from './routes/stream/$id'
 import { Route as RemoteSessionRouteImport } from './routes/remote/$session'
 
+const StreamsRoute = StreamsRouteImport.update({
+  id: '/streams',
+  path: '/streams',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RemoteTestRoute = RemoteTestRouteImport.update({
   id: '/remote-test',
   path: '/remote-test',
@@ -45,6 +51,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
   '/remote-test': typeof RemoteTestRoute
+  '/streams': typeof StreamsRoute
   '/remote/$session': typeof RemoteSessionRoute
   '/stream/$id': typeof StreamIdRoute
 }
@@ -52,6 +59,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
   '/remote-test': typeof RemoteTestRoute
+  '/streams': typeof StreamsRoute
   '/remote/$session': typeof RemoteSessionRoute
   '/stream/$id': typeof StreamIdRoute
 }
@@ -60,6 +68,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRoute
   '/remote-test': typeof RemoteTestRoute
+  '/streams': typeof StreamsRoute
   '/remote/$session': typeof RemoteSessionRoute
   '/stream/$id': typeof StreamIdRoute
 }
@@ -69,15 +78,23 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/remote-test'
+    | '/streams'
     | '/remote/$session'
     | '/stream/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/agents' | '/remote-test' | '/remote/$session' | '/stream/$id'
+  to:
+    | '/'
+    | '/agents'
+    | '/remote-test'
+    | '/streams'
+    | '/remote/$session'
+    | '/stream/$id'
   id:
     | '__root__'
     | '/'
     | '/agents'
     | '/remote-test'
+    | '/streams'
     | '/remote/$session'
     | '/stream/$id'
   fileRoutesById: FileRoutesById
@@ -86,12 +103,20 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRoute
   RemoteTestRoute: typeof RemoteTestRoute
+  StreamsRoute: typeof StreamsRoute
   RemoteSessionRoute: typeof RemoteSessionRoute
   StreamIdRoute: typeof StreamIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/streams': {
+      id: '/streams'
+      path: '/streams'
+      fullPath: '/streams'
+      preLoaderRoute: typeof StreamsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/remote-test': {
       id: '/remote-test'
       path: '/remote-test'
@@ -134,6 +159,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRoute,
   RemoteTestRoute: RemoteTestRoute,
+  StreamsRoute: StreamsRoute,
   RemoteSessionRoute: RemoteSessionRoute,
   StreamIdRoute: StreamIdRoute,
 }

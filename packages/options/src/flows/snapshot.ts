@@ -25,40 +25,22 @@ export const readMarketSnapshot = async (
     marketId
   );
 
-  // Populate marketSnapshot.vaults by reading EACH vault the market indexes (this is what the panel
-  // projection consumes → "see the vault in stream mode"). Read in parallel for latency. RESILIENCE:
-  // a single vault that 404s or transiently fails must NOT zero out the whole board — drop it and
-  // keep the rest, so a market with N vaults still surfaces its readable vaults. (LiveStreakConfigError
-  // = a hard config/validation fault → rethrow; everything else for one vault is non-fatal here.)
-  // Per-vault failures are non-fatal: the market + its vaultIds already read cleanly (so the registry
-  // path is healthy), and one vault that is missing/!exists/transiently unreadable should drop out
-  // rather than throw away the entire board. A genuinely systemic fault degrades to an empty vault
-  // list — the same observable as "no vaults yet" — not a hard crash of the whole snapshot.
-  const vaultResults = await Promise.all(
-    vaultIds.map(async (vaultId) => {
-      try {
-        return await reader.readVault(vaultId);
-      } catch {
-        return undefined;
-      }
-    })
+  // A failed child read is not an empty market. Reject the refresh so the runtime can
+  // preserve its last complete board and explicitly report that it is unavailable/stale.
+  const vaults = await Promise.all(
+    vaultIds.map(vaultId => readOrThrow(() => reader.readVault(vaultId), "vault", vaultId))
   );
-  const vaults = vaultResults.filter(
-    (vault): vault is OptionsVault => vault !== undefined
-  );
-
-  // Fetch the raw stream pointer. Non-fatal: a market may have no stream set yet.
-  let streamState: import("../model/stream.js").OptionsStreamState | undefined;
-  try {
-    streamState = await reader.readStreamState(marketId);
-  } catch {
-    // Leave streamState undefined — stream pointer may not exist on-chain yet.
+  if (market.marketId !== marketId || vaults.some((vault, index) =>
+    vault.vaultId !== vaultIds[index] || vault.marketId !== marketId)) {
+    throw new LiveStreakRuntimeError({ message: "Mismatched market graph" });
   }
+  // Readers express an unset pointer as status=none. An RPC error must stay an error.
+  const streamState = await readOrThrow(() => reader.readStreamState(marketId), "stream state", marketId);
 
   return {
     market,
     vaults,
-    ...(streamState === undefined ? {} : { streamState })
+    streamState
   };
 };
 

@@ -2,7 +2,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import type { OptionsVault } from '@livestreak/options'
-vi.mock('../src/hooks/use-fixture-mode', () => ({ usePreferFixture: () => false }))
 vi.mock('../src/hooks/use-board-ui-state', () => ({
   useStreamTab: () => ['vaults', vi.fn()],
 }))

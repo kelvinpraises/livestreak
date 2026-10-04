@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 
-import type { Position } from '#/utils/mock'
+import type { Position } from '#/types/ui'
 import { isOptionsModeEnabled } from '#/utils/env'
 import { useOptionsContext } from '#/providers/options-provider'
 import { useStreamDraft } from '#/hooks/use-stream-draft'

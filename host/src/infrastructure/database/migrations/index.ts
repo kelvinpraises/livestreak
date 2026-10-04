@@ -1,6 +1,8 @@
 import { Migrator, type Kysely, type Migration, type MigrationProvider } from "kysely";
 import type Database from "better-sqlite3";
 import type { DB } from "../schema.js";
+import { catalogUpgradeStatements } from '../catalog-upgrade.js';
+import * as catalogIntegrity from './20261004T000000_catalog_integrity.js';
 import { SCHEMA_DDL } from "../ddl.js";
 import * as init20260622 from "./20260622T000000_init.js";
 import * as vaultLivePools20260623 from "./20260623T000000_vault_live_pools.js";
@@ -13,7 +15,8 @@ const MIGRATIONS: Record<string, Migration> = {
   "20260622T000000_init": init20260622,
   "20260623T000000_vault_live_pools": vaultLivePools20260623,
   "20260715T000000_steward_memory": stewardMemory20260715,
-  "20260715T000100_forum_messages": forumMessages20260715
+  "20260715T000100_forum_messages": forumMessages20260715,
+  "20261004T000000_catalog_integrity": catalogIntegrity
 };
 
 class StaticMigrationProvider implements MigrationProvider {
@@ -41,4 +44,9 @@ export const migrateToLatest = async (db: Kysely<DB>): Promise<void> => {
 // synchronous, so we apply the shared DDL directly without an await. Idempotent.
 export const migrateSync = (sqlite: Database.Database): void => {
   sqlite.exec(SCHEMA_DDL);
+  const columns = sqlite.prepare('PRAGMA table_info(markets)').all() as { name: string; pk: number }[];
+  if (!columns.some(column => column.name === 'chain' && column.pk > 0)) {
+    const vaultColumns = sqlite.prepare('PRAGMA table_info(vaults)').all() as { name: string }[];
+    sqlite.transaction(() => { for (const statement of catalogUpgradeStatements(columns.map(column => column.name), vaultColumns.map(column => column.name))) sqlite.exec(statement); })();
+  }
 };

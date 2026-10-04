@@ -70,6 +70,7 @@ export function resolveStreamMedia(
 /** Minimal host/fixture stream detail shape this resolver needs (subset of HostStreamDetail). */
 export interface StreamFeedDetail {
   watchUrl?: string
+  stale?: boolean
   isLive: boolean
   streamStatus?: 'none' | 'live' | 'ended'
   recordingStatus?: 'recording' | 'processing' | 'ready' | 'failed'
@@ -93,9 +94,10 @@ export function resolveStreamFeed(
   // An explicit no-recording end stays offline even when a host/fixture URL exists —
   // falling through would dress a demo feed up as this market's replay.
   if (pointer?.status === 'ended' || host?.streamStatus === 'ended') {
-    if (host?.replay && /^https:\/\//.test(host.replay.url) && (!pointer || pointer.status === 'none' || (pointer.status === 'ended' && pointer.scheme === 'host' && pointer.id === host.replay.pointerId))) return { kind: 'vod', src: host.replay.url, format: 'hls' }
+    if (!host?.stale && host?.replay && /^https:\/\//.test(host.replay.url) && (!pointer || pointer.status === 'none' || (pointer.status === 'ended' && pointer.scheme === 'host' && pointer.id === host.replay.pointerId))) return { kind: 'vod', src: host.replay.url, format: 'hls' }
     return { kind: 'none', ended: true, ...(host?.recordingStatus === 'processing' ? { processing: true } : {}) }
   }
+  if (!host || host.stale || !host.isLive) return { kind: 'none' }
   if (pointer && pointer.status !== 'none') {
     const fromPointer = resolveStreamMedia(pointer, host?.watchUrl)
     if (fromPointer.kind !== 'none' && fromPointer.src) return fromPointer

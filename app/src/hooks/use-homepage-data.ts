@@ -3,10 +3,8 @@ import { useEffect, useState } from 'react'
 import { env } from '#/utils/env'
 import { fetchHomepage, hostHomepageToCards } from '#/utils/host'
 import type { HomepageData } from '#/types/homepage'
-import { usePreferFixture, useParsedFixture } from '#/hooks/use-fixture-mode'
-import { useOptionsContext } from '#/providers/options-provider'
 
-/** Honest empty state for live mode before/without host data — never the fixture (A). */
+/** Honest empty state for live mode before Host data arrives. */
 const EMPTY_HOMEPAGE: HomepageData = {
   streams: [],
   liveVaults: [],
@@ -20,31 +18,41 @@ const EMPTY_HOMEPAGE: HomepageData = {
   },
 }
 
-/**
- * Homepage discovery data.
- *  - DEMO mode  -> the bundled/injected fixture (the demo-edge toggle is the switch).
- *  - LIVE mode  -> the HOST's `GET /homepage` aggregate across ALL markets/chains (NOT the
- *                  single-market options board). While the fetch is in flight or fails we render
- *                  an honest empty state — never a silent fixture fallback.
- */
-export function useHomepageData(): HomepageData {
-  const preferFixture = usePreferFixture()
-  const fixture = useParsedFixture()
-  const { chain } = useOptionsContext()
+/** Cross-chain discovery from the Host; never substitute sample data. */
+export function useHomepageData(): HomepageData & { ready: boolean; error: string | null } {
   const [live, setLive] = useState<HomepageData>(EMPTY_HOMEPAGE)
 
+  const [ready, setReady] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
   useEffect(() => {
-    if (preferFixture) return
     let cancelled = false
     setLive(EMPTY_HOMEPAGE)
 
-    // Scope discovery to the selected chain (the host's per-chain router); re-fetch on chain switch.
-    void fetchHomepage(env.hostBaseUrl, chain)
-      .then(data => { if (!cancelled) setLive(hostHomepageToCards(data)) })
-      .catch(() => { if (!cancelled) setLive(EMPTY_HOMEPAGE) })
+    // Discovery spans all chains, independently of the signing wallet.
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async () => {
+      try {
+        const data = await fetchHomepage(env.hostBaseUrl)
+        if (!cancelled) { setLive(hostHomepageToCards(data)); setError(null) }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) { setReady(true); timer = setTimeout(() => { void refresh() }, 5000) }
+      }
+    }
+    refresh()
 
-    return () => { cancelled = true }
-  }, [preferFixture, chain])
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [])
 
-  return preferFixture ? fixture.homepage : live
+  return {
+    ...live,
+    ...(error ? {
+      streams: live.streams.map(stream => ({ ...stream, stale: true, isLive: false })),
+      liveVaults: live.liveVaults.map(vault => ({ ...vault, stale: true })),
+      lifetimeVaults: live.lifetimeVaults.map(vault => ({ ...vault, stale: true })),
+    } : {}),
+    ready, error,
+  }
 }

@@ -19,6 +19,8 @@ export interface MarketsTable {
   title: string;
   category: string;
   stream_id: string; // on-chain stream pointer id ("" when no stream set)
+  stream_scheme: string;
+  ended_at_ms: ColumnType<number | null, number | null, number | null>;
   status: string; // OptionsStreamState.status: none|pending|live|ended
   is_live: ColumnType<number, number, number>; // 0|1 (sqlite has no bool)
   watch_url: ColumnType<string | null, string | null, string | null>;

@@ -103,26 +103,9 @@ export interface StreamMeta {
   isLive: boolean
 }
 
-export interface FixtureVaultRaw {
-  vaultId: string
-  marketId: string
-  question: string
-  type: string
-  creator: string
-  status: string
-  outcome: string
-  pools: { yes: number; no: number }
-  timing: {
-    createdAtAgoMs: number
-    expiresAtFromNowMs: number
-    resolvedAtAgoMs?: number
-  }
-  steward: { hot: boolean; hotUntilFromNowMs?: number }
-}
-
 // The agents-directory row (`Agent`/`AgentRole`) + the homepage `*Raw` item shapes are the
 // host discovery CONTRACT — they live in `@livestreak/host` now (single source of truth).
-// Re-exported here so existing `#/types/demo` importers keep compiling unchanged.
+// Re-exported here so existing `#/types/ui` importers keep compiling unchanged.
 export type {
   Agent,
   AgentRole,

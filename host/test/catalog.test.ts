@@ -109,6 +109,8 @@ describe("catalog mapper", () => {
     });
 
     expect(mapped.lifetimeVaults).toHaveLength(1);
+    expect(mapped.lifetimeVaults[0]?.streamId).toBe(mapped.stream.routeId);
+    expect(mapped.stream.streamStatus).toBe("live");
     expect(mapped.lifetimeVaults[0]).toMatchObject({
       id: "v-done",
       outcome: "yes",
@@ -146,40 +148,18 @@ describe("catalog service", () => {
     availableChains: ["evm"]
   });
 
-  it("aggregates registered markets across the catalog + homepage", async () => {
+  it("deduplicates registered and seeded chain-qualified markets", () => {
     const service = createCatalogService({
       readers: providerFor(snapshot("m1")),
-      baseUrl: "http://host",
-      seedMarkets: [{ chain: "evm", marketId: "m1" }],
-      now: () => NOW
+      seedMarkets: [{ chain: "evm", marketId: "m1" }]
     });
-
-    const full = await service.buildFull();
-    expect(full.catalog.streams).toHaveLength(1);
-    expect(full.streams.m1.marketId).toBe("m1");
-    expect(full.homepage.liveVaults).toHaveLength(1);
-    expect(full.homepage.lifetimeVaults).toHaveLength(1);
-    expect(full.homepage.protocolStats).toEqual({
-      totalVaults: 2,
-      totalVolume: 430,
-      activeStreams: 1
-    });
-
-    const detail = await service.buildStream("m1");
-    expect(detail?.marketId).toBe("m1");
-    expect(await service.buildStream("missing")).toBeNull();
+    service.registerMarket({ chain: "evm", marketId: "m1" });
+    service.registerMarket({ chain: "sui", marketId: "m1" });
+    expect(service.knownMarkets()).toEqual([
+      { chain: "evm", marketId: "m1" }, { chain: "sui", marketId: "m1" }
+    ]);
   });
 
-  it("skips chains with no reader instead of failing", async () => {
-    const service = createCatalogService({
-      readers: { reader: () => null, availableChains: [] },
-      baseUrl: "http://host",
-      seedMarkets: [{ chain: "sui", marketId: "s1" }],
-      now: () => NOW
-    });
-    const catalog = await service.buildCatalog();
-    expect(catalog.streams).toEqual([]);
-  });
 });
 
 describe("catalog routes", () => {
@@ -190,7 +170,7 @@ describe("catalog routes", () => {
     const app = createApp(deps);
 
     const catalog = await request(app).get("/catalog").expect(200);
-    expect(catalog.body).toEqual({ streams: [] });
+    expect(catalog.body).toMatchObject({ streams: [], indexing: { status: "unavailable" } });
 
     const full = await request(app).get("/catalog/full").expect(200);
     expect(full.body.homepage.protocolStats.totalVaults).toBe(0);

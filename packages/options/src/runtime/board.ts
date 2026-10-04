@@ -7,14 +7,18 @@ export interface OptionsBoard {
   readonly revision: number;
   readonly panel: OptionsPanel;
   readonly snapshot: OptionsUserOptionsSnapshot;
+  /** Last runtime failure. Retained values must not be presented as a successful refresh. */
+  readonly dataError?: string;
 }
 
 export const assembleBoard = (
   revision: number,
   snapshot: OptionsUserOptionsSnapshot,
-  panel: OptionsPanel
+  panel: OptionsPanel,
+  dataError?: string
 ): OptionsBoard => ({
   revision,
   panel,
-  snapshot
+  snapshot,
+  ...(dataError === undefined ? {} : { dataError })
 });

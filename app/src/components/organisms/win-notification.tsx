@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CheckCircle, TrendUp } from '@phosphor-icons/react'
 
-interface WinToast { id: string; type: 'win' | 'loss' | 'stream'; amount?: number; lvstReceived?: number; rate?: number; side?: 'yes' | 'no'; option: string; mock?: boolean; txId?: string; subtitle?: string }
+interface WinToast { id: string; type: 'win' | 'loss' | 'stream'; amount?: number; lvstReceived?: number; rate?: number; side?: 'yes' | 'no'; option: string; txId?: string; subtitle?: string }
 interface Props { notifications: WinToast[]; onDismiss: (id: string) => void }
 
 export function WinNotification({ notifications, onDismiss }: Props) {
@@ -65,11 +65,7 @@ function Toast({ toast, onDismiss }: { toast: WinToast; onDismiss: () => void })
             </div>
             <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)', marginTop: 3 }}>
               {toast.subtitle
-                ?? (toast.mock
-                  ? 'Mock commit — funds will flow when connected'
-                  : toast.txId
-                    ? `Submitted · ${toast.txId.slice(0, 10)}…`
-                    : 'Submitted on-chain')}
+                ?? (toast.txId ? `Submitted · ${toast.txId.slice(0, 10)}…` : 'Submitted on-chain')}
             </div>
           </>
         ) : (

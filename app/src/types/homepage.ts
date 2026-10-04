@@ -1,7 +1,6 @@
-/** Homepage card shapes (demo fixture or derived from options panel). */
+/** Homepage card shapes projected from the Host catalog. */
 
-/** Chain tag carried through from the host catalog so the homepage can scope rails by the
- *  active chain. Optional because the demo fixture predates the tag (it is never chain-filtered). */
+/** Discovery spans all chains; vault tags identify the chain used for signing. */
 export type HomepageChain = 'evm' | 'sui' | 'solana'
 
 export interface HomepageStreamCard {
@@ -15,11 +14,16 @@ export interface HomepageStreamCard {
   /** Settled on-chain pool when host splits it from effective. */
   settledPooled?: number
   elapsed: string
+  indexedAtMs?: number
+  stale?: boolean
+  streamStatus?: 'none' | 'live' | 'ended'
   isLive: boolean
   chain?: HomepageChain
 }
 
 export interface HomepageLiveVaultCard {
+  indexedAtMs?: number
+  stale?: boolean
   vaultId: string
   streamId: string
   streamTitle: string
@@ -35,6 +39,9 @@ export interface HomepageLiveVaultCard {
 }
 
 export interface HomepageLifetimeVault {
+  indexedAtMs?: number
+  stale?: boolean
+  streamId?: string
   vaultId: string
   option: string
   streamTitle: string
@@ -53,6 +60,7 @@ export interface HomepageProtocolStats {
 }
 
 export interface HomepageData {
+  indexing?: import('@livestreak/host').CatalogIndexing
   streams: HomepageStreamCard[]
   liveVaults: HomepageLiveVaultCard[]
   lifetimeVaults: HomepageLifetimeVault[]

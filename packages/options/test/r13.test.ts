@@ -129,12 +129,11 @@ describe("OptionsMarketPanel.stream (Part B)", () => {
     expect(panel.markets[0]?.stream?.id).toBe("test-blob-id");
   });
 
-  it("stream pointer is absent when readStreamState throws (no stream on-chain)", async () => {
-    // No streamStates in seed → FakeReader throws → should be caught gracefully.
+  it("an unset stream pointer is an explicit none state", async () => {
     const reader = createFakeOptionsReader(fixtureSeed());
     const snapshot = await readMarketSnapshot(reader, asMarketId("market_01"));
 
-    expect(snapshot.streamState).toBeUndefined();
+    expect(snapshot.streamState?.status).toBe("none");
 
     const userSnapshot = await readUserOptionsSnapshot(
       reader,
@@ -142,7 +141,7 @@ describe("OptionsMarketPanel.stream (Part B)", () => {
       asMarketId("market_01")
     );
     const panel = projectOptionsPanel(userSnapshot);
-    expect(panel.markets[0]).not.toHaveProperty("stream");
+    expect(panel.markets[0]?.stream?.status).toBe("none");
   });
 
   it("stream pointer carries ended status and endedAtMs", async () => {

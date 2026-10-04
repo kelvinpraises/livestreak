@@ -18,7 +18,7 @@ import {
   formatShares,
   calcPoolPct,
 } from '#/utils/format'
-import type { VaultView } from '#/types/demo'
+import type { VaultView } from '#/types/ui'
 import type { OptionsVault } from '@livestreak/options'
 import { useVaultView } from '#/hooks/use-vault-views'
 import { useVaultCardUi } from '#/hooks/use-board-ui-state'

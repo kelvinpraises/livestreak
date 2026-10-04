@@ -1,13 +1,19 @@
-import type {
+import { Schema } from "effect"
+import {
   AgentsData,
   HomepageData as HostHomepageData,
   HostCatalog,
   HostStreamDetail,
 } from '@livestreak/host'
-import type { Agent } from '#/types/demo'
+import type { Agent } from '#/types/ui'
 import type { HomepageData } from '#/types/homepage'
-import type { AppFixture } from '#/types/host-edge'
 import type { OptionsChainKind } from '#/utils/chain'
+
+async function fetchPage<A, I>(url: string, schema: Schema.Schema<A, I, never>): Promise<A> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(20000) })
+  if (!response.ok) throw new Error(`Host HTTP ${response.status}`)
+  return Schema.decodeUnknownSync(schema)(await response.json())
+}
 
 const CATALOG_PATH = '/catalog'
 
@@ -19,11 +25,7 @@ const AGENTS_PATH = '/agents'
 const STREAM_PATH = '/stream'
 
 export async function fetchHostCatalog(baseUrl: string): Promise<HostCatalog> {
-  const res = await fetch(`${baseUrl}${CATALOG_PATH}`)
-  if (!res.ok) {
-    throw new Error(`Host catalog HTTP ${res.status}`)
-  }
-  return (await res.json()) as HostCatalog
+  return fetchPage(`${baseUrl}${CATALOG_PATH}`, HostCatalog)
 }
 
 /** GET /homepage[?chain] -> the homepage payload. Passing `chain` scopes it to that chain (the host's
@@ -33,43 +35,33 @@ export async function fetchHomepage(
   chain?: OptionsChainKind,
 ): Promise<HostHomepageData> {
   const url = chain ? `${baseUrl}${HOMEPAGE_PATH}?chain=${chain}` : `${baseUrl}${HOMEPAGE_PATH}`
-  const res = await fetch(url)
-  if (!res.ok) {
-    throw new Error(`Host homepage HTTP ${res.status}`)
-  }
-  return (await res.json()) as HostHomepageData
+  return fetchPage(url, HostHomepageData)
 }
 
 /** GET /agents -> the agents directory. */
 export async function fetchAgents(baseUrl: string): Promise<AgentsData> {
-  const res = await fetch(`${baseUrl}${AGENTS_PATH}`)
-  if (!res.ok) {
-    throw new Error(`Host agents HTTP ${res.status}`)
-  }
-  return (await res.json()) as AgentsData
+  return fetchPage(`${baseUrl}${AGENTS_PATH}`, AgentsData)
 }
 
 export async function fetchHostStream(
   baseUrl: string,
   routeId: string,
+  chain?: OptionsChainKind,
 ): Promise<HostStreamDetail> {
-  const res = await fetch(`${baseUrl}${STREAM_PATH}/${encodeURIComponent(routeId)}`)
-  if (!res.ok) {
-    throw new Error(`Host stream HTTP ${res.status}`)
-  }
-  return (await res.json()) as HostStreamDetail
+  return fetchPage(`${baseUrl}${STREAM_PATH}/${encodeURIComponent(routeId)}${chain ? `?chain=${chain}` : ''}`, HostStreamDetail)
 }
 
 /**
  * Project the host's discovery payload (raw `@livestreak/host` shapes) onto the app's homepage
- * CARD shapes. Shared by the LIVE host fetch (use-homepage-data) and the DEMO fixture
- * (parse-fixture) so both render identically — pure source swap. `resolvedVaults` /
+ * card shapes. `resolvedVaults` /
  * `yesWinRatePct` are derived from the lifetime rail (the host stats payload omits them).
  */
 export function hostHomepageToCards(d: HostHomepageData): HomepageData {
-  const resolved = d.lifetimeVaults.length
-  const yesWins = d.lifetimeVaults.filter(v => v.outcome === 'yes').length
+  const verifiedResolutions = d.lifetimeVaults.filter(v => !v.stale)
+  const resolved = verifiedResolutions.length
+  const yesWins = verifiedResolutions.filter(v => v.outcome === 'yes').length
   return {
+    indexing: d.indexing,
     streams: d.streams.map(stream => ({
       id: stream.routeId,
       marketId: stream.marketId,
@@ -80,9 +72,14 @@ export function hostHomepageToCards(d: HostHomepageData): HomepageData {
       ...(stream.settledPooled !== undefined ? { settledPooled: stream.settledPooled } : {}),
       elapsed: stream.elapsed ?? '',
       isLive: stream.isLive,
+      streamStatus: stream.streamStatus,
+      indexedAtMs: stream.indexedAtMs,
+      stale: stream.stale,
       ...(stream.chain ? { chain: stream.chain } : {}),
     })),
     liveVaults: d.liveVaults.map(vault => ({
+      indexedAtMs: vault.indexedAtMs,
+      stale: vault.stale,
       vaultId: vault.id,
       streamId: vault.streamId,
       streamTitle: vault.streamTitle,
@@ -95,12 +92,15 @@ export function hostHomepageToCards(d: HostHomepageData): HomepageData {
       ...(vault.chain ? { chain: vault.chain } : {}),
     })),
     lifetimeVaults: d.lifetimeVaults.map(v => ({
+      indexedAtMs: v.indexedAtMs,
+      stale: v.stale,
       vaultId: v.id,
+      streamId: v.streamId,
       option: v.option,
       streamTitle: v.streamTitle,
       outcome: v.outcome,
       totalPool: v.totalPool,
-      resolvedAtMs: Date.now() - v.resolvedAgoMs,
+      resolvedAtMs: v.resolutionTimeKnown === false ? 0 : (d.indexing?.generatedAtMs ?? Date.now()) - v.resolvedAgoMs,
       ...(v.chain ? { chain: v.chain } : {}),
     })),
     protocolStats: {
@@ -119,47 +119,5 @@ export async function fetchAgentRows(baseUrl: string): Promise<Agent[]> {
   return [...data.agents]
 }
 
-/** Resolve catalog: demo fixture or live host. */
-export async function resolveCatalog(
-  baseUrl: string,
-  demo: boolean,
-  fixture: AppFixture,
-): Promise<HostCatalog> {
-  if (demo) return fixture.catalog
-  return fetchHostCatalog(baseUrl)
-}
-
-/** Resolve stream header + watch URL: demo fixture or live host. */
-export async function resolveStream(
-  baseUrl: string,
-  routeId: string,
-  demo: boolean,
-  fixture: AppFixture,
-): Promise<HostStreamDetail> {
-  if (demo) {
-    const hit = fixture.streams[routeId] ?? fixture.catalog.streams.find(s => s.routeId === routeId)
-    if (hit) {
-      return 'watchUrl' in hit
-        ? hit as HostStreamDetail
-        : {
-            routeId: hit.routeId,
-            marketId: hit.marketId,
-            title: hit.title,
-            category: hit.category,
-            isLive: hit.isLive,
-            chain: hit.chain,
-          }
-    }
-    const first = fixture.catalog.streams[0]
-    if (!first) throw new Error('Demo fixture has no streams')
-    return fixture.streams[first.routeId] ?? {
-      routeId: first.routeId,
-      marketId: first.marketId,
-      title: first.title,
-      category: first.category,
-      isLive: first.isLive,
-      chain: first.chain,
-    }
-  }
-  return fetchHostStream(baseUrl, routeId)
-}
+/** Fetch this exact stream; missing routes never borrow another broadcast. */
+export const resolveStream = fetchHostStream

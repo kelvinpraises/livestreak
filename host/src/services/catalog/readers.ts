@@ -6,7 +6,6 @@ import {
   asVaultId,
   createOptionsChain,
   createOptionsSuiConfig,
-  readMarketSnapshot,
   readVaultSnapshot,
   type OptionsContractAddresses,
   type OptionsMarketSnapshot,
@@ -194,12 +193,22 @@ const buildSolanaReader = (): OptionsReader | null => {
   }
 };
 
-// Build a reader provider from the environment + deploy snapshots. Each chain reader is
-// constructed once and cached; a chain with no deployment/RPC resolves to null so the
-// catalog simply omits it.
+// Build readers only for the explicit environment-selected scope. A missing deployment
+// or RPC yields a null reader but remains a coverage failure for an enabled chain.
+export const parseCatalogChains = (raw: string | undefined): readonly CatalogChain[] => {
+  if (raw === undefined) return ["evm"];
+  const chains = raw.split(",").map(value => value.trim());
+  if (!chains.length || chains.some(value => value !== "evm" && value !== "sui" && value !== "solana")) {
+    throw new Error("LIVESTREAK_CATALOG_CHAINS must list evm, sui and/or solana");
+  }
+  return [...new Set(chains)] as CatalogChain[];
+};
+
 export const createEnvReaderProvider = (): CatalogReaderProvider => {
+  const enabled = parseCatalogChains(process.env.LIVESTREAK_CATALOG_CHAINS);
   const cache = new Map<CatalogChain, OptionsReader | null>();
   const get = (chain: CatalogChain): OptionsReader | null => {
+    if (!enabled.includes(chain)) return null;
     if (!cache.has(chain)) {
       cache.set(
         chain,
@@ -210,9 +219,9 @@ export const createEnvReaderProvider = (): CatalogReaderProvider => {
   };
   return {
     reader: get,
-    get availableChains() {
-      return (["evm", "sui", "solana"] as const).filter((c) => get(c) !== null);
-    }
+    // Configuration, not reachability. Explicitly enabled broken legs remain observable
+    // as failures; deployment files alone never opt another chain into indexing.
+    availableChains: enabled
   };
 };
 
@@ -229,18 +238,27 @@ export const readMarketGraph = async (
   reader: OptionsReader,
   marketId: string
 ): Promise<CatalogMarketGraph> => {
-  const snap = await readMarketSnapshot(reader, asMarketId(marketId));
+  const id = asMarketId(marketId);
+  // A replacing DB projection must be complete. One swallowed RPC error would delete
+  // valid rows and write fabricated zero aggregates.
+  const market = await reader.readMarket(id);
+  const vaultIds = await reader.listMarketVaults(id);
+  const streamState = await reader.readStreamState(id);
+  const vaults = await Promise.all(vaultIds.map(vaultId => reader.readVault(vaultId)));
+  if (!market || String(market.marketId) !== marketId || vaults.some((vault, index) => !vault || String(vault.vaultId) !== String(vaultIds[index]) || String(vault.marketId) !== marketId)) {
+    throw new Error('Incomplete or mismatched market graph');
+  }
+  const snap: OptionsMarketSnapshot = { market, vaults, streamState };
   const vaultSnapshots = new Map<string, OptionsVaultSnapshot>();
-  await Promise.all(
-    snap.vaults.map(async (vault) => {
-      try {
-        const vs = await readVaultSnapshot(reader, asVaultId(vault.vaultId));
-        vaultSnapshots.set(String(vault.vaultId), vs);
-      } catch {
-        // Non-fatal: indexer falls back to settled pools for this vault.
-      }
-    })
-  );
+  await Promise.all(vaults.map(async vault => {
+    if (vault.status === 'resolved') return; // Settled pools are authoritative after resolution.
+    const snapshot = await readVaultSnapshot(reader, asVaultId(vault.vaultId));
+    if (snapshot.vault.vaultId !== vault.vaultId || snapshot.vault.marketId !== vault.marketId || snapshot.vault.status !== vault.status) {
+      throw new Error("Vault changed during index refresh; retry next cycle");
+    }
+    vaultSnapshots.set(String(vault.vaultId), snapshot);
+  }));
+
   return { snap, vaultSnapshots };
 };
 

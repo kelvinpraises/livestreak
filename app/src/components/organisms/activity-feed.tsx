@@ -1,7 +1,7 @@
 import { type ElementType } from 'react'
 import { motion } from 'framer-motion'
 import { Warning, Stack, Lightning, Fire, CheckCircle, Trophy, Broadcast } from '@phosphor-icons/react'
-import type { WSEvent } from '#/utils/mock'
+import type { WSEvent } from '#/types/ui'
 
 const META: Record<string, { icon: ElementType; color: string; label: string }> = {
   alert: { icon: Warning, color: '#ffd553', label: 'ALERT' },
@@ -20,7 +20,7 @@ export function ActivityFeed({ events }: { events: WSEvent[] }) {
       {events.length === 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '40px 0', gap: 10 }}>
           <Broadcast size={24} color="rgba(255,255,255,0.1)" />
-          <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.25)' }}>Waiting for events...</span>
+          <span style={{ fontSize: 13, color: 'rgba(255,255,255,0.25)' }}>No activity received yet.</span>
         </div>
       )}
     </div>

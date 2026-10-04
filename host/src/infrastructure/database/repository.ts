@@ -28,9 +28,10 @@ export interface ProtocolStatsRow {
 // Discovery reads accept an optional `chain` filter (the per-chain router): omit it for the
 // cross-chain aggregate (back-compat), or pass "evm"/"sui" to scope to the UI's selected chain.
 export interface CatalogRepository {
+  snapshot(chain?: ChainTag): Promise<{ markets: readonly Market[]; vaults: readonly Vault[]; resolutions: readonly Resolution[] }>;
   syncMarket(rows: MarketRows): Promise<void>;
   allMarkets(chain?: ChainTag): Promise<readonly Market[]>;
-  marketByRoute(routeId: string): Promise<Market | undefined>;
+  marketByRoute(routeId: string, chain?: ChainTag): Promise<Market | undefined>;
   liveVaults(chain?: ChainTag): Promise<readonly LiveVaultRow[]>;
   lifetimeVaults(chain?: ChainTag): Promise<readonly LifetimeRow[]>;
   protocolStats(chain?: ChainTag): Promise<ProtocolStatsRow>;
@@ -42,25 +43,23 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
   const syncMarket = async (rows: MarketRows): Promise<void> => {
     const { id } = rows.market;
     await db.transaction().execute(async (tx) => {
-      const { id: _omit, ...marketUpdate } = rows.market;
       await tx
         .insertInto("markets")
         .values(rows.market)
-        .onConflict((oc) => oc.column("id").doUpdateSet(marketUpdate))
+        .onConflict((oc) => oc.columns(["chain", "id"]).doUpdateSet(rows.market))
         .execute();
 
       // Replace this market's vault projection wholesale.
-      await tx.deleteFrom("vaults").where("market_id", "=", id).execute();
+      await tx.deleteFrom("vaults").where("market_id", "=", id).where("chain", "=", rows.market.chain).execute();
       if (rows.vaults.length > 0) {
         await tx.insertInto("vaults").values([...rows.vaults]).execute();
       }
 
+      await tx.deleteFrom("resolutions").where("market_id", "=", id).where("chain", "=", rows.market.chain).execute();
       for (const r of rows.resolutions) {
-        const { vault_id: _vid, ...resUpdate } = r;
         await tx
           .insertInto("resolutions")
           .values(r)
-          .onConflict((oc) => oc.column("vault_id").doUpdateSet(resUpdate))
           .execute();
       }
     });
@@ -72,17 +71,27 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
     return q.selectAll().orderBy("updated_at", "desc").execute();
   };
 
-  const marketByRoute = async (routeId: string): Promise<Market | undefined> =>
-    db
-      .selectFrom("markets")
-      .selectAll()
-      .where("route_id", "=", routeId)
-      .executeTakeFirst();
+  const marketByRoute = async (routeId: string, chain?: ChainTag): Promise<Market | undefined> => {
+    let query = db.selectFrom('markets').selectAll().where('route_id', '=', routeId);
+    if (chain !== undefined) query = query.where('chain', '=', chain);
+    const rows = await query.execute();
+    if (rows.length > 1) throw new Error('ambiguous_stream_chain');
+    return rows[0];
+  };
+
+  const snapshot = async (chain?: ChainTag) => db.transaction().execute(async tx => {
+    let mq = tx.selectFrom('markets').selectAll();
+    let vq = tx.selectFrom('vaults').selectAll();
+    let rq = tx.selectFrom('resolutions').selectAll();
+    if (chain !== undefined) { mq = mq.where('chain', '=', chain); vq = vq.where('chain', '=', chain); rq = rq.where('chain', '=', chain); }
+    // Sequential within one read transaction: never interleave pieces of a refresh.
+    return { markets: await mq.orderBy('updated_at', 'desc').execute(), vaults: await vq.execute(), resolutions: await rq.execute() };
+  });
 
   const liveVaults = async (chain?: ChainTag): Promise<readonly LiveVaultRow[]> => {
     let q = db
       .selectFrom("vaults")
-      .innerJoin("markets", "markets.id", "vaults.market_id")
+      .innerJoin("markets", join => join.onRef("markets.id", "=", "vaults.market_id").onRef("markets.chain", "=", "vaults.chain"))
       .where("vaults.status", "in", ["open", "hot"]);
     if (chain !== undefined) q = q.where("vaults.chain", "=", chain);
     const rows = await q
@@ -99,8 +108,8 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
   const lifetimeVaults = async (chain?: ChainTag): Promise<readonly LifetimeRow[]> => {
     let q = db
       .selectFrom("resolutions")
-      .innerJoin("vaults", "vaults.id", "resolutions.vault_id")
-      .innerJoin("markets", "markets.id", "resolutions.market_id");
+      .innerJoin("vaults", join => join.onRef("vaults.id", "=", "resolutions.vault_id").onRef("vaults.chain", "=", "resolutions.chain"))
+      .innerJoin("markets", join => join.onRef("markets.id", "=", "resolutions.market_id").onRef("markets.chain", "=", "resolutions.chain"));
     if (chain !== undefined) q = q.where("resolutions.chain", "=", chain);
     const rows = await q
       .orderBy("resolutions.resolved_at", "desc")
@@ -143,6 +152,7 @@ export const createCatalogRepository = (db: Kysely<DB>): CatalogRepository => {
   };
 
   return {
+    snapshot,
     syncMarket,
     allMarkets,
     marketByRoute,

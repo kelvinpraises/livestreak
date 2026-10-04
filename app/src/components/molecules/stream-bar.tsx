@@ -1,20 +1,14 @@
-import { useEffect, useState } from 'react'
-import type { WSFrame } from '#/utils/mock'
 import { ScoreUSD } from '#/components/atoms/score-usd'
-import { usePreferFixture } from '#/hooks/use-fixture-mode'
 
 interface Props {
-  frame: WSFrame
   streamTitle: string
   totalPooled: number
   totalPooledRatePerSec?: number
-  status?: 'live' | 'ended' | 'offline'
+  verified?: boolean
+  status?: 'live' | 'ended' | 'offline' | 'stale' | 'loading' | 'unavailable'
 }
 
-export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerSec, status = 'live' }: Props) {
-  const preferFixture = usePreferFixture()
-  const [minute, setMinute] = useState(frame.min)
-  useEffect(() => { setMinute(frame.min) }, [frame.min])
+export function StreamBar({ streamTitle, totalPooled, totalPooledRatePerSec, verified = false, status = 'unavailable' }: Props) {
 
   return (
     <header className="scan-line stream-summary" style={{
@@ -39,17 +33,13 @@ export function StreamBar({ frame, streamTitle, totalPooled, totalPooledRatePerS
       {/* Stream title + elapsed */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
         <span className="display" style={{ fontSize: 15, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.9)', letterSpacing: '0.02em' }}>{streamTitle}</span>
-        {preferFixture && <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.08)' }} />}
-        {preferFixture && <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00ff87' }}>{minute}'</span>
-          <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)' }}>elapsed</span>
-        </div>}
+
       </div>
 
       {/* Pooled total */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.35)', letterSpacing: '0.05em' }}>POOLED</span>
-        <ScoreUSD value={totalPooled} live ratePerSec={totalPooledRatePerSec} className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }} />
+        {verified ? <ScoreUSD value={totalPooled} ratePerSec={totalPooledRatePerSec} className="mono" style={{ fontSize: 13, fontWeight: 600, color: '#00c8ff' }} /> : <span className="mono">—</span>}
       </div>
     </header>
   )

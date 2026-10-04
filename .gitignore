@@ -37,6 +37,9 @@ tmp/
 .mastra/
 context/
 
+# Local scripts
+/scripts/
+
 # Runtime / generated config (CLI gateway + host write these per-cwd; never commit)
 settings.json
 livestreak.json
@@ -49,4 +52,3 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.pyc
-

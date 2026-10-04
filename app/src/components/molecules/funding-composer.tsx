@@ -2,7 +2,6 @@ import { useId, useState } from 'react'
 import { CheckCircle, ShieldCheck, ArrowRight, SpinnerGap } from '@phosphor-icons/react'
 import { perMinUSDCToRate, type OptionsVault } from '@livestreak/options'
 import { useOptionsContext } from '#/providers/options-provider'
-import { usePreferFixture } from '#/hooks/use-fixture-mode'
 import { useFundingRules } from '#/hooks/use-funding-rules'
 import { useWalletActions } from '#/hooks/use-wallet-actions'
 import { useVaultView } from '#/hooks/use-vault-views'
@@ -32,8 +31,7 @@ export function FundingComposer({ vault, draft, onStream }: {
 }) {
   const inputId = useId()
   const options = useOptionsContext()
-  const fixture = usePreferFixture()
-  const live = options.enabled && !fixture
+  const live = options.enabled
   const rules = useFundingRules(vault.vaultId, live)
   const wallet = useWalletActions()
   const view = useVaultView(vault.vaultId)
@@ -50,9 +48,9 @@ export function FundingComposer({ vault, draft, onStream }: {
   const balance = nft?.account.balanceUSDC ?? 0
   const deposit = balance > 0 || rate <= 0 ? 0 : Number(perMinUSDCToRate(Math.max(0, Number.isFinite(rate) && rate <= 10 ? rate : 0)) * 600n) / 1_000_000
   const insufficient = live && options.isConnected && wallet.usdcBalance < deposit
-  const blocked = live && (rules.loading || !!rules.error || rules.closed || !rules.verified)
+  const blocked = live && (!!options.board?.dataError || rules.loading || !!rules.error || rules.closed || !rules.verified)
   const needsPosition = live && !options.hasNftForVault(vault.vaultId)
-  const canSubmit = !!side && Number.isFinite(rate) && rate >= 0.01 && rate <= 10 && !busy && !blocked && !insufficient && (!pending || continuing) && !options.claiming
+  const canSubmit = live && !!side && Number.isFinite(rate) && rate >= 0.01 && rate <= 10 && !busy && !blocked && !insufficient && (!pending || continuing) && !options.claiming
   const pauseReady = live && !!view.userPosition && view.userPosition.rate > 0 && !frozen
   const choose = (next: 'yes' | 'no') => { draft.setSide(next); if (draft.rate < 0.01) draft.setRate(1) }
   const submit = async () => {
@@ -78,7 +76,7 @@ export function FundingComposer({ vault, draft, onStream }: {
       </summary>
       {rules.verified && <><Rules mandate={rules.verified.mandate} /><p className="funding-digest mono">Commitment {rules.verified.terms.commitment}</p></>}
       {rules.error && <p>{rules.error} <button className="funding-text-button" onClick={rules.reload}>Check again</button></p>}
-    </details> : <p className="funding-caption">Demo preview · no funds will move</p>}
+    </details> : <p className="funding-caption">Funding unavailable · options runtime is disabled</p>}
     {rules.error && live && <p className="funding-caption" role="status">We can’t verify the question’s rules yet. <button className="funding-text-button" onClick={rules.reload}>Retry</button></p>}
     <div className="funding-sides" role="group" aria-label="Choose a side">
       {(['yes', 'no'] as const).map(s => <button key={s} type="button" className={`funding-side funding-side-${s}`} aria-pressed={side === s}
@@ -116,7 +114,7 @@ export function FundingComposer({ vault, draft, onStream }: {
     {ownOp?.status === 'unknown' ? <button className="funding-submit" disabled={busy || options.claiming} onClick={recover}>{busy ? 'Checking confirmation…' : 'Check transaction status'}</button> :
       <button className="funding-submit" data-side={side ?? ''} data-testid={`fund-submit-${vault.vaultId}`} disabled={!canSubmit} onClick={submit}>
         {busy || ownOp?.status === 'working' ? <><SpinnerGap className="funding-spinner" size={17} /> {needsPosition ? 'Creating your position…' : 'Confirming your stream…'}</> :
-          !live ? 'Preview stream' : !options.isConnected ? 'Connect to fund' : continuing ? 'Continue funding' : rules.closed ? 'Funding closed' : !side ? 'Choose YES or NO' : `${needsPosition ? 'Create position & stream' : 'Stream'} ${side.toUpperCase()}`}<ArrowRight size={16} aria-hidden />
+          !live ? 'Funding unavailable' : !options.isConnected ? 'Connect to fund' : continuing ? 'Continue funding' : rules.closed ? 'Funding closed' : !side ? 'Choose YES or NO' : `${needsPosition ? 'Create position & stream' : 'Stream'} ${side.toUpperCase()}`}<ArrowRight size={16} aria-hidden />
       </button>}
     {error && <p className="funding-error" role="alert">{error}</p>}
     {view.userPosition && <div className="funding-position"><span>Your {view.userPosition.side.toUpperCase()} position</span><strong className="mono">{formatRate(view.userPosition.rate)} · {formatShares(view.userPosition.shares)} shares</strong>

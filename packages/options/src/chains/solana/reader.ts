@@ -44,6 +44,7 @@ import {
   tokenIdToHex32,
   vaultIdHex,
   withProtocolView,
+  ProtocolStateMissingError,
   type SolanaOptionsContext,
 } from "./config.js";
 import {
@@ -246,7 +247,8 @@ export const createSolanaOptionsReader = (
         return await withProtocolView(ctx, marketId, (view) =>
           view.nftBalance(tokenIdToHex32(tokenId)),
         );
-      } catch {
+      } catch (error) {
+        if (!(error instanceof ProtocolStateMissingError)) throw error;
         return 0n; // ProtocolState not allocated for the market yet
       }
     },
@@ -294,7 +296,8 @@ const readMarket = async (
     vaultIds = await withProtocolView(ctx, marketId as unknown as Hex32, (view) =>
       view.listVaultIds().map((id) => asVaultId(id)),
     );
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ProtocolStateMissingError)) throw error;
     // ProtocolState not yet allocated (init_protocol not run) — no vaults.
   }
 
@@ -341,7 +344,8 @@ const listMarketVaults = async (
     return await withProtocolView(ctx, marketId as unknown as Hex32, (view) =>
       view.listVaultIds().map((id) => asVaultId(id)),
     );
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ProtocolStateMissingError)) throw error;
     return [];
   }
 };
@@ -453,7 +457,8 @@ const readNft = async (
       balance = await withProtocolView(ctx, rec.marketId, (view) =>
         view.nftBalance(tokenIdToHex32(tokenId)),
       );
-    } catch {
+    } catch (error) {
+      if (!(error instanceof ProtocolStateMissingError)) throw error;
       // ProtocolState not allocated — no balance to report
     }
   }
@@ -540,7 +545,8 @@ const loadProtocolSummary = async (
   for (const id of ids) {
     try {
       vaultCount += await withProtocolView(ctx, id, (view) => view.listVaultIds().length);
-    } catch {
+    } catch (error) {
+      if (!(error instanceof ProtocolStateMissingError)) throw error;
       // ProtocolState not allocated — contributes 0.
     }
   }

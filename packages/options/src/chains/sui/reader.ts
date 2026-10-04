@@ -515,11 +515,12 @@ const readVaultData = async (
 };
 
 const decodeHotState = (ret: InspectReturnValue | undefined): SuiHotState => {
-  if (ret === undefined) return { active: false, until: 0n, severity: 0 };
+  if (ret === undefined) throw new Error("Missing Sui hot-state result");
   try {
     // Option<HotState>: first byte is 0 (none) or 1 (some).
     const bytes = Uint8Array.from(ret[0]);
     if (bytes[0] === 0) return { active: false, until: 0n, severity: 0 };
+    if (bytes[0] !== 1) throw new Error("Invalid Sui hot-state option");
     // Some(HotState): remaining bytes are the struct.
     // HotState: active: bool, until: u64, severity: u8, reason_hash: vector<u8>
     const HotStateBcs = bcs.struct("HotState", {
@@ -540,8 +541,8 @@ const decodeHotState = (ret: InspectReturnValue | undefined): SuiHotState => {
       severity: parsed.severity as number,
       ...(reasonHash === undefined ? {} : { reasonHash }),
     };
-  } catch {
-    return { active: false, until: 0n, severity: 0 };
+  } catch (error) {
+    throw suiReadFailed("hot state", error);
   }
 };
 

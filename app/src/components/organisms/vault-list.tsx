@@ -1,6 +1,5 @@
 import { type ReactNode } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { usePreferFixture } from '#/hooks/use-fixture-mode'
 import { useStreamTab } from '#/hooks/use-board-ui-state'
 import { FocusedVault } from '#/components/organisms/focused-vault'
 import { VaultCard } from '#/components/molecules/vault-card'
@@ -10,7 +9,7 @@ import { NftPanel } from '#/components/organisms/nft-panel'
 import { useOptionsContext } from '#/providers/options-provider'
 import { OptionsActionButton } from '#/components/atoms/options-action-button'
 import { isOptionsModeEnabled } from '#/utils/env'
-import type { WSEvent, Position } from '#/utils/mock'
+import type { WSEvent, Position } from '#/types/ui'
 import type { OptionsVault } from '@livestreak/options'
 
 interface Props {
@@ -44,8 +43,7 @@ export function VaultList({
     : null
 
   const options = useOptionsContext()
-  const fixture = usePreferFixture()
-  const loading = !fixture && options.enabled && (!options.board || options.isLoading)
+  const loading = options.enabled && !options.error && (!options.board || options.isLoading)
   const mintFn =
     isOptionsModeEnabled() && options.isConnected
       ? options.findFunction('mint', (fn) => fn.target?.kind === 'market')
@@ -66,6 +64,7 @@ export function VaultList({
         overflow: 'hidden',
       }}
     >
+      {options.error && <p role="alert" style={{ color: '#ffd553', padding: 12 }}>Market/account data could not be refreshed. Values may be stale.</p>}
       {/* Focused vault from NikoNiko click */}
       <AnimatePresence>
         {selectedVault && (

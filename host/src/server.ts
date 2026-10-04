@@ -1,39 +1,36 @@
+import type { HostModuleToken } from "@livestreak/host";
 import express, { type Express } from "express";
-import { bootstrapAaFromConfig, readAaServerConfig } from "./services/aa/chains.js";
-import { loadDefaultDeploySnapshotConfig } from "./config/aa/deploy-env.js";
 import { bootstrapHostServerConfig, defaultHostServerConfig, isModuleEnabled } from "./config/host.js";
 import { bootstrapHostRouteDeps, type HostRouteDeps } from "./deps.js";
+import { createAaRouter } from "./features/aa/routes.js";
+import { createCatalogRouter, createPagesRouter } from "./features/catalog/routes.js";
+import { createContentRouter } from "./features/content/routes.js";
+import { createUploadsRouter } from "./features/content/uploads.js";
+import { createDescriptorRouter } from "./features/descriptor/routes.js";
+import { createDiscoveryRouter } from "./features/discovery/routes.js";
+import { createForumRouter } from "./features/forum/routes.js";
+import { createLiveRouter } from "./features/live/routes.js";
+import { createMediaRouter } from "./features/media/routes.js";
+import { createMemoryRouter } from "./features/memory/routes.js";
+import { createRecordingsRouter } from "./features/recordings/routes.js";
+import { createRemoteRouter } from "./features/remote/routes.js";
 import {
   errorHandler,
   malformedJsonHandler,
   notFoundHandler,
   payloadTooLargeHandler
-} from "./api/middleware/errorHandler.js";
-import { createAaRouter } from "./api/routes/aa.js";
-import { createCatalogRouter } from "./api/routes/catalog.js";
-import { createPagesRouter } from "./api/routes/pages.js";
-import { createUploadsRouter } from "./api/routes/uploads.js";
-import { createRecordingsRouter } from "./api/routes/recordings.js";
-import { createContentRouter } from "./api/routes/content.js";
-import { createDescriptorRouter } from "./api/routes/descriptor.js";
-import { createDiscoveryRouter } from "./api/routes/discovery.js";
-import { createMediaRouter } from "./api/routes/media.js";
-import { createMemoryRouter } from "./api/routes/memory.js";
-import { createForumRouter } from "./api/routes/forum.js";
-import { createLiveRouter } from "./api/routes/live.js";
-import { createRemoteRouter } from "./api/routes/remote.js";
+} from "./http/errorHandler.js";
 import {
   createCorsMiddleware,
   createModuleDisabledHandler,
   createRateLimit,
   securityHeaders
-} from "./api/middleware/posture.js";
-import type { HostModuleToken } from "@livestreak/host";
+} from "./http/posture.js";
 
 // --- exports ---
 
-export { createHostRouteDeps, bootstrapHostRouteDeps, type HostRouteDeps } from "./deps.js";
 export { bootstrapHostServerConfig } from "./config/host.js";
+export { bootstrapHostRouteDeps,createHostRouteDeps,type HostRouteDeps } from "./deps.js";
 
 // H6: blob uploads carry base64 payloads (manifests, evidence, media chunks)
 // that exceed the default 100kb JSON limit. Raise the cap for `/content/blobs`
@@ -126,8 +123,6 @@ export const bootstrapHostServer = async (
   config: ReturnType<typeof defaultHostServerConfig> = defaultHostServerConfig()
 ): Promise<BootstrappedHost> => {
   const resolved = await bootstrapHostServerConfig(config);
-  const aa = readAaServerConfig(resolved, loadDefaultDeploySnapshotConfig());
-  await bootstrapAaFromConfig(aa);
   const deps = await bootstrapHostRouteDeps(resolved);
   const app = createApp(deps);
   return { config: resolved, deps, app };

@@ -1,3 +1,4 @@
+import { makePasswordVerifier } from "#test/helpers/remote.js";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { capabilityGrantSigningBytes, type CapabilityGrant } from "@livestreak/schema";
@@ -6,9 +7,8 @@ import { createApp, createHostRouteDeps } from "#server.js";
 import { defaultHostServerConfig } from "#config/host.js";
 import {
   createRemoteService,
-  makePasswordVerifier,
   type RelayConn
-} from "#services/remote/index.js";
+} from "#features/remote/index.js";
 
 // Fake duplex connection that records every frame the relay sends to it.
 const fakeConn = () => {

@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRecordingService } from "../src/services/recordings/service.js";
+import { createRecordingService } from "../src/features/recordings/service.js";
 import { createFmp4Chunker } from "../../packages/observe/src/pipeline/publish/encoder/fmp4-boxes.js";
 import { testObjectStore } from "./helpers/object-store.js";
 const scope = {

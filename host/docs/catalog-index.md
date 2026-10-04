@@ -1,6 +1,6 @@
 # Catalog index scope and freshness
 
-The Host polls configured chain deployments, atomically stores complete market/vault/resolution graphs, and serves discovery from one transactional SQLite projection. `/catalog`, `/catalog/full`, `/homepage`, `/stream/:id` and its catalog alias share that projection. IDs are chain-qualified; ambiguous detail routes require `?chain=evm|sui|solana`.
+The Host polls configured chain deployments, atomically stores complete market/vault/resolution graphs, and serves discovery from one transactional Turso/libSQL projection. `/catalog`, `/catalog/full`, `/homepage`, `/stream/:id` and its catalog alias share that projection. IDs are chain-qualified; ambiguous detail routes require `?chain=evm|sui|solana`.
 
 ## Configuration
 
@@ -25,3 +25,9 @@ A registry scan failure does not invalidate an independently refreshed market gr
 Regression tests cover mixed-chain outage/recovery, failed registry scans with readable known markets, healthy empty scopes, disabled cache, failed child reads, overlapping refresh, migration preservation, chain ID collisions and consistent public endpoints. App tests cover totals/results through partial and unavailable states.
 
 This is a polling mini-indexer. It does not pin every RPC to one block/slot/checkpoint or implement finalized event history. Turso recording-metadata migration, network isolation, historical activity/volume and agent reputation remain separate work. Recording playback is independently checked against storage and the committed pointer; an ended stream does not imply a replay exists.
+
+## Database layout
+
+`database/` contains only `connection.ts`, `schema.ts` and `migrations/`. Schema and row types live together. Shared DDL lives in the initial migration, and catalog rebuild logic lives in its integrity migration. Applied migration names and data-preservation behavior are retained.
+
+The catalog read model and indexer use Kysely directly, with transactions for complete graph replacement and consistent reads. Memory and forum handlers likewise query their injected Kysely connection directly. The dependency builder provides the connection; no repository factory or facade is involved. Runtime connects to the configured Turso/libSQL URL; only isolated tests use SQLite. Mandates and resolution receipts share the same remote Kysely connection.

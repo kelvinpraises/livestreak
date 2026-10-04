@@ -19,7 +19,7 @@
 
 FROM node:22-slim
 
-# Native toolchain for better-sqlite3 (host catalog projection) and the wallet SDK
+# Native toolchain for test dependencies and the wallet SDK
 # (sodium-*, @tetherto/wdk-*). curl is kept for the deploy healthcheck.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ ca-certificates curl \
@@ -63,7 +63,7 @@ RUN npm run build:packages:image
 COPY host ./host
 RUN npm run build -w @livestreak/host-server
 
-# Runtime. Config (RPC URLs, executor keys, cloud storage settings, remote-console secrets)
+# Runtime. Config (Turso URL/token, RPC URLs, sponsor keys, storage settings, console secrets)
 # comes from `--env-file` at `docker run` time — never baked into the image.
 ENV NODE_ENV=production
 ENV LIVESTREAK_HOST_BIND_HOST=0.0.0.0

@@ -106,7 +106,7 @@ The seed never leaves the gateway process.
 ### Preflight (not remote UI)
 
 - Regenerate `settings.json` after `./dev.sh` force deploy (addresses change)
-- Mint test USDC to operator Safe via `cast` (see `host/docs/dev-stack.md`)
+- Fund the operator account with the configured testnet token before publishing or funding a vault.
 - On `ExecutionFailed 0xacfdb444`: `cast run <userOpHash>` for inner revert
 
 ### Soft / deferred

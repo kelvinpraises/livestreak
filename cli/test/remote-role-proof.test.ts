@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 import type { BridgeCaller, CallActionEnvelope, CapabilityScope, SessionWallet } from "@livestreak/schema";
 import { createApp, createHostRouteDeps } from "../../host/src/server.js";
 import { defaultHostServerConfig } from "../../host/src/config/host.js";
-import { attachRemoteWss } from "../../host/src/infrastructure/ws/server.js";
+import { attachRemoteWss } from "../../host/src/features/remote/transport.js";
 import { SessionRegistry } from "../src/gateway/session/registry.js";
 import { createRelay, type Relay } from "../src/gateway/remote/relay.js";
 import { connectGateway, type WssClient } from "../src/gateway/remote/wss-client.js";

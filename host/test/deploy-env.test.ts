@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { loadDeploySnapshotConfig } from "#config/aa/deploy-env.js";
+import { loadDeploySnapshotConfig } from "#config/deployment.js";
 
 const HOST_ROOT = resolve(fileURLToPath(import.meta.url), "..", "..");
 const LOCALHOST_SNAPSHOT = resolve(
@@ -28,7 +28,6 @@ describe("loadDeploySnapshotConfig", () => {
     expect(config.rpcUrl).toBe(data.rpc);
     expect(config.entryPoint).toBe(data.scopes.aa.contracts.entryPoint);
     expect(config.safeModule).toBe(data.scopes.aa.contracts.safe4337Module);
-    expect(config.paymasterAddress).toBe(data.scopes.paymaster.contracts.verifyingPaymaster);
   });
 
   it("is a pure read — it does not mutate process.env", () => {

@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { SessionWallet } from "@livestreak/schema";
 import { createApp, createHostRouteDeps } from "../../host/src/server.js";
 import { defaultHostServerConfig } from "../../host/src/config/host.js";
-import { attachRemoteWss } from "../../host/src/infrastructure/ws/server.js";
+import { attachRemoteWss } from "../../host/src/features/remote/transport.js";
 import { HostWssTransport, type WebSocketLike } from "../../app/src/utils/host-wss-transport.js";
 import { SessionRegistry } from "../src/gateway/session/registry.js";
 import { createRelay } from "../src/gateway/remote/relay.js";

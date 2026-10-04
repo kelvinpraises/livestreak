@@ -2,18 +2,18 @@ import type { EndpointDescriptor } from "@livestreak/host";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, createHostRouteDeps } from "#server.js";
-import { handleFindSimilar, handleIndexVault } from "#api/controllers/discovery.js";
-import { handleMemoryRecall, handleMemoryRemember } from "#services/memory/records.js";
-import { handleForumList, handleForumPost } from "#services/forum/messages.js";
-import { handlePolicyEvaluate } from "#services/media/policy-routes.js";
+import { handleFindSimilar, handleIndexVault } from "#features/discovery/routes.js";
+import { handleMemoryRecall, handleMemoryRemember } from "#features/memory/routes.js";
+import { handleForumList, handleForumPost } from "#features/forum/routes.js";
+import { handlePolicyEvaluate } from "#features/media/routes.js";
 import {
   handleCacheReceipt,
   handleCreateSession,
   handleGetManifest
-} from "#api/controllers/media.js";
-import { createEvidenceStore } from "#services/media/evidence.js";
-import { createManifestStore } from "#services/media/manifest.js";
-import { createSessionStore } from "#services/media/session.js";
+} from "#features/media/routes.js";
+import { createEvidenceStore } from "#features/media/evidence.js";
+import { createManifestStore } from "#features/media/manifest.js";
+import { createSessionStore } from "#features/media/session.js";
 import { defaultHostServerConfig } from "#config/host.js";
 
 const validIndexVaultBody = {
@@ -127,6 +127,8 @@ describe("media session routes", () => {
 
     expect(response.ok).toBe(true);
     if (response.ok) {
+      expect(response.result.draft.endpoints).toEqual([]);
+      expect(response.result.draft.manifestDraft.endpoints).toEqual([]);
       expect(response.result).toMatchObject({
         summary: {
           sessionId: "session_test_01",
@@ -202,10 +204,9 @@ describe("media session routes", () => {
     }
   });
 
-  it("rejects simulcast when LiveKit is not configured", async () => {
+  it("rejects unsupported simulcast", async () => {
     const host = createTestHost({
       ...defaultHostServerConfig(),
-      livekitApiKey: undefined
     });
 
     const response = await handleCreateSession(
@@ -593,7 +594,7 @@ describe("discovery routes", () => {
 });
 
 describe("memory records routes", () => {
-  it("remembers then recalls a subject's records through the DB repo", async () => {
+  it("remembers then recalls a subject's records through Kysely", async () => {
     const host = createTestHost();
 
     const remembered = await handleMemoryRemember(

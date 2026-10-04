@@ -1,19 +1,20 @@
 #!/usr/bin/env tsx
+import { createServer } from "node:http";
+import { attachLiveWss } from "./features/live/transport.js";
+import { attachRemoteWss } from "./features/remote/transport.js";
+import { bootstrapHostServer } from "./server.js";
+
 /**
- * LiveStreak host dev server — HTTP on :8787 with AA (embedded Alto bundler + paymaster).
+ * LiveStreak host dev server — HTTP on :8787 with AA (hosted bundler proxy + sponsorship).
  *
- * Prereqs: anvil + `npm run deploy -- --name localhost` in packages/contracts
+ * Configure hosted AA endpoints and deployed chain snapshots before enabling chain writes.
  *
  * Run:
  *   npm run dev
  */
 
-import { createServer } from "node:http";
-import { bootstrapHostServer } from "./server.js";
-import { attachRemoteWss } from "./infrastructure/ws/server.js";
-import { attachLiveWss } from "./infrastructure/ws/live-server.js";
 
-// The AA config assembly loads the deploy snapshot as read-only INPUT (config/aa/deploy-env.ts) —
+// The AA config assembly loads the deploy snapshot as read-only INPUT (config/deployment.ts) —
 // env is never mutated here. LIVESTREAK_AA_FROM_DEPLOY=0 / LIVESTREAK_DEPLOY_SNAPSHOT are honored there.
 const { config, deps, app } = await bootstrapHostServer();
 

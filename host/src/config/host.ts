@@ -1,6 +1,6 @@
 import type { HostModuleToken, HostProviderDescriptor } from "@livestreak/host";
 import type { OutputMode } from "@livestreak/schema";
-import type { StorageConfig } from "../infrastructure/storage/object-store.js";
+import type { StorageConfig } from "../storage/object-store.js";
 import { readOptionalEnv } from "./env.js";
 
 // --- exports ---
@@ -23,7 +23,6 @@ export interface HostServerConfig {
   readonly walletSeed: string | null;
   readonly storage: StorageConfig | null;
   readonly contentWriteToken: string | null;
-  readonly livekitApiKey: string | undefined;
   // --- Remote Bridge Console (P4) ---
   /** App origin the host 302-redirects `/remote/:session` to (UI lives there). */
   readonly remoteAppOrigin: string | null;
@@ -54,7 +53,7 @@ export const defaultHostServerConfig = (): HostServerConfig => ({
   accountTier: "dev",
   termsVersion: "dev-terms",
   enabledModules: [...allModules],
-  supportedOutputs: ["file", "local", "simulcast"],
+  supportedOutputs: ["file", "local"],
   cacheQuotaBytes: 1024 * 1024 * 1024,
   cacheRetentionDays: 7,
   cacheReceipts: "required",
@@ -63,7 +62,6 @@ export const defaultHostServerConfig = (): HostServerConfig => ({
   walletSeed: readOptionalEnv("LIVESTREAK_WALLET_SEED"),
   storage: readStorageConfig(),
   contentWriteToken: readOptionalEnv("LIVESTREAK_HOST_API_TOKEN"),
-  livekitApiKey: process.env.LIVEKIT_API_KEY,
   remoteAppOrigin: readOptionalEnv("LIVESTREAK_APP_ORIGIN"),
   remoteGatewayToken: readOptionalEnv("LIVESTREAK_REMOTE_GATEWAY_TOKEN"),
   remoteGrantKeyHex: readOptionalEnv("LIVESTREAK_REMOTE_GRANT_KEY"),
@@ -71,7 +69,7 @@ export const defaultHostServerConfig = (): HostServerConfig => ({
 });
 
 export const toHostProviderDescriptor = (config: HostServerConfig): HostProviderDescriptor => {
-  const simulcastAvailable = config.livekitApiKey !== undefined && config.livekitApiKey.length > 0;
+  const simulcastAvailable = false;
   const advertisedOutputs = config.supportedOutputs.filter(
     (mode) => mode !== "simulcast" || simulcastAvailable
   );

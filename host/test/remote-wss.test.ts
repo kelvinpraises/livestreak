@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { createApp, createHostRouteDeps } from "#server.js";
 import { defaultHostServerConfig } from "#config/host.js";
-import { attachRemoteWss } from "#infrastructure/ws/server.js";
-import { makePasswordVerifier } from "#services/remote/index.js";
+import { attachRemoteWss } from "#features/remote/transport.js";
+import { makePasswordVerifier } from "#test/helpers/remote.js";
 import type { HostRouteDeps } from "#deps.js";
 
 // End-to-end over REAL sockets: proves the WSS legs share the http.Server, the

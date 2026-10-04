@@ -3,7 +3,7 @@ import {
   createLiveRingStore,
   type LiveRingConfig,
   type ViewerFrame
-} from "../src/services/live/ring.js";
+} from "../src/features/live/ring.js";
 
 /**
  * Live fMP4 ring buffer + fan-out semantics: init caching, late-join backlog, slow-viewer drop-oldest

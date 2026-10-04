@@ -3,13 +3,13 @@ import request from "supertest";
 import { createApp, createHostRouteDeps } from "#server.js";
 import { defaultHostServerConfig } from "#config/host.js";
 import type { OptionsMarketSnapshot, OptionsReader } from "@livestreak/options";
-import { createDatabase } from "#infrastructure/database/connection.js";
-import { migrateSync, migrateToLatest } from "#infrastructure/database/migrations/index.js";
-import { SCHEMA_DDL } from "#infrastructure/database/ddl.js";
-import { createCatalogRepository } from "#infrastructure/database/repository.js";
-import { createCatalogIndexer } from "#infrastructure/cron/catalog-sync.js";
-import { createCatalogReadModel } from "#services/catalog/read-model.js";
-import { snapshotToRows } from "#services/catalog/mapper.js";
+import { createDatabase } from "#database/connection.js";
+import { migrateSync, migrateToLatest } from "#database/migrations/index.js";
+import { SCHEMA_DDL } from "#database/migrations/2026-10-04T08:00:00+0000.js";
+import { createCatalogIndexer } from "#features/catalog/indexer.js";
+import { createCatalogReadModel } from "#features/catalog/read-model.js";
+import type { Kysely } from "kysely";
+import type { DB, ChainTag } from "#database/schema.js";
 
 const NOW = 1000000;
 const handles: ReturnType<typeof createDatabase>[] = [];
@@ -20,7 +20,7 @@ function database() {
   const handle = createDatabase(":memory:");
   handles.push(handle);
   migrateSync(handle.sqlite);
-  return { handle, repo: createCatalogRepository(handle.db) };
+  return { handle, db: handle.db };
 }
 function snapshot(status = "open"): OptionsMarketSnapshot {
   return {
@@ -72,9 +72,39 @@ function reader(snap: OptionsMarketSnapshot): OptionsReader {
     readBoundaries: async () => [],
   } as unknown as OptionsReader;
 }
+
+async function storedRows(db: Kysely<DB>) {
+  return db.transaction().execute(async (tx) => ({
+    markets: await tx
+      .selectFrom("markets")
+      .selectAll()
+      .orderBy("updated_at", "desc")
+      .execute(),
+    vaults: await tx.selectFrom("vaults").selectAll().execute(),
+    resolutions: await tx.selectFrom("resolutions").selectAll().execute(),
+  }));
+}
+async function seed(
+  db: Kysely<DB>,
+  chain: ChainTag,
+  snap: OptionsMarketSnapshot,
+  at: number,
+  live?: boolean,
+) {
+  const indexer = createCatalogIndexer({
+    db,
+    readers: { availableChains: [chain], reader: () => reader(snap) },
+    baseUrl: "http://host",
+    knownMarkets: () => [],
+    now: () => at,
+    ...(live === undefined ? {} : { isStreamLive: () => live }),
+  });
+  expect(await indexer.syncMarket({ chain, marketId: "m" })).toBe(true);
+}
+
 describe("catalog correctness under failure and identity permutations", () => {
   it("times out a stalled market, permits retry and prevents late reads overwriting recovery", async () => {
-    const { repo } = database();
+    const { db } = database();
     const old = snapshot();
     let release!: (value: OptionsMarketSnapshot["market"]) => void;
     const r = reader(old);
@@ -85,7 +115,7 @@ describe("catalog correctness under failure and identity permutations", () => {
         }),
     );
     const indexer = createCatalogIndexer({
-      repo,
+      db,
       readers: { availableChains: ["evm"], reader: () => r },
       baseUrl: "http://host",
       knownMarkets: () => [],
@@ -93,11 +123,11 @@ describe("catalog correctness under failure and identity permutations", () => {
       now: () => NOW,
     });
     expect(await indexer.syncAll()).toEqual({ indexed: 0, failed: 1 });
-    expect(await repo.allMarkets()).toEqual([]);
+    expect(await db.selectFrom("markets").selectAll().execute()).toEqual([]);
     expect(await indexer.syncAll()).toEqual({ indexed: 1, failed: 0 });
     release({ ...old.market, title: "Late obsolete title" });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect((await repo.allMarkets())[0]?.title).toBe("Show");
+    expect((await db.selectFrom("markets").selectAll().execute())[0]?.title).toBe("Show");
     expect(marketRead).toHaveBeenCalledTimes(2);
   });
   it("serves every discovery endpoint from the same projection with chain-qualified detail routes", async () => {
@@ -122,7 +152,7 @@ describe("catalog correctness under failure and identity permutations", () => {
     expect(home.protocolStats).toEqual({
       totalVaults: 2,
       totalVolume: 6,
-      activeStreams: 2,
+      activeStreams: 0,
     });
     expect(Object.keys(full.streams).sort()).toEqual(["evm:m", "sui:m"]);
     await request(app).get("/stream/m").expect(409);
@@ -138,11 +168,11 @@ describe("catalog correctness under failure and identity permutations", () => {
     expect(scoped.streams).toEqual([]);
   });
   it("scopes totals to verified graphs through a second-chain outage and recovery", async () => {
-    const { repo } = database();
+    const { db } = database();
     const evm = reader(snapshot("resolved"));
     const sui = reader(snapshot("resolved"));
     const indexer = createCatalogIndexer({
-      repo,
+      db,
       readers: {
         availableChains: ["evm", "sui"],
         reader: (c) => (c === "evm" ? evm : sui),
@@ -151,7 +181,7 @@ describe("catalog correctness under failure and identity permutations", () => {
       knownMarkets: () => [],
       now: () => NOW,
     });
-    const model = createCatalogReadModel({ repo, health: indexer.health, now: () => NOW });
+    const model = createCatalogReadModel({ db, health: indexer.health, now: () => NOW });
     await indexer.syncAll();
     expect((await model.homepage()).protocolStats.totalVolume).toBe(6);
     const failure = vi.spyOn(sui, "readVault").mockRejectedValue(new Error("Sui offline"));
@@ -186,10 +216,10 @@ describe("catalog correctness under failure and identity permutations", () => {
     expect(recovered.lifetimeVaults.every((v) => !v.stale)).toBe(true);
   });
   it("excludes disabled-chain cache and treats a successfully enumerated empty chain as verified", async () => {
-    const { repo } = database();
-    await repo.syncMarket(snapshotToRows("sui", snapshot("resolved"), NOW, "http://host"));
+    const { db } = database();
+    await seed(db, "sui", snapshot("resolved"), NOW);
     const model = createCatalogReadModel({
-      repo,
+      db,
       health: () => ({ availableChains: ["evm"], failedChains: [], failedMarketKeys: [] }),
       now: () => NOW,
     });
@@ -208,54 +238,62 @@ describe("catalog correctness under failure and identity permutations", () => {
     });
     expect(await model.stream("m", "sui")).toBeNull();
     expect((await model.homepage("sui")).indexing?.statsScope).toBe("unavailable");
-    expect((await repo.allMarkets()).length).toBe(1);
+    expect((await db.selectFrom("markets").selectAll().execute()).length).toBe(1);
   });
   it("rolls back a failed replacement without losing the old market and resolution", async () => {
-    const { repo } = database();
-    await repo.syncMarket(snapshotToRows("evm", snapshot("resolved"), NOW, "http://host"));
-    const before = await repo.snapshot();
-    const next = snapshotToRows("evm", snapshot(), NOW + 1, "http://host");
-    await expect(
-      repo.syncMarket({ ...next, vaults: [...next.vaults, ...next.vaults] }),
-    ).rejects.toThrow();
-    expect(await repo.snapshot()).toEqual(before);
+    const { db } = database();
+    await seed(db, "evm", snapshot("resolved"), NOW);
+    const before = await storedRows(db);
+    const next = snapshot();
+    (next.market as { title: string }).title = "Must roll back";
+    const r = reader(next);
+    vi.spyOn(r, "listMarketVaults").mockResolvedValue(["v", "v"] as never);
+    const indexer = createCatalogIndexer({
+      db,
+      readers: { availableChains: ["evm"], reader: () => r },
+      baseUrl: "http://host",
+      knownMarkets: () => [],
+      now: () => NOW + 1,
+    });
+    expect(await indexer.syncMarket({ chain: "evm", marketId: "m" })).toBe(false);
+    expect(await storedRows(db)).toEqual(before);
   });
   it("rejects corrupted aggregate and outcome data, and does not invent a resolution timestamp", async () => {
-    const { repo, handle } = database();
+    const { db, handle } = database();
     const unknownTime = snapshot("resolved");
     delete (unknownTime.vaults[0]!.timing as { resolvedAtMs?: number }).resolvedAtMs;
-    await repo.syncMarket(snapshotToRows("evm", unknownTime, NOW, "http://host"));
-    const model = createCatalogReadModel({ repo, now: () => NOW });
+    await seed(db, "evm", unknownTime, NOW);
+    const model = createCatalogReadModel({ db, now: () => NOW });
     expect((await model.homepage()).lifetimeVaults[0]).toMatchObject({
       resolutionTimeKnown: false,
       resolvedAgoMs: 0,
     });
     handle.sqlite.prepare("UPDATE resolutions SET outcome = 'corrupt'").run();
     await expect(model.homepage()).rejects.toThrow("disagrees");
-    await repo.syncMarket(snapshotToRows("evm", snapshot(), NOW, "http://host"));
+    await seed(db, "evm", snapshot(), NOW);
     handle.sqlite.prepare("UPDATE markets SET total_pooled = 42").run();
     await expect(model.homepage()).rejects.toThrow("totals disagree");
   });
   it("preserves a complete snapshot when any child, stream or board read fails", async () => {
-    const { repo } = database();
+    const { db } = database();
     const r = reader(snapshot());
     let at = NOW;
     const indexer = createCatalogIndexer({
-      repo,
+      db,
       readers: { availableChains: ["evm"], reader: () => r },
       baseUrl: "http://host",
       knownMarkets: () => [],
       now: () => at,
     });
     expect(await indexer.syncAll()).toEqual({ indexed: 1, failed: 0 });
-    const previous = await repo.snapshot();
+    const previous = await storedRows(db);
     at += 1000;
     for (const method of ["readVault", "readStreamState", "readBoard"] as const) {
       const spy = vi.spyOn(r, method).mockRejectedValue(new Error("RPC offline"));
       expect(await indexer.syncAll()).toEqual({ indexed: 0, failed: 1 });
-      expect(await repo.snapshot()).toEqual(previous);
+      expect(await storedRows(db)).toEqual(previous);
       const home = await createCatalogReadModel({
-        repo,
+        db,
         health: indexer.health,
         now: () => at,
       }).homepage();
@@ -273,11 +311,11 @@ describe("catalog correctness under failure and identity permutations", () => {
     expect(indexer.health().failedMarkets).toBe(0);
   });
   it("shares overlapping cron and lazy reads instead of racing writes", async () => {
-    const { repo } = database();
+    const { db } = database();
     const r = reader(snapshot());
     const spy = vi.spyOn(r, "readMarket");
     const indexer = createCatalogIndexer({
-      repo,
+      db,
       readers: { availableChains: ["evm"], reader: () => r },
       baseUrl: "http://host",
       knownMarkets: () => [],
@@ -287,60 +325,84 @@ describe("catalog correctness under failure and identity permutations", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
   it("keeps identical IDs on different chains independent and rejects ambiguous routes", async () => {
-    const { repo } = database();
-    await repo.syncMarket(snapshotToRows("evm", snapshot("resolved"), NOW, "http://host"));
-    await repo.syncMarket(snapshotToRows("sui", snapshot(), NOW, "http://host"));
-    expect((await repo.allMarkets()).length).toBe(2);
-    expect((await repo.liveVaults()).length).toBe(1);
-    expect((await repo.lifetimeVaults()).length).toBe(1);
-    await expect(repo.marketByRoute("m")).rejects.toThrow("ambiguous");
-    expect((await repo.marketByRoute("m", "sui"))?.chain).toBe("sui");
-    const home = await createCatalogReadModel({ repo, now: () => NOW }).homepage();
+    const { db } = database();
+    await seed(db, "evm", snapshot("resolved"), NOW);
+    await seed(db, "sui", snapshot(), NOW);
+    expect((await db.selectFrom("markets").selectAll().execute()).length).toBe(2);
+    expect(
+      (
+        await db
+          .selectFrom("vaults")
+          .selectAll()
+          .where("status", "in", ["open", "hot"])
+          .execute()
+      ).length,
+    ).toBe(1);
+    expect((await db.selectFrom("resolutions").selectAll().execute()).length).toBe(1);
+    await expect(
+      createCatalogReadModel({ db, now: () => NOW }).stream("m"),
+    ).rejects.toThrow("ambiguous");
+    expect(
+      (
+        await db
+          .selectFrom("markets")
+          .selectAll()
+          .where("id", "=", "m")
+          .where("chain", "=", "sui")
+          .executeTakeFirst()
+      )?.chain,
+    ).toBe("sui");
+    const home = await createCatalogReadModel({ db, now: () => NOW }).homepage();
     expect(home.protocolStats.totalVaults).toBe(2);
     expect(home.protocolStats.totalVolume).toBe(6);
     expect(home.lifetimeVaults[0]?.chain).toBe("evm");
-    await repo.syncMarket(snapshotToRows("evm", snapshot(), NOW + 1, "http://host"));
-    expect(await repo.lifetimeVaults()).toEqual([]); // Fresh chain observation removed the previous outcome.
+    await seed(db, "evm", snapshot(), NOW + 1);
+    expect(await db.selectFrom("resolutions").selectAll().execute()).toEqual([]); // Fresh chain observation removed the previous outcome.
   });
   it("exposes stale indexing and never presents an aged live cache as current", async () => {
-    const { repo } = database();
-    await repo.syncMarket(snapshotToRows("solana", snapshot(), NOW, "http://host"));
-    const home = await createCatalogReadModel({ repo, now: () => NOW + 50000 }).homepage();
+    const { db } = database();
+    await seed(db, "solana", snapshot(), NOW);
+    const home = await createCatalogReadModel({ db, now: () => NOW + 50000 }).homepage();
     expect(home.indexing?.status).toBe("unavailable");
     expect(home.streams[0]?.isLive).toBe(false);
     expect(home.streams[0]?.stale).toBe(true);
     expect(home.protocolStats.activeStreams).toBe(0);
   });
   it("requires observed video liveness when a signaling observation is available", async () => {
-    const { repo } = database();
-    await repo.syncMarket(
-      snapshotToRows("evm", snapshot(), NOW, "http://host", undefined, false),
-    );
-    expect((await repo.marketByRoute("m", "evm"))?.is_live).toBe(0);
+    const { db } = database();
+    await seed(db, "evm", snapshot(), NOW, false);
+    expect(
+      (
+        await db
+          .selectFrom("markets")
+          .selectAll()
+          .where("id", "=", "m")
+          .where("chain", "=", "evm")
+          .executeTakeFirst()
+      )?.is_live,
+    ).toBe(0);
     const ended = snapshot();
     (ended.streamState as { status: string }).status = "ended";
-    await repo.syncMarket(
-      snapshotToRows("evm", ended, NOW, "http://host", undefined, true),
-    );
-    const home = await createCatalogReadModel({ repo, now: () => NOW }).homepage();
+    await seed(db, "evm", ended, NOW, true);
+    const home = await createCatalogReadModel({ db, now: () => NOW }).homepage();
     expect(home.streams[0]?.isLive).toBe(false);
     expect(home.streams[0]?.elapsed).toBe("");
     expect(home.streams[0]?.category).toBe("Uncategorized");
   });
   it("does not turn invalid stored amounts into valid zero balances", async () => {
-    const { repo, handle } = database();
-    await repo.syncMarket(snapshotToRows("evm", snapshot(), NOW, "http://host"));
+    const { db, handle } = database();
+    await seed(db, "evm", snapshot(), NOW);
     handle.sqlite.prepare("UPDATE vaults SET live_yes_pool = 'corrupt'").run();
-    await expect(
-      createCatalogReadModel({ repo, now: () => NOW }).homepage(),
-    ).rejects.toThrow("Invalid indexed pool");
+    await expect(createCatalogReadModel({ db, now: () => NOW }).homepage()).rejects.toThrow(
+      "Invalid indexed pool",
+    );
   });
   it("exposes failed enumeration even when a seeded market can still be read", async () => {
-    const { repo } = database();
+    const { db } = database();
     const r = reader(snapshot());
     vi.spyOn(r, "listMarketIds").mockRejectedValue(new Error("Registry unavailable"));
     const indexer = createCatalogIndexer({
-      repo,
+      db,
       readers: { availableChains: ["evm"], reader: () => r },
       baseUrl: "http://host",
       knownMarkets: () => [{ chain: "evm", marketId: "m" }],
@@ -348,7 +410,7 @@ describe("catalog correctness under failure and identity permutations", () => {
     });
     await indexer.ensureAll();
     const home = await createCatalogReadModel({
-      repo,
+      db,
       health: indexer.health,
       now: () => NOW,
     }).homepage();

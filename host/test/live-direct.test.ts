@@ -7,7 +7,7 @@ import {
   handleDirectWithdraw,
   handleReachabilityEcho,
   type TcpDialer
-} from "../src/services/live/direct.js";
+} from "../src/features/live/direct.js";
 
 const announcedKey = (result: ReturnType<typeof handleDirectAnnounce>): string => {
   expect(result.ok).toBe(true);

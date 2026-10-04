@@ -72,7 +72,7 @@ import {
 
 import {
   HOST_BASE_URL,
-  LOCAL_CHAIN_ID,
+  EVM_CHAIN_ID,
   isOptionsModeEnabled,
   testOptionsSeed,
 } from '#/utils/env'
@@ -80,13 +80,14 @@ import {
   buildOptionsContractAddresses,
   initialChain,
   isChainDeployed,
-  LOCALHOST_AA_CONTRACTS,
-  LOCALHOST_RPC_URL,
+  EVM_AA_CONTRACTS,
+  EVM_RPC_URL,
 } from '#/utils/deployments'
 import {
   chainLabel,
   isValidRecipientAddress,
   SESSION_CHAIN_KEY,
+  SUPPORTED_CHAINS,
   type OptionsChainKind,
 } from '#/utils/chain'
 import {
@@ -282,20 +283,20 @@ function savePausedLanes(lanes: readonly OptionsPausedLane[]): void {
 }
 
 function buildWalletInit(descriptor: AaCapabilityDescriptor): WalletInit {
-  const chain = descriptor.chains.find((c) => c.chainId === LOCAL_CHAIN_ID)
+  const chain = descriptor.chains.find((c) => c.chainId === EVM_CHAIN_ID)
   if (!chain) {
-    throw new Error(`Host AA descriptor has no chain ${LOCAL_CHAIN_ID}`)
+    throw new Error(`Host AA descriptor has no chain ${EVM_CHAIN_ID}`)
   }
 
-  const aa = LOCALHOST_AA_CONTRACTS
-  const chainKey = String(LOCAL_CHAIN_ID)
-  const rpcUrl = chain.rpcUrl ?? LOCALHOST_RPC_URL
+  const aa = EVM_AA_CONTRACTS
+  const chainKey = String(EVM_CHAIN_ID)
+  const rpcUrl = chain.rpcUrl ?? EVM_RPC_URL
 
   const evmConfig = Schema.decodeUnknownSync(EvmWalletInitConfig)({
-    chainId: LOCAL_CHAIN_ID,
+    chainId: EVM_CHAIN_ID,
     provider: rpcUrl,
     bundlerUrl: `${HOST_BASE_URL}${chain.bundlerPath}`,
-    paymasterUrl: `${HOST_BASE_URL}${descriptor.paymasterPath}/local`,
+    paymasterUrl: `${HOST_BASE_URL}${chain.bundlerPath.replace("/aa/bundler/", "/aa/paymaster/")}`,
     isSponsored: true,
     useNativeCoins: false,
     entryPointAddress: chain.entryPoint,
@@ -376,7 +377,7 @@ function buildChainConfig(
     walletInit,
     seed: secret,
     addresses: buildOptionsContractAddresses(),
-    readRpcUrl: LOCALHOST_RPC_URL,
+    readRpcUrl: EVM_RPC_URL,
     includeProtocolSummary: true,
     hostUrl: HOST_BASE_URL,
   }
@@ -678,6 +679,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
 
   const setChain = useCallback(
     (next: OptionsChainKind) => {
+      if (!SUPPORTED_CHAINS.some(option => option.id === next)) return
       if (writeBusyRef.current || isLoading || next === chainRef.current) return
       sessionStorage.setItem(SESSION_CHAIN_KEY, next)
       // B: switching chains KEEPS the derived secret and re-derives the new chain's address from the

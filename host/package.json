@@ -15,33 +15,30 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",
     "@aws-sdk/lib-storage": "^3.1146.0",
+    "@libsql/kysely-libsql": "^0.4.1",
     "@livestreak/core": "file:../packages/core",
     "@livestreak/host": "file:../packages/host",
     "@livestreak/options": "file:../packages/options",
     "@livestreak/schema": "file:../packages/schema",
     "@livestreak/wallet": "file:../packages/wallet",
     "@mysten/sui": "^2.19.0",
-    "@pimlico/alto": "^0.0.20",
-    "@solana/spl-token": "^0.4.15",
-    "@solana/web3.js": "^1.98.4",
-    "@types/express": "^5.0.6",
-    "@types/supertest": "^7.2.0",
-    "better-sqlite3": "^11.8.1",
     "express": "^5.2.1",
     "kysely": "^0.27.5",
     "node-cron": "^3.0.3",
-    "supertest": "^7.2.2",
     "viem": "^2.50.4",
-    "ws": "^8.18.0",
-    "zod": "^3.25.76"
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.15.30",
     "@types/node-cron": "^3.0.11",
+    "@types/supertest": "^7.2.0",
     "@types/ws": "^8.5.12",
+    "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "typescript": "6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "better-sqlite3": "^11.8.1"
   }
 }

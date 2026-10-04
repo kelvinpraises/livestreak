@@ -1,13 +1,11 @@
 [
   {
-    "routeKey": "local",
-    "chainId": 31337,
-    "name": "local",
+    "routeKey": "arbitrum-sepolia",
+    "chainId": 421614,
+    "name": "Arbitrum Sepolia",
     "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-    "rpcUrl": "http://127.0.0.1:8545",
-    "executorKeyEnv": "LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY",
-    "paymasterAddress": "0x547f60b6c453178c851d529bf36e9bccc57ba844",
-    "safeModule": "0x7240e794b12f848dea622a0da206d1b7d56bd",
-    "bundlerUrl": "http://127.0.0.1:4337"
+    "rpcUrl": "https://sepolia-rollup.arbitrum.io/rpc",
+    "bundlerUrlEnv": "ZERODEV_ARBITRUM_SEPOLIA_RPC_URL",
+    "paymasterUrlEnv": "ZERODEV_ARBITRUM_SEPOLIA_RPC_URL"
   }
 ]

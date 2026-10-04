@@ -14,32 +14,29 @@ name: Deploy host
 # Host RUNTIME config is NOT baked into the image and is NOT a CI secret. It lives in
 # a VPS-side env file (never committed) that `docker run --env-file` reads:
 #   /home/ubuntu/livestreak-host.env
-# Variables the host reads at runtime (host/src/config/*, host/src/services/*):
+# Variables the host reads at runtime (host/src/config/*, host/src/features/*):
 #   Server / bind
 #     LIVESTREAK_HOST_ID, LIVESTREAK_HOST_BASE_URL,
 #     LIVESTREAK_HOST_BIND_HOST (default 0.0.0.0 in-image), LIVESTREAK_HOST_BIND_PORT (8787)
-#   Account-abstraction (EVM RPC + executor keys + paymaster)
+#   Account-abstraction (hosted EVM bundler and paymaster)
 #     LIVESTREAK_AA_CHAINS_FILE (path to a per-chain JSON, mounted separately) — OR the
 #     single-chain env form:
-#     LIVESTREAK_AA_CHAIN_ID, LIVESTREAK_AA_RPC_URL, LIVESTREAK_AA_BUNDLER_URL,
-#     LIVESTREAK_AA_ENTRY_POINT, LIVESTREAK_AA_PAYMASTER_ADDRESS,
-#     LIVESTREAK_AA_SAFE_MODULE, LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY,
-#     LIVESTREAK_AA_OPERATOR_KEY, LIVESTREAK_AA_PAYMASTER_AUTH_TOKEN
-#     (LIVESTREAK_AA_ALLOW_DEV_KEY is DEV-ONLY — do NOT set in prod)
+#     LIVESTREAK_AA_CHAIN_ID, LIVESTREAK_AA_RPC_URL, LIVESTREAK_AA_BUNDLER_URL, LIVESTREAK_AA_PAYMASTER_URL,
+#     LIVESTREAK_AA_ENTRY_POINT, LIVESTREAK_AA_SAFE_MODULE, LIVESTREAK_AA_PAYMASTER_AUTH_TOKEN
 #   Sui (memory/content sponsor + reads)
 #     LIVESTREAK_SUI_NETWORK, LIVESTREAK_SUI_RPC_URL, LIVESTREAK_SUI_DEPLOYMENT,
 #     LIVESTREAK_SUI_SPONSOR_MNEMONIC
 #   Catalog index scope
 #     LIVESTREAK_CATALOG_CHAINS (comma-separated evm,sui,solana; default evm),
-#     LIVESTREAK_CATALOG_DEFAULT_CHAIN, LIVESTREAK_CATALOG_MARKETS, LIVESTREAK_RESET_CATALOG
+#     LIVESTREAK_CATALOG_DEFAULT_CHAIN, LIVESTREAK_CATALOG_MARKETS
 #   S3-compatible cloud storage (video/content)
 #     LIVESTREAK_STORAGE_PROVIDER, LIVESTREAK_STORAGE_ENDPOINT, LIVESTREAK_STORAGE_REGION,
 #     LIVESTREAK_STORAGE_BUCKET, LIVESTREAK_STORAGE_ACCESS_KEY_ID, LIVESTREAK_STORAGE_SECRET_ACCESS_KEY,
 #     LIVESTREAK_STORAGE_PUBLIC_BASE_URL, LIVESTREAK_HOST_API_TOKEN, LIVESTREAK_WALLET_SEED
-#     (steward memory is host-DB-backed: DATABASE_URL, Turso-compatible)
-#   Remote Bridge Console (P4) + LiveKit
+#     (catalog, documents, steward memory and forum use Turso: TURSO_DATABASE_URL, TURSO_AUTH_TOKEN)
+#   Remote Bridge Console (P4)
 #     LIVESTREAK_APP_ORIGIN, LIVESTREAK_REMOTE_GATEWAY_TOKEN,
-#     LIVESTREAK_REMOTE_GRANT_KEY, LIVESTREAK_REMOTE_SESSION_TTL_MS, LIVEKIT_API_KEY
+#     LIVESTREAK_REMOTE_GRANT_KEY, LIVESTREAK_REMOTE_SESSION_TTL_MS
 #
 # One-time after the first run: make the ghcr package PUBLIC
 #   (github.com/users/<you>/packages/container/livestreak-host/settings → Change visibility)

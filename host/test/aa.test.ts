@@ -1,13 +1,10 @@
 import type { Hex } from "viem";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAaRouteDeps } from "#deps.js";
-import { proxyBundlerRpc } from "#services/aa/bundler.js";
-import { createPaymasterSigner } from "#services/aa/paymaster.js";
-import { createAaController } from "#api/controllers/aa.js";
+import { proxyBundlerRpc } from "#features/aa/evm.js";
+import { createAaHandlers } from "#features/aa/routes.js";
 import { defaultHostServerConfig } from "#config/host.js";
 
-const TEST_EXECUTOR_KEY =
-  "0x0000000000000000000000000000000000000000000000000000000000000001" as Hex;
 const TEST_PAYMASTER_ADDRESS = "0x1111111111111111111111111111111111111111" as Hex;
 const TEST_ENTRY_POINT = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789" as Hex;
 
@@ -23,14 +20,8 @@ const fixedUserOp = {
   signature: "0x" as Hex
 };
 
-const createTestAaDeps = () => {
-  const signers = new Map<string, ReturnType<typeof createPaymasterSigner>>();
-  signers.set("local", createPaymasterSigner(TEST_EXECUTOR_KEY, TEST_PAYMASTER_ADDRESS));
-  return createAaRouteDeps(defaultHostServerConfig(), { paymasterSigners: signers });
-};
-
 describe("aa bundler proxy", () => {
-  it("returns 503 JSON-RPC error when Alto is not running for the chain", async () => {
+  it("returns 503 JSON-RPC error when no hosted bundler is configured for the chain", async () => {
     const proxied = await proxyBundlerRpc("local", {
       jsonrpc: "2.0",
       method: "eth_chainId",
@@ -50,131 +41,79 @@ describe("aa bundler proxy", () => {
   });
 });
 
-describe("aa paymaster rpc", () => {
-  const controllerFor = () => createAaController(createTestAaDeps());
-
-  const paymasterResponse = async (body: unknown) => {
-    const deps = createTestAaDeps();
-    const controller = createAaController(deps);
+describe("hosted AA forwarding", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const depsFor = (authenticated = false) => {
+    const deps = createAaRouteDeps(defaultHostServerConfig());
+    return { ...deps, aa: {
+      ...deps.aa,
+      requirePaymasterAuth: authenticated,
+      ...(authenticated ? { paymasterAuthToken: 'host-secret' } : {}),
+      chains: [{ routeKey: 'base-sepolia', chainId: 84532, name: 'Base Sepolia',
+        entryPoint: TEST_ENTRY_POINT, bundlerUrl: 'https://provider.test/bundler',
+        paymasterUrl: 'https://provider.test/paymaster' }],
+    } };
+  };
+  const capture = () => {
     let status = 0;
-    let payload: unknown;
-    await controller.paymaster(
-      { params: { chain: "local" }, body },
-      {
-        status: (code: number) => ({
-          json: (value: unknown) => {
-            status = code;
-            payload = value;
-          }
-        })
-      }
-    );
-    return { status, body: payload };
+    let body: unknown;
+    return { res: { status: (code: number) => ({ json: (value: unknown) => { status = code; body = value; } }) },
+      result: () => ({ status, body }) };
   };
 
-  it("returns stub data with paymaster fields and gas limits", async () => {
-    const response = await paymasterResponse({
-      jsonrpc: "2.0",
-      method: "pm_getPaymasterStubData",
-      params: [],
-      id: 1
-    });
-
-    expect(response.status).toBe(200);
-    const body = response.body as {
-      jsonrpc: string;
-      id: number;
-      result: {
-        paymaster: string;
-        paymasterData: string;
-        paymasterVerificationGasLimit: string;
-        paymasterPostOpGasLimit: string;
-      };
-    };
-    expect(body.jsonrpc).toBe("2.0");
-    expect(body.id).toBe(1);
-    expect(body.result.paymaster).toBe(TEST_PAYMASTER_ADDRESS);
-    expect(body.result.paymasterVerificationGasLimit).toBe("0x30000");
-    expect(body.result.paymasterPostOpGasLimit).toBe("0x10000");
-    expect(body.result.paymasterData.startsWith("0x")).toBe(true);
-    expect(body.result.paymasterData.length).toBeGreaterThanOrEqual(194);
-    expect((body.result.paymasterData.length - 2) % 2).toBe(0);
+  it("forwards to the configured bundler and preserves its gas estimate", async () => {
+    const envelope = { jsonrpc: '2.0', id: 12, result: { callGasLimit: '0x100' } };
+    const fetcher = vi.fn().mockResolvedValue({ status: 200, json: async () => envelope });
+    vi.stubGlobal('fetch', fetcher);
+    const body = { jsonrpc: '2.0', method: 'eth_estimateUserOperationGas', params: [], id: 12 };
+    const result = await proxyBundlerRpc('base-sepolia', body, depsFor().aa);
+    expect(result).toEqual({ status: 200, body: envelope });
+    expect(fetcher).toHaveBeenCalledWith('https://provider.test/bundler', expect.objectContaining({ body: JSON.stringify(body) }));
   });
 
-  it("returns signed paymaster data for pm_getPaymasterData", async () => {
-    const response = await paymasterResponse({
-      jsonrpc: "2.0",
-      method: "pm_getPaymasterData",
-      params: [fixedUserOp, TEST_ENTRY_POINT, "0x7a69"],
-      id: 7
-    });
-
-    expect(response.status).toBe(200);
-    const body = response.body as {
-      result: {
-        paymaster: string;
-        paymasterData: string;
-        paymasterVerificationGasLimit: string;
-        paymasterPostOpGasLimit: string;
-      };
-    };
-    expect(body.result.paymaster).toBe(TEST_PAYMASTER_ADDRESS);
-    expect(body.result.paymasterVerificationGasLimit).toBe("0x30000");
-    expect(body.result.paymasterPostOpGasLimit).toBe("0x10000");
-    expect(body.result.paymasterData.startsWith("0x")).toBe(true);
-    expect(body.result.paymasterData.length).toBeGreaterThanOrEqual(194);
-    expect((body.result.paymasterData.length - 2) % 2).toBe(0);
+  it("never forwards administration methods", async () => {
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    const result = await proxyBundlerRpc('base-sepolia', { method: 'anvil_setBalance', id: 13 }, depsFor().aa);
+    expect(result.status).toBe(400);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("returns -32601 for unknown methods", async () => {
-    const response = await paymasterResponse({
-      jsonrpc: "2.0",
-      method: "pm_unknown",
-      params: [],
-      id: 3
-    });
-
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({
-      jsonrpc: "2.0",
-      id: 3,
-      error: { code: -32601, message: "Method not found: pm_unknown" }
-    });
+  it("requires authorization before requesting hosted sponsorship", async () => {
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    const out = capture();
+    await createAaHandlers(depsFor(true)).paymaster({ params: { chain: 'base-sepolia' }, body: {
+      method: 'pm_getPaymasterData', params: [fixedUserOp, TEST_ENTRY_POINT, '0x14a34'], id: 14,
+    } }, out.res);
+    expect(out.result().status).toBe(401);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("returns 503 when no signer is configured for the chain", async () => {
-    const deps = createAaRouteDeps(defaultHostServerConfig());
-    const controller = createAaController(deps);
-    let status = 0;
-    let payload: unknown;
-    await controller.paymaster(
-      {
-        params: { chain: "local" },
-        body: {
-          jsonrpc: "2.0",
-          method: "pm_getPaymasterStubData",
-          params: [],
-          id: 9
-        }
-      },
-      {
-        status: (code: number) => ({
-          json: (value: unknown) => {
-            status = code;
-            payload = value;
-          }
-        })
-      }
-    );
+  it.each(['0x1', '0x', 'garbage'])("rejects mismatched or malformed chain %s before forwarding", async chainId => {
+    const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+    const out = capture();
+    await createAaHandlers(depsFor()).paymaster({ params: { chain: 'base-sepolia' }, body: {
+      method: 'pm_getPaymasterData', params: [fixedUserOp, TEST_ENTRY_POINT, chainId], id: 15,
+    } }, out.res);
+    expect(out.result().body).toMatchObject({ id: 15, error: { code: -32602 } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
 
-    expect(status).toBe(503);
-    expect(payload).toMatchObject({
-      jsonrpc: "2.0",
-      id: 9,
-      error: {
-        code: -32000,
-        message: "Paymaster not available for chain: local"
-      }
-    });
+  it("forwards valid sponsorship without exposing the Host bearer token upstream", async () => {
+    const envelope = { jsonrpc: '2.0', id: 16, result: { paymaster: TEST_PAYMASTER_ADDRESS } };
+    const fetcher = vi.fn().mockResolvedValue({ status: 200, json: async () => envelope });
+    vi.stubGlobal('fetch', fetcher);
+    const out = capture();
+    await createAaHandlers(depsFor(true)).paymaster({ params: { chain: 'base-sepolia' }, headers: { authorization: 'Bearer host-secret' }, body: {
+      method: 'pm_getPaymasterData', params: [fixedUserOp, TEST_ENTRY_POINT, '0x14a34'], id: 16,
+    } }, out.res);
+    expect(out.result()).toEqual({ status: 200, body: envelope });
+    expect(fetcher).toHaveBeenCalledWith('https://provider.test/paymaster', expect.objectContaining({ headers: { 'Content-Type': 'application/json' } }));
+  });
+
+  it("returns a bounded unavailable response without leaking upstream credentials", async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('https://provider.test/secret')));
+    const result = await proxyBundlerRpc('base-sepolia', { method: 'eth_chainId', id: 17 }, depsFor().aa);
+    expect(result).toMatchObject({ status: 503, body: { id: 17, error: { message: 'Bundler unavailable' } } });
+    expect(JSON.stringify(result)).not.toContain('secret');
   });
 });

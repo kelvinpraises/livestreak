@@ -2,9 +2,23 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp, createHostRouteDeps } from "#server.js";
 import { defaultHostServerConfig } from "#config/host.js";
-import { mapMarket, snapshotToRows } from "#services/catalog/mapper.js";
-import { createCatalogService, type CatalogReaderProvider } from "#services/catalog/catalog.js";
+import { snapshotToRows, marketRowToSummary, marketRowToDetail, vaultRowToLiveRaw, resolutionRowToLifetime } from "#features/catalog/mapper.js";
+import { createCatalogService, type CatalogReaderProvider } from "#features/catalog/catalog.js";
 import type { OptionsMarketSnapshot, OptionsReader } from "@livestreak/options";
+
+import type { Market, Vault, Resolution } from "#database/schema.js";
+
+// Exercise the same snapshot -> database -> response projection used by the indexer.
+const mapMarket = (...args: Parameters<typeof snapshotToRows>) => {
+  const rows = snapshotToRows(...args);
+  const at = args[2];
+  return {
+    stream: marketRowToSummary(rows.market as Market, at),
+    detail: marketRowToDetail(rows.market as Market),
+    liveVaults: rows.vaults.filter(v => v.status === 'open' || v.status === 'hot').map(v => vaultRowToLiveRaw(v as Vault, rows.market.title, at)),
+    lifetimeVaults: rows.resolutions.map(r => resolutionRowToLifetime(r as Resolution, rows.vaults.find(v => v.id === r.vault_id)!.question, rows.market.title, at)),
+  };
+};
 
 const NOW = 1_000_000_000_000;
 

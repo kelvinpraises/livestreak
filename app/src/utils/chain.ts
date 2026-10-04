@@ -4,22 +4,31 @@ import { isAddress } from 'viem'
 // first-class runtime chain alongside EVM + Sui (no longer a display-only pill).
 export type OptionsChainKind = 'evm' | 'sui' | 'solana'
 
+export const EVM_NETWORK = {
+  chainId: 421614,
+  name: 'Arbitrum Sepolia',
+  rpcUrl: 'https://sepolia-rollup.arbitrum.io/rpc',
+  token: {
+    symbol: 'USDG',
+    address: '0xFFC95faa3d63Cde504a05B567C600B78C0b41892',
+    supplyControl: '0xDDF7d873F5738c2A191624b1ba1Aba7042621E43',
+  },
+} as const
+
 export const SESSION_CHAIN_KEY = 'livestreak_options_chain'
 
 export interface ChainOption {
   readonly id: OptionsChainKind
   readonly label: string
   readonly network: string
-  readonly deployed: boolean
 }
 
 // Canonical chains shown in the wallet's chain picker. `id` is the VM family used for wallet derivation
 // + contract deployments (unchanged across the app); `label` is the SPECIFIC chain name — the EVM
-// deployment currently targets Anvil, not "EVM" (the family). Flip `deployed` as chains land.
+// EVM targets Arbitrum Sepolia; actual action availability is checked against its deployment.
 export const SUPPORTED_CHAINS: readonly ChainOption[] = [
-  { id: 'sui', label: 'Sui', network: 'localnet', deployed: true },
-  { id: 'evm', label: 'Anvil', network: 'localhost · 31337', deployed: true },
-  { id: 'solana', label: 'Solana', network: 'localnet · 8899', deployed: true },
+  { id: 'evm', label: 'Arbitrum', network: 'Sepolia · 421614' },
+  { id: 'solana', label: 'Solana', network: 'localnet · 8899' },
 ]
 
 // Empty-state helper: given the active chain, return the FIRST other supported chain that has open
@@ -46,7 +55,7 @@ const SOLANA_ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/
 export function readStoredChain(): OptionsChainKind | null {
   if (typeof window === 'undefined') return null
   const stored = sessionStorage.getItem(SESSION_CHAIN_KEY)
-  if (stored === 'sui' || stored === 'solana' || stored === 'evm') return stored
+  if (SUPPORTED_CHAINS.some(chain => chain.id === stored)) return stored as OptionsChainKind
   return null
 }
 

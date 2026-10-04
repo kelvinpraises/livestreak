@@ -144,9 +144,10 @@ describe('HostWssTransport (leg B) against an in-process canonical host', () => 
     await t.connect(await t.redeem('demo', PASSWORD))
     await new Promise(r => setTimeout(r, 20))
     for (const ws of wss.clients) ws.terminate()
-    await new Promise(r => setTimeout(r, 80))
+    await expect.poll(() => ({ status: t.status, board }), { timeout: 1000 }).toEqual({
+      status: 'open', board: { observe: { revision: 2 } },
+    })
     expect(statuses).toContain('reconnecting')
-    expect(t.status).toBe('open'); expect(board).toEqual({ observe: { revision: 2 } })
     expect(calls).toBe(0)
     t.disconnect()
   })

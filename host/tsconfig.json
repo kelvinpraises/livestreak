@@ -2,16 +2,38 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "paths": {
-      "#server.js": ["./src/server.ts"],
-      "#deps.js": ["./src/deps.ts"],
-      "#api/*": ["./src/api/*"],
-      "#config/*": ["./src/config/*"],
-      "#services/*": ["./src/services/*"],
-      "#infrastructure/*": ["./src/infrastructure/*"],
-      "#test/*": ["./test/*"]
+      "#server.js": [
+        "./src/server.ts"
+      ],
+      "#deps.js": [
+        "./src/deps.ts"
+      ],
+      "#config/*": [
+        "./src/config/*"
+      ],
+      "#test/*": [
+        "./test/*"
+      ],
+      "#features/*": [
+        "./src/features/*"
+      ],
+      "#http/*": [
+        "./src/http/*"
+      ],
+      "#database/*": [
+        "./src/database/*"
+      ],
+      "#storage/*": [
+        "./src/storage/*"
+      ]
     }
   },
-  "include": ["src", "test"]
+  "include": [
+    "src",
+    "test"
+  ]
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handleDescriptor } from "#services/descriptor.js";
+import { handleDescriptor } from "#features/descriptor/routes.js";
 import { defaultHostServerConfig } from "#config/host.js";
 
 describe("host descriptor", () => {
@@ -7,8 +7,7 @@ describe("host descriptor", () => {
     const config = {
       ...defaultHostServerConfig(),
       storage: {endpoint:"https://storage.test",bucket:"media",accessKeyId:"KEY",secretAccessKey:"SECRET",publicBaseUrl:"https://media.test",region:"auto"},
-      contentWriteToken: "TOKEN",
-      livekitApiKey: undefined
+      contentWriteToken: "TOKEN"
     };
 
     const descriptor = handleDescriptor({ config });
@@ -31,8 +30,7 @@ describe("host descriptor", () => {
   it("advertises unavailable cloud storage when no provider is configured", () => {
     const config = {
       ...defaultHostServerConfig(),
-      storage: null,
-      livekitApiKey: undefined
+      storage: null
     };
 
     const descriptor = handleDescriptor({ config });
@@ -41,15 +39,10 @@ describe("host descriptor", () => {
     expect(descriptor.content.available).toBe(false);
   });
 
-  it("advertises simulcast when LiveKit is configured", () => {
-    const config = {
-      ...defaultHostServerConfig(),
-      livekitApiKey: "lk_test_key"
-    };
-
+  it("never advertises an unimplemented simulcast provider", () => {
+    const config = { ...defaultHostServerConfig(), supportedOutputs: ['file', 'local', 'simulcast'] as const };
     const descriptor = handleDescriptor({ config });
-
-    expect(descriptor.media.simulcastAvailable).toBe(true);
-    expect(descriptor.supportedOutputs).toContain("simulcast");
+    expect(descriptor.media.simulcastAvailable).toBe(false);
+    expect(descriptor.supportedOutputs).not.toContain('simulcast');
   });
 });

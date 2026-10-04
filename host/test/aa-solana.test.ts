@@ -19,7 +19,7 @@ import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "#server.js";
 import { createAaRouteDeps, createHostRouteDeps } from "#deps.js";
-import { createSolanaPaymaster } from "#services/aa/solana-paymaster.js";
+import { createSolanaPaymaster } from "#features/aa/solana.js";
 import { defaultHostServerConfig } from "#config/host.js";
 
 const PAYER_SEED = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
@@ -44,8 +44,7 @@ const createSolanaEnabledApp = () => {
       rpcUrl: "http://offline.invalid",
       payerAddress,
       payerPrivateKey,
-      feeTokens: [FEE_TOKEN],
-      koraUrl: null
+      feeTokens: [FEE_TOKEN]
     }
   });
   const config = defaultHostServerConfig();

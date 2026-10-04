@@ -4,7 +4,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createApp } from "#server.js";
 import { createAaRouteDeps, createHostRouteDeps } from "#deps.js";
-import { createSuiGasStation } from "#services/aa/sui-gas-station.js";
+import { createSuiGasStation } from "#features/aa/sui.js";
 import { defaultHostServerConfig } from "#config/host.js";
 
 const SPONSOR_SEED = new Uint8Array(32).fill(9);

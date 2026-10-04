@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   createSuiGasStation,
   SUI_GAS_STATION_POOL_EXHAUSTED
-} from "#services/aa/sui-gas-station.js";
+} from "#features/aa/sui.js";
 
 const SPONSOR_SEED = new Uint8Array(32).fill(9);
 const sponsorKeypair = Ed25519Keypair.fromSecretKey(SPONSOR_SEED);

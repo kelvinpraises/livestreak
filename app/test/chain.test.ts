@@ -33,9 +33,9 @@ describe('readStoredChain', () => {
     expect(readStoredChain()).toBe('solana')
   })
 
-  it('round-trips sui and evm; returns null for unset/unknown (the default is decided by initialChain)', () => {
+  it('ignores paused sui and restores evm; returns null for unset/unknown (the default is decided by initialChain)', () => {
     sessionStorage.setItem(SESSION_CHAIN_KEY, 'sui')
-    expect(readStoredChain()).toBe('sui')
+    expect(readStoredChain()).toBeNull()
     sessionStorage.setItem(SESSION_CHAIN_KEY, 'evm')
     expect(readStoredChain()).toBe('evm')
     // No hard-coded default here anymore: unknown / unset → null, so a Solana-only run never boots evm.
@@ -50,7 +50,6 @@ describe('SUPPORTED_CHAINS', () => {
   it('marks solana as a deployed runtime chain on localnet', () => {
     const solana = SUPPORTED_CHAINS.find((c) => c.id === 'solana')
     expect(solana).toBeDefined()
-    expect(solana?.deployed).toBe(true)
     expect(solana?.network).toBe('localnet · 8899')
   })
 })
@@ -69,8 +68,8 @@ describe('recipientPlaceholder', () => {
 
 describe('firstOtherChainWithVaults', () => {
   it('skips the active chain and returns the first OTHER chain that has vaults', () => {
-    // Active solana, vaults only on sui -> point at sui (not evm, the old binary "other").
-    expect(firstOtherChainWithVaults('solana', c => c === 'sui')).toBe('sui')
+    // A paused chain cannot be suggested even if it has old vaults.
+    expect(firstOtherChainWithVaults('solana', c => c === 'sui')).toBeNull()
   })
 
   it('never points at an equally-empty chain (returns null when no other chain has vaults)', () => {
@@ -79,8 +78,8 @@ describe('firstOtherChainWithVaults', () => {
   })
 
   it('honours SUPPORTED_CHAINS ordering when multiple others qualify', () => {
-    // sui precedes evm in SUPPORTED_CHAINS; active solana with both funded -> sui wins.
-    expect(firstOtherChainWithVaults('solana', c => c === 'sui' || c === 'evm')).toBe('sui')
+    // Paused Sui is excluded, so EVM is the available alternative.
+    expect(firstOtherChainWithVaults('solana', c => c === 'sui' || c === 'evm')).toBe('evm')
   })
 })
 

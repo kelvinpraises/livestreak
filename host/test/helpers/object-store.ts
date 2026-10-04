@@ -1,6 +1,6 @@
 // Test double only. There is no local/in-memory production storage fallback.
 import { Readable } from "node:stream";
-import type { ObjectStore } from "../../src/infrastructure/storage/object-store.js";
+import type { ObjectStore } from "../../src/storage/object-store.js";
 export const testObjectStore = (): ObjectStore & { data: Map<string, Uint8Array> } => {
   const data = new Map<string, Uint8Array>();
   const get = async (key: string) => {

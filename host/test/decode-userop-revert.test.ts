@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeRevertData,
   enrichBundlerJsonRpcError
-} from "#services/aa/decode-userop-revert.js";
+} from "#features/aa/decode-userop-revert.js";
 
 const entryPointErrors = parseAbi([
   "error FailedOp(uint256 opIndex, string reason)",

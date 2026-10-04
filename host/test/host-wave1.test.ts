@@ -1,18 +1,12 @@
-import type { Hex } from "viem";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp, createHostRouteDeps } from "#server.js";
 import { createAaRouteDeps } from "#deps.js";
-import { createPaymasterSigner } from "#services/aa/paymaster.js";
-import { createAaController } from "#api/controllers/aa.js";
-import { readAaServerConfig } from "#services/aa/chains.js";
-import { createDiscoveryStore } from "#services/discovery.js";
-import { handleFindSimilar, handleIndexVault } from "#api/controllers/discovery.js";
+import { createAaHandlers } from "#features/aa/routes.js";
+import { readAaServerConfig } from "#config/aa.js";
+import { createDiscoveryStore } from "#features/discovery/store.js";
+import { handleFindSimilar, handleIndexVault } from "#features/discovery/routes.js";
 import { defaultHostServerConfig } from "#config/host.js";
-
-const TEST_EXECUTOR_KEY =
-  "0x0000000000000000000000000000000000000000000000000000000000000001" as Hex;
-const TEST_PAYMASTER_ADDRESS = "0x1111111111111111111111111111111111111111" as Hex;
 
 const captureRes = () => {
   const out: { status: number; body: unknown } = { status: 200, body: undefined };
@@ -61,7 +55,7 @@ describe("H5 — per-chain paymasterPath", () => {
 
   it("emits chains[].paymasterPath scoped to the route key and keeps top-level", () => {
     const deps = createAaRouteDeps(defaultHostServerConfig());
-    const controller = createAaController(deps);
+    const controller = createAaHandlers(deps);
     const { out, res } = captureRes();
 
     controller.descriptor({}, res);
@@ -109,11 +103,8 @@ describe("H1 — loopback-gated dev_open sponsorship", () => {
     expect(aa.sponsorshipMode).toBe("paymaster_signed");
     expect(aa.requirePaymasterAuth).toBe(true);
 
-    const signers = new Map([
-      ["local", createPaymasterSigner(TEST_EXECUTOR_KEY, TEST_PAYMASTER_ADDRESS)]
-    ]);
-    const deps = createAaRouteDeps(config, { paymasterSigners: signers });
-    const controller = createAaController(deps);
+    const deps = createAaRouteDeps(config);
+    const controller = createAaHandlers(deps);
 
     const noAuth = captureRes();
     await controller.paymaster(
@@ -131,82 +122,7 @@ describe("H1 — loopback-gated dev_open sponsorship", () => {
       },
       withAuth.res
     );
-    expect(withAuth.out.status).toBe(200);
-  });
-});
-
-describe("H2 — userOp validation + chainId anti-replay", () => {
-  const buildController = () => {
-    const config = { ...defaultHostServerConfig(), bindHost: "127.0.0.1" };
-    process.env.LIVESTREAK_AA_RPC_URL = "http://127.0.0.1:8545";
-    process.env.LIVESTREAK_AA_CHAIN_ID = "31337";
-    const signers = new Map([
-      ["local", createPaymasterSigner(TEST_EXECUTOR_KEY, TEST_PAYMASTER_ADDRESS)]
-    ]);
-    const deps = createAaRouteDeps(config, { paymasterSigners: signers });
-    return createAaController(deps);
-  };
-
-  afterEach(() => {
-    delete process.env.LIVESTREAK_AA_RPC_URL;
-    delete process.env.LIVESTREAK_AA_CHAIN_ID;
-  });
-
-  const validUserOp = {
-    sender: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
-    nonce: "0x0",
-    callData: "0x",
-    callGasLimit: "0x5208",
-    verificationGasLimit: "0x100000",
-    preVerificationGas: "0x5208",
-    maxFeePerGas: "0x3b9aca00",
-    maxPriorityFeePerGas: "0x3b9aca00",
-    signature: "0x"
-  };
-
-  it("rejects a malformed userOp with -32602", async () => {
-    const controller = buildController();
-    const { out, res } = captureRes();
-    await controller.paymaster(
-      {
-        params: { chain: "local" },
-        body: { method: "pm_getPaymasterData", params: [{ sender: "nope" }, "0x", "0x7a69"], id: 5 }
-      },
-      res
-    );
-    expect((out.body as { error: { code: number } }).error.code).toBe(-32602);
-  });
-
-  it("rejects a chainId that does not match the route chain with -32602", async () => {
-    const controller = buildController();
-    const { out, res } = captureRes();
-    await controller.paymaster(
-      {
-        params: { chain: "local" },
-        // route chain is 31337 (0x7a69); send 0x1 (mainnet) → replay guard fires
-        body: { method: "pm_getPaymasterData", params: [validUserOp, "0x" + "11".repeat(20), "0x1"], id: 6 }
-      },
-      res
-    );
-    const body = out.body as { error: { code: number; message: string } };
-    expect(body.error.code).toBe(-32602);
-    expect(body.error.message).toContain("chainId");
-  });
-
-  it("signs a matching chainId", async () => {
-    const controller = buildController();
-    const { out, res } = captureRes();
-    await controller.paymaster(
-      {
-        params: { chain: "local" },
-        body: { method: "pm_getPaymasterData", params: [validUserOp, "0x" + "11".repeat(20), "0x7a69"], id: 7 }
-      },
-      res
-    );
-    expect(out.status).toBe(200);
-    expect((out.body as { result: { paymaster: string } }).result.paymaster).toBe(
-      TEST_PAYMASTER_ADDRESS
-    );
+    expect(withAuth.out.status).toBe(503); // Auth succeeds, but no hosted provider is configured.
   });
 });
 

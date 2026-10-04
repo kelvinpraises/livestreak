@@ -2,9 +2,9 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readChainsFromFile } from "#config/aa/chains-file.js";
-import type { DeploySnapshotConfig } from "#config/aa/deploy-env.js";
-import { readAaServerConfig } from "#services/aa/chains.js";
+import { readChainsFromFile } from "#config/aa.js";
+import type { DeploySnapshotConfig } from "#config/deployment.js";
+import { readAaServerConfig } from "#config/aa.js";
 import { defaultHostServerConfig } from "#config/host.js";
 
 const localChain = (aa: ReturnType<typeof readAaServerConfig>) =>
@@ -31,48 +31,7 @@ describe("aa chains file", () => {
     expect(() => readChainsFromFile(filePath)).toThrow(/duplicate_routeKey/);
   });
 
-  it("rejects malformed executor private keys", () => {
-    const dir = mkdtempSync(join(tmpdir(), "aa-chains-"));
-    const filePath = join(dir, "chains.json");
-    writeFileSync(
-      filePath,
-      JSON.stringify([
-        {
-          routeKey: "local",
-          chainId: 31337,
-          name: "local",
-          entryPoint: "0x0000000000000000000000000000000000000001",
-          executorPrivateKey: "0xnot-a-key"
-        }
-      ])
-    );
 
-    expect(() => readChainsFromFile(filePath)).toThrow(/invalid_hex/);
-  });
-
-  it("resolves executorKeyEnv from process.env", () => {
-    const dir = mkdtempSync(join(tmpdir(), "aa-chains-"));
-    const filePath = join(dir, "chains.json");
-    writeFileSync(
-      filePath,
-      JSON.stringify([
-        {
-          routeKey: "local",
-          chainId: 31337,
-          name: "local",
-          entryPoint: "0x0000000000000000000000000000000000000001",
-          executorKeyEnv: "TEST_EXECUTOR_ENV"
-        }
-      ])
-    );
-
-    process.env.TEST_EXECUTOR_ENV =
-      "0x0000000000000000000000000000000000000000000000000000000000000001";
-    const chains = readChainsFromFile(filePath);
-    expect(chains[0]?.executorPrivateKey).toBe(
-      "0x0000000000000000000000000000000000000000000000000000000000000001"
-    );
-  });
 });
 
 describe("aa deploy env merge", () => {
@@ -92,7 +51,6 @@ describe("aa deploy env merge", () => {
     rpcUrl: "http://snapshot-rpc.example",
     entryPoint: "0x00000000000000000000000000000000000000e1",
     safeModule: "0x00000000000000000000000000000000000000a1",
-    paymasterAddress: "0x00000000000000000000000000000000000000b1"
   };
 
   it("fills gaps from the snapshot when the env is unset", () => {
@@ -102,7 +60,6 @@ describe("aa deploy env merge", () => {
     expect(chain?.rpcUrl).toBe(snapshot.rpcUrl);
     expect(chain?.entryPoint).toBe(snapshot.entryPoint);
     expect(chain?.safeModule).toBe(snapshot.safeModule);
-    expect(chain?.paymasterAddress).toBe(snapshot.paymasterAddress);
     expect(chain?.chainId).toBe(31337);
   });
 
@@ -118,27 +75,11 @@ describe("aa deploy env merge", () => {
     expect(chain?.safeModule).toBe(snapshot.safeModule);
   });
 
-  it("does not inject the dev executor key unless opted in", () => {
-    cleanAaEnv();
-    const aa = readAaServerConfig(defaultHostServerConfig(), snapshot);
-    expect(localChain(aa)?.executorPrivateKey).toBeUndefined();
-  });
-
-  it("injects the dev executor key only when chainId 31337 and opt-in", () => {
+  it("never injects a local signing key even with the retired flag set", () => {
     cleanAaEnv();
     process.env.LIVESTREAK_AA_ALLOW_DEV_KEY = "1";
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const aa = readAaServerConfig(defaultHostServerConfig(), snapshot);
-    expect(localChain(aa)?.executorPrivateKey).toMatch(/^0x[a-fA-F0-9]{64}$/);
-    expect(warn).toHaveBeenCalled();
-    warn.mockRestore();
-  });
-
-  it("does not inject the dev key on a non-31337 chain even when opted in", () => {
-    cleanAaEnv();
-    process.env.LIVESTREAK_AA_ALLOW_DEV_KEY = "1";
-    const aa = readAaServerConfig(defaultHostServerConfig(), { ...snapshot, chainId: 1 });
-    expect(localChain(aa)?.executorPrivateKey).toBeUndefined();
+    expect(localChain(aa)).not.toHaveProperty("executorPrivateKey");
   });
 });
 

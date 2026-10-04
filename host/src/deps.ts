@@ -1,108 +1,101 @@
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import type { SuiGasCoinRef } from "@livestreak/wallet";
-import { defaultHostServerConfig, type HostServerConfig } from "./config/host.js";
-import { readAaServerConfig, buildPaymasterSigners, type AaServerConfig } from "./services/aa/chains.js";
-import { loadDefaultDeploySnapshotConfig } from "./config/aa/deploy-env.js";
-import type { PaymasterSigner } from "./services/aa/paymaster.js";
+import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import {
-  createSuiGasStation,
-  type SuiGasStationService
-} from "./services/aa/sui-gas-station.js";
-import { readSuiGasStationRuntimeConfig } from "./services/aa/sui-sponsor.js";
+  readAaServerConfig,
+  type AaServerConfig,
+} from "./config/aa.js";
+import { loadDefaultDeploySnapshotConfig } from "./config/deployment.js";
+import { defaultHostServerConfig, type HostServerConfig } from "./config/host.js";
+import {
+  createDatabase,
+  type DatabaseHandle,
+  type TestDatabaseHandle,
+} from "./database/connection.js";
+import {
+  migrateToLatest,
+  migrateSync,
+} from "./database/migrations/index.js";
 import {
   createSolanaPaymaster,
   readSolanaPaymasterRuntimeConfig,
-  type SolanaPaymasterService
-} from "./services/aa/solana-paymaster.js";
+  type SolanaPaymasterService,
+} from "./features/aa/solana.js";
 import {
-  createSolanaFaucet,
-  type SolanaFaucetService
-} from "./services/aa/solana-faucet.js";
-import { readKoraSpawnConfig, startKora } from "./infrastructure/relay/kora.js";
-import { createDiscoveryStore } from "./services/discovery.js";
+  createSuiGasStation,
+  readSuiGasStationRuntimeConfig,
+  type SuiGasStationService,
+} from "./features/aa/sui.js";
 import {
   createCatalogService,
   type CatalogReaderProvider,
-  type CatalogService
-} from "./services/catalog/catalog.js";
-import {
-  createEnvReaderProvider,
-  parseSeedMarkets
-} from "./services/catalog/readers.js";
-import {
-  createCatalogReadModel,
-  type CatalogReadModel
-} from "./services/catalog/read-model.js";
-import {
-  createDatabase,
-  type DatabaseHandle
-} from "./infrastructure/database/connection.js";
-import { migrateSync, migrateToLatest } from "./infrastructure/database/migrations/index.js";
-import {
-  createCatalogRepository,
-  type CatalogRepository
-} from "./infrastructure/database/repository.js";
+  type CatalogService,
+} from "./features/catalog/catalog.js";
 import {
   createCatalogIndexer,
-  type CatalogIndexer
-} from "./infrastructure/cron/catalog-sync.js";
-import { registerCronJobs, type CronHandle } from "./infrastructure/cron/index.js";
-import { createLiveRingStore, type LiveRingStore } from "./services/live/ring.js";
-import { createDirectAnnounceStore, type DirectAnnounceStore } from "./services/live/direct.js";
-import { createRemoteService, type RemoteService } from "./services/remote/index.js";
-import { createEvidenceStore } from "./services/media/evidence.js";
-import { createManifestStore } from "./services/media/manifest.js";
-import { createSessionStore } from "./services/media/session.js";
-import { createContentStore, type ContentStore } from "./services/content/content.js";
-import { createS3ObjectStore, type ObjectStore } from "./infrastructure/storage/object-store.js";
-import { createRecordingService, type RecordingService } from "./services/recordings/service.js";
+  type CatalogIndexer,
+} from "./features/catalog/indexer.js";
 import {
-  createMemoryRepository,
-  type MemoryRepository
-} from "./infrastructure/database/memory-repository.js";
+  createCatalogReadModel,
+  type CatalogReadModel,
+} from "./features/catalog/read-model.js";
+import { createEnvReaderProvider, parseSeedMarkets } from "./features/catalog/readers.js";
+import { registerCronJobs, type CronHandle } from "./features/catalog/scheduler.js";
+import { createContentStore, type ContentStore } from "./features/content/content.js";
+import { createDiscoveryStore } from "./features/discovery/store.js";
+import type { ForumRouteDeps } from "./features/forum/routes.js";
 import {
-  createForumRepository,
-  type ForumRepository
-} from "./infrastructure/database/forum-repository.js";
+  createDirectAnnounceStore,
+  type DirectAnnounceStore,
+} from "./features/live/direct.js";
+import { createLiveRingStore, type LiveRingStore } from "./features/live/ring.js";
+import { createEvidenceStore } from "./features/media/evidence.js";
+import { createManifestStore } from "./features/media/manifest.js";
+import { createSessionStore } from "./features/media/session.js";
+import type { MemoryRouteDeps } from "./features/memory/routes.js";
+import {
+  createRecordingService,
+  type RecordingService,
+} from "./features/recordings/service.js";
+import { createRemoteService, type RemoteService } from "./features/remote/index.js";
+import {
+  createS3ObjectStore,
+  type ObjectStore,
+} from "./storage/object-store.js";
+
+export type { ForumRouteDeps,MemoryRouteDeps };
 
 // --- exports ---
 
 export interface AaRouteDeps {
   readonly config: HostServerConfig;
   readonly aa: AaServerConfig;
-  readonly paymasterSigners: Map<string, PaymasterSigner>;
   readonly suiGasStation: SuiGasStationService;
   readonly solanaPaymaster: SolanaPaymasterService;
-  readonly solanaFaucet: SolanaFaucetService;
 }
 
 export interface CreateAaRouteDepsOptions {
-  readonly paymasterSigners?: Map<string, PaymasterSigner>;
   readonly suiGasStation?: SuiGasStationService;
   readonly suiClient?: SuiJsonRpcClient;
   readonly suiInitialCoins?: readonly SuiGasCoinRef[];
   readonly solanaPaymaster?: SolanaPaymasterService;
-  readonly solanaFaucet?: SolanaFaucetService;
 }
 
 export const createAaRouteDeps = (
   config: HostServerConfig,
-  options: CreateAaRouteDepsOptions = {}
+  options: CreateAaRouteDepsOptions = {},
 ): AaRouteDeps => {
   const aa = readAaServerConfig(config, loadDefaultDeploySnapshotConfig());
   return {
     config,
     aa,
-    paymasterSigners: options.paymasterSigners ?? buildPaymasterSigners(aa),
     suiGasStation: options.suiGasStation ?? createSuiGasStation({ config: null }),
     solanaPaymaster: options.solanaPaymaster ?? createSolanaPaymaster({ config: null }),
-    solanaFaucet: options.solanaFaucet ?? createSolanaFaucet()
   };
 };
 
 export const bootstrapAaRouteDeps = async (
   config: HostServerConfig,
-  options: CreateAaRouteDepsOptions = {}
+  options: CreateAaRouteDepsOptions = {},
 ): Promise<AaRouteDeps> => {
   const suiGasStation = await buildSuiGasStation(config, options);
   const solanaPaymaster = await buildSolanaPaymaster(config, options);
@@ -129,53 +122,24 @@ export const bootstrapAaRouteDeps = async (
 
 export const bootstrapHostRouteDeps = async (
   config: HostServerConfig = defaultHostServerConfig(),
-  options: CreateHostRouteDepsOptions = {}
+  options: CreateHostRouteDepsOptions = {},
 ): Promise<HostRouteDeps> => {
-  const aa = await bootstrapAaRouteDeps(config, options);
-  const objects = options.objectStore ?? (config.storage === null ? null : createS3ObjectStore(config.storage));
+  const objects = options.objectStore === undefined
+    ? (config.storage === null ? null : createS3ObjectStore(config.storage))
+    : options.objectStore;
   await objects?.check?.();
-  const content = { store: createContentStore(objects), objects };
-  const recordings = createRecordingService(objects, config.contentWriteToken);
-  const discoveryStore = createDiscoveryStore();
-  // Signaling-plane stores exist before the catalog so isLive can reflect a stream serving
-  // bytes right now (host ring ingest or a direct-lane announce), not only on-chain goLive.
-  const live = createLiveRingStore();
-  const direct = createDirectAnnounceStore();
-  const isStreamLive = (marketId: string): boolean =>
-    live.isLive(marketId) || direct.lookup(marketId) !== undefined;
-  const catalogStack = buildCatalogStack(config, discoveryStore, options, isStreamLive);
-  // Boot path: also run the formal migrator (records the migration as applied on top of the
-  // idempotent sync DDL) so the bookkeeping table reflects reality.
-  await migrateToLatest(catalogStack.db.db);
-
-  // Dev reset: local chains (anvil + sui localnet) are wiped on every dev.sh run, but the SQLite
-  // discovery projection persists — so the homepage would show vaults from a previous boot that no
-  // longer exist on-chain. When dev.sh sets this flag, wipe the projection so the indexer rebuilds
-  // from the fresh chain state. Production (persistent chains) leaves it unset.
-  if (process.env.LIVESTREAK_RESET_CATALOG === "1" || process.env.LIVESTREAK_RESET_CATALOG === "true") {
-    await catalogStack.repo.clearAll();
+  const aa = options.aa ?? await bootstrapAaRouteDeps(config, options);
+  const deps = createHostRouteDeps(config, { ...options, objectStore: objects, aa, cronEnabled: false });
+  try {
+    await migrateToLatest(deps.catalogDb.db);
+    return { ...deps, catalogCron: registerCronJobs({
+      indexer: deps.catalogIndexer,
+      ...(options.cronEnabled === undefined ? {} : { enabled: options.cronEnabled }),
+    }) };
+  } catch (error) {
+    if (options.catalogDb === undefined) await deps.catalogDb.close();
+    throw error;
   }
-
-  return {
-    config,
-    media: {
-      sessions: createSessionStore(),
-      manifests: createManifestStore(),
-      evidence: createEvidenceStore(config.cacheQuotaBytes)
-    },
-    discovery: {
-      store: discoveryStore
-    },
-    content,
-    recordings,
-    memory: { repo: createMemoryRepository(catalogStack.db.db) },
-    forum: { repo: createForumRepository(catalogStack.db.db) },
-    aa,
-    remote: buildRemoteService(config),
-    ...stackToDeps(catalogStack),
-    live,
-    direct
-  };
 };
 
 export interface HostRouteDeps {
@@ -191,7 +155,6 @@ export interface HostRouteDeps {
   readonly catalog: CatalogService;
   // Discovery read-model (DB projection + lazy/cron indexer) powering the page endpoints.
   readonly catalogDb: DatabaseHandle;
-  readonly catalogRepo: CatalogRepository;
   readonly catalogReadModel: CatalogReadModel;
   readonly catalogIndexer: CatalogIndexer;
   readonly catalogCron: CronHandle;
@@ -201,12 +164,11 @@ export interface HostRouteDeps {
 }
 
 export interface CatalogStack {
-  readonly service: CatalogService;
-  readonly db: DatabaseHandle;
-  readonly repo: CatalogRepository;
-  readonly readModel: CatalogReadModel;
-  readonly indexer: CatalogIndexer;
-  readonly cron: CronHandle;
+  readonly catalog: CatalogService;
+  readonly catalogDb: DatabaseHandle;
+  readonly catalogReadModel: CatalogReadModel;
+  readonly catalogIndexer: CatalogIndexer;
+  readonly catalogCron: CronHandle;
 }
 
 export interface MediaRouteDeps {
@@ -219,20 +181,13 @@ export interface DiscoveryRouteDeps {
   readonly store: ReturnType<typeof createDiscoveryStore>;
 }
 
-export interface MemoryRouteDeps {
-  readonly repo: MemoryRepository;
-}
-
-export interface ForumRouteDeps {
-  readonly repo: ForumRepository;
-}
-
 export interface ContentRouteDeps {
   readonly store: ReturnType<typeof createContentStore>;
 }
 
 export interface CreateHostRouteDepsOptions extends CreateAaRouteDepsOptions {
-  readonly objectStore?: ObjectStore;
+  readonly aa?: AaRouteDeps;
+  readonly objectStore?: ObjectStore | null;
   // Inject a reader provider in tests; defaults to the env/deploy-snapshot provider.
   readonly catalogReaders?: CatalogReaderProvider;
   // Inject a DB handle in tests (e.g. createDatabase(":memory:")); defaults to the
@@ -241,11 +196,11 @@ export interface CreateHostRouteDepsOptions extends CreateAaRouteDepsOptions {
   // Force-enable/disable the cron loop; defaults to env-guarded (off in tests/CI).
   readonly cronEnabled?: boolean;
   // Explicit directory entries for embedding/tests. Production has no measured agent index.
-  readonly agents?: readonly import("./services/catalog/types.js").Agent[];
+  readonly agents?: readonly import("@livestreak/host").Agent[];
 }
 
 // Build the whole discovery read-model stack: the live `CatalogService` (registrations +
-// known-market set), the DB handle (schema applied synchronously), the repository, the
+// known-market set), the DB handle (schema applied synchronously), the
 // read-model the page endpoints serve from, the indexer (cron body + lazy path), and the
 // registered cron handle. The reader provider + known-market set are SHARED between the
 // live service and the indexer so a `POST /catalog/markets` registration feeds both.
@@ -253,91 +208,82 @@ const buildCatalogStack = (
   config: HostServerConfig,
   store: ReturnType<typeof createDiscoveryStore>,
   options: CreateHostRouteDepsOptions,
-  isStreamLive?: (marketId: string) => boolean
+  isStreamLive?: (marketId: string) => boolean,
 ): CatalogStack => {
   const readers = options.catalogReaders ?? createEnvReaderProvider();
   const service = createCatalogService({
     readers,
     defaultChain:
-      (process.env.LIVESTREAK_CATALOG_DEFAULT_CHAIN as "evm" | "sui" | "solana" | undefined) ?? "evm",
+      (process.env.LIVESTREAK_CATALOG_DEFAULT_CHAIN as
+        | "evm"
+        | "sui"
+        | "solana"
+        | undefined) ?? "evm",
     listDiscoveryMarketIds: () => store.listMarketIds(),
-    seedMarkets: parseSeedMarkets(process.env.LIVESTREAK_CATALOG_MARKETS)
+    seedMarkets: parseSeedMarkets(process.env.LIVESTREAK_CATALOG_MARKETS),
   });
 
   // Under vitest/CI default to an isolated in-memory db (no file artifacts, no cross-test
   // bleed) unless a handle is explicitly injected.
-  const inTest =
-    process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
-  const db = options.catalogDb ?? createDatabase(inTest ? ":memory:" : undefined);
-  migrateSync(db.sqlite);
+  const inTest = process.env.VITEST !== undefined || process.env.NODE_ENV === "test";
+  const db = options.catalogDb ?? (inTest ? createDatabase(":memory:") : createDatabase());
+  if ("sqlite" in db) migrateSync((db as TestDatabaseHandle).sqlite);
 
-  const repo = createCatalogRepository(db.db);
   const indexer = createCatalogIndexer({
-    repo,
+    db: db.db,
     readers,
     baseUrl: config.baseUrl,
     knownMarkets: () => service.knownMarkets(),
-    ...(isStreamLive === undefined ? {} : { isStreamLive })
+    ...(isStreamLive === undefined ? {} : { isStreamLive }),
   });
   const readModel = createCatalogReadModel({
-    repo,
+    db: db.db,
     agents: options.agents,
-    health: indexer.health
+    health: indexer.health,
   });
   const cron = registerCronJobs({
     indexer,
-    ...(options.cronEnabled === undefined ? {} : { enabled: options.cronEnabled })
+    ...(options.cronEnabled === undefined ? {} : { enabled: options.cronEnabled }),
   });
 
-  return { service, db, repo, readModel, indexer, cron };
+  return { catalog: service, catalogDb: db, catalogReadModel: readModel, catalogIndexer: indexer, catalogCron: cron };
 };
-
-const stackToDeps = (stack: CatalogStack): Pick<
-  HostRouteDeps,
-  | "catalog"
-  | "catalogDb"
-  | "catalogRepo"
-  | "catalogReadModel"
-  | "catalogIndexer"
-  | "catalogCron"
-> => ({
-  catalog: stack.service,
-  catalogDb: stack.db,
-  catalogRepo: stack.repo,
-  catalogReadModel: stack.readModel,
-  catalogIndexer: stack.indexer,
-  catalogCron: stack.cron
-});
 
 export const createHostRouteDeps = (
   config: HostServerConfig = defaultHostServerConfig(),
-  options: CreateHostRouteDepsOptions = {}
+  options: CreateHostRouteDepsOptions = {},
 ): HostRouteDeps => {
-  const objects = options.objectStore ?? (config.storage === null ? null : createS3ObjectStore(config.storage));
+  const objects =
+    options.objectStore === undefined
+      ? (config.storage === null ? null : createS3ObjectStore(config.storage))
+      : options.objectStore;
   const content = { store: createContentStore(objects), objects };
   const recordings = createRecordingService(objects, config.contentWriteToken);
   const discoveryStore = createDiscoveryStore();
-  const catalogStack = buildCatalogStack(config, discoveryStore, options);
+  const live = createLiveRingStore();
+  const direct = createDirectAnnounceStore();
+  const catalogStack = buildCatalogStack(config, discoveryStore, options,
+    (marketId) => live.isLive(marketId) || direct.lookup(marketId) !== undefined);
 
   return {
     config,
     media: {
       sessions: createSessionStore(),
       manifests: createManifestStore(),
-      evidence: createEvidenceStore(config.cacheQuotaBytes)
+      evidence: createEvidenceStore(config.cacheQuotaBytes),
     },
     discovery: {
-      store: discoveryStore
+      store: discoveryStore,
     },
     content,
     recordings,
-    memory: { repo: createMemoryRepository(catalogStack.db.db) },
-    forum: { repo: createForumRepository(catalogStack.db.db) },
-    aa: createAaRouteDeps(config, options),
+    memory: { db: catalogStack.catalogDb.db },
+    forum: { db: catalogStack.catalogDb.db },
+    aa: options.aa ?? createAaRouteDeps(config, options),
     remote: buildRemoteService(config),
-    ...stackToDeps(catalogStack),
-    live: createLiveRingStore(),
-    direct: createDirectAnnounceStore()
+    ...catalogStack,
+    live,
+    direct,
   };
 };
 
@@ -348,12 +294,12 @@ const buildRemoteService = (config: HostServerConfig): RemoteService =>
     gatewayToken: config.remoteGatewayToken,
     remoteBaseUrl: config.remoteAppOrigin ?? config.baseUrl,
     grantKeyHex: config.remoteGrantKeyHex,
-    grantKeyId: `${config.hostId}_grant`
+    grantKeyId: `${config.hostId}_grant`,
   });
 
 const buildSolanaPaymaster = async (
   config: HostServerConfig,
-  options: CreateAaRouteDepsOptions
+  options: CreateAaRouteDepsOptions,
 ): Promise<SolanaPaymasterService> => {
   if (options.solanaPaymaster !== undefined) {
     return options.solanaPaymaster;
@@ -364,26 +310,12 @@ const buildSolanaPaymaster = async (
     return createSolanaPaymaster({ config: null });
   }
 
-  // Shape A: spawn a real kora-rpc sidecar when enabled; the service then proxies to it.
-  const spawnConfig = readKoraSpawnConfig(
-    runtime.rpcUrl,
-    Buffer.from(runtime.payerPrivateKey).toString("base64")
-  );
-  if (spawnConfig !== null && runtime.koraUrl === null) {
-    try {
-      const koraUrl = await startKora(spawnConfig);
-      return createSolanaPaymaster({ config: { ...runtime, koraUrl } });
-    } catch (error) {
-      console.warn(`[aa]: kora sidecar spawn failed, using in-process signer: ${String(error)}`);
-    }
-  }
-
   return createSolanaPaymaster({ config: runtime });
 };
 
 const buildSuiGasStation = async (
   config: HostServerConfig,
-  options: CreateAaRouteDepsOptions
+  options: CreateAaRouteDepsOptions,
 ): Promise<SuiGasStationService> => {
   if (options.suiGasStation !== undefined) {
     return options.suiGasStation;
@@ -394,22 +326,31 @@ const buildSuiGasStation = async (
     return createSuiGasStation({ config: null });
   }
 
-  const client = options.suiClient ?? new SuiJsonRpcClient({
-    url: runtime.rpcUrl,
-    network: readSuiNetwork()
-  });
+  const client =
+    options.suiClient ??
+    new SuiJsonRpcClient({
+      url: runtime.rpcUrl,
+      network: readSuiNetwork(),
+    });
   return createSuiGasStation({
     config: runtime,
     client,
-    ...(options.suiInitialCoins === undefined ? {} : { initialCoins: options.suiInitialCoins })
+    ...(options.suiInitialCoins === undefined
+      ? {}
+      : { initialCoins: options.suiInitialCoins }),
   });
 };
 
 const readSuiNetwork = (): "mainnet" | "testnet" | "devnet" | "localnet" => {
-  const value = process.env.LIVESTREAK_SUI_NETWORK ?? "localnet";
-  if (value === "mainnet" || value === "testnet" || value === "devnet" || value === "localnet") {
+  const value = process.env.LIVESTREAK_SUI_NETWORK ?? "testnet";
+  if (
+    value === "mainnet" ||
+    value === "testnet" ||
+    value === "devnet" ||
+    value === "localnet"
+  ) {
     return value;
   }
 
-  return "localnet";
+  throw new Error("Invalid LIVESTREAK_SUI_NETWORK");
 };

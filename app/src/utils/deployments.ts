@@ -1,25 +1,28 @@
 import { isAddress } from 'viem'
-import { localhostDeployment } from '@livestreak/contracts/evm'
+import type { EvmDeployOutput } from '@livestreak/contracts/evm'
 import { localnetDeployment as suiLocalnetDeployment } from '@livestreak/contracts/sui'
 import { localnetDeployment as solanaLocalnetDeployment } from '@livestreak/contracts/solana/deployments/localnet'
 import type { OptionsContractAddresses } from '@livestreak/options'
 
-import { SUPPORTED_CHAINS, readStoredChain, type OptionsChainKind } from './chain'
+import { EVM_NETWORK, SUPPORTED_CHAINS, readStoredChain, type OptionsChainKind } from './chain'
 
-export const LOCALHOST_RPC_URL = localhostDeployment.rpc
+// Public deployment input. Never reuse Anvil addresses on a public network.
+const configuredDeployment = (() => {
+  const raw = import.meta.env.VITE_EVM_DEPLOYMENT_JSON as string | undefined
+  if (!raw?.trim()) return undefined
+  const deployment = JSON.parse(raw) as EvmDeployOutput
+  if (Number(deployment.chainId) !== EVM_NETWORK.chainId) throw new Error('Expected Arbitrum Sepolia deployment (421614)')
+  return deployment
+})()
 
-export const LOCALHOST_AA_CONTRACTS = localhostDeployment.scopes.aa?.contracts ?? {}
-
-// The local MockUSDC (permissionless `mint`). Only the dev faucet (useWalletActions) reads it, on the
-// localhost EVM stack; undefined on any deployment that ships no mock token.
-export const LOCALHOST_MOCK_USDC = (
-  localhostDeployment.scopes.protocol?.contracts as Record<string, string> | undefined
-)?.mockUsdc as `0x${string}` | undefined
+export const EVM_RPC_URL = EVM_NETWORK.rpcUrl
+export const EVM_AA_CONTRACTS = configuredDeployment?.scopes.aa?.contracts ?? {}
 
 export function buildOptionsContractAddresses(): OptionsContractAddresses {
-  const protocol = localhostDeployment.scopes.protocol?.contracts ?? {}
-  const wire = localhostDeployment.scopes.wire?.contracts ?? {}
-  const streaming = localhostDeployment.scopes.streaming?.contracts ?? {}
+  if (!configuredDeployment) throw new Error("Arbitrum Sepolia deployment is not configured")
+  const protocol = configuredDeployment.scopes.protocol?.contracts ?? {}
+  const wire = configuredDeployment.scopes.wire?.contracts ?? {}
+  const streaming = configuredDeployment.scopes.streaming?.contracts ?? {}
 
   return {
     marketRegistry: protocol.marketRegistry as `0x${string}`,
@@ -43,6 +46,7 @@ const isNonZeroSuiId = (v: unknown): v is string =>
 // addresses that would otherwise hard-crash the board; this lets the picker grey them out and the default
 // steer clear, instead of the app wedging on an undeployed chain.
 export function isChainDeployed(chain: OptionsChainKind): boolean {
+  if (!SUPPORTED_CHAINS.some(option => option.id === chain)) return false
   try {
     if (chain === 'evm') {
       const a = buildOptionsContractAddresses()
@@ -77,7 +81,7 @@ export const deployedChains = (): OptionsChainKind[] =>
 export function defaultChain(): OptionsChainKind {
   const envDefault = (import.meta.env.VITE_DEFAULT_CHAIN ?? undefined) as OptionsChainKind | undefined
   if (envDefault && isChainDeployed(envDefault)) return envDefault
-  return deployedChains()[0] ?? 'evm'
+  return 'evm'
 }
 
 // The chain the provider starts on: a valid stored pick wins (respect the user), else the smart default.

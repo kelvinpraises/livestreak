@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCatalogChains } from "#services/catalog/readers.js";
+import { parseCatalogChains } from "#features/catalog/readers.js";
 describe("explicit catalog chain configuration", () => {
   it("defaults to EVM without activating every checked-in deployment", () => {
     expect(parseCatalogChains(undefined)).toEqual(["evm"]);

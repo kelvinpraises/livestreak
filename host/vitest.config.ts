@@ -11,12 +11,13 @@ export default defineConfig({
   },
   resolve: {
     alias: [
+      { find: /^#features\//, replacement: `${sourceDirectory}/features/` },
+      { find: /^#http\//, replacement: `${sourceDirectory}/http/` },
+      { find: /^#database\//, replacement: `${sourceDirectory}/database/` },
+      { find: /^#storage\//, replacement: `${sourceDirectory}/storage/` },
       { find: /^#server\.js$/, replacement: `${sourceDirectory}/server.ts` },
       { find: /^#deps\.js$/, replacement: `${sourceDirectory}/deps.ts` },
-      { find: /^#api\//, replacement: `${sourceDirectory}/api/` },
       { find: /^#config\//, replacement: `${sourceDirectory}/config/` },
-      { find: /^#services\//, replacement: `${sourceDirectory}/services/` },
-      { find: /^#infrastructure\//, replacement: `${sourceDirectory}/infrastructure/` },
       { find: /^#test\//, replacement: `${packageDirectory}/test/` }
     ]
   }

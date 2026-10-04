@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 // to read. Add a var here when (and only when) you add a documented env read — an undocumented read
 // makes this test RED. Keep deploy-host.yml's header inventory consistent with this list.
 //
-// The dynamic `process.env[record.executorKeyEnv]` read in config/aa/chains-file.ts is exempt by
+// The dynamic `process.env[record.bundlerUrlEnv / record.paymasterUrlEnv]` read in config/aa.ts is exempt by
 // design (the key name is operator-supplied at runtime, not a fixed var) and is excluded below.
 const ALLOWLIST: readonly string[] = [
   // --- Node / test runtime ---
@@ -26,10 +26,7 @@ const ALLOWLIST: readonly string[] = [
   "LIVESTREAK_AA_ENTRY_POINT",
   "LIVESTREAK_AA_SAFE_MODULE",
   "LIVESTREAK_AA_BUNDLER_URL",
-  "LIVESTREAK_AA_EXECUTOR_PRIVATE_KEY",
-  "LIVESTREAK_AA_OPERATOR_KEY",
-  "LIVESTREAK_AA_ALLOW_DEV_KEY",
-  "LIVESTREAK_AA_PAYMASTER_ADDRESS",
+  "LIVESTREAK_AA_PAYMASTER_URL",
   "LIVESTREAK_AA_PAYMASTER_AUTH_TOKEN",
   "LIVESTREAK_DEPLOY_SNAPSHOT",
   "LIVESTREAK_CATALOG_CHAINS",
@@ -53,12 +50,6 @@ const ALLOWLIST: readonly string[] = [
   "LIVESTREAK_SOLANA_SPONSOR_MNEMONIC",
   "LIVESTREAK_SOLANA_FEE_TOKENS",
   // Dev-only localnet faucet mint-authority keypair path (deploy-snapshot override is registered above).
-  "LIVESTREAK_SOLANA_DEPLOYER_KEYPAIR",
-  "LIVESTREAK_KORA_URL",
-  "LIVESTREAK_KORA_ENABLED",
-  "LIVESTREAK_KORA_BIN",
-  "LIVESTREAK_KORA_CONFIG",
-  "LIVESTREAK_KORA_PORT",
   // --- Generic S3-compatible cloud storage ---
   "LIVESTREAK_STORAGE_PROVIDER",
   "LIVESTREAK_STORAGE_ENDPOINT",
@@ -78,11 +69,11 @@ const ALLOWLIST: readonly string[] = [
   // --- Catalog / cron / agents ---
   "LIVESTREAK_CATALOG_DEFAULT_CHAIN",
   "LIVESTREAK_CATALOG_MARKETS",
-  "LIVESTREAK_RESET_CATALOG",
   "LIVESTREAK_CRON_DISABLED",
   // --- External services ---
   "DATABASE_URL",
-  "LIVEKIT_API_KEY"
+  "TURSO_DATABASE_URL",
+  "TURSO_AUTH_TOKEN",
 ];
 
 const HOST_SRC = resolve(fileURLToPath(import.meta.url), "..", "..", "src");
@@ -102,7 +93,7 @@ const listTsFiles = (dir: string): string[] => {
 
 // Collect env keys the same way the audit grep does: direct `process.env.X` / `process.env["X"]`
 // literals, plus the fixed string keys passed to host's env-reader helpers (readOptionalEnv/readEnv/
-// readIntEnv/readBigIntEnv/readPositiveIntEnv). The dynamic `process.env[record.executorKeyEnv]` read
+// readIntEnv/readBigIntEnv/readPositiveIntEnv). The dynamic `process.env[record.bundlerUrlEnv / record.paymasterUrlEnv]` read
 // carries no literal, so it never enters this set — exempt by design.
 const collectEnvKeys = (): Set<string> => {
   const direct = /process\.env(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[\s*["']([A-Za-z_][A-Za-z0-9_]*)["']\s*\])/g;

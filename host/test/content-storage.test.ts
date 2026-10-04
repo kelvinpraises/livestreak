@@ -1,9 +1,9 @@
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createUploadsRouter } from "../src/api/routes/uploads.js";
-import { createContentStore } from "../src/services/content/content.js";
-import { digest } from "../src/infrastructure/storage/object-store.js";
+import { createUploadsRouter } from "../src/features/content/uploads.js";
+import { createContentStore } from "../src/features/content/content.js";
+import { digest } from "../src/storage/object-store.js";
 import { testObjectStore } from "./helpers/object-store.js";
 describe("generic cloud content", () => {
   it("requires cloud storage, verifies readback, and rejects corruption", async () => {

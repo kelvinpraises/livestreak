@@ -2,8 +2,8 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { attachLiveWss } from "../src/infrastructure/ws/live-server.js";
-import { createLiveRingStore } from "../src/services/live/ring.js";
+import { attachLiveWss } from "../src/features/live/transport.js";
+import { createLiveRingStore } from "../src/features/live/ring.js";
 
 /**
  * Live fMP4 fan-out over REAL sockets: a producer ingests init + fragments over /live/ingest, a viewer

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createContentStore } from "#services/content/content.js";
+import { createContentStore } from "#features/content/content.js";
 import { testObjectStore } from "./helpers/object-store.js";
 import {
   handleVodMetadataResolve,
   handleVodMetadataStore
-} from "#services/content/vod.js";
+} from "#features/content/vod.js";
 
 describe("cloud VOD metadata", () => {
   const store = createContentStore(testObjectStore());

@@ -171,12 +171,14 @@ const resolveCreateVaultFromUserOp = async (
 
   assertUserOperationSucceeded(userOpReceipt);
 
-  const receipt = await readOnly.getTransactionReceipt(userOpHash);
-  if (receipt === null || receipt === undefined) {
+  // The top-level logs belong to this UserOperation. Nested transaction logs
+  // may include other creators' vaults from the same bundler transaction.
+  const logs = (userOpReceipt as { logs?: readonly unknown[] }).logs;
+  if (!Array.isArray(logs)) {
     return undefined;
   }
 
-  const vaultId = parseVaultCreatedFromLogs(receipt.logs);
+  const vaultId = parseVaultCreatedFromLogs(logs);
 
   return {
     txId: asTxId(userOpHash),

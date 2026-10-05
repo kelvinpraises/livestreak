@@ -111,6 +111,7 @@ const config = defineConfig({
   resolve: {
     alias: {
       'sodium-javascript': path.dirname(nodeRequire.resolve('sodium-javascript')),
+      'sodium-universal': path.resolve(import.meta.dirname, 'src/utils/sodium-browser.ts'),
     },
   },
   optimizeDeps: {

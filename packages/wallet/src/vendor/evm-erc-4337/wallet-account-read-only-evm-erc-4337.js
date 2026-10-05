@@ -550,7 +550,21 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
   async _getFeeEstimator () {
     if (!this._feeEstimator) {
       const { bundlerUrl } = this._config
-      const isPimlico = bundlerUrl?.includes('pimlico')
+      // Host proxies hide provider hostnames. Discover the fee API through the same
+      // configured bundler route instead of guessing its provider from the URL.
+      const response = await fetch(bundlerUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'pimlico_getUserOperationGasPrice', params: [] }),
+        signal: AbortSignal.timeout(15000)
+      })
+      if (!response.ok) throw new Error(`Bundler fee discovery failed (${response.status})`)
+      const feeReply = await response.json()
+      const isPimlico = feeReply.result?.standard?.maxFeePerGas !== undefined &&
+        feeReply.result?.standard?.maxPriorityFeePerGas !== undefined
+      if (!isPimlico && feeReply.error?.code !== -32601) {
+        throw new Error(feeReply.error?.message ?? 'Bundler returned invalid fee data')
+      }
 
       if (isPimlico) {
         this._feeEstimator = new PimlicoFeeEstimator()
@@ -563,6 +577,27 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
     }
 
     return this._feeEstimator
+  }
+
+  // Read the nonce directly without the provider's short-lived eth_call cache.
+  // An approval may have been included immediately before the next operation.
+  async _getFreshNonce (pack, address) {
+    const provider = pack.protocolKit.getSafeProvider().getExternalProvider()
+    const result = await provider.request({ method: 'eth_call', params: [{
+      to: this._config.entryPointAddress,
+      data: encodeFunctionData({ abi: [{ type: 'function', name: 'getNonce', stateMutability: 'view', inputs: [{ type: 'address', name: 'sender' }, { type: 'uint192', name: 'key' }], outputs: [{ type: 'uint256' }] }], functionName: 'getNonce', args: [address, 0n] })
+    }, 'pending'] })
+    let nonce = BigInt(result)
+    const previous = this._lastSubmittedOperation
+    if (previous && nonce <= previous.nonce) {
+      const receipt = await pack.getUserOperationReceipt(previous.hash)
+      // A receipt proves that EntryPoint consumed the nonce, even if execution
+      // reverted. Never advance from a submission or a still-pending operation.
+      if (receipt?.receipt?.blockHash && receipt.sender?.toLowerCase() === address.toLowerCase() && BigInt(receipt.nonce) === previous.nonce) {
+        nonce = previous.nonce + 1n
+      }
+    }
+    return nonce
   }
 
   /** @private */
@@ -578,6 +613,7 @@ export default class WalletAccountReadOnlyEvmErc4337 extends WalletAccountReadOn
         transactions: txs.map(tx => ({ from: address, ...tx })),
         options: {
           feeEstimator: await this._getFeeEstimator(),
+          customNonce: await this._getFreshNonce(safe4337Pack, address),
           amountToApprove,
           paymasterTokenAddress
         }

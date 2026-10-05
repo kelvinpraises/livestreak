@@ -271,6 +271,7 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
         transactions: txs.map(tx => ({ from: address, ...tx })),
         options: {
           validUntil: twoMinutesFromNow,
+          customNonce: await this._getFreshNonce(safe4337Pack, address),
           feeEstimator: await this._getFeeEstimator(),
           ...options
         }
@@ -278,9 +279,11 @@ export default class WalletAccountEvmErc4337 extends WalletAccountReadOnlyEvmErc
 
       const signedSafeOperation = await safe4337Pack.signSafeOperation(safeOperation)
 
-      return await safe4337Pack.executeTransaction({
+      const hash = await safe4337Pack.executeTransaction({
         executable: signedSafeOperation
       })
+      this._lastSubmittedOperation = { hash, nonce: BigInt(safeOperation.userOperation.nonce) }
+      return hash
     } catch (err) {
       if (err.message.includes('AA50')) {
         throw new Error('Not enough funds on the safe account to repay the paymaster.')

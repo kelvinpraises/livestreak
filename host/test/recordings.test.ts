@@ -41,7 +41,7 @@ const video = () => {
   const chunker = createFmp4Chunker();
   return [...chunker.push(bytes), ...chunker.flush()];
 };
-afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(databases.splice(0).map(handle => handle.close())); });
+afterEach(async () => { vi.unstubAllGlobals(); vi.restoreAllMocks(); await Promise.all(databases.splice(0).map(handle => handle.close())); });
 describe("cloud recordings", () => {
   it("records real encoded fragments, survives service restart and exposes a verified HLS receipt", async () => {
     const store = testObjectStore();
@@ -161,4 +161,33 @@ it("atomically binds a market and claims the producer across Host instances", as
   expect(writers.filter(result => result.status === "fulfilled")).toHaveLength(1);
   for (const result of writers) if (result.status === "fulfilled") await result.value.close(false);
   expect(store.data.size).toBe(0);
+});
+
+
+describe("recording metadata network blips", () => {
+  it("retries the same metadata write and preserves the complete recording", async () => {
+    const store = testObjectStore();
+    const db = metadata();
+    vi.stubGlobal("fetch", async (url: string) => new Response(new Uint8Array(await store.get(new URL(url).pathname.slice(1))).buffer));
+    const executor = db.getExecutor();
+    const execute = executor.executeQuery.bind(executor);
+    let failures = 0;
+    vi.spyOn(executor, "executeQuery").mockImplementation(async (query, queryId) => {
+      if (query.sql.startsWith('update "recordings" set "body"') && failures < 2) {
+        failures++;
+        throw new TypeError("fetch failed");
+      }
+      return execute(query, queryId);
+    });
+    const service = createRecordingService(store, "secret", db);
+    const recording = await service.begin(scope);
+    const writer = await service.open(recording.id, recording.ingestToken);
+    for (const chunk of video()) writer.push(chunk.kind === "init" ? 1 : 2, chunk.data);
+    await writer.close(true);
+    const receipt = await service.read(scope);
+    expect(failures).toBe(2);
+    expect(receipt?.status).toBe("ready");
+    expect(receipt?.segments).toBe(2);
+    expect(receipt?.durationSeconds).toBeCloseTo(2);
+  });
 });

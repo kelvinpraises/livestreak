@@ -62,8 +62,19 @@ const receipt = (s: State): RecordingReceipt => ({
   ...(s.error ? { error: s.error } : {}),
   ...(s.pointer ? { pointer: s.pointer } : {}),
 });
+// Recording metadata writes replace the same body, so a lost response can be
+// retried safely. Keep retries bounded and leave integrity/validation failures fatal.
+const retryTransient = async <T>(action: () => Promise<T>): Promise<T> => {
+  for (let attempt = 0; ; attempt++) {
+    try { return await action(); }
+    catch (error) {
+      if (attempt === 2 || !(error instanceof Error) || !/fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|network error/i.test(error.message)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+};
 const readPublic = async (url: string, maxBytes: number): Promise<Uint8Array> => {
-  const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const response = await retryTransient(() => fetch(url, { signal: AbortSignal.timeout(15000) }));
   if (!response.ok || !response.body)
     throw new Error("Public recording delivery failed verification");
   const reader = response.body.getReader();
@@ -126,7 +137,8 @@ export const createRecordingService = (
   };
   const save = async (s: State): Promise<void> => {
     s.updatedAtMs = Date.now();
-    const result = await db.updateTable("recordings").set({ body: JSON.stringify(s) }).where("id", "=", s.id).executeTakeFirst();
+    const body = JSON.stringify(s);
+    const result = await retryTransient(() => db.updateTable("recordings").set({ body }).where("id", "=", s.id).executeTakeFirst());
     if (result.numUpdatedRows !== 1n) throw new Error("Recording metadata unavailable");
   };
   const token = (id: string): string =>

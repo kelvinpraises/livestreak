@@ -1,0 +1,10 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "npm run build:packages:image && npm run build --workspace=app",
+  "outputDirectory": "app/.output/public",
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/.*", "dest": "/_shell.html" }
+  ]
+}

@@ -8,6 +8,7 @@ dist/
 .next/
 .tanstack/
 .output/
+.vercel/
 
 # Environment
 .env

@@ -1,5 +1,6 @@
 #!/usr/bin/env tsx
 import { createServer } from "node:http";
+import { WebSocket } from "ws";
 import { attachLiveWss } from "./features/live/transport.js";
 import { attachRemoteWss } from "./features/remote/transport.js";
 import { bootstrapHostServer } from "./server.js";
@@ -24,8 +25,20 @@ const { config, deps, app } = await bootstrapHostServer();
 // the one server. A final listener 404s any upgrade neither claimed (registered LAST so the claimers run
 // first — Node invokes upgrade listeners in registration order).
 const httpServer = createServer(app);
-attachRemoteWss(httpServer, deps);
-attachLiveWss(httpServer, deps.live, deps.recordings, config.storage !== null);
+const remote = attachRemoteWss(httpServer, deps);
+const live = attachLiveWss(httpServer, deps.live, deps.recordings, config.storage !== null);
+
+// Public proxies may close idle WebSockets. Protocol pings keep quiet consoles
+// and viewers alive; browser and Node WebSocket clients reply automatically.
+const heartbeat = setInterval(() => {
+  for (const transport of [remote, live]) {
+    for (const socket of transport.wss.clients) {
+      if (socket.readyState === WebSocket.OPEN) socket.ping();
+    }
+  }
+}, 20_000);
+heartbeat.unref();
+httpServer.once("close", () => clearInterval(heartbeat));
 httpServer.on("upgrade", (req, socket) => {
   const path = (req.url ?? "").split("?")[0] ?? "";
   if (path.startsWith("/remote/") || path.startsWith("/live/")) return; // a claimer already handled it

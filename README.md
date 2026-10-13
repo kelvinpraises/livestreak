@@ -1,58 +1,97 @@
 # LiveStreak
 
-LiveStreak turns any live stream into a prediction market. Point it at a football match, an esports final, a debate, anything happening in real time, and it opens small yes/no questions you can bet on while you watch. Will there be a red card? Does this team score next? You stream USDC onto the side you believe in through floating cards laid over the video, and when the moment resolves the winners get paid. Lose and you don't walk away with nothing either, because the loss mints **$LVST**, a token that turns being wrong into a small piece of ownership.
+**Watch a live stream. Take a side. Fund your prediction as the moment unfolds.**
 
-It runs on EVM, Sui, and Solana, and the app doesn't much care which. It flips between them by config, the same interface sitting over a different deployment underneath. The video, the market metadata, and the steward's memory all live on Walrus, served through the host.
+LiveStreak brings prediction markets into the video player. A match, a debate, a creator's broadcast, or an automated data show can carry multiple YES/NO questions. Viewers stream USDC into their chosen sides over time, follow their positions while watching, and claim after the outcome is resolved.
 
-## How it works
+[Open the app](https://livestreak.vercel.app) · [Agent control](cli/docs/agent-control.md) · [Host deployment](DEPLOYMENT.md)
 
-A stream comes in and the observe pipeline captures it, processes it, and publishes it with a Walrus pointer attached. The market opens from there, and people fund the YES and NO vaults by streaming into them over time rather than placing one lump bet. When the outcome is known someone resolves it, the winners withdraw, and the losing side mints $LVST. On the sports side, anything that reduces to a stat can settle straight through TxLINE's on-chain feed; the questions that don't reduce that cleanly are the ones our own Agora layer is there to read.
+## One stream, many questions
 
-```
-[stream] → observe (capture → process → publish)
-              ↓  market opens, Walrus pointer attached
-        options (stream USDC onto YES / NO, claim)
-              ↓
-        steward / TxLINE (resolve)
-              ↓
-        $LVST (a loss becomes ownership)
-```
+1. **Broadcast:** an operator captures and publishes watchable video, then registers its market.
+2. **Create predictions:** a bookmaker opens and seeds vaults with a question, decision rules, funding deadline, and designated Steward.
+3. **Participate:** viewers fund YES or NO, adjust their funding, and follow their live positions.
+4. **Resolve:** the Steward evaluates evidence against the committed rules and publishes an explicit outcome with a reason and receipt.
+5. **Claim and replay:** viewers collect eligible payouts or LVST loss rewards; completed recordings remain available when archival succeeds.
 
-Nobody runs the whole thing from one command. Each package (observe, options, bookmaker, steward) is its own control surface, and an operator drives them from browser tabs after opening a remote session from the CLI. The seed stays in the CLI keystore and never crosses the wire.
+Resolution is generic. A question can use human judgment or a data adapter, according to its declared rules. The platform does not require every stream to use the same oracle.
 
-## Run it
+## Independent roles, shared plumbing
 
-You'll need Node 22+, Foundry for EVM, and the Sui CLI for the Sui leg (`brew install sui`).
+Each role has its own SDK, runtime, and control surface. People or agents can drive those surfaces through the CLI and remote browser console.
 
-```shell
-./dev.sh                 # Sui localnet + Anvil + deploy + host + app
-WITH_SUI=0 ./dev.sh      # EVM only
-CHAIN=solana ./dev.sh    # Solana localnet
-```
+| Role | Responsibility | Package |
+| --- | --- | --- |
+| Broadcaster | Capture video, publish media, manage the stream lifecycle | `@livestreak/observe` |
+| Bookmaker | Define questions and rules, create and seed vaults | `@livestreak/bookmaker` |
+| Viewer | Read markets, fund positions, collect claims | `@livestreak/options` |
+| Steward | Evaluate evidence, explain decisions, submit resolution | `@livestreak/steward` |
 
-That brings the app up at `localhost:3000` and the host at `127.0.0.1:8787`, with each chain on its usual local port. To drive it as an operator, open a remote session and the seed stays put in the CLI:
+The **Host** supplies shared services: discovery and chain indexing, video relay and recording, metadata storage, sponsored transaction endpoints, and remote session transport. Signing stays in the operator's gateway. Remote access uses scoped, revocable grants.
 
-```shell
-cd cli && npm run build
-node dist/main.js settings init
-LIVESTREAK_PASSWORD='<password>' node dist/main.js remote open \
-  --scopes 'bridge:action:*,bridge:board:read' --ttl 30m
-```
+The wallet service uses **ZeroDev-backed sponsorship for its configured EVM network**. Sponsorship depends on the active provider and network configuration.
 
-Open the URL it prints and enter the pairing password.
+## Networks
 
-## Where things live
+LiveStreak's product scope is **Monad and Solana**: Solidity contracts for Monad's EVM and a native Solana program.
 
-The app, host, and CLI sit at the top. The real logic is in the packages: observe runs the video pipeline, options is the SDK for reading and betting on markets, bookmaker originates the vaults, and steward handles resolution and accountability. schema, core, wallet, and host hold the shared wire types and the account-abstraction wallet. Everything on-chain lives in `packages/contracts`: the Sui Move, the EVM Solidity, the Solana program, and the typed deployment snapshots.
+Deployment wiring is still being aligned with that scope. **This checkout does not yet contain a Monad deployment**, and the checked-in Solana default is localnet. The current frontend and Host EVM defaults also still need migrating. A network is ready for use when its deployment snapshot, Host configuration, wallet provider, and frontend agree.
 
-## Deployments
+## Develop
 
-Sui is live on testnet (deployed 2026-06-21); the canonical addresses are in [`chains/sui/deployments/testnet.json`](packages/contracts/chains/sui/deployments/testnet.json). EVM and Solana come up from local snapshots through `./dev.sh`. Redeploy Sui with `npm run deploy:sui -- --name testnet` from `packages/contracts`.
+Use **Node.js 22**. Broadcasting also requires FFmpeg. Foundry is needed to build and test Solidity; the Solana toolchain is needed for program work.
 
-## Build & test
+From the repository root:
 
-```shell
-npm install && npm run build && npm run test
+```sh
+npm ci
+npm run build:packages:ts
+npm run build --workspace=@livestreak/cli
+npm run build --workspace=@livestreak/host-server
 ```
 
-Sui Move tests run with `sui move test` in `chains/sui`, EVM with `forge test` in `chains/evm`, and the Solana engine with `cargo test` in its crate. Every chain carries the same conservation invariants and stream-lifecycle coverage.
+Configure the Host's private `.env` for your database, object storage, wallet provider, and deployed contracts. Configure the frontend's `VITE_HOST_BASE_URL` to reach that Host. See [Host deployment](DEPLOYMENT.md) for the current operating setup.
+
+Run these in separate terminals:
+
+```sh
+npm run dev --workspace=@livestreak/host-server
+```
+
+```sh
+npm run dev --workspace=app
+```
+
+The default frontend address is `http://localhost:3000`; the Host listens on `http://127.0.0.1:8787`.
+
+### Drive a role session
+
+```sh
+node cli/dist/main.js settings init --host-url http://127.0.0.1:8787
+node cli/dist/main.js remote open --help
+```
+
+Initialize and unlock your operator keystore, configure the intended network in CLI settings, then open a session with the action scopes that role needs. The CLI prints a console URL and pairing credentials. An outside agent can use the same scoped interface through `@livestreak/cli/agent-client`; see the [agent control guide](cli/docs/agent-control.md).
+
+## Repository map
+
+| Path | Contains |
+| --- | --- |
+| `app/` | Video player, stream discovery, positions, remote consoles |
+| `host/` | Shared APIs, chain index, media relay, archival, session transport |
+| `cli/` | Operator keystore, settings, role gateway, agent client |
+| `packages/observe`, `bookmaker`, `options`, `steward` | The four independent role SDKs |
+| `packages/schema`, `core`, `wallet`, `host` | Shared types, runtime primitives, wallets, Host client contracts |
+| `packages/contracts/chains/evm/` | Solidity contracts, ABIs, deployment tooling and snapshots |
+| `packages/contracts/chains/solana/` | Native program, streaming engine, IDL and deployment tooling |
+| `examples/` | Agent and integration examples |
+
+## Checks
+
+```sh
+npm run check
+npm run lint
+npm test
+```
+
+Individual workspaces also expose their own checks. For contract changes, run the relevant Solidity or Solana tests in addition to the SDK checks.

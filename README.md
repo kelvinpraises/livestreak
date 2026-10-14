@@ -46,8 +46,6 @@ People or agents operate each role independently through its SDK, CLI or remote 
 | CreateCall | [`0x9c25750c3f274facf6eeec33d5d1e0bf9b6a3da3`](https://testnet.monadexplorer.com/address/0x9c25750c3f274facf6eeec33d5d1e0bf9b6a3da3) | Contract creation |
 | SimulateTxAccessor | [`0x06041007e4f2e33aa5c42f4cb2a062bb8dbd398c`](https://testnet.monadexplorer.com/address/0x06041007e4f2e33aa5c42f4cb2a062bb8dbd398c) | Transaction simulation |
 
-Source: [deployment snapshot](packages/contracts/chains/evm/deployments/monad-testnet.json). USDC here is our permissionless six-decimal **test token**. The Solana implementation is included; its checked-in deployment is localnet.
-
 ## Run
 
 Use **Node.js 22** and **FFmpeg** for broadcasting. Foundry is needed when rebuilding Solidity contracts.

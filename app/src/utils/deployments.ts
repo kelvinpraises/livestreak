@@ -1,5 +1,5 @@
 import { isAddress } from 'viem'
-import { arbitrumSepoliaDeployment } from '@livestreak/contracts/evm'
+import { monadTestnetDeployment } from '@livestreak/contracts/evm'
 import { localnetDeployment as suiLocalnetDeployment } from '@livestreak/contracts/sui'
 import { localnetDeployment as solanaLocalnetDeployment } from '@livestreak/contracts/solana/deployments/localnet'
 import type { OptionsContractAddresses } from '@livestreak/options'
@@ -7,8 +7,8 @@ import type { OptionsContractAddresses } from '@livestreak/options'
 import { EVM_NETWORK, SUPPORTED_CHAINS, readStoredChain, type OptionsChainKind } from './chain'
 
 // Deployment addresses and ABIs come from the same contracts package.
-const configuredDeployment = arbitrumSepoliaDeployment
-if (configuredDeployment.chainId !== EVM_NETWORK.chainId) throw new Error('Expected Arbitrum Sepolia deployment (421614)')
+const configuredDeployment = monadTestnetDeployment
+if (configuredDeployment.chainId !== EVM_NETWORK.chainId) throw new Error(`Expected ${EVM_NETWORK.name} deployment (${EVM_NETWORK.chainId})`)
 
 export const EVM_RPC_URL = EVM_NETWORK.rpcUrl
 export const EVM_AA_CONTRACTS = configuredDeployment?.scopes.aa?.contracts ?? {}
@@ -18,7 +18,7 @@ const configuredTestUsdc = (configuredDeployment?.scopes.protocol?.contracts as 
 export const EVM_TEST_USDC = configuredTestUsdc && isAddress(configuredTestUsdc) && !/^0x0+$/i.test(configuredTestUsdc) ? configuredTestUsdc as `0x${string}` : undefined;
 
 export function buildOptionsContractAddresses(): OptionsContractAddresses {
-  if (!configuredDeployment) throw new Error("Arbitrum Sepolia deployment is not configured")
+  if (!configuredDeployment) throw new Error(`${EVM_NETWORK.name} deployment is not configured`)
   const protocol = configuredDeployment.scopes.protocol?.contracts ?? {}
   const wire = configuredDeployment.scopes.wire?.contracts ?? {}
   const streaming = configuredDeployment.scopes.streaming?.contracts ?? {}

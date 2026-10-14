@@ -8,6 +8,7 @@ import { useVaultView } from '#/hooks/use-vault-views'
 import type { StreamDraft } from '#/hooks/use-stream-draft'
 import { formatUSDCFull, formatRate, formatShares } from '#/utils/format'
 import type { VaultMandate } from '@livestreak/schema'
+import { EVM_NETWORK } from '#/utils/chain'
 
 const date = (seconds: number) => new Date(seconds * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 function Rules({ mandate }: { mandate: VaultMandate }) {
@@ -102,7 +103,7 @@ export function FundingComposer({ vault, draft, onStream }: {
     {insufficient && <div className="funding-notice" role="status">Add USDC to start this stream. {wallet.canTopUp ? <button className="funding-text-button" disabled={wallet.isToppingUp || frozen} onClick={async () => {
       setError(null); try { await wallet.topUp(100) } catch (err) { setError(err instanceof Error ? err.message : 'Test funding is unavailable.') }
     }}>{wallet.isToppingUp ? 'Adding test funds…' : 'Mint 100 test USDC'}</button> : 'Send USDC to your connected wallet.'}
-      {wallet.canTopUp && <small>Arbitrum Sepolia · test funds only</small>}</div>}
+      {wallet.canTopUp && <small>{EVM_NETWORK.name} · test funds only</small>}</div>}
     {ownOp && <div className={`funding-progress funding-progress-${ownOp.status}`} role="status" aria-live="polite">
       {ownOp.status === 'confirmed' ? <CheckCircle size={18} /> : ownOp.status === 'working' ? <SpinnerGap className="funding-spinner" size={18} /> : null}
       <div><strong>{ownOp.status === 'confirmed' ? `${ownOp.side.toUpperCase()} position confirmed` : ownOp.status === 'unknown' ? 'Confirmation needed' : ownOp.status === 'continue' ? 'Ready to continue' : ownOp.status === 'failed' ? 'Transaction not completed' : ownOp.phase === 'mint' ? 'Creating your position…' : ownOp.phase === 'verify' ? 'Loading your on-chain position…' : ownOp.receiptStep === 'approve' ? 'Approving USDC…' : 'Funding your stream…'}</strong>

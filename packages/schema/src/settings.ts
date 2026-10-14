@@ -39,4 +39,4 @@ export const SettingsDoc = Schema.Struct({
 export type SettingsDoc = Schema.Schema.Type<typeof SettingsDoc>;
 
 export const DEFAULT_HOST_URL = "http://127.0.0.1:8787";
-export const DEFAULT_EVM_CAIP2 = "eip155:421614";
+export const DEFAULT_EVM_CAIP2 = "eip155:10143";

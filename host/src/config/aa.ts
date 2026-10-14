@@ -111,7 +111,7 @@ const buildEnvChain = (snapshot: DeploySnapshotConfig): AaChainConfig | null => 
   return {
     routeKey: "local",
     chainId,
-    name: chainId === 421614 ? "Arbitrum Sepolia" : `EVM ${chainId}`,
+    name: chainId === 10143 ? "Monad Testnet" : chainId === 421614 ? "Arbitrum Sepolia" : `EVM ${chainId}`,
     entryPoint,
     ...(safeModule === undefined ? {} : { safeModule }),
     bundlerUrl: process.env.LIVESTREAK_AA_BUNDLER_URL,
@@ -120,13 +120,13 @@ const buildEnvChain = (snapshot: DeploySnapshotConfig): AaChainConfig | null => 
   };
 };
 
-// ENV > explicit snapshot > Arbitrum Sepolia.
+// ENV > explicit snapshot > Monad testnet.
 const resolveChainId = (snapshotChainId: number | undefined): number => {
   const envValue = readEnv("LIVESTREAK_AA_CHAIN_ID");
   if (envValue !== undefined) {
     return Number.parseInt(envValue, 10);
   }
-  return snapshotChainId ?? 421614;
+  return snapshotChainId ?? 10143;
 };
 
 const mergeChains = (

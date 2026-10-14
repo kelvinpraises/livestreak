@@ -882,7 +882,7 @@ export function OptionsProvider({ children }: { children: ReactNode }) {
   )
 
   const mintTestUsdc = useCallback(async (amountUsd = 100): Promise<void> => {
-    if (!isConnected || !address || chainRef.current !== 'evm') throw new Error('Connect your Arbitrum Sepolia wallet first.');
+    if (!isConnected || !address || chainRef.current !== 'evm') throw new Error(`Connect your ${EVM_NETWORK.name} wallet first.`);
     if (writeBusyRef.current) throw new Error('Wait for the current wallet action to finish.');
     const user = address;
     const secret = sessionStorage.getItem(SESSION_SECRET_KEY);

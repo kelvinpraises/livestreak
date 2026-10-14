@@ -46,7 +46,7 @@ const flattenEvmDeployment = (deployment?: string, caip2?: string): Record<strin
   const prefix = "@livestreak/contracts/evm/deployments/";
   if (deployment && !deployment.startsWith(prefix)) throw new Error(`Unsupported EVM deployment reference: ${deployment}`);
   const name = deployment?.slice(prefix.length) ?? DEFAULT_DEPLOYMENT;
-  if (name !== "localhost" && name !== "arbitrum-sepolia") throw new Error(`Unknown EVM deployment: ${name}`);
+  if (name !== "localhost" && name !== "arbitrum-sepolia" && name !== "monad-testnet") throw new Error(`Unknown EVM deployment: ${name}`);
   const snapshot = loadDeploymentOutput(name as DeploymentName);
   if (caip2 && caip2 !== `eip155:${snapshot.chainId}`) throw new Error(`Deployment ${name} belongs to eip155:${snapshot.chainId}, not ${caip2}`);
   // Read fresh from the promoted JSON at call time so a redeploy is picked up without a rebuild.

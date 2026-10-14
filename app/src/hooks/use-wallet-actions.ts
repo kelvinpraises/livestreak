@@ -14,7 +14,7 @@ export interface WalletActions {
   readonly isToppingUp: boolean
 }
 
-/** Test USDC is requested directly from its configured Arbitrum Sepolia token. */
+/** Test USDC is requested directly from the active deployment's configured token. */
 export function useWalletActions(): WalletActions {
   const { address, chain, usdcBalance, isConnected, mintTestUsdc } = useOptionsContext()
   const [isToppingUp, setToppingUp] = useState(false)

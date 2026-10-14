@@ -7,6 +7,7 @@ import { isOptionsModeEnabled } from '#/utils/env'
 import { useOptionsContext } from '#/providers/options-provider'
 import { useWalletActions } from '#/hooks/use-wallet-actions'
 import { ScoreUSD } from '#/components/atoms/score-usd'
+import { EVM_NETWORK } from '#/utils/chain'
 
 interface Props {
   flow: FlowState
@@ -168,7 +169,7 @@ export function BalanceBar({ flow, wallet }: Props) {
               <button
                 onClick={() => { setActionError(null); setExpanded(true); void walletActions.topUp().catch(err => setActionError(err instanceof Error ? err.message : 'Test USDC mint failed.')) }}
                 disabled={walletActions.isToppingUp}
-                title="Mint 100 test USDC on Arbitrum Sepolia"
+                title={`Mint 100 test USDC on ${EVM_NETWORK.name}`}
                 aria-label="Mint test USDC"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center',

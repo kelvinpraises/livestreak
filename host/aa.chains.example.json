@@ -1,11 +1,11 @@
 [
   {
-    "routeKey": "arbitrum-sepolia",
-    "chainId": 421614,
-    "name": "Arbitrum Sepolia",
+    "routeKey": "monad-testnet",
+    "chainId": 10143,
+    "name": "Monad Testnet",
     "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-    "rpcUrl": "https://sepolia-rollup.arbitrum.io/rpc",
-    "bundlerUrlEnv": "ZERODEV_ARBITRUM_SEPOLIA_RPC_URL",
-    "paymasterUrlEnv": "ZERODEV_ARBITRUM_SEPOLIA_RPC_URL"
+    "rpcUrl": "https://testnet-rpc.monad.xyz",
+    "bundlerUrlEnv": "ZERODEV_MONAD_TESTNET_RPC_URL",
+    "paymasterUrlEnv": "ZERODEV_MONAD_TESTNET_RPC_URL"
   }
 ]

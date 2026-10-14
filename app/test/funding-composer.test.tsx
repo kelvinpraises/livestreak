@@ -52,7 +52,7 @@ it('offers a clearly labelled testnet mint before the first position exists', as
   render(<Form />); choose(); expect(submit().disabled).toBe(true)
   fireEvent.click(screen.getByText('Mint 100 test USDC'))
   await waitFor(() => expect(mocks.wallet.topUp).toHaveBeenCalledWith(100))
-  expect(screen.getByText('Arbitrum Sepolia · test funds only')).toBeTruthy()
+  expect(screen.getByText('Monad Testnet · test funds only')).toBeTruthy()
 })
 it('opens the canonical wallet dialog instead of pretending a disconnected bet worked', () => {
   mocks.options.isConnected = false

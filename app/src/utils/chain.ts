@@ -1,13 +1,14 @@
 import { isAddress } from 'viem'
+import { monadTestnet } from 'viem/chains'
 
 // The VM families the options runtime can drive. Solana's contracts port landed, so it is now a
 // first-class runtime chain alongside EVM + Sui (no longer a display-only pill).
 export type OptionsChainKind = 'evm' | 'sui' | 'solana'
 
 export const EVM_NETWORK = {
-  chainId: 421614,
-  name: 'Arbitrum Sepolia',
-  rpcUrl: 'https://sepolia-rollup.arbitrum.io/rpc',
+  chainId: monadTestnet.id,
+  name: monadTestnet.name,
+  rpcUrl: monadTestnet.rpcUrls.default.http[0],
   token: {
     symbol: 'USDC',
     decimals: 6,
@@ -24,9 +25,9 @@ export interface ChainOption {
 
 // Canonical chains shown in the wallet's chain picker. `id` is the VM family used for wallet derivation
 // + contract deployments (unchanged across the app); `label` is the SPECIFIC chain name — the EVM
-// EVM targets Arbitrum Sepolia; actual action availability is checked against its deployment.
+// EVM targets Monad testnet; actual action availability is checked against its deployment.
 export const SUPPORTED_CHAINS: readonly ChainOption[] = [
-  { id: 'evm', label: 'Arbitrum', network: 'Sepolia · 421614' },
+  { id: 'evm', label: 'Monad', network: 'Testnet · 10143' },
   { id: 'solana', label: 'Solana', network: 'localnet · 8899' },
 ]
 

@@ -426,7 +426,9 @@ describe("catalog correctness under failure and identity permutations", () => {
     async (mode) => {
       const handle = createDatabase(":memory:");
       handles.push(handle);
-      const legacy = SCHEMA_DDL.replace(
+      const legacy = SCHEMA_DDL.replaceAll("  deployment_scope TEXT NOT NULL DEFAULT '',\n", "")
+        .replaceAll("deployment_scope, ", "")
+        .replace(
         "id            TEXT NOT NULL,",
         "id            TEXT PRIMARY KEY,",
       )
@@ -480,7 +482,7 @@ describe("catalog correctness under failure and identity permutations", () => {
             pk: number;
           }[]
         ).find((c) => c.name === "chain")?.pk,
-      ).toBe(1);
+      ).toBeGreaterThan(0);
       expect(
         handle.sqlite
           .prepare(

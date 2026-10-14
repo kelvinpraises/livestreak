@@ -15,6 +15,7 @@ export interface CatalogMarketRef {
 export interface CatalogReaderProvider {
   reader(chain: CatalogChain): OptionsReader | null;
   readonly availableChains: readonly CatalogChain[];
+  readonly deploymentScopes?: Partial<Record<CatalogChain, string>>;
 }
 
 export interface CatalogServiceConfig {

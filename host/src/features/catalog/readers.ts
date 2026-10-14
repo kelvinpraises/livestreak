@@ -205,6 +205,15 @@ export const parseCatalogChains = (raw: string | undefined): readonly CatalogCha
 
 export const createEnvReaderProvider = (): CatalogReaderProvider => {
   const enabled = parseCatalogChains(process.env.LIVESTREAK_CATALOG_CHAINS);
+  const evm = readEvmSnapshot(process.env.LIVESTREAK_DEPLOY_SNAPSHOT ?? deploymentPath());
+  const sui = readJsonFile<{ packageId?: string }>(process.env.LIVESTREAK_SUI_DEPLOYMENT ?? DEFAULT_SUI_DEPLOYMENT);
+  const solana = readJsonFile<{ programId?: string; rpc?: string }>(process.env.LIVESTREAK_SOLANA_DEPLOYMENT ?? DEFAULT_SOLANA_DEPLOYMENT);
+  const deploymentScopes = {
+    evm: evm?.scopes.protocol?.contracts?.marketRegistry
+      ? `eip155:${evm.chainId}:${evm.scopes.protocol.contracts.marketRegistry.toLowerCase()}` : 'unconfigured:evm',
+    sui: sui?.packageId ? `sui:${resolveSuiNetworkFromEnv()}:${sui.packageId}` : 'unconfigured:sui',
+    solana: solana?.programId ? `solana:${solana.rpc}:${solana.programId}` : 'unconfigured:solana',
+  };
   const cache = new Map<CatalogChain, OptionsReader | null>();
   const get = (chain: CatalogChain): OptionsReader | null => {
     if (!enabled.includes(chain)) return null;
@@ -218,6 +227,7 @@ export const createEnvReaderProvider = (): CatalogReaderProvider => {
   };
   return {
     reader: get,
+    deploymentScopes,
     // Configuration, not reachability. Explicitly enabled broken legs remain observable
     // as failures; deployment files alone never opt another chain into indexing.
     availableChains: enabled

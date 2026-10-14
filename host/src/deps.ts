@@ -11,6 +11,7 @@ import {
   type DatabaseHandle,
   type TestDatabaseHandle,
 } from "./database/connection.js";
+import type { DeploymentScopes } from "./database/schema.js";
 import {
   migrateToLatest,
   migrateSync,
@@ -164,6 +165,7 @@ export interface HostRouteDeps {
 }
 
 export interface CatalogStack {
+  readonly deploymentScopes?: DeploymentScopes;
   readonly catalog: CatalogService;
   readonly catalogDb: DatabaseHandle;
   readonly catalogReadModel: CatalogReadModel;
@@ -238,6 +240,7 @@ const buildCatalogStack = (
   });
   const readModel = createCatalogReadModel({
     db: db.db,
+    deploymentScopes: readers.deploymentScopes,
     agents: options.agents,
     health: indexer.health,
   });
@@ -246,7 +249,7 @@ const buildCatalogStack = (
     ...(options.cronEnabled === undefined ? {} : { enabled: options.cronEnabled }),
   });
 
-  return { catalog: service, catalogDb: db, catalogReadModel: readModel, catalogIndexer: indexer, catalogCron: cron };
+  return { deploymentScopes: readers.deploymentScopes, catalog: service, catalogDb: db, catalogReadModel: readModel, catalogIndexer: indexer, catalogCron: cron };
 };
 
 export const createHostRouteDeps = (
@@ -263,7 +266,8 @@ export const createHostRouteDeps = (
   const direct = createDirectAnnounceStore();
   const catalogStack = buildCatalogStack(config, discoveryStore, options,
     (marketId) => live.isLive(marketId) || direct.lookup(marketId) !== undefined);
-  const recordings = createRecordingService(objects, config.contentWriteToken, catalogStack.catalogDb.db);
+  const recordings = createRecordingService(objects, config.contentWriteToken, catalogStack.catalogDb.db,
+    catalogStack.deploymentScopes);
 
   return {
     config,

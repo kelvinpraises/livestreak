@@ -1,5 +1,5 @@
 import type { Kysely } from "kysely";
-import type { DB } from "../../database/schema.js";
+import { deploymentScopeWhere, type DB, type DeploymentScopes } from "../../database/schema.js";
 import type { RecordingReceipt, RecordingScope } from "@livestreak/host";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
@@ -41,10 +41,10 @@ const validScope = (s: RecordingScope): void => {
   )
     throw new Error("Invalid recording scope");
 };
-const scopeId = (s: RecordingScope): string => {
+const scopeId = (s: RecordingScope, deploymentScope = ''): string => {
   validScope(s);
   return digest(
-    encoder.encode(JSON.stringify([s.chain, s.marketId.toLowerCase(), s.runId])),
+    encoder.encode(JSON.stringify([...(deploymentScope ? [deploymentScope] : []), s.chain, s.marketId.toLowerCase(), s.runId])),
   );
 };
 const validateId = (id: string): void => {
@@ -103,19 +103,23 @@ export const createRecordingService = (
   objects: ObjectStore | null,
   accessToken: string | null,
   db: Kysely<DB>,
+  deploymentScopes: DeploymentScopes = {},
 ): RecordingService => {
   const active = new Set<string>();
+  const scoped = deploymentScopeWhere(deploymentScopes);
+  const deploymentScope = (chain: string) => deploymentScopes[chain as keyof DeploymentScopes] ?? '';
+  const recordingId = (scope: RecordingScope) => scopeId(scope, deploymentScope(scope.chain));
   const store = (): ObjectStore => {
     if (!objects || !accessToken) throw new Error("Host cloud recording is not configured");
     return objects;
   };
   const load = async (id: string): Promise<State | null> => {
     validateId(id);
-    const row = await db.selectFrom("recordings").selectAll().where("id", "=", id).executeTakeFirst();
+    const row = await db.selectFrom("recordings").selectAll().where(scoped).where("id", "=", id).executeTakeFirst();
     if (!row) return null;
     const state = JSON.parse(row.body) as State;
       if (
-        scopeId(state) !== id ||
+        recordingId(state) !== id ||
         state.id !== id ||
         !Array.isArray(state.parts) ||
         !["recording", "processing", "ready", "failed"].includes(state.status)
@@ -138,7 +142,7 @@ export const createRecordingService = (
   const save = async (s: State): Promise<void> => {
     s.updatedAtMs = Date.now();
     const body = JSON.stringify(s);
-    const result = await retryTransient(() => db.updateTable("recordings").set({ body }).where("id", "=", s.id).executeTakeFirst());
+    const result = await retryTransient(() => db.updateTable("recordings").set({ body }).where(scoped).where("id", "=", s.id).executeTakeFirst());
     if (result.numUpdatedRows !== 1n) throw new Error("Recording metadata unavailable");
   };
   const token = (id: string): string =>
@@ -198,7 +202,7 @@ export const createRecordingService = (
   return {
     async begin(scope) {
       store();
-      const id = scopeId(scope);
+      const id = recordingId(scope);
       const existing = await load(id);
       if (existing) return { ...receipt(existing), ingestToken: token(id) };
       const state: State = {
@@ -212,8 +216,8 @@ export const createRecordingService = (
         parts: [],
         updatedAtMs: Date.now(),
       };
-      await db.insertInto("recordings").values({ id, chain: state.chain, market_id: state.marketId, run_id: state.runId, body: JSON.stringify(state), lease_claimed: 0 }).onConflict(oc => oc.doNothing()).execute();
-      const bound = await db.selectFrom("recordings").selectAll().where("chain", "=", scope.chain).where("market_id", "=", state.marketId).executeTakeFirstOrThrow();
+      await db.insertInto("recordings").values({ deployment_scope: deploymentScope(state.chain), id, chain: state.chain, market_id: state.marketId, run_id: state.runId, body: JSON.stringify(state), lease_claimed: 0 }).onConflict(oc => oc.doNothing()).execute();
+      const bound = await db.selectFrom("recordings").selectAll().where(scoped).where("chain", "=", scope.chain).where("market_id", "=", state.marketId).executeTakeFirstOrThrow();
       if (bound.id !== id) throw new Error("This market already belongs to another recording run");
       const present = await load(id);
       if (!present) throw new Error("Recording state unavailable");
@@ -221,13 +225,13 @@ export const createRecordingService = (
 
     },
     async read(scope) {
-      const state = await load(scopeId(scope));
+      const state = await load(recordingId(scope));
       return state ? receipt(state) : null;
     },
     async forMarket(chain, marketId) {
       if (!["evm", "solana", "sui"].includes(chain) || !/^0x[a-f0-9]{64}$/i.test(marketId))
         throw new Error("Invalid recording market");
-      const binding = await db.selectFrom("recordings").select("id").where("chain", "=", chain).where("market_id", "=", marketId.toLowerCase()).executeTakeFirst();
+      const binding = await db.selectFrom("recordings").select("id").where(scoped).where("chain", "=", chain).where("market_id", "=", marketId.toLowerCase()).executeTakeFirst();
       const state = binding ? await load(binding.id) : null;
       return state ? receipt(state) : null;
     },
@@ -255,7 +259,7 @@ export const createRecordingService = (
         const s = await load(id);
         if (!s || s.status !== "recording" || s.parts.length || s.init)
           throw new Error("Recording cannot be restarted; use a new observation");
-        const claimed = await db.updateTable("recordings").set({ lease_claimed: 1 }).where("id", "=", id).where("lease_claimed", "=", 0).executeTakeFirst();
+        const claimed = await db.updateTable("recordings").set({ lease_claimed: 1 }).where(scoped).where("id", "=", id).where("lease_claimed", "=", 0).executeTakeFirst();
         if (claimed.numUpdatedRows !== 1n) throw new Error("Recording producer lease already claimed; interrupted streams cannot restart silently");
         let clock: VideoClock | undefined;
         let queue = Promise.resolve();

@@ -3,18 +3,21 @@ import { sql, type Kysely } from "kysely";
 /** Complete Host schema, shared by production migration and isolated test fixtures. */
 export const RECORDINGS_DDL = `
 CREATE TABLE IF NOT EXISTS recordings (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL,
+  deployment_scope TEXT NOT NULL DEFAULT '',
   chain TEXT NOT NULL,
   market_id TEXT NOT NULL,
   run_id TEXT NOT NULL,
   body TEXT NOT NULL,
   lease_claimed INTEGER NOT NULL DEFAULT 0,
-  UNIQUE (chain, market_id)
+  PRIMARY KEY (deployment_scope, id),
+  UNIQUE (deployment_scope, chain, market_id)
 );
 `;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS markets (
+  deployment_scope TEXT NOT NULL DEFAULT '',
   id            TEXT NOT NULL,
   chain         TEXT NOT NULL,
   route_id      TEXT NOT NULL,
@@ -30,10 +33,11 @@ CREATE TABLE IF NOT EXISTS markets (
   total_pooled  REAL NOT NULL DEFAULT 0,
   from_ms       INTEGER NOT NULL DEFAULT 0,
   updated_at    INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (chain, id)
+  PRIMARY KEY (deployment_scope, chain, id)
 );
 
 CREATE TABLE IF NOT EXISTS vaults (
+  deployment_scope TEXT NOT NULL DEFAULT '',
   id               TEXT NOT NULL,
   market_id        TEXT NOT NULL,
   chain            TEXT NOT NULL,
@@ -48,12 +52,13 @@ CREATE TABLE IF NOT EXISTS vaults (
   expires_at_ms    INTEGER NOT NULL DEFAULT 0,
   resolved_at_ms   INTEGER,
   updated_at       INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (chain, id)
+  PRIMARY KEY (deployment_scope, chain, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_vaults_market ON vaults (market_id);
 
 CREATE TABLE IF NOT EXISTS resolutions (
+  deployment_scope TEXT NOT NULL DEFAULT '',
   vault_id    TEXT NOT NULL,
   market_id   TEXT NOT NULL,
   chain       TEXT NOT NULL,
@@ -61,7 +66,7 @@ CREATE TABLE IF NOT EXISTS resolutions (
   yes_total   TEXT NOT NULL DEFAULT '0',
   no_total    TEXT NOT NULL DEFAULT '0',
   resolved_at INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (chain, vault_id)
+  PRIMARY KEY (deployment_scope, chain, vault_id)
 );
 
 CREATE TABLE IF NOT EXISTS steward_memory (
@@ -107,6 +112,29 @@ export async function up<Schema>(db: Kysely<Schema>): Promise<void> {
   const markets = (await sql<{ name: string; pk: number }>`PRAGMA table_info(markets)`.execute(db)).rows;
   const vaults = (await sql<{ name: string }>`PRAGMA table_info(vaults)`.execute(db)).rows;
   for (const statement of upgradeStatements(markets, vaults)) await sql.raw(statement).execute(db);
+  const columns: Record<string, string[]> = {};
+  for (const table of SCOPED_TABLES) {
+    columns[table] = (await sql.raw<{ name: string }>(`PRAGMA table_info(${table})`).execute(db)).rows.map(column => column.name);
+  }
+  for (const statement of scopeUpgradeStatements(columns)) await sql.raw(statement).execute(db);
+}
+
+export const SCOPED_TABLES = ['markets', 'vaults', 'resolutions', 'recordings'] as const;
+
+// Keep all historical rows in their legacy scope. Public readers select only their exact deployment.
+// The caller executes the complete rebuild in one transaction, including the revised unique keys.
+export function scopeUpgradeStatements(columns: Readonly<Record<string, readonly string[]>>): readonly string[] {
+  const tables = SCOPED_TABLES.filter(table => !columns[table]?.includes('deployment_scope'));
+  if (!tables.length) return [];
+  return [
+    ...tables.map(table => `ALTER TABLE ${table} RENAME TO ${table}_unscoped`),
+    ...(tables.includes('vaults') ? ['DROP INDEX IF EXISTS idx_vaults_market'] : []),
+    ...SCHEMA_DDL.split(';').map(statement => statement.trim()).filter(Boolean),
+    ...tables.flatMap(table => [
+      `INSERT INTO ${table} (${columns[table]!.join(',')}) SELECT ${columns[table]!.join(',')} FROM ${table}_unscoped`,
+      `DROP TABLE ${table}_unscoped`,
+    ]),
+  ];
 }
 
 export async function down(): Promise<void> {

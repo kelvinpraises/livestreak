@@ -1,5 +1,6 @@
 import type { Kysely } from "kysely";
 import type { DB } from "../../database/schema.js";
+import { deploymentScopeWhere } from "../../database/schema.js";
 import {
   enumerateMarkets,
   type CatalogMarketRef,
@@ -54,6 +55,7 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
   const failed = new Set<string>();
   let failedChains: CatalogMarketRef["chain"][] = [];
   const key = (ref: CatalogMarketRef) => `${ref.chain}:${ref.marketId}`;
+  const scoped = deploymentScopeWhere(config.readers.deploymentScopes);
   const readAndSync = async (ref: CatalogMarketRef): Promise<boolean> => {
     const reader = config.readers.reader(ref.chain);
     if (reader === null) {
@@ -73,31 +75,35 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
         graph.vaultSnapshots,
         config.isStreamLive?.(ref.marketId),
       );
+      const deploymentScope = config.readers.deploymentScopes?.[ref.chain] ?? '';
+      const market = { ...rows.market, deployment_scope: deploymentScope };
       await config.db.transaction().execute(async (tx) => {
         await tx
           .insertInto("markets")
-          .values(rows.market)
-          .onConflict((oc) => oc.columns(["chain", "id"]).doUpdateSet(rows.market))
+          .values(market)
+          .onConflict((oc) => oc.columns(["deployment_scope", "chain", "id"]).doUpdateSet(market))
           .execute();
         await tx
           .deleteFrom("vaults")
+          .where("deployment_scope", "=", deploymentScope)
           .where("chain", "=", ref.chain)
           .where("market_id", "=", rows.market.id)
           .execute();
         if (rows.vaults.length)
           await tx
             .insertInto("vaults")
-            .values([...rows.vaults])
+            .values(rows.vaults.map(row => ({ ...row, deployment_scope: deploymentScope })))
             .execute();
         await tx
           .deleteFrom("resolutions")
+          .where("deployment_scope", "=", deploymentScope)
           .where("chain", "=", ref.chain)
           .where("market_id", "=", rows.market.id)
           .execute();
         if (rows.resolutions.length)
           await tx
             .insertInto("resolutions")
-            .values([...rows.resolutions])
+            .values(rows.resolutions.map(row => ({ ...row, deployment_scope: deploymentScope })))
             .execute();
       });
       failed.delete(key(ref));
@@ -130,6 +136,7 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
     enumeration = config.db
       .selectFrom("markets")
       .selectAll()
+      .where(scoped)
       .orderBy("updated_at", "desc")
       .execute()
       .then((cached) =>
@@ -174,6 +181,7 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
         await config.db
           .selectFrom("markets")
           .selectAll()
+          .where(scoped)
           .where("route_id", "=", routeId)
           .execute()
       ).some(
@@ -185,6 +193,7 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
     const existing = await config.db
       .selectFrom("markets")
       .selectAll()
+      .where(scoped)
       .where("route_id", "=", routeId)
       .where("chain", "=", ref.chain)
       .executeTakeFirst();
@@ -200,7 +209,7 @@ export const createCatalogIndexer = (config: CatalogIndexerConfig): CatalogIndex
   };
 
   const ensureAll = async (): Promise<void> => {
-    const markets = await config.db.selectFrom("markets").selectAll().execute();
+    const markets = await config.db.selectFrom("markets").selectAll().where(scoped).execute();
     const freshAt = new Map(markets.map((m) => [`${m.chain}:${m.id}`, m.updated_at]));
     const nowMs = now();
     await Promise.all(

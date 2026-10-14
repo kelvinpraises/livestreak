@@ -1,6 +1,7 @@
 import type { Agent, AgentsData, CatalogIndexing, HomepageData, HostStreamDetail } from "@livestreak/host";
 import type { Kysely } from "kysely";
 import type { ChainTag, DB, Market } from "../../database/schema.js";
+import { deploymentScopeWhere, type DeploymentScopes } from "../../database/schema.js";
 import {
   marketRowToDetail,
   marketRowToSummary,
@@ -21,6 +22,7 @@ interface FullProjection {
 }
 export interface CatalogReadModelConfig {
   readonly db: Kysely<DB>;
+  readonly deploymentScopes?: DeploymentScopes;
   readonly health?: () => IndexHealth;
   readonly now?: () => number;
   // Configuration is an agent directory, never measured performance.
@@ -71,13 +73,14 @@ export const createCatalogReadModel = (
 ): CatalogReadModel => {
   const now = config.now ?? (() => Date.now());
   const agents = config.agents ?? [];
+  const scoped = deploymentScopeWhere(config.deploymentScopes);
   const full = async (chain?: ChainTag): Promise<FullProjection> => {
     const nowMs = now();
     // All response sections originate in this one read transaction.
     const snapshot = await config.db.transaction().execute(async (tx) => {
-      let mq = tx.selectFrom("markets").selectAll();
-      let vq = tx.selectFrom("vaults").selectAll();
-      let rq = tx.selectFrom("resolutions").selectAll();
+      let mq = tx.selectFrom("markets").selectAll().where(scoped);
+      let vq = tx.selectFrom("vaults").selectAll().where(scoped);
+      let rq = tx.selectFrom("resolutions").selectAll().where(scoped);
       if (chain !== undefined) {
         mq = mq.where("chain", "=", chain);
         vq = vq.where("chain", "=", chain);
@@ -87,7 +90,7 @@ export const createCatalogReadModel = (
         markets: await mq.orderBy("updated_at", "desc").execute(),
         vaults: await vq.execute(),
         resolutions: await rq.execute(),
-        recordings: await tx.selectFrom("recordings").selectAll().execute(),
+        recordings: await tx.selectFrom("recordings").selectAll().where(scoped).execute(),
       };
     });
     const health = config.health?.();
@@ -250,6 +253,7 @@ export const createCatalogReadModel = (
       let query = config.db
         .selectFrom("markets")
         .selectAll()
+        .where(scoped)
         .where("route_id", "=", routeId);
       if (chain !== undefined) query = query.where("chain", "=", chain);
       const matches = (await query.execute()).filter(
@@ -260,7 +264,7 @@ export const createCatalogReadModel = (
       if (matches.length > 1) throw new Error("ambiguous_stream_chain");
       if (!matches[0]) return null;
       const m = matches[0];
-      const recording = await config.db.selectFrom("recordings").select("body").where("chain", "=", m.chain).where("market_id", "=", m.id).executeTakeFirst();
+      const recording = await config.db.selectFrom("recordings").select("body").where(scoped).where("chain", "=", m.chain).where("market_id", "=", m.id).executeTakeFirst();
       return recordingDetail(detail(m, now(), health), recording?.body);
     },
   };

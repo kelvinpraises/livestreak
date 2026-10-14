@@ -33,8 +33,8 @@ export async function migrateToLatest(db: Kysely<DB>): Promise<void> {
   const migrator = new Migrator({ db, provider: { getMigrations: async () => ({ [BASELINE_NAME]: baseline }) } });
   const { error } = await migrator.migrateToLatest();
   if (error !== undefined) throw error instanceof Error ? error : new Error(String(error));
-  // Alpha baseline adds recording metadata to databases that already adopted the squash.
-  await sql.raw(baseline.RECORDINGS_DDL).execute(db);
+  // Alpha schema upgrades remain idempotent and preserve all rows on already-adopted baselines.
+  await db.transaction().execute(tx => baseline.up(tx));
 }
 
 /** Explicit test-only synchronous setup uses exactly the same schema and upgrade rules. */
@@ -44,5 +44,8 @@ export function migrateSync(sqlite: Database.Database): void {
     const markets = sqlite.prepare("PRAGMA table_info(markets)").all() as { name: string; pk: number }[];
     const vaults = sqlite.prepare("PRAGMA table_info(vaults)").all() as { name: string }[];
     for (const statement of baseline.upgradeStatements(markets, vaults)) sqlite.exec(statement);
+    const scopedColumns = Object.fromEntries(baseline.SCOPED_TABLES.map(table => [table,
+      (sqlite.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(column => column.name)]));
+    for (const statement of baseline.scopeUpgradeStatements(scopedColumns)) sqlite.exec(statement);
   })();
 }

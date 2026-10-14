@@ -1,4 +1,5 @@
 import type { ColumnType, Generated, Insertable, Selectable } from "kysely";
+import { sql } from "kysely";
 
 // Host-INTERNAL discovery read-model schema. The chain is the source of truth; these
 // tables are a MATERIALIZED PROJECTION the cron lazily refreshes (see cron/catalog-sync).
@@ -7,12 +8,21 @@ import type { ColumnType, Generated, Insertable, Selectable } from "kysely";
 // live together here; `connection.ts` consumes the DB type.
 
 export type ChainTag = "evm" | "sui" | "solana";
+export type DeploymentScopes = Partial<Record<ChainTag, string>>;
+
+// The VM tag alone is insufficient: two EVM networks can have identical contract/market IDs.
+// Empty scope belongs to legacy rows and isolated fixtures, never a configured public reader.
+export const deploymentScopeWhere = (scopes: DeploymentScopes = {}) => sql<boolean>`deployment_scope = CASE chain
+  WHEN 'evm' THEN ${scopes.evm ?? ''}
+  WHEN 'sui' THEN ${scopes.sui ?? ''}
+  WHEN 'solana' THEN ${scopes.solana ?? ''} END`;
 
 // One row per market == one stream header on the homepage / stream page. `route_id` is
 // what the app fetches `/stream/:id` by (== market_id). Per-stream aggregates
 // (active_vaults / total_pooled) are STORED denormalized so a homepage read is a single
 // scan with no per-market vault fan-in; they are recomputed by the indexer on every upsert.
 export interface MarketsTable {
+  deployment_scope: Generated<string>;
   id: string; // marketId — keyed together with chain
   chain: ChainTag;
   route_id: string;
@@ -33,6 +43,7 @@ export interface MarketsTable {
 // One row per on-chain vault. Pools are uint256 USDC base units that DO NOT fit a sqlite
 // INTEGER, so they are stored as TEXT and parsed back to bigint/float by the mapper.
 export interface VaultsTable {
+  deployment_scope: Generated<string>;
   id: string; // vaultId — keyed together with chain
   market_id: string;
   chain: ChainTag;
@@ -52,6 +63,7 @@ export interface VaultsTable {
 // Derived resolution projection, replaced atomically with its market and vaults.
 // It orders the homepage results; it is not an independent event-history ledger.
 export interface ResolutionsTable {
+  deployment_scope: Generated<string>;
   vault_id: string; // keyed together with chain
   market_id: string;
   chain: ChainTag;
@@ -91,7 +103,7 @@ export interface ForumMessagesTable {
 }
 
 export interface DB {
-  recordings: { id: string; chain: string; market_id: string; run_id: string; body: string; lease_claimed: number };
+  recordings: { deployment_scope: Generated<string>; id: string; chain: string; market_id: string; run_id: string; body: string; lease_claimed: number };
   vault_mandates: { digest: string; body: Uint8Array | ArrayBuffer };
   resolution_records: { digest: string; chain_id: string; vault_id: string; body: Uint8Array | ArrayBuffer };
   markets: MarketsTable;

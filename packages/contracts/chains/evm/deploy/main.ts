@@ -41,7 +41,7 @@ if (values.help) {
 Usage: npm run deploy -- [options]
 
 Options:
-  --name <chain>     Chain name (e.g. localhost, flow-testnet)
+  --name <chain>     Chain name (e.g. localhost, monad-testnet)
   --rpc <url>        Custom RPC URL
   --scope <name>     Deploy only this scope (aa, streaming, protocol, wire, paymaster)
   --skip-paymaster   Use an external sponsor; omit the legacy paymaster and deposit

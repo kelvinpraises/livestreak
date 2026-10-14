@@ -65,6 +65,11 @@
     "./package": {
       "default": "./package.json"
     },
+    "./evm/deployments/monad-testnet": {
+      "types": "./dist/chains/evm/deployments/monad-testnet.d.ts",
+      "livestreak-dev": "./chains/evm/deployments/monad-testnet.ts",
+      "default": "./dist/chains/evm/deployments/monad-testnet.js"
+    },
     "./evm/deployments/arbitrum-sepolia": {
       "types": "./dist/chains/evm/deployments/arbitrum-sepolia.d.ts",
       "livestreak-dev": "./chains/evm/deployments/arbitrum-sepolia.ts",

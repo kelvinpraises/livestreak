@@ -23,7 +23,7 @@ const deploymentsDir = join(
   "deployments",
 );
 
-const KNOWN_DEPLOYMENTS = ["localhost", "arbitrum-sepolia"] as const satisfies readonly DeploymentName[];
+const KNOWN_DEPLOYMENTS = ["localhost", "arbitrum-sepolia", "monad-testnet"] as const satisfies readonly DeploymentName[];
 
 // Parse a snapshot JSON from an explicit path. THE single EVM snapshot parser: both the name-based
 // loader and any host/path override read through this so no consumer hand-rolls its own JSON.parse.

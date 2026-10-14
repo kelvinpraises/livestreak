@@ -15,7 +15,7 @@ export type EvmContract =
   | "paymaster";
 
 /** Known committed deployment snapshots under `chains/evm/deployments/`. */
-export type DeploymentName = "localhost" | "arbitrum-sepolia";
+export type DeploymentName = "localhost" | "arbitrum-sepolia" | "monad-testnet";
 
 export type EvmDeployScope = {
   readonly status: string;

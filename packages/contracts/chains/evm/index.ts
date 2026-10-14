@@ -18,6 +18,7 @@ export type { EvmContractAbi } from "./abis.js";
 
 export { addresses } from "./addresses-static.js";
 export { arbitrum_sepoliaDeployment as arbitrumSepoliaDeployment } from "./deployments/arbitrum-sepolia.js";
+export { monad_testnetDeployment as monadTestnetDeployment } from "./deployments/monad-testnet.js";
 export { localhostDeployment } from "./deployments/localhost.js";
 
 export { contract, DEFAULT_DEPLOYMENT } from "./contract.js";

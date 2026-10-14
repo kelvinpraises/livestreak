@@ -1,11 +1,11 @@
 export const defaultChains = [
   { name: "localhost", rpc: "http://127.0.0.1:8545" },
   {
-    name: "flow-testnet",
-    rpc: "https://testnet.evm.nodes.onflow.org",
-    chainId: 545,
-    currency: "LVST",
-    explorer: "https://evm-testnet.flowscan.io"
+    name: "monad-testnet",
+    rpc: "https://testnet-rpc.monad.xyz",
+    chainId: 10143,
+    currency: "MON",
+    explorer: "https://testnet.monadexplorer.com"
   }
 ] as const satisfies readonly {
   name: string;
